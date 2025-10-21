@@ -10,6 +10,7 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub address: String,
+    pub port: u16,
 }
 
 #[cfg(test)]
@@ -20,7 +21,8 @@ mod tests {
     fn test_can_create_empty_config_struct() {
         let _config = Config {
             server: ServerConfig {
-                address: String::from("127.0.0.1:8080"),
+                address: String::from("127.0.0.1"),
+                port: 8080,
             },
         };
     }
@@ -29,7 +31,8 @@ mod tests {
     fn test_can_deserialize_minimal_valid_yaml_config() {
         let yaml = r#"
 server:
-  address: "127.0.0.1:8080"
+  address: "127.0.0.1"
+  port: 8080
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         // If we got here, deserialization succeeded
@@ -40,9 +43,21 @@ server:
     fn test_can_access_server_address_from_config() {
         let yaml = r#"
 server:
-  address: "127.0.0.1:8080"
+  address: "127.0.0.1"
+  port: 8080
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
-        assert_eq!(config.server.address, "127.0.0.1:8080");
+        assert_eq!(config.server.address, "127.0.0.1");
+    }
+
+    #[test]
+    fn test_can_access_server_port_from_config() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        assert_eq!(config.server.port, 8080);
     }
 }
