@@ -274,4 +274,26 @@ buckets:
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
         );
     }
+
+    #[test]
+    fn test_rejects_bucket_config_with_missing_required_fields() {
+        // Missing 'name' field
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(
+            result.is_err(),
+            "Expected deserialization to fail with missing 'name' field"
+        );
+    }
 }
