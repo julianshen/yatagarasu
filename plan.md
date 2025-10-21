@@ -102,7 +102,7 @@ yatagarasu/
 
 ### Configuration - Bucket Config
 - [x] Test: Can parse single bucket configuration
-- [ ] Test: Can parse multiple bucket configurations
+- [x] Test: Can parse multiple bucket configurations
 - [ ] Test: Can access bucket name from config
 - [ ] Test: Can access bucket path_prefix from config
 - [ ] Test: Can access S3 bucket name from config
