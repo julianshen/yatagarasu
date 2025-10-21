@@ -1,6 +1,7 @@
 // Configuration module
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -10,10 +11,20 @@ pub struct Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), String> {
+        let mut seen_prefixes = HashSet::new();
+
         // Validate each bucket configuration
         for bucket in &self.buckets {
             if bucket.path_prefix.is_empty() {
                 return Err(format!("Bucket '{}' has empty path_prefix", bucket.name));
+            }
+
+            // Check for duplicate path_prefix
+            if !seen_prefixes.insert(&bucket.path_prefix) {
+                return Err(format!(
+                    "Duplicate path_prefix '{}' found in bucket '{}'",
+                    bucket.path_prefix, bucket.name
+                ));
             }
         }
         Ok(())
@@ -329,6 +340,36 @@ buckets:
         assert!(
             validation_result.is_err(),
             "Expected validation to fail with empty path_prefix"
+        );
+    }
+
+    #[test]
+    fn test_rejects_bucket_config_with_duplicate_path_prefix() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/api"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  - name: "images"
+    path_prefix: "/api"
+    s3:
+      bucket: "my-images-bucket"
+      region: "us-east-1"
+      access_key: "AKIAIOSFODNN7EXAMPLE2"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with duplicate path_prefix"
         );
     }
 }

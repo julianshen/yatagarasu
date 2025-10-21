@@ -111,7 +111,7 @@ yatagarasu/
 - [x] Test: Can access S3 secret_key from config
 - [x] Test: Rejects bucket config with missing required fields
 - [x] Test: Rejects bucket config with empty path_prefix
-- [ ] Test: Rejects bucket config with duplicate path_prefix
+- [x] Test: Rejects bucket config with duplicate path_prefix
 
 ### Configuration - Environment Variable Substitution
 - [ ] Test: Can substitute environment variable in access_key
