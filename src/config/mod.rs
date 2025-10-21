@@ -233,4 +233,45 @@ buckets:
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         assert_eq!(config.buckets[0].s3.region, "us-west-2");
     }
+
+    #[test]
+    fn test_can_access_s3_access_key_from_config() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        assert_eq!(config.buckets[0].s3.access_key, "AKIAIOSFODNN7EXAMPLE");
+    }
+
+    #[test]
+    fn test_can_access_s3_secret_key_from_config() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        assert_eq!(
+            config.buckets[0].s3.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        );
+    }
 }
