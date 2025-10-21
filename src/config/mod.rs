@@ -60,4 +60,14 @@ server:
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         assert_eq!(config.server.port, 8080);
     }
+
+    #[test]
+    fn test_config_deserialization_fails_with_empty_file() {
+        let yaml = "";
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(
+            result.is_err(),
+            "Expected deserialization to fail with empty file"
+        );
+    }
 }

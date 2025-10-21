@@ -97,7 +97,7 @@ yatagarasu/
 - [x] Test: Can deserialize minimal valid YAML config
 - [x] Test: Can access server address from config
 - [x] Test: Can access server port from config
-- [ ] Test: Config deserialization fails with empty file
+- [x] Test: Config deserialization fails with empty file
 - [ ] Test: Config deserialization fails with invalid YAML
 
 ### Configuration - Bucket Config
