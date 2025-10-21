@@ -1,0 +1,83 @@
+[package]
+name = "yatagarasu"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["Yatagarasu Team"]
+description = "High-performance S3 proxy built with Cloudflare's Pingora framework"
+license = "MIT"
+repository = "https://github.com/julianshen/yatagarasu"
+
+[dependencies]
+# Proxy Framework
+pingora = "0.6"
+pingora-core = "0.6"
+
+# Async Runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# AWS S3 SDK
+aws-sdk-s3 = "1.0"
+aws-config = "1.0"
+aws-credential-types = "1.0"
+
+# JWT Authentication
+jsonwebtoken = "9.2"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+
+# Configuration
+config = "0.14"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Metrics
+prometheus = "0.13"
+
+# HTTP
+hyper = "1.0"
+http = "1.0"
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+bytes = "1.5"
+futures = "0.3"
+
+[dev-dependencies]
+# Testing
+rstest = "0.18"
+mockall = "0.12"
+testcontainers = "0.15"
+tempfile = "3.8"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+
+# Benchmarks will be added as features are implemented
+# [[bench]]
+# name = "jwt_validation"
+# harness = false
+#
+# [[bench]]
+# name = "routing"
+# harness = false
+#
+# [[bench]]
+# name = "s3_signature"
+# harness = false
