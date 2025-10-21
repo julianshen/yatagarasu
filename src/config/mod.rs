@@ -3,7 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {}
+pub struct Config {
+    pub server: ServerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    pub address: String,
+}
 
 #[cfg(test)]
 mod tests {
@@ -11,14 +18,31 @@ mod tests {
 
     #[test]
     fn test_can_create_empty_config_struct() {
-        let _config = Config {};
+        let _config = Config {
+            server: ServerConfig {
+                address: String::from("127.0.0.1:8080"),
+            },
+        };
     }
 
     #[test]
     fn test_can_deserialize_minimal_valid_yaml_config() {
-        let yaml = "{}";
+        let yaml = r#"
+server:
+  address: "127.0.0.1:8080"
+"#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         // If we got here, deserialization succeeded
         let _ = config;
+    }
+
+    #[test]
+    fn test_can_access_server_address_from_config() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1:8080"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        assert_eq!(config.server.address, "127.0.0.1:8080");
     }
 }
