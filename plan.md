@@ -103,10 +103,10 @@ yatagarasu/
 ### Configuration - Bucket Config
 - [x] Test: Can parse single bucket configuration
 - [x] Test: Can parse multiple bucket configurations
-- [ ] Test: Can access bucket name from config
-- [ ] Test: Can access bucket path_prefix from config
-- [ ] Test: Can access S3 bucket name from config
-- [ ] Test: Can access S3 region from config
+- [x] Test: Can access bucket name from config
+- [x] Test: Can access bucket path_prefix from config
+- [x] Test: Can access S3 bucket name from config
+- [x] Test: Can access S3 region from config
 - [ ] Test: Can access S3 access_key from config
 - [ ] Test: Can access S3 secret_key from config
 - [ ] Test: Rejects bucket config with missing required fields
