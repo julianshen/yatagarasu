@@ -70,4 +70,18 @@ server:
             "Expected deserialization to fail with empty file"
         );
     }
+
+    #[test]
+    fn test_config_deserialization_fails_with_invalid_yaml() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: [invalid syntax here}
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(
+            result.is_err(),
+            "Expected deserialization to fail with invalid YAML"
+        );
+    }
 }
