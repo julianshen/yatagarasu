@@ -8,6 +8,18 @@ pub struct Config {
     pub buckets: Vec<BucketConfig>,
 }
 
+impl Config {
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate each bucket configuration
+        for bucket in &self.buckets {
+            if bucket.path_prefix.is_empty() {
+                return Err(format!("Bucket '{}' has empty path_prefix", bucket.name));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub address: String,
@@ -294,6 +306,29 @@ buckets:
         assert!(
             result.is_err(),
             "Expected deserialization to fail with missing 'name' field"
+        );
+    }
+
+    #[test]
+    fn test_rejects_bucket_config_with_empty_path_prefix() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: ""
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with empty path_prefix"
         );
     }
 }
