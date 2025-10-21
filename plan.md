@@ -101,7 +101,7 @@ yatagarasu/
 - [x] Test: Config deserialization fails with invalid YAML
 
 ### Configuration - Bucket Config
-- [ ] Test: Can parse single bucket configuration
+- [x] Test: Can parse single bucket configuration
 - [ ] Test: Can parse multiple bucket configurations
 - [ ] Test: Can access bucket name from config
 - [ ] Test: Can access bucket path_prefix from config

@@ -5,12 +5,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
+    pub buckets: Vec<BucketConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub address: String,
     pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BucketConfig {
+    pub name: String,
+    pub path_prefix: String,
+    pub s3: S3Config,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3Config {
+    pub bucket: String,
+    pub region: String,
+    pub access_key: String,
+    pub secret_key: String,
 }
 
 #[cfg(test)]
@@ -24,6 +40,7 @@ mod tests {
                 address: String::from("127.0.0.1"),
                 port: 8080,
             },
+            buckets: vec![],
         };
     }
 
@@ -33,6 +50,7 @@ mod tests {
 server:
   address: "127.0.0.1"
   port: 8080
+buckets: []
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         // If we got here, deserialization succeeded
@@ -45,6 +63,7 @@ server:
 server:
   address: "127.0.0.1"
   port: 8080
+buckets: []
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         assert_eq!(config.server.address, "127.0.0.1");
@@ -56,6 +75,7 @@ server:
 server:
   address: "127.0.0.1"
   port: 8080
+buckets: []
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
         assert_eq!(config.server.port, 8080);
@@ -83,5 +103,28 @@ server:
             result.is_err(),
             "Expected deserialization to fail with invalid YAML"
         );
+    }
+
+    #[test]
+    fn test_can_parse_single_bucket_configuration() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize YAML");
+        assert_eq!(config.buckets.len(), 1);
+        assert_eq!(config.buckets[0].name, "products");
+        assert_eq!(config.buckets[0].path_prefix, "/products");
+        assert_eq!(config.buckets[0].s3.bucket, "my-products-bucket");
+        assert_eq!(config.buckets[0].s3.region, "us-west-2");
     }
 }
