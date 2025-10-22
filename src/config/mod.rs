@@ -54,6 +54,20 @@ impl Config {
                 ));
             }
         }
+
+        // Validate JWT configuration if present
+        if let Some(jwt) = &self.jwt {
+            // Validate algorithm
+            const VALID_ALGORITHMS: &[&str] = &["HS256", "HS384", "HS512"];
+            if !VALID_ALGORITHMS.contains(&jwt.algorithm.as_str()) {
+                return Err(format!(
+                    "Invalid JWT algorithm '{}'. Supported algorithms: {}",
+                    jwt.algorithm,
+                    VALID_ALGORITHMS.join(", ")
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -734,5 +748,31 @@ jwt:
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize JWT secret");
         let jwt = config.jwt.as_ref().expect("JWT config should be present");
         assert_eq!(jwt.secret, "my-super-secret-key-12345");
+    }
+
+    #[test]
+    fn test_rejects_jwt_config_with_invalid_algorithm() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "INVALID"
+"#;
+        let config: Config = serde_yaml::from_str(yaml)
+            .expect("Failed to deserialize config with invalid algorithm");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with invalid algorithm"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("INVALID") || err_msg.contains("algorithm"),
+            "Error message should mention the invalid algorithm or algorithm field"
+        );
     }
 }
