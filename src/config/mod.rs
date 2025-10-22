@@ -1,5 +1,6 @@
 // Configuration module
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -10,6 +11,17 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn from_yaml_with_env(yaml: &str) -> Result<Self, String> {
+        // Replace ${VAR_NAME} with environment variable values
+        let re = Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)\}").map_err(|e| e.to_string())?;
+        let substituted = re.replace_all(yaml, |caps: &regex::Captures| {
+            let var_name = &caps[1];
+            std::env::var(var_name).unwrap_or_else(|_| format!("${{{}}}", var_name))
+        });
+
+        serde_yaml::from_str(&substituted).map_err(|e| e.to_string())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         let mut seen_prefixes = HashSet::new();
 
@@ -371,5 +383,29 @@ buckets:
             validation_result.is_err(),
             "Expected validation to fail with duplicate path_prefix"
         );
+    }
+
+    #[test]
+    fn test_can_substitute_environment_variable_in_access_key() {
+        std::env::set_var("TEST_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "${TEST_ACCESS_KEY}"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config =
+            Config::from_yaml_with_env(yaml).expect("Failed to load config with env substitution");
+        assert_eq!(config.buckets[0].s3.access_key, "AKIAIOSFODNN7EXAMPLE");
+
+        std::env::remove_var("TEST_ACCESS_KEY");
     }
 }
