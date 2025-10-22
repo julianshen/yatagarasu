@@ -115,7 +115,7 @@ yatagarasu/
 
 ### Configuration - Environment Variable Substitution
 - [x] Test: Can substitute environment variable in access_key
-- [ ] Test: Can substitute environment variable in secret_key
+- [x] Test: Can substitute environment variable in secret_key
 - [ ] Test: Can substitute environment variable in JWT secret
 - [ ] Test: Substitution fails gracefully when env var missing
 - [ ] Test: Can use literal value (no substitution) for non-sensitive fields

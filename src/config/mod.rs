@@ -408,4 +408,34 @@ buckets:
 
         std::env::remove_var("TEST_ACCESS_KEY");
     }
+
+    #[test]
+    fn test_can_substitute_environment_variable_in_secret_key() {
+        std::env::set_var(
+            "TEST_SECRET_KEY",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "${TEST_SECRET_KEY}"
+"#;
+        let config: Config =
+            Config::from_yaml_with_env(yaml).expect("Failed to load config with env substitution");
+        assert_eq!(
+            config.buckets[0].s3.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        );
+
+        std::env::remove_var("TEST_SECRET_KEY");
+    }
 }
