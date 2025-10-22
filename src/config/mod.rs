@@ -877,4 +877,27 @@ jwt:
         assert_eq!(second_rule.operator, "equals");
         assert_eq!(second_rule.value.as_str().unwrap(), "engineering");
     }
+
+    #[test]
+    fn test_can_parse_equals_operator() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize equals operator");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        let claim_rule = &jwt.claims[0];
+        assert_eq!(claim_rule.operator, "equals");
+    }
 }

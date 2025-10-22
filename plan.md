@@ -135,7 +135,7 @@ yatagarasu/
 ### Configuration - Claims Verification
 - [x] Test: Can parse single claim verification rule
 - [x] Test: Can parse multiple claim verification rules
-- [ ] Test: Can parse "equals" operator
+- [x] Test: Can parse "equals" operator
 - [ ] Test: Can parse string claim value
 - [ ] Test: Can parse numeric claim value
 - [ ] Test: Can parse boolean claim value
