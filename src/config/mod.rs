@@ -83,6 +83,7 @@ pub struct S3Config {
 pub struct JwtConfig {
     pub enabled: bool,
     pub secret: String,
+    pub algorithm: String,
     #[serde(default)]
     pub token_sources: Vec<TokenSource>,
 }
@@ -485,6 +486,7 @@ buckets: []
 jwt:
   enabled: true
   secret: "${TEST_JWT_SECRET}"
+  algorithm: "HS256"
 "#;
         let config: Config =
             Config::from_yaml_with_env(yaml).expect("Failed to load config with env substitution");
@@ -543,6 +545,7 @@ buckets:
 jwt:
   enabled: true
   secret: "my-jwt-secret-key"
+  algorithm: "HS256"
 "#;
         let config: Config =
             Config::from_yaml_with_env(yaml).expect("Failed to load config with literal values");
@@ -572,6 +575,7 @@ buckets: []
 jwt:
   enabled: true
   secret: "my-jwt-secret"
+  algorithm: "HS256"
 "#;
         let config: Config =
             serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with enabled=true");
@@ -590,6 +594,7 @@ buckets: []
 jwt:
   enabled: false
   secret: "my-jwt-secret"
+  algorithm: "HS256"
 "#;
         let config: Config = serde_yaml::from_str(yaml)
             .expect("Failed to deserialize JWT config with enabled=false");
@@ -608,6 +613,7 @@ buckets: []
 jwt:
   enabled: true
   secret: "my-jwt-secret"
+  algorithm: "HS256"
   token_sources:
     - type: "header"
     - type: "query"
@@ -628,6 +634,7 @@ buckets: []
 jwt:
   enabled: true
   secret: "my-jwt-secret"
+  algorithm: "HS256"
   token_sources:
     - type: "header"
       name: "Authorization"
@@ -654,6 +661,7 @@ buckets: []
 jwt:
   enabled: true
   secret: "my-jwt-secret"
+  algorithm: "HS256"
   token_sources:
     - type: "query"
       name: "token"
@@ -678,6 +686,7 @@ buckets: []
 jwt:
   enabled: true
   secret: "my-jwt-secret"
+  algorithm: "HS256"
   token_sources:
     - type: "header"
       name: "X-API-Token"
@@ -690,5 +699,23 @@ jwt:
         let token_source = &jwt.token_sources[0];
         assert_eq!(token_source.source_type, "header");
         assert_eq!(token_source.name.as_ref().unwrap(), "X-API-Token");
+    }
+
+    #[test]
+    fn test_can_parse_jwt_algorithm_hs256() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize JWT algorithm");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.algorithm, "HS256");
     }
 }

@@ -127,7 +127,7 @@ yatagarasu/
 - [x] Test: Can parse header token source with prefix
 - [x] Test: Can parse query parameter token source
 - [x] Test: Can parse custom header token source
-- [ ] Test: Can parse JWT algorithm (HS256)
+- [x] Test: Can parse JWT algorithm (HS256)
 - [ ] Test: Can parse JWT secret
 - [ ] Test: Rejects JWT config with invalid algorithm
 - [ ] Test: Rejects auth config missing JWT secret when enabled=true
