@@ -133,7 +133,7 @@ yatagarasu/
 - [x] Test: Rejects auth config missing JWT secret when enabled=true
 
 ### Configuration - Claims Verification
-- [ ] Test: Can parse single claim verification rule
+- [x] Test: Can parse single claim verification rule
 - [ ] Test: Can parse multiple claim verification rules
 - [ ] Test: Can parse "equals" operator
 - [ ] Test: Can parse string claim value

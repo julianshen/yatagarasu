@@ -105,6 +105,8 @@ pub struct JwtConfig {
     pub algorithm: String,
     #[serde(default)]
     pub token_sources: Vec<TokenSource>,
+    #[serde(default)]
+    pub claims: Vec<ClaimRule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +117,13 @@ pub struct TokenSource {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimRule {
+    pub claim: String,
+    pub operator: String,
+    pub value: serde_json::Value,
 }
 
 #[cfg(test)]
@@ -805,5 +814,32 @@ jwt:
             err_msg.contains("secret") || err_msg.contains("empty"),
             "Error message should mention secret or empty"
         );
+    }
+
+    #[test]
+    fn test_can_parse_single_claim_verification_rule() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize claim verification rule");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.claims.len(), 1);
+
+        let claim_rule = &jwt.claims[0];
+        assert_eq!(claim_rule.claim, "role");
+        assert_eq!(claim_rule.operator, "equals");
+        assert_eq!(claim_rule.value.as_str().unwrap(), "admin");
     }
 }
