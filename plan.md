@@ -121,7 +121,7 @@ yatagarasu/
 - [x] Test: Can use literal value (no substitution) for non-sensitive fields
 
 ### Configuration - Auth Config
-- [ ] Test: Can parse JWT config with enabled=true
+- [x] Test: Can parse JWT config with enabled=true
 - [ ] Test: Can parse JWT config with enabled=false
 - [ ] Test: Can parse multiple token sources
 - [ ] Test: Can parse header token source with prefix

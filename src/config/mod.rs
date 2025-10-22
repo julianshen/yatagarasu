@@ -81,6 +81,7 @@ pub struct S3Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtConfig {
+    pub enabled: bool,
     pub secret: String,
 }
 
@@ -470,6 +471,7 @@ server:
   port: 8080
 buckets: []
 jwt:
+  enabled: true
   secret: "${TEST_JWT_SECRET}"
 "#;
         let config: Config =
@@ -527,6 +529,7 @@ buckets:
       access_key: "AKIAIOSFODNN7EXAMPLE"
       secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 jwt:
+  enabled: true
   secret: "my-jwt-secret-key"
 "#;
         let config: Config =
@@ -545,5 +548,23 @@ jwt:
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
         );
         assert_eq!(config.jwt.as_ref().unwrap().secret, "my-jwt-secret-key");
+    }
+
+    #[test]
+    fn test_can_parse_jwt_config_with_enabled_true() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with enabled=true");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.enabled, true);
+        assert_eq!(jwt.secret, "my-jwt-secret");
     }
 }
