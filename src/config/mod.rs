@@ -16,9 +16,22 @@ impl Config {
     pub fn from_yaml_with_env(yaml: &str) -> Result<Self, String> {
         // Replace ${VAR_NAME} with environment variable values
         let re = Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)\}").map_err(|e| e.to_string())?;
+
+        // First, check that all referenced environment variables exist
+        for caps in re.captures_iter(yaml) {
+            let var_name = &caps[1];
+            std::env::var(var_name).map_err(|_| {
+                format!(
+                    "Environment variable '{}' is referenced but not set",
+                    var_name
+                )
+            })?;
+        }
+
+        // Now perform the substitution (we know all vars exist)
         let substituted = re.replace_all(yaml, |caps: &regex::Captures| {
             let var_name = &caps[1];
-            std::env::var(var_name).unwrap_or_else(|_| format!("${{{}}}", var_name))
+            std::env::var(var_name).unwrap() // Safe because we checked above
         });
 
         serde_yaml::from_str(&substituted).map_err(|e| e.to_string())
@@ -467,5 +480,35 @@ jwt:
         );
 
         std::env::remove_var("TEST_JWT_SECRET");
+    }
+
+    #[test]
+    fn test_substitution_fails_gracefully_when_env_var_missing() {
+        // Ensure the env var doesn't exist
+        std::env::remove_var("MISSING_VAR");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "${MISSING_VAR}"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let result = Config::from_yaml_with_env(yaml);
+        assert!(
+            result.is_err(),
+            "Expected error when environment variable is missing"
+        );
+        let err_msg = result.unwrap_err();
+        assert!(
+            err_msg.contains("MISSING_VAR") || err_msg.contains("environment variable"),
+            "Error message should mention the missing variable or environment variable"
+        );
     }
 }
