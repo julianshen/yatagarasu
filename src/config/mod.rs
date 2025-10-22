@@ -8,6 +8,8 @@ use std::collections::HashSet;
 pub struct Config {
     pub server: ServerConfig,
     pub buckets: Vec<BucketConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jwt: Option<JwtConfig>,
 }
 
 impl Config {
@@ -64,6 +66,11 @@ pub struct S3Config {
     pub secret_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwtConfig {
+    pub secret: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +83,7 @@ mod tests {
                 port: 8080,
             },
             buckets: vec![],
+            jwt: None,
         };
     }
 
@@ -437,5 +445,27 @@ buckets:
         );
 
         std::env::remove_var("TEST_SECRET_KEY");
+    }
+
+    #[test]
+    fn test_can_substitute_environment_variable_in_jwt_secret() {
+        std::env::set_var("TEST_JWT_SECRET", "my-super-secret-jwt-key");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  secret: "${TEST_JWT_SECRET}"
+"#;
+        let config: Config =
+            Config::from_yaml_with_env(yaml).expect("Failed to load config with env substitution");
+        assert_eq!(
+            config.jwt.as_ref().unwrap().secret,
+            "my-super-secret-jwt-key"
+        );
+
+        std::env::remove_var("TEST_JWT_SECRET");
     }
 }
