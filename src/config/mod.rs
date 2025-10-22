@@ -83,6 +83,14 @@ pub struct S3Config {
 pub struct JwtConfig {
     pub enabled: bool,
     pub secret: String,
+    #[serde(default)]
+    pub token_sources: Vec<TokenSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
 }
 
 #[cfg(test)]
@@ -584,5 +592,25 @@ jwt:
         let jwt = config.jwt.as_ref().expect("JWT config should be present");
         assert_eq!(jwt.enabled, false);
         assert_eq!(jwt.secret, "my-jwt-secret");
+    }
+
+    #[test]
+    fn test_can_parse_multiple_token_sources() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  token_sources:
+    - type: "header"
+    - type: "query"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize multiple token sources");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.token_sources.len(), 2);
     }
 }

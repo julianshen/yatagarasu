@@ -123,7 +123,7 @@ yatagarasu/
 ### Configuration - Auth Config
 - [x] Test: Can parse JWT config with enabled=true
 - [x] Test: Can parse JWT config with enabled=false
-- [ ] Test: Can parse multiple token sources
+- [x] Test: Can parse multiple token sources
 - [ ] Test: Can parse header token source with prefix
 - [ ] Test: Can parse query parameter token source
 - [ ] Test: Can parse custom header token source
