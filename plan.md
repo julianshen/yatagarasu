@@ -130,7 +130,7 @@ yatagarasu/
 - [x] Test: Can parse JWT algorithm (HS256)
 - [x] Test: Can parse JWT secret
 - [x] Test: Rejects JWT config with invalid algorithm
-- [ ] Test: Rejects auth config missing JWT secret when enabled=true
+- [x] Test: Rejects auth config missing JWT secret when enabled=true
 
 ### Configuration - Claims Verification
 - [ ] Test: Can parse single claim verification rule

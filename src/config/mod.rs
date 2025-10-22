@@ -57,6 +57,11 @@ impl Config {
 
         // Validate JWT configuration if present
         if let Some(jwt) = &self.jwt {
+            // Validate that secret is not empty when JWT is enabled
+            if jwt.enabled && jwt.secret.is_empty() {
+                return Err("JWT secret cannot be empty when authentication is enabled".to_string());
+            }
+
             // Validate algorithm
             const VALID_ALGORITHMS: &[&str] = &["HS256", "HS384", "HS512"];
             if !VALID_ALGORITHMS.contains(&jwt.algorithm.as_str()) {
@@ -773,6 +778,32 @@ jwt:
         assert!(
             err_msg.contains("INVALID") || err_msg.contains("algorithm"),
             "Error message should mention the invalid algorithm or algorithm field"
+        );
+    }
+
+    #[test]
+    fn test_rejects_auth_config_missing_jwt_secret_when_enabled() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: ""
+  algorithm: "HS256"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize config with empty secret");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with empty JWT secret when enabled"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("secret") || err_msg.contains("empty"),
+            "Error message should mention secret or empty"
         );
     }
 }
