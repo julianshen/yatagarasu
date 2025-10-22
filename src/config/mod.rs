@@ -667,4 +667,28 @@ jwt:
         assert_eq!(token_source.source_type, "query");
         assert_eq!(token_source.name.as_ref().unwrap(), "token");
     }
+
+    #[test]
+    fn test_can_parse_custom_header_token_source() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  token_sources:
+    - type: "header"
+      name: "X-API-Token"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize custom header token source");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.token_sources.len(), 1);
+
+        let token_source = &jwt.token_sources[0];
+        assert_eq!(token_source.source_type, "header");
+        assert_eq!(token_source.name.as_ref().unwrap(), "X-API-Token");
+    }
 }
