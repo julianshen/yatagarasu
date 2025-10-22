@@ -718,4 +718,21 @@ jwt:
         let jwt = config.jwt.as_ref().expect("JWT config should be present");
         assert_eq!(jwt.algorithm, "HS256");
     }
+
+    #[test]
+    fn test_can_parse_jwt_secret() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-super-secret-key-12345"
+  algorithm: "HS256"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to deserialize JWT secret");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.secret, "my-super-secret-key-12345");
+    }
 }
