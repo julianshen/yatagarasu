@@ -118,7 +118,7 @@ yatagarasu/
 - [x] Test: Can substitute environment variable in secret_key
 - [x] Test: Can substitute environment variable in JWT secret
 - [x] Test: Substitution fails gracefully when env var missing
-- [ ] Test: Can use literal value (no substitution) for non-sensitive fields
+- [x] Test: Can use literal value (no substitution) for non-sensitive fields
 
 ### Configuration - Auth Config
 - [ ] Test: Can parse JWT config with enabled=true

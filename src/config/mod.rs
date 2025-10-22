@@ -511,4 +511,39 @@ buckets:
             "Error message should mention the missing variable or environment variable"
         );
     }
+
+    #[test]
+    fn test_can_use_literal_value_without_substitution() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+jwt:
+  secret: "my-jwt-secret-key"
+"#;
+        let config: Config =
+            Config::from_yaml_with_env(yaml).expect("Failed to load config with literal values");
+
+        // Verify all literal values are preserved
+        assert_eq!(config.server.address, "127.0.0.1");
+        assert_eq!(config.server.port, 8080);
+        assert_eq!(config.buckets[0].name, "products");
+        assert_eq!(config.buckets[0].path_prefix, "/products");
+        assert_eq!(config.buckets[0].s3.bucket, "my-products-bucket");
+        assert_eq!(config.buckets[0].s3.region, "us-west-2");
+        assert_eq!(config.buckets[0].s3.access_key, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(
+            config.buckets[0].s3.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        );
+        assert_eq!(config.jwt.as_ref().unwrap().secret, "my-jwt-secret-key");
+    }
 }
