@@ -842,4 +842,39 @@ jwt:
         assert_eq!(claim_rule.operator, "equals");
         assert_eq!(claim_rule.value.as_str().unwrap(), "admin");
     }
+
+    #[test]
+    fn test_can_parse_multiple_claim_verification_rules() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+    - claim: "department"
+      operator: "equals"
+      value: "engineering"
+"#;
+        let config: Config = serde_yaml::from_str(yaml)
+            .expect("Failed to deserialize multiple claim verification rules");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.claims.len(), 2);
+
+        let first_rule = &jwt.claims[0];
+        assert_eq!(first_rule.claim, "role");
+        assert_eq!(first_rule.operator, "equals");
+        assert_eq!(first_rule.value.as_str().unwrap(), "admin");
+
+        let second_rule = &jwt.claims[1];
+        assert_eq!(second_rule.claim, "department");
+        assert_eq!(second_rule.operator, "equals");
+        assert_eq!(second_rule.value.as_str().unwrap(), "engineering");
+    }
 }
