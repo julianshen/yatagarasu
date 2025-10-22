@@ -91,6 +91,10 @@ pub struct JwtConfig {
 pub struct TokenSource {
     #[serde(rename = "type")]
     pub source_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
 }
 
 #[cfg(test)]
@@ -612,5 +616,31 @@ jwt:
             serde_yaml::from_str(yaml).expect("Failed to deserialize multiple token sources");
         let jwt = config.jwt.as_ref().expect("JWT config should be present");
         assert_eq!(jwt.token_sources.len(), 2);
+    }
+
+    #[test]
+    fn test_can_parse_header_token_source_with_prefix() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize header token source");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.token_sources.len(), 1);
+
+        let token_source = &jwt.token_sources[0];
+        assert_eq!(token_source.source_type, "header");
+        assert_eq!(token_source.name.as_ref().unwrap(), "Authorization");
+        assert_eq!(token_source.prefix.as_ref().unwrap(), "Bearer ");
     }
 }
