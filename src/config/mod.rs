@@ -567,4 +567,22 @@ jwt:
         assert_eq!(jwt.enabled, true);
         assert_eq!(jwt.secret, "my-jwt-secret");
     }
+
+    #[test]
+    fn test_can_parse_jwt_config_with_enabled_false() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: false
+  secret: "my-jwt-secret"
+"#;
+        let config: Config = serde_yaml::from_str(yaml)
+            .expect("Failed to deserialize JWT config with enabled=false");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        assert_eq!(jwt.enabled, false);
+        assert_eq!(jwt.secret, "my-jwt-secret");
+    }
 }
