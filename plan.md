@@ -147,7 +147,7 @@ yatagarasu/
 - [x] Test: Validates that all path_prefixes start with /
 - [x] Test: Validates that bucket names are not empty
 - [x] Test: Validates that JWT secret exists when auth is enabled
-- [ ] Test: Validates that at least one token source exists when JWT enabled
+- [x] Test: Validates that at least one token source exists when JWT enabled
 - [ ] Test: Full config validation passes with valid config
 - [ ] Test: Full config validation fails with invalid config
 

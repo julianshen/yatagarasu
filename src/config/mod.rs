@@ -85,6 +85,14 @@ impl Config {
                 ));
             }
 
+            // Validate that at least one token source exists when JWT is enabled
+            if jwt.enabled && jwt.token_sources.is_empty() {
+                return Err(
+                    "At least one token source must be configured when JWT authentication is enabled"
+                        .to_string(),
+                );
+            }
+
             // Validate claim operators
             const VALID_OPERATORS: &[&str] =
                 &["equals", "in", "contains", "gt", "lt", "gte", "lte"];
@@ -1034,6 +1042,10 @@ jwt:
   enabled: true
   secret: "my-jwt-secret"
   algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
   claims:
     - claim: "role"
       operator: "invalid_operator"
@@ -1172,6 +1184,33 @@ jwt:
         assert!(
             err_msg.contains("secret") || err_msg.contains("JWT") || err_msg.contains("empty"),
             "Error message should mention JWT secret requirement"
+        );
+    }
+
+    #[test]
+    fn test_validates_that_at_least_one_token_source_exists_when_jwt_enabled() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  token_sources: []
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize config with no token sources");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail when JWT is enabled but no token sources are defined"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("token") || err_msg.contains("source") || err_msg.contains("JWT"),
+            "Error message should mention token source requirement"
         );
     }
 }
