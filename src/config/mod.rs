@@ -3,6 +3,7 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -35,6 +36,12 @@ impl Config {
         });
 
         serde_yaml::from_str(&substituted).map_err(|e| e.to_string())
+    }
+
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let yaml = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read config file: {}", e))?;
+        Self::from_yaml_with_env(&yaml)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -1306,5 +1313,37 @@ jwt:
             err_msg.contains("Duplicate") || err_msg.contains("path"),
             "Error message should mention duplicate path_prefix"
         );
+    }
+
+    #[test]
+    fn test_can_load_config_from_yaml_file_path() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-test-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        temp_file
+            .write_all(yaml.as_bytes())
+            .expect("Failed to write to temp file");
+        temp_file.flush().expect("Failed to flush temp file");
+
+        let config = Config::from_file(temp_file.path()).expect("Failed to load config from file");
+
+        assert_eq!(config.server.address, "127.0.0.1");
+        assert_eq!(config.server.port, 8080);
+        assert_eq!(config.buckets.len(), 1);
+        assert_eq!(config.buckets[0].name, "test-bucket");
     }
 }

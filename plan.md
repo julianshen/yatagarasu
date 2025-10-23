@@ -152,7 +152,7 @@ yatagarasu/
 - [x] Test: Full config validation fails with invalid config
 
 ### Configuration - Loading from File
-- [ ] Test: Can load config from YAML file path
+- [x] Test: Can load config from YAML file path
 - [ ] Test: Returns error for non-existent file
 - [ ] Test: Returns error for unreadable file
 - [ ] Test: Returns error for malformed YAML
