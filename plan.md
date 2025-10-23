@@ -136,7 +136,7 @@ yatagarasu/
 - [x] Test: Can parse single claim verification rule
 - [x] Test: Can parse multiple claim verification rules
 - [x] Test: Can parse "equals" operator
-- [ ] Test: Can parse string claim value
+- [x] Test: Can parse string claim value
 - [ ] Test: Can parse numeric claim value
 - [ ] Test: Can parse boolean claim value
 - [ ] Test: Can parse array claim value (for "in" operator)
