@@ -140,7 +140,7 @@ yatagarasu/
 - [x] Test: Can parse numeric claim value
 - [x] Test: Can parse boolean claim value
 - [x] Test: Can parse array claim value (for "in" operator)
-- [ ] Test: Rejects claim verification with unknown operator
+- [x] Test: Rejects claim verification with unknown operator
 
 ### Configuration - Validation
 - [ ] Test: Validates that all path_prefixes are unique

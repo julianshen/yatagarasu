@@ -71,6 +71,19 @@ impl Config {
                     VALID_ALGORITHMS.join(", ")
                 ));
             }
+
+            // Validate claim operators
+            const VALID_OPERATORS: &[&str] =
+                &["equals", "in", "contains", "gt", "lt", "gte", "lte"];
+            for claim_rule in &jwt.claims {
+                if !VALID_OPERATORS.contains(&claim_rule.operator.as_str()) {
+                    return Err(format!(
+                        "Invalid claim operator '{}'. Supported operators: {}",
+                        claim_rule.operator,
+                        VALID_OPERATORS.join(", ")
+                    ));
+                }
+            }
         }
 
         Ok(())
@@ -995,5 +1008,35 @@ jwt:
         assert_eq!(array[0].as_str().unwrap(), "admin");
         assert_eq!(array[1].as_str().unwrap(), "moderator");
         assert_eq!(array[2].as_str().unwrap(), "owner");
+    }
+
+    #[test]
+    fn test_rejects_claim_verification_with_unknown_operator() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  claims:
+    - claim: "role"
+      operator: "invalid_operator"
+      value: "admin"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize config with unknown operator");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with unknown operator"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("invalid_operator") || err_msg.contains("operator"),
+            "Error message should mention the invalid operator or operator field"
+        );
     }
 }
