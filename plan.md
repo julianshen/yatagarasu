@@ -172,7 +172,7 @@ yatagarasu/
 - [x] Test: Router handles path without leading slash (rejects or normalizes)
 
 ### Router - Path Normalization
-- [ ] Test: Normalizes paths with double slashes (`//`)
+- [x] Test: Normalizes paths with double slashes (`//`)
 - [ ] Test: Normalizes paths with trailing slash
 - [ ] Test: Handles URL-encoded paths correctly
 - [ ] Test: Handles special characters in paths

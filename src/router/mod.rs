@@ -12,9 +12,29 @@ impl Router {
     }
 
     pub fn route(&self, path: &str) -> Option<&BucketConfig> {
+        let normalized_path = Self::normalize_path(path);
         self.buckets
             .iter()
-            .find(|bucket| path.starts_with(&bucket.path_prefix))
+            .find(|bucket| normalized_path.starts_with(&bucket.path_prefix))
+    }
+
+    fn normalize_path(path: &str) -> String {
+        let mut result = String::new();
+        let mut prev_was_slash = false;
+
+        for ch in path.chars() {
+            if ch == '/' {
+                if !prev_was_slash {
+                    result.push(ch);
+                    prev_was_slash = true;
+                }
+            } else {
+                result.push(ch);
+                prev_was_slash = false;
+            }
+        }
+
+        result
     }
 }
 
@@ -221,5 +241,39 @@ mod tests {
             result.is_none(),
             "Expected to reject path without leading slash"
         );
+    }
+
+    #[test]
+    fn test_normalizes_paths_with_double_slashes() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Path with double slashes in the middle should be normalized and match
+        let result = router.route("/products//item.txt");
+        assert!(
+            result.is_some(),
+            "Expected to normalize and match /products//item.txt"
+        );
+        let matched_bucket = result.unwrap();
+        assert_eq!(matched_bucket.name, "products");
+
+        // Path with double slashes at the beginning should be normalized and match
+        let result2 = router.route("//products/item.txt");
+        assert!(
+            result2.is_some(),
+            "Expected to normalize and match //products/item.txt"
+        );
+        let matched_bucket2 = result2.unwrap();
+        assert_eq!(matched_bucket2.name, "products");
     }
 }
