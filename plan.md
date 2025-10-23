@@ -165,7 +165,7 @@ yatagarasu/
 - [x] Test: Can create router with empty bucket list
 - [x] Test: Can create router with single bucket config
 - [x] Test: Can create router with multiple bucket configs
-- [ ] Test: Router matches exact path prefix
+- [x] Test: Router matches exact path prefix
 - [ ] Test: Router matches path with trailing segments
 - [ ] Test: Router returns None for unmapped path
 - [ ] Test: Router returns correct bucket for first matching prefix
