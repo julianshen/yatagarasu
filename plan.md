@@ -155,7 +155,7 @@ yatagarasu/
 - [x] Test: Can load config from YAML file path
 - [x] Test: Returns error for non-existent file
 - [x] Test: Returns error for unreadable file
-- [ ] Test: Returns error for malformed YAML
+- [x] Test: Returns error for malformed YAML
 
 ---
 

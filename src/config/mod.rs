@@ -1406,4 +1406,34 @@ buckets:
             err_msg
         );
     }
+
+    #[test]
+    fn test_returns_error_for_malformed_yaml() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Invalid YAML with missing colon and bad indentation
+        let malformed_yaml = r#"
+server
+  address "127.0.0.1"
+    port: 8080
+buckets
+  - name: "test-bucket"
+"#;
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        temp_file
+            .write_all(malformed_yaml.as_bytes())
+            .expect("Failed to write to temp file");
+        temp_file.flush().expect("Failed to flush temp file");
+
+        let result = Config::from_file(temp_file.path());
+
+        assert!(result.is_err(), "Expected error for malformed YAML");
+        let err_msg = result.unwrap_err();
+        // Error message should indicate parsing/deserialization failure
+        assert!(
+            !err_msg.is_empty(),
+            "Error message should not be empty for malformed YAML"
+        );
+    }
 }
