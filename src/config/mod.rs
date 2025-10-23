@@ -42,6 +42,11 @@ impl Config {
 
         // Validate each bucket configuration
         for bucket in &self.buckets {
+            // Check that bucket name is not empty
+            if bucket.name.is_empty() {
+                return Err("Bucket name cannot be empty".to_string());
+            }
+
             if bucket.path_prefix.is_empty() {
                 return Err(format!("Bucket '{}' has empty path_prefix", bucket.name));
             }
@@ -1112,6 +1117,35 @@ buckets:
         assert!(
             err_msg.contains("api/products") || err_msg.contains("/") || err_msg.contains("start"),
             "Error message should mention the path_prefix or / requirement"
+        );
+    }
+
+    #[test]
+    fn test_validates_that_bucket_names_are_not_empty() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: ""
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config = serde_yaml::from_str(yaml)
+            .expect("Failed to deserialize config with empty bucket name");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with empty bucket name"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("name") || err_msg.contains("empty") || err_msg.contains("bucket"),
+            "Error message should mention name or empty bucket"
         );
     }
 }
