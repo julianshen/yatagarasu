@@ -923,4 +923,27 @@ jwt:
         let claim_rule = &jwt.claims[0];
         assert_eq!(claim_rule.value.as_str().unwrap(), "alice@example.com");
     }
+
+    #[test]
+    fn test_can_parse_numeric_claim_value() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  claims:
+    - claim: "user_level"
+      operator: "equals"
+      value: 5
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize numeric claim value");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        let claim_rule = &jwt.claims[0];
+        assert_eq!(claim_rule.value.as_i64().unwrap(), 5);
+    }
 }
