@@ -1039,4 +1039,42 @@ jwt:
             "Error message should mention the invalid operator or operator field"
         );
     }
+
+    #[test]
+    fn test_validates_that_all_path_prefixes_are_unique() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "bucket1"
+    path_prefix: "/api/v1"
+    s3:
+      bucket: "my-bucket-1"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  - name: "bucket2"
+    path_prefix: "/api/v1"
+    s3:
+      bucket: "my-bucket-2"
+      region: "us-east-1"
+      access_key: "AKIAIOSFODNN7EXAMPLE2"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize config with duplicate paths");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with duplicate path_prefix"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("/api/v1")
+                || err_msg.contains("duplicate")
+                || err_msg.contains("path"),
+            "Error message should mention the duplicate path_prefix"
+        );
+    }
 }

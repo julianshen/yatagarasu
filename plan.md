@@ -143,7 +143,7 @@ yatagarasu/
 - [x] Test: Rejects claim verification with unknown operator
 
 ### Configuration - Validation
-- [ ] Test: Validates that all path_prefixes are unique
+- [x] Test: Validates that all path_prefixes are unique
 - [ ] Test: Validates that all path_prefixes start with /
 - [ ] Test: Validates that bucket names are not empty
 - [ ] Test: Validates that JWT secret exists when auth is enabled
