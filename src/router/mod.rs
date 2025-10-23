@@ -136,4 +136,24 @@ mod tests {
         assert_eq!(matched_bucket.name, "products");
         assert_eq!(matched_bucket.path_prefix, "/products");
     }
+
+    #[test]
+    fn test_router_returns_none_for_unmapped_path() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        let result = router.route("/unmapped");
+
+        assert!(result.is_none(), "Expected no match for /unmapped path");
+    }
 }
