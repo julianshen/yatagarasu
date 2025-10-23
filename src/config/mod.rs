@@ -1213,4 +1213,53 @@ jwt:
             "Error message should mention token source requirement"
         );
     }
+
+    #[test]
+    fn test_full_config_validation_passes_with_valid_config() {
+        let yaml = r#"
+server:
+  address: "0.0.0.0"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/api/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  - name: "images"
+    path_prefix: "/api/images"
+    s3:
+      bucket: "my-images-bucket"
+      region: "us-east-1"
+      access_key: "AKIAIOSFODNN7EXAMPLE2"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+jwt:
+  enabled: true
+  secret: "my-super-secret-jwt-key"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+    - type: "query"
+      name: "token"
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+    - claim: "department"
+      operator: "in"
+      value: ["engineering", "operations"]
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize valid config");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_ok(),
+            "Expected validation to pass with valid config, but got error: {:?}",
+            validation_result.err()
+        );
+    }
 }

@@ -148,7 +148,7 @@ yatagarasu/
 - [x] Test: Validates that bucket names are not empty
 - [x] Test: Validates that JWT secret exists when auth is enabled
 - [x] Test: Validates that at least one token source exists when JWT enabled
-- [ ] Test: Full config validation passes with valid config
+- [x] Test: Full config validation passes with valid config
 - [ ] Test: Full config validation fails with invalid config
 
 ### Configuration - Loading from File
