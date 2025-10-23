@@ -276,4 +276,38 @@ mod tests {
         let matched_bucket2 = result2.unwrap();
         assert_eq!(matched_bucket2.name, "products");
     }
+
+    #[test]
+    fn test_normalizes_paths_with_trailing_slash() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Path with single trailing slash should match and be normalized
+        let result = router.route("/products/");
+        assert!(
+            result.is_some(),
+            "Expected to match /products/ (with trailing slash)"
+        );
+        let matched_bucket = result.unwrap();
+        assert_eq!(matched_bucket.name, "products");
+
+        // Path with multiple trailing slashes should be normalized
+        let result2 = router.route("/products/item.txt///");
+        assert!(
+            result2.is_some(),
+            "Expected to normalize and match /products/item.txt///"
+        );
+        let matched_bucket2 = result2.unwrap();
+        assert_eq!(matched_bucket2.name, "products");
+    }
 }

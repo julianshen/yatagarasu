@@ -173,7 +173,7 @@ yatagarasu/
 
 ### Router - Path Normalization
 - [x] Test: Normalizes paths with double slashes (`//`)
-- [ ] Test: Normalizes paths with trailing slash
+- [x] Test: Normalizes paths with trailing slash
 - [ ] Test: Handles URL-encoded paths correctly
 - [ ] Test: Handles special characters in paths
 - [ ] Test: Preserves case sensitivity in paths
