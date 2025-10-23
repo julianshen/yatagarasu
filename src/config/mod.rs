@@ -1360,4 +1360,50 @@ buckets:
             err_msg
         );
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_returns_error_for_unreadable_file() {
+        use std::fs;
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::NamedTempFile;
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-test-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        temp_file
+            .write_all(yaml.as_bytes())
+            .expect("Failed to write to temp file");
+        temp_file.flush().expect("Failed to flush temp file");
+
+        // Remove read permissions (mode 000)
+        let permissions = fs::Permissions::from_mode(0o000);
+        fs::set_permissions(temp_file.path(), permissions).expect("Failed to set permissions");
+
+        let result = Config::from_file(temp_file.path());
+
+        // Restore read permissions before assertions (cleanup)
+        let permissions = fs::Permissions::from_mode(0o644);
+        let _ = fs::set_permissions(temp_file.path(), permissions);
+
+        assert!(result.is_err(), "Expected error for unreadable file");
+        let err_msg = result.unwrap_err();
+        assert!(
+            err_msg.contains("Failed to read config file"),
+            "Error message should mention failed to read config file, got: {}",
+            err_msg
+        );
+    }
 }
