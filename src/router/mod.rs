@@ -14,7 +14,7 @@ impl Router {
     pub fn route(&self, path: &str) -> Option<&BucketConfig> {
         self.buckets
             .iter()
-            .find(|bucket| path == bucket.path_prefix)
+            .find(|bucket| path.starts_with(&bucket.path_prefix))
     }
 }
 
@@ -106,6 +106,32 @@ mod tests {
         let result = router.route("/products");
 
         assert!(result.is_some(), "Expected to match /products path");
+        let matched_bucket = result.unwrap();
+        assert_eq!(matched_bucket.name, "products");
+        assert_eq!(matched_bucket.path_prefix, "/products");
+    }
+
+    #[test]
+    fn test_router_matches_path_with_trailing_segments() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        let result = router.route("/products/item.txt");
+
+        assert!(
+            result.is_some(),
+            "Expected to match /products/item.txt path"
+        );
         let matched_bucket = result.unwrap();
         assert_eq!(matched_bucket.name, "products");
         assert_eq!(matched_bucket.path_prefix, "/products");
