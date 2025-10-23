@@ -139,7 +139,7 @@ yatagarasu/
 - [x] Test: Can parse string claim value
 - [x] Test: Can parse numeric claim value
 - [x] Test: Can parse boolean claim value
-- [ ] Test: Can parse array claim value (for "in" operator)
+- [x] Test: Can parse array claim value (for "in" operator)
 - [ ] Test: Rejects claim verification with unknown operator
 
 ### Configuration - Validation

@@ -969,4 +969,31 @@ jwt:
         let claim_rule = &jwt.claims[0];
         assert_eq!(claim_rule.value.as_bool().unwrap(), true);
     }
+
+    #[test]
+    fn test_can_parse_array_claim_value() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+  algorithm: "HS256"
+  claims:
+    - claim: "role"
+      operator: "in"
+      value: ["admin", "moderator", "owner"]
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize array claim value");
+        let jwt = config.jwt.as_ref().expect("JWT config should be present");
+        let claim_rule = &jwt.claims[0];
+        let array = claim_rule.value.as_array().unwrap();
+        assert_eq!(array.len(), 3);
+        assert_eq!(array[0].as_str().unwrap(), "admin");
+        assert_eq!(array[1].as_str().unwrap(), "moderator");
+        assert_eq!(array[2].as_str().unwrap(), "owner");
+    }
 }
