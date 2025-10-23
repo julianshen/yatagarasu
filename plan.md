@@ -168,7 +168,7 @@ yatagarasu/
 - [x] Test: Router matches exact path prefix
 - [x] Test: Router matches path with trailing segments
 - [x] Test: Router returns None for unmapped path
-- [ ] Test: Router returns correct bucket for first matching prefix
+- [x] Test: Router returns correct bucket for first matching prefix
 - [ ] Test: Router handles path without leading slash (rejects or normalizes)
 
 ### Router - Path Normalization
