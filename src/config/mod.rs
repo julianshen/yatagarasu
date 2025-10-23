@@ -46,6 +46,14 @@ impl Config {
                 return Err(format!("Bucket '{}' has empty path_prefix", bucket.name));
             }
 
+            // Check that path_prefix starts with /
+            if !bucket.path_prefix.starts_with('/') {
+                return Err(format!(
+                    "Bucket '{}' has path_prefix '{}' that does not start with /",
+                    bucket.name, bucket.path_prefix
+                ));
+            }
+
             // Check for duplicate path_prefix
             if !seen_prefixes.insert(&bucket.path_prefix) {
                 return Err(format!(
@@ -1075,6 +1083,35 @@ buckets:
                 || err_msg.contains("duplicate")
                 || err_msg.contains("path"),
             "Error message should mention the duplicate path_prefix"
+        );
+    }
+
+    #[test]
+    fn test_validates_that_all_path_prefixes_start_with_slash() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "api/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+"#;
+        let config: Config = serde_yaml::from_str(yaml)
+            .expect("Failed to deserialize config with invalid path_prefix");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with path_prefix not starting with /"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("api/products") || err_msg.contains("/") || err_msg.contains("start"),
+            "Error message should mention the path_prefix or / requirement"
         );
     }
 }

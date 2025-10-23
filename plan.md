@@ -144,7 +144,7 @@ yatagarasu/
 
 ### Configuration - Validation
 - [x] Test: Validates that all path_prefixes are unique
-- [ ] Test: Validates that all path_prefixes start with /
+- [x] Test: Validates that all path_prefixes start with /
 - [ ] Test: Validates that bucket names are not empty
 - [ ] Test: Validates that JWT secret exists when auth is enabled
 - [ ] Test: Validates that at least one token source exists when JWT enabled
