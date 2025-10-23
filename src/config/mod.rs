@@ -1148,4 +1148,30 @@ buckets:
             "Error message should mention name or empty bucket"
         );
     }
+
+    #[test]
+    fn test_validates_that_jwt_secret_exists_when_auth_is_enabled() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: ""
+  algorithm: "HS256"
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize config with empty JWT secret");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail when JWT is enabled but secret is empty"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("secret") || err_msg.contains("JWT") || err_msg.contains("empty"),
+            "Error message should mention JWT secret requirement"
+        );
+    }
 }
