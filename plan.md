@@ -162,7 +162,7 @@ yatagarasu/
 ## Phase 3: Path Routing
 
 ### Router - Basic Path Matching
-- [ ] Test: Can create router with empty bucket list
+- [x] Test: Can create router with empty bucket list
 - [ ] Test: Can create router with single bucket config
 - [ ] Test: Can create router with multiple bucket configs
 - [ ] Test: Router matches exact path prefix
