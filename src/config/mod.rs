@@ -1346,4 +1346,18 @@ buckets:
         assert_eq!(config.buckets.len(), 1);
         assert_eq!(config.buckets[0].name, "test-bucket");
     }
+
+    #[test]
+    fn test_returns_error_for_non_existent_file() {
+        let non_existent_path = "/tmp/this_file_definitely_does_not_exist_12345.yaml";
+        let result = Config::from_file(non_existent_path);
+
+        assert!(result.is_err(), "Expected error for non-existent file");
+        let err_msg = result.unwrap_err();
+        assert!(
+            err_msg.contains("Failed to read config file"),
+            "Error message should mention failed to read config file, got: {}",
+            err_msg
+        );
+    }
 }
