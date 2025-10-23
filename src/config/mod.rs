@@ -1262,4 +1262,49 @@ jwt:
             validation_result.err()
         );
     }
+
+    #[test]
+    fn test_full_config_validation_fails_with_invalid_config() {
+        // Config with duplicate path_prefix
+        let yaml = r#"
+server:
+  address: "0.0.0.0"
+  port: 8080
+buckets:
+  - name: "products"
+    path_prefix: "/api/data"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  - name: "images"
+    path_prefix: "/api/data"
+    s3:
+      bucket: "my-images-bucket"
+      region: "us-east-1"
+      access_key: "AKIAIOSFODNN7EXAMPLE2"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+jwt:
+  enabled: true
+  secret: "my-super-secret-jwt-key"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize config with duplicate paths");
+        let validation_result = config.validate();
+        assert!(
+            validation_result.is_err(),
+            "Expected validation to fail with duplicate path_prefix"
+        );
+        let err_msg = validation_result.unwrap_err();
+        assert!(
+            err_msg.contains("Duplicate") || err_msg.contains("path"),
+            "Error message should mention duplicate path_prefix"
+        );
+    }
 }

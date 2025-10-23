@@ -149,7 +149,7 @@ yatagarasu/
 - [x] Test: Validates that JWT secret exists when auth is enabled
 - [x] Test: Validates that at least one token source exists when JWT enabled
 - [x] Test: Full config validation passes with valid config
-- [ ] Test: Full config validation fails with invalid config
+- [x] Test: Full config validation fails with invalid config
 
 ### Configuration - Loading from File
 - [ ] Test: Can load config from YAML file path
