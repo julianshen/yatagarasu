@@ -163,7 +163,7 @@ yatagarasu/
 
 ### Router - Basic Path Matching
 - [x] Test: Can create router with empty bucket list
-- [ ] Test: Can create router with single bucket config
+- [x] Test: Can create router with single bucket config
 - [ ] Test: Can create router with multiple bucket configs
 - [ ] Test: Router matches exact path prefix
 - [ ] Test: Router matches path with trailing segments
