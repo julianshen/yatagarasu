@@ -44,4 +44,42 @@ mod tests {
 
         // Router should be created successfully with single bucket config
     }
+
+    #[test]
+    fn test_can_create_router_with_multiple_bucket_configs() {
+        let bucket1 = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+            },
+        };
+        let bucket2 = BucketConfig {
+            name: "images".to_string(),
+            path_prefix: "/images".to_string(),
+            s3: S3Config {
+                bucket: "my-images-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+            },
+        };
+        let bucket3 = BucketConfig {
+            name: "documents".to_string(),
+            path_prefix: "/documents".to_string(),
+            s3: S3Config {
+                bucket: "my-documents-bucket".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+            },
+        };
+        let buckets = vec![bucket1, bucket2, bucket3];
+        let _router = Router::new(buckets);
+
+        // Router should be created successfully with multiple bucket configs
+    }
 }
