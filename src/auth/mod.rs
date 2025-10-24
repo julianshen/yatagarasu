@@ -6,7 +6,8 @@ pub fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String>
     headers
         .get("Authorization")
         .and_then(|value| value.strip_prefix("Bearer "))
-        .filter(|token| !token.trim().is_empty())
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty())
         .map(|token| token.to_string())
 }
 
@@ -158,6 +159,48 @@ mod tests {
         assert_eq!(
             token4, None,
             "Expected None when Authorization header is just whitespace"
+        );
+    }
+
+    #[test]
+    fn test_handles_whitespace_in_authorization_header_value() {
+        // Test token with trailing whitespace
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer token123  ".to_string());
+
+        let token = extract_bearer_token(&headers);
+
+        assert_eq!(
+            token,
+            Some("token123".to_string()),
+            "Expected 'token123' with trailing whitespace trimmed"
+        );
+
+        // Test token with leading whitespace after Bearer
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("Authorization".to_string(), "Bearer   token456".to_string());
+
+        let token2 = extract_bearer_token(&headers2);
+
+        assert_eq!(
+            token2,
+            Some("token456".to_string()),
+            "Expected 'token456' with leading whitespace trimmed"
+        );
+
+        // Test token with both leading and trailing whitespace
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert(
+            "Authorization".to_string(),
+            "Bearer  token789  ".to_string(),
+        );
+
+        let token3 = extract_bearer_token(&headers3);
+
+        assert_eq!(
+            token3,
+            Some("token789".to_string()),
+            "Expected 'token789' with both leading and trailing whitespace trimmed"
         );
     }
 }
