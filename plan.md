@@ -218,7 +218,7 @@ yatagarasu/
 - [x] Test: Handles empty query parameter value
 
 ### JWT - Token Extraction Priority
-- [ ] Test: Tries all configured sources in order
+- [x] Test: Tries all configured sources in order
 - [ ] Test: Returns first valid token found
 - [ ] Test: Returns None if no sources have valid token
 - [ ] Test: Header source checked before query parameter

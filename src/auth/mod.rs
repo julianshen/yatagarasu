@@ -37,6 +37,39 @@ pub fn extract_query_token(
         .filter(|s| !s.is_empty())
 }
 
+pub fn try_extract_token(
+    headers: &HashMap<String, String>,
+    query_params: &HashMap<String, String>,
+    sources: &[crate::config::TokenSource],
+) -> Option<String> {
+    for source in sources {
+        let token = match source.source_type.as_str() {
+            "bearer" => extract_bearer_token(headers),
+            "header" => {
+                if let Some(ref header_name) = source.name {
+                    extract_header_token(headers, header_name)
+                } else {
+                    None
+                }
+            }
+            "query" => {
+                if let Some(ref param_name) = source.name {
+                    extract_query_token(query_params, param_name)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if token.is_some() {
+            return token;
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +522,87 @@ mod tests {
         assert_eq!(
             token3, None,
             "Expected None when query parameter value is only whitespace"
+        );
+    }
+
+    #[test]
+    fn test_tries_all_configured_sources_in_order() {
+        use crate::config::TokenSource;
+
+        // Setup: No token in any source
+        let headers = std::collections::HashMap::new();
+        let query_params = std::collections::HashMap::new();
+
+        // Configure sources: Bearer header, then custom header, then query param
+        let sources = vec![
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        // Try all sources - should check all three and return None
+        let token = try_extract_token(&headers, &query_params, &sources);
+
+        assert_eq!(
+            token, None,
+            "Expected None when no token found in any configured source"
+        );
+
+        // Setup: Token only in the third source (query parameter)
+        let headers2 = std::collections::HashMap::new();
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), "query_token".to_string());
+
+        // Should try bearer header (none), custom header (none), then query (found!)
+        let token2 = try_extract_token(&headers2, &query_params2, &sources);
+
+        assert_eq!(
+            token2,
+            Some("query_token".to_string()),
+            "Expected to find token in third source (query parameter)"
+        );
+
+        // Setup: Token in the second source (custom header)
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert("X-Auth-Token".to_string(), "header_token".to_string());
+        let query_params3 = std::collections::HashMap::new();
+
+        // Should try bearer header (none), then custom header (found!)
+        let token3 = try_extract_token(&headers3, &query_params3, &sources);
+
+        assert_eq!(
+            token3,
+            Some("header_token".to_string()),
+            "Expected to find token in second source (custom header)"
+        );
+
+        // Setup: Token in the first source (bearer header)
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert(
+            "Authorization".to_string(),
+            "Bearer bearer_token".to_string(),
+        );
+        let query_params4 = std::collections::HashMap::new();
+
+        // Should find immediately in first source
+        let token4 = try_extract_token(&headers4, &query_params4, &sources);
+
+        assert_eq!(
+            token4,
+            Some("bearer_token".to_string()),
+            "Expected to find token in first source (bearer header)"
         );
     }
 }
