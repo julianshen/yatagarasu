@@ -858,4 +858,176 @@ mod tests {
             "Expected to return query token (higher priority in reversed order) and ignore header token"
         );
     }
+
+    #[test]
+    fn test_configurable_source_order_is_respected() {
+        use crate::config::TokenSource;
+
+        // Setup: All three types of tokens present
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer bearer_token".to_string(),
+        );
+        headers.insert("X-Auth-Token".to_string(), "header_token".to_string());
+
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), "query_token".to_string());
+
+        // Test 1: Order: Bearer, Header, Query
+        let order1 = vec![
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        let token1 = try_extract_token(&headers, &query_params, &order1);
+        assert_eq!(
+            token1,
+            Some("bearer_token".to_string()),
+            "Expected bearer_token with order [Bearer, Header, Query]"
+        );
+
+        // Test 2: Order: Bearer, Query, Header
+        let order2 = vec![
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        let token2 = try_extract_token(&headers, &query_params, &order2);
+        assert_eq!(
+            token2,
+            Some("bearer_token".to_string()),
+            "Expected bearer_token with order [Bearer, Query, Header]"
+        );
+
+        // Test 3: Order: Header, Bearer, Query
+        let order3 = vec![
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        let token3 = try_extract_token(&headers, &query_params, &order3);
+        assert_eq!(
+            token3,
+            Some("header_token".to_string()),
+            "Expected header_token with order [Header, Bearer, Query]"
+        );
+
+        // Test 4: Order: Header, Query, Bearer
+        let order4 = vec![
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+        ];
+
+        let token4 = try_extract_token(&headers, &query_params, &order4);
+        assert_eq!(
+            token4,
+            Some("header_token".to_string()),
+            "Expected header_token with order [Header, Query, Bearer]"
+        );
+
+        // Test 5: Order: Query, Bearer, Header
+        let order5 = vec![
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        let token5 = try_extract_token(&headers, &query_params, &order5);
+        assert_eq!(
+            token5,
+            Some("query_token".to_string()),
+            "Expected query_token with order [Query, Bearer, Header]"
+        );
+
+        // Test 6: Order: Query, Header, Bearer
+        let order6 = vec![
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+        ];
+
+        let token6 = try_extract_token(&headers, &query_params, &order6);
+        assert_eq!(
+            token6,
+            Some("query_token".to_string()),
+            "Expected query_token with order [Query, Header, Bearer]"
+        );
+    }
 }

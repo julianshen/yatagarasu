@@ -222,7 +222,7 @@ yatagarasu/
 - [x] Test: Returns first valid token found
 - [x] Test: Returns None if no sources have valid token
 - [x] Test: Header source checked before query parameter
-- [ ] Test: Configurable source order is respected
+- [x] Test: Configurable source order is respected
 
 ### JWT - Token Validation (HS256)
 - [ ] Test: Validates correctly signed JWT with HS256
