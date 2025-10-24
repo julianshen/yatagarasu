@@ -840,4 +840,84 @@ mod tests {
             "Expected S3 key to preserve trailing slash for folder paths"
         );
     }
+
+    #[test]
+    fn test_handles_s3_key_with_special_characters() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Spaces in filename
+        let s3_key = router.extract_s3_key("/products/my file.txt");
+        assert_eq!(
+            s3_key,
+            Some("my file.txt".to_string()),
+            "Expected S3 key to preserve spaces"
+        );
+
+        // Hyphens and underscores
+        let s3_key2 = router.extract_s3_key("/products/my-file_name.txt");
+        assert_eq!(
+            s3_key2,
+            Some("my-file_name.txt".to_string()),
+            "Expected S3 key to preserve hyphens and underscores"
+        );
+
+        // Multiple dots
+        let s3_key3 = router.extract_s3_key("/products/file.backup.2024.txt");
+        assert_eq!(
+            s3_key3,
+            Some("file.backup.2024.txt".to_string()),
+            "Expected S3 key to preserve multiple dots"
+        );
+
+        // Parentheses and brackets
+        let s3_key4 = router.extract_s3_key("/products/file(1)[copy].txt");
+        assert_eq!(
+            s3_key4,
+            Some("file(1)[copy].txt".to_string()),
+            "Expected S3 key to preserve parentheses and brackets"
+        );
+
+        // Special characters: tilde, exclamation, at, plus
+        let s3_key5 = router.extract_s3_key("/products/~backup/user@email+tag.txt");
+        assert_eq!(
+            s3_key5,
+            Some("~backup/user@email+tag.txt".to_string()),
+            "Expected S3 key to preserve ~, @, + characters"
+        );
+
+        // Dollar sign, percent, ampersand
+        let s3_key6 = router.extract_s3_key("/products/$price-100%&sale.txt");
+        assert_eq!(
+            s3_key6,
+            Some("$price-100%&sale.txt".to_string()),
+            "Expected S3 key to preserve $, %, & characters"
+        );
+
+        // Equals, comma, semicolon
+        let s3_key7 = router.extract_s3_key("/products/key=value,item;data.txt");
+        assert_eq!(
+            s3_key7,
+            Some("key=value,item;data.txt".to_string()),
+            "Expected S3 key to preserve =, ,, ; characters"
+        );
+
+        // Single quotes and backticks
+        let s3_key8 = router.extract_s3_key("/products/file's-name`backup.txt");
+        assert_eq!(
+            s3_key8,
+            Some("file's-name`backup.txt".to_string()),
+            "Expected S3 key to preserve single quotes and backticks"
+        );
+    }
 }
