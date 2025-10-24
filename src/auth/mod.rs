@@ -87,9 +87,9 @@ pub fn try_extract_token(
 
 pub fn validate_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
-    validation.validate_exp = false; // We'll handle expiration separately in later tests
+    validation.validate_exp = true; // Validate expiration if present
     validation.validate_nbf = false; // We'll handle not-before separately in later tests
-    validation.required_spec_claims.clear(); // Don't require exp, nbf, etc.
+    validation.required_spec_claims.clear(); // Don't require exp, nbf, etc. (but validate if present)
 
     let token_data = decode::<Claims>(
         token,
@@ -1177,6 +1177,53 @@ mod tests {
         assert!(
             result.is_err(),
             "Expected tampered JWT to be rejected, but it was accepted"
+        );
+    }
+
+    #[test]
+    fn test_rejects_jwt_with_expired_exp_claim() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+
+        // Get current timestamp
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Create claims with exp set to 1 hour ago (expired)
+        let mut claims_map = serde_json::Map::new();
+        claims_map.insert("sub".to_string(), json!("user123"));
+        claims_map.insert("exp".to_string(), json!(now - 3600)); // 1 hour ago
+
+        // Encode the JWT token
+        let token = encode(
+            &Header::default(),
+            &claims_map,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode token");
+
+        // Try to validate the expired token
+        let result = validate_jwt(&token, secret);
+
+        assert!(
+            result.is_err(),
+            "Expected expired JWT to be rejected, but it was accepted"
+        );
+
+        // Verify the error is related to expiration
+        let error = result.unwrap_err();
+        assert!(
+            matches!(
+                error.kind(),
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature
+            ),
+            "Expected ExpiredSignature error, but got: {:?}",
+            error.kind()
         );
     }
 }
