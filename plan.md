@@ -206,7 +206,7 @@ yatagarasu/
 - [x] Test: Extracts token from Authorization header without prefix
 - [x] Test: Extracts token from custom header (e.g., X-Auth-Token)
 - [x] Test: Returns None when Authorization header missing
-- [ ] Test: Returns None when Authorization header malformed
+- [x] Test: Returns None when Authorization header malformed
 - [ ] Test: Handles whitespace in Authorization header value
 - [ ] Test: Case-insensitive header name matching
 

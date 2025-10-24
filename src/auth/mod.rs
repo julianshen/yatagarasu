@@ -6,6 +6,7 @@ pub fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String>
     headers
         .get("Authorization")
         .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|token| !token.trim().is_empty())
         .map(|token| token.to_string())
 }
 
@@ -110,6 +111,53 @@ mod tests {
         assert_eq!(
             custom_token, None,
             "Expected None when custom header is missing"
+        );
+    }
+
+    #[test]
+    fn test_returns_none_when_authorization_header_malformed() {
+        // Test Bearer prefix with no token
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer ".to_string());
+
+        let token = extract_bearer_token(&headers);
+
+        assert_eq!(
+            token, None,
+            "Expected None when Authorization header has 'Bearer ' with no token"
+        );
+
+        // Test Bearer without space (malformed)
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("Authorization".to_string(), "Bearer".to_string());
+
+        let token2 = extract_bearer_token(&headers2);
+
+        assert_eq!(
+            token2, None,
+            "Expected None when Authorization header has 'Bearer' without space"
+        );
+
+        // Test empty string
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert("Authorization".to_string(), "".to_string());
+
+        let token3 = extract_bearer_token(&headers3);
+
+        assert_eq!(
+            token3, None,
+            "Expected None when Authorization header is empty string"
+        );
+
+        // Test just whitespace
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert("Authorization".to_string(), "   ".to_string());
+
+        let token4 = extract_bearer_token(&headers4);
+
+        assert_eq!(
+            token4, None,
+            "Expected None when Authorization header is just whitespace"
         );
     }
 }
