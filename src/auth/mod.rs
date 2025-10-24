@@ -389,4 +389,59 @@ mod tests {
             "Expected to extract token with special characters"
         );
     }
+
+    #[test]
+    fn test_handles_multiple_query_parameters_ignores_others() {
+        // Test with many query parameters, extracting specific one
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), "mytoken123".to_string());
+        query_params.insert("user".to_string(), "john".to_string());
+        query_params.insert("action".to_string(), "download".to_string());
+        query_params.insert("file".to_string(), "document.pdf".to_string());
+        query_params.insert("version".to_string(), "2".to_string());
+
+        // Extract token parameter, ignoring all others
+        let token = extract_query_token(&query_params, "token");
+
+        assert_eq!(
+            token,
+            Some("mytoken123".to_string()),
+            "Expected to extract 'token' parameter while ignoring other parameters"
+        );
+
+        // Extract a different parameter from the same set
+        let user = extract_query_token(&query_params, "user");
+
+        assert_eq!(
+            user,
+            Some("john".to_string()),
+            "Expected to extract 'user' parameter while ignoring other parameters"
+        );
+
+        // Test with similar parameter names (token vs access_token)
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), "token1".to_string());
+        query_params2.insert("access_token".to_string(), "token2".to_string());
+        query_params2.insert("refresh_token".to_string(), "token3".to_string());
+
+        let token1 = extract_query_token(&query_params2, "token");
+        let token2 = extract_query_token(&query_params2, "access_token");
+        let token3 = extract_query_token(&query_params2, "refresh_token");
+
+        assert_eq!(
+            token1,
+            Some("token1".to_string()),
+            "Expected to extract exact 'token' parameter"
+        );
+        assert_eq!(
+            token2,
+            Some("token2".to_string()),
+            "Expected to extract exact 'access_token' parameter"
+        );
+        assert_eq!(
+            token3,
+            Some("token3".to_string()),
+            "Expected to extract exact 'refresh_token' parameter"
+        );
+    }
 }
