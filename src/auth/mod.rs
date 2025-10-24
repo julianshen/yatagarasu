@@ -605,4 +605,75 @@ mod tests {
             "Expected to find token in first source (bearer header)"
         );
     }
+
+    #[test]
+    fn test_returns_first_valid_token_found() {
+        use crate::config::TokenSource;
+
+        // Configure sources: Bearer header, then custom header, then query param
+        let sources = vec![
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        // Setup: Tokens in ALL sources - should return only the first one (bearer)
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer first_token".to_string(),
+        );
+        headers.insert("X-Auth-Token".to_string(), "second_token".to_string());
+
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), "third_token".to_string());
+
+        let token = try_extract_token(&headers, &query_params, &sources);
+
+        assert_eq!(
+            token,
+            Some("first_token".to_string()),
+            "Expected to return first token (bearer) and ignore others"
+        );
+
+        // Setup: Tokens in second and third sources - should return second (custom header)
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("X-Auth-Token".to_string(), "second_token".to_string());
+
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), "third_token".to_string());
+
+        let token2 = try_extract_token(&headers2, &query_params2, &sources);
+
+        assert_eq!(
+            token2,
+            Some("second_token".to_string()),
+            "Expected to return second token (custom header) and ignore query param"
+        );
+
+        // Setup: Token only in third source
+        let headers3 = std::collections::HashMap::new();
+        let mut query_params3 = std::collections::HashMap::new();
+        query_params3.insert("token".to_string(), "third_token".to_string());
+
+        let token3 = try_extract_token(&headers3, &query_params3, &sources);
+
+        assert_eq!(
+            token3,
+            Some("third_token".to_string()),
+            "Expected to return third token (query param) when no higher priority sources"
+        );
+    }
 }
