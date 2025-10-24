@@ -183,7 +183,7 @@ yatagarasu/
 - [x] Test: `/products/foo` matches `/products` not `/prod`
 - [x] Test: Handles root path `/` correctly
 - [x] Test: Handles path prefixes with query parameters
-- [ ] Test: Handles path prefixes with fragments (strips them)
+- [x] Test: Handles path prefixes with fragments (strips them)
 
 ### Router - S3 Key Extraction
 - [ ] Test: Extracts S3 key by removing path prefix

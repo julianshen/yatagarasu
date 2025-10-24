@@ -628,4 +628,39 @@ mod tests {
         );
         assert_eq!(result3.unwrap().name, "products");
     }
+
+    #[test]
+    fn test_handles_path_prefixes_with_fragments() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Path with fragment should match
+        let result = router.route("/products/item.txt#section1");
+        assert!(result.is_some(), "Expected to match path with fragment");
+        let matched_bucket = result.unwrap();
+        assert_eq!(matched_bucket.name, "products");
+
+        // Fragment on prefix itself
+        let result2 = router.route("/products#top");
+        assert!(result2.is_some(), "Expected to match prefix with fragment");
+        assert_eq!(result2.unwrap().name, "products");
+
+        // Combined query parameter and fragment
+        let result3 = router.route("/products/item.txt?version=2#section1");
+        assert!(
+            result3.is_some(),
+            "Expected to match path with query and fragment"
+        );
+        assert_eq!(result3.unwrap().name, "products");
+    }
 }
