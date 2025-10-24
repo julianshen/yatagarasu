@@ -211,7 +211,7 @@ yatagarasu/
 - [x] Test: Case-insensitive header name matching
 
 ### JWT - Token Extraction from Query Parameter
-- [ ] Test: Extracts token from query parameter by name
+- [x] Test: Extracts token from query parameter by name
 - [ ] Test: Returns None when query parameter missing
 - [ ] Test: Handles URL-encoded token in query parameter
 - [ ] Test: Handles multiple query parameters (ignores others)

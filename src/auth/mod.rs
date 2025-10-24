@@ -27,6 +27,13 @@ pub fn extract_header_token(
     get_header_case_insensitive(headers, header_name)
 }
 
+pub fn extract_query_token(
+    query_params: &HashMap<String, String>,
+    param_name: &str,
+) -> Option<String> {
+    query_params.get(param_name).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +268,47 @@ mod tests {
             token4,
             Some("customtoken".to_string()),
             "Expected to extract token from lowercase 'x-auth-token' when requesting 'X-Auth-Token'"
+        );
+    }
+
+    #[test]
+    fn test_extracts_token_from_query_parameter_by_name() {
+        // Create query parameters
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), "querytoken123".to_string());
+        query_params.insert("other".to_string(), "othervalue".to_string());
+
+        // Extract token from query parameter by name
+        let token = extract_query_token(&query_params, "token");
+
+        assert_eq!(
+            token,
+            Some("querytoken123".to_string()),
+            "Expected to extract 'querytoken123' from 'token' query parameter"
+        );
+
+        // Test with different parameter name
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("access_token".to_string(), "accesstoken456".to_string());
+
+        let token2 = extract_query_token(&query_params2, "access_token");
+
+        assert_eq!(
+            token2,
+            Some("accesstoken456".to_string()),
+            "Expected to extract 'accesstoken456' from 'access_token' query parameter"
+        );
+
+        // Test with jwt parameter name
+        let mut query_params3 = std::collections::HashMap::new();
+        query_params3.insert("jwt".to_string(), "jwttoken789".to_string());
+
+        let token3 = extract_query_token(&query_params3, "jwt");
+
+        assert_eq!(
+            token3,
+            Some("jwttoken789".to_string()),
+            "Expected to extract 'jwttoken789' from 'jwt' query parameter"
         );
     }
 }
