@@ -311,4 +311,36 @@ mod tests {
             "Expected to extract 'jwttoken789' from 'jwt' query parameter"
         );
     }
+
+    #[test]
+    fn test_returns_none_when_query_parameter_missing() {
+        // Create empty query parameters
+        let query_params = std::collections::HashMap::new();
+
+        // Try to extract from missing query parameter
+        let token = extract_query_token(&query_params, "token");
+
+        assert_eq!(token, None, "Expected None when query parameter is missing");
+
+        // Create query params with some parameters but not the one we're looking for
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("other".to_string(), "othervalue".to_string());
+        query_params2.insert("foo".to_string(), "bar".to_string());
+
+        // Try to extract a parameter that doesn't exist
+        let token2 = extract_query_token(&query_params2, "token");
+
+        assert_eq!(
+            token2, None,
+            "Expected None when specific query parameter is missing"
+        );
+
+        // Test with different parameter name
+        let token3 = extract_query_token(&query_params2, "access_token");
+
+        assert_eq!(
+            token3, None,
+            "Expected None when 'access_token' parameter is missing"
+        );
+    }
 }
