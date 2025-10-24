@@ -792,4 +792,52 @@ mod tests {
             "Expected empty string for exact prefix match without trailing slash"
         );
     }
+
+    #[test]
+    fn test_extracts_nested_s3_keys_correctly() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Two-level nesting
+        let s3_key = router.extract_s3_key("/products/folder/file.txt");
+        assert_eq!(
+            s3_key,
+            Some("folder/file.txt".to_string()),
+            "Expected S3 key to be 'folder/file.txt' for two-level nesting"
+        );
+
+        // Three-level nesting
+        let s3_key2 = router.extract_s3_key("/products/folder/subfolder/file.txt");
+        assert_eq!(
+            s3_key2,
+            Some("folder/subfolder/file.txt".to_string()),
+            "Expected S3 key to be 'folder/subfolder/file.txt' for three-level nesting"
+        );
+
+        // Deep nesting with multiple subdirectories
+        let s3_key3 = router.extract_s3_key("/products/a/b/c/d/e/file.txt");
+        assert_eq!(
+            s3_key3,
+            Some("a/b/c/d/e/file.txt".to_string()),
+            "Expected S3 key to be 'a/b/c/d/e/file.txt' for deep nesting"
+        );
+
+        // Nested folder without file (folder path)
+        let s3_key4 = router.extract_s3_key("/products/folder/subfolder/");
+        assert_eq!(
+            s3_key4,
+            Some("folder/subfolder/".to_string()),
+            "Expected S3 key to preserve trailing slash for folder paths"
+        );
+    }
 }
