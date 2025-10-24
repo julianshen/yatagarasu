@@ -220,7 +220,7 @@ yatagarasu/
 ### JWT - Token Extraction Priority
 - [x] Test: Tries all configured sources in order
 - [x] Test: Returns first valid token found
-- [ ] Test: Returns None if no sources have valid token
+- [x] Test: Returns None if no sources have valid token
 - [ ] Test: Header source checked before query parameter
 - [ ] Test: Configurable source order is respected
 

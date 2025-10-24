@@ -25,6 +25,8 @@ pub fn extract_header_token(
     header_name: &str,
 ) -> Option<String> {
     get_header_case_insensitive(headers, header_name)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 pub fn extract_query_token(
@@ -674,6 +676,97 @@ mod tests {
             token3,
             Some("third_token".to_string()),
             "Expected to return third token (query param) when no higher priority sources"
+        );
+    }
+
+    #[test]
+    fn test_returns_none_if_no_sources_have_valid_token() {
+        use crate::config::TokenSource;
+
+        // Configure sources: Bearer header, then custom header, then query param
+        let sources = vec![
+            TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        // Test 1: Empty headers and query params
+        let headers = std::collections::HashMap::new();
+        let query_params = std::collections::HashMap::new();
+
+        let token = try_extract_token(&headers, &query_params, &sources);
+
+        assert_eq!(
+            token, None,
+            "Expected None when headers and query params are empty"
+        );
+
+        // Test 2: Headers and query params exist but don't contain the configured parameters
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("Content-Type".to_string(), "application/json".to_string());
+        headers2.insert("User-Agent".to_string(), "test-agent".to_string());
+
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("user".to_string(), "john".to_string());
+        query_params2.insert("action".to_string(), "download".to_string());
+
+        let token2 = try_extract_token(&headers2, &query_params2, &sources);
+
+        assert_eq!(
+            token2, None,
+            "Expected None when configured token parameters are missing"
+        );
+
+        // Test 3: Bearer header exists but malformed (no "Bearer " prefix)
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert("Authorization".to_string(), "InvalidFormat".to_string());
+
+        let query_params3 = std::collections::HashMap::new();
+
+        let token3 = try_extract_token(&headers3, &query_params3, &sources);
+
+        assert_eq!(token3, None, "Expected None when bearer token is malformed");
+
+        // Test 4: Token parameters exist but have empty values
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert("X-Auth-Token".to_string(), "".to_string());
+
+        let mut query_params4 = std::collections::HashMap::new();
+        query_params4.insert("token".to_string(), "   ".to_string());
+
+        let token4 = try_extract_token(&headers4, &query_params4, &sources);
+
+        assert_eq!(
+            token4, None,
+            "Expected None when all token values are empty or whitespace"
+        );
+
+        // Test 5: Empty sources list
+        let sources_empty: Vec<TokenSource> = vec![];
+        let mut headers5 = std::collections::HashMap::new();
+        headers5.insert(
+            "Authorization".to_string(),
+            "Bearer valid_token".to_string(),
+        );
+        let query_params5 = std::collections::HashMap::new();
+
+        let token5 = try_extract_token(&headers5, &query_params5, &sources_empty);
+
+        assert_eq!(
+            token5, None,
+            "Expected None when sources list is empty (no configured sources)"
         );
     }
 }
