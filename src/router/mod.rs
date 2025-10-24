@@ -310,4 +310,47 @@ mod tests {
         let matched_bucket2 = result2.unwrap();
         assert_eq!(matched_bucket2.name, "products");
     }
+
+    #[test]
+    fn test_handles_url_encoded_paths_correctly() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // URL-encoded space (%20) should be decoded
+        let result = router.route("/products/my%20item.txt");
+        assert!(
+            result.is_some(),
+            "Expected to decode and match /products/my%20item.txt"
+        );
+        let matched_bucket = result.unwrap();
+        assert_eq!(matched_bucket.name, "products");
+
+        // URL-encoded special characters should be decoded
+        let result2 = router.route("/products/item%2Btest.txt");
+        assert!(
+            result2.is_some(),
+            "Expected to decode and match /products/item%2Btest.txt"
+        );
+        let matched_bucket2 = result2.unwrap();
+        assert_eq!(matched_bucket2.name, "products");
+
+        // URL-encoded forward slash (%2F) should be decoded (but not used for path separation)
+        let result3 = router.route("/products/folder%2Fitem.txt");
+        assert!(
+            result3.is_some(),
+            "Expected to decode and match /products/folder%2Fitem.txt"
+        );
+        let matched_bucket3 = result3.unwrap();
+        assert_eq!(matched_bucket3.name, "products");
+    }
 }
