@@ -15,7 +15,8 @@ impl Router {
         let normalized_path = Self::normalize_path(path);
         self.buckets
             .iter()
-            .find(|bucket| normalized_path.starts_with(&bucket.path_prefix))
+            .filter(|bucket| normalized_path.starts_with(&bucket.path_prefix))
+            .max_by_key(|bucket| bucket.path_prefix.len())
     }
 
     fn normalize_path(path: &str) -> String {
@@ -450,5 +451,51 @@ mod tests {
             "Expected to match prefix but preserve case in filename"
         );
         assert_eq!(result4.unwrap().name, "products");
+    }
+
+    #[test]
+    fn test_matches_longest_prefix_when_multiple_prefixes_match() {
+        let bucket1 = BucketConfig {
+            name: "prod".to_string(),
+            path_prefix: "/prod".to_string(),
+            s3: S3Config {
+                bucket: "prod-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+            },
+        };
+        let bucket2 = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+            },
+        };
+        let buckets = vec![bucket1, bucket2];
+        let router = Router::new(buckets);
+
+        // /products/item.txt should match /products (longest), not /prod
+        let result = router.route("/products/item.txt");
+        assert!(
+            result.is_some(),
+            "Expected to match /products/item.txt to a bucket"
+        );
+        let matched_bucket = result.unwrap();
+        assert_eq!(
+            matched_bucket.name, "products",
+            "Expected to match longest prefix /products, not /prod"
+        );
+        assert_eq!(matched_bucket.path_prefix, "/products");
+
+        // /prod/item.txt should match /prod
+        let result2 = router.route("/prod/item.txt");
+        assert!(result2.is_some(), "Expected to match /prod/item.txt");
+        let matched_bucket2 = result2.unwrap();
+        assert_eq!(matched_bucket2.name, "prod");
+        assert_eq!(matched_bucket2.path_prefix, "/prod");
     }
 }

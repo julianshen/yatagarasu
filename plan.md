@@ -179,7 +179,7 @@ yatagarasu/
 - [x] Test: Preserves case sensitivity in paths
 
 ### Router - Prefix Matching Edge Cases
-- [ ] Test: Matches longest prefix when multiple prefixes match
+- [x] Test: Matches longest prefix when multiple prefixes match
 - [ ] Test: `/products/foo` matches `/products` not `/prod`
 - [ ] Test: Handles root path `/` correctly
 - [ ] Test: Handles path prefixes with query parameters
