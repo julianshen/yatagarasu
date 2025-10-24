@@ -186,7 +186,7 @@ yatagarasu/
 - [x] Test: Handles path prefixes with fragments (strips them)
 
 ### Router - S3 Key Extraction
-- [ ] Test: Extracts S3 key by removing path prefix
+- [x] Test: Extracts S3 key by removing path prefix
 - [ ] Test: Handles path prefix with trailing slash
 - [ ] Test: Handles path prefix without trailing slash
 - [ ] Test: Extracts nested S3 keys correctly (e.g., `folder/subfolder/file.txt`)

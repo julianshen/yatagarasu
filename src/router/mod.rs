@@ -19,6 +19,19 @@ impl Router {
             .max_by_key(|bucket| bucket.path_prefix.len())
     }
 
+    pub fn extract_s3_key(&self, path: &str) -> Option<String> {
+        let normalized_path = Self::normalize_path(path);
+        let bucket = self.route(path)?;
+
+        // Remove the prefix from the path
+        let key = normalized_path.strip_prefix(&bucket.path_prefix)?;
+
+        // Remove leading slash if present
+        let key = key.strip_prefix('/').unwrap_or(key);
+
+        Some(key.to_string())
+    }
+
     fn normalize_path(path: &str) -> String {
         let mut result = String::new();
         let mut prev_was_slash = false;
@@ -662,5 +675,41 @@ mod tests {
             "Expected to match path with query and fragment"
         );
         assert_eq!(result3.unwrap().name, "products");
+    }
+
+    #[test]
+    fn test_extracts_s3_key_by_removing_path_prefix() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Extract S3 key from path
+        let s3_key = router.extract_s3_key("/products/folder/item.txt");
+        assert_eq!(
+            s3_key,
+            Some("folder/item.txt".to_string()),
+            "Expected S3 key to be 'folder/item.txt'"
+        );
+
+        // Single file
+        let s3_key2 = router.extract_s3_key("/products/item.txt");
+        assert_eq!(
+            s3_key2,
+            Some("item.txt".to_string()),
+            "Expected S3 key to be 'item.txt'"
+        );
+
+        // Path that doesn't match any prefix
+        let s3_key3 = router.extract_s3_key("/unmapped/file.txt");
+        assert_eq!(s3_key3, None, "Expected None for unmapped path");
     }
 }
