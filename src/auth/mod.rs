@@ -2,20 +2,29 @@
 
 use std::collections::HashMap;
 
-pub fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String> {
+// Helper function to get header value with case-insensitive matching
+fn get_header_case_insensitive(
+    headers: &HashMap<String, String>,
+    header_name: &str,
+) -> Option<String> {
     headers
-        .get("Authorization")
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(|token| token.trim())
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(header_name))
+        .map(|(_, value)| value.to_string())
+}
+
+pub fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String> {
+    get_header_case_insensitive(headers, "Authorization")
+        .and_then(|value| value.strip_prefix("Bearer ").map(|s| s.to_string()))
+        .map(|token| token.trim().to_string())
         .filter(|token| !token.is_empty())
-        .map(|token| token.to_string())
 }
 
 pub fn extract_header_token(
     headers: &HashMap<String, String>,
     header_name: &str,
 ) -> Option<String> {
-    headers.get(header_name).map(|value| value.to_string())
+    get_header_case_insensitive(headers, header_name)
 }
 
 #[cfg(test)]
@@ -201,6 +210,57 @@ mod tests {
             token3,
             Some("token789".to_string()),
             "Expected 'token789' with both leading and trailing whitespace trimmed"
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_header_name_matching() {
+        // Test lowercase "authorization"
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("authorization".to_string(), "Bearer token123".to_string());
+
+        let token = extract_bearer_token(&headers);
+
+        assert_eq!(
+            token,
+            Some("token123".to_string()),
+            "Expected to extract token from lowercase 'authorization' header"
+        );
+
+        // Test UPPERCASE "AUTHORIZATION"
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("AUTHORIZATION".to_string(), "Bearer token456".to_string());
+
+        let token2 = extract_bearer_token(&headers2);
+
+        assert_eq!(
+            token2,
+            Some("token456".to_string()),
+            "Expected to extract token from uppercase 'AUTHORIZATION' header"
+        );
+
+        // Test mixed case "AuThOrIzAtIoN"
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert("AuThOrIzAtIoN".to_string(), "Bearer token789".to_string());
+
+        let token3 = extract_bearer_token(&headers3);
+
+        assert_eq!(
+            token3,
+            Some("token789".to_string()),
+            "Expected to extract token from mixed case 'AuThOrIzAtIoN' header"
+        );
+
+        // Test case-insensitive custom header with extract_header_token
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert("x-auth-token".to_string(), "customtoken".to_string());
+
+        let token4 = extract_header_token(&headers4, "X-Auth-Token");
+
+        assert_eq!(
+            token4,
+            Some("customtoken".to_string()),
+            "Expected to extract token from lowercase 'x-auth-token' when requesting 'X-Auth-Token'"
         );
     }
 }
