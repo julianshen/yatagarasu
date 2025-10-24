@@ -88,7 +88,7 @@ pub fn try_extract_token(
 pub fn validate_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true; // Validate expiration if present
-    validation.validate_nbf = false; // We'll handle not-before separately in later tests
+    validation.validate_nbf = true; // Validate not-before if present
     validation.required_spec_claims.clear(); // Don't require exp, nbf, etc. (but validate if present)
 
     let token_data = decode::<Claims>(
@@ -1223,6 +1223,53 @@ mod tests {
                 jsonwebtoken::errors::ErrorKind::ExpiredSignature
             ),
             "Expected ExpiredSignature error, but got: {:?}",
+            error.kind()
+        );
+    }
+
+    #[test]
+    fn test_rejects_jwt_with_future_nbf_claim() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+
+        // Get current timestamp
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Create claims with nbf set to 1 hour in the future
+        let mut claims_map = serde_json::Map::new();
+        claims_map.insert("sub".to_string(), json!("user123"));
+        claims_map.insert("nbf".to_string(), json!(now + 3600)); // 1 hour from now
+
+        // Encode the JWT token
+        let token = encode(
+            &Header::default(),
+            &claims_map,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode token");
+
+        // Try to validate the token with future nbf
+        let result = validate_jwt(&token, secret);
+
+        assert!(
+            result.is_err(),
+            "Expected JWT with future nbf to be rejected, but it was accepted"
+        );
+
+        // Verify the error is related to nbf validation
+        let error = result.unwrap_err();
+        assert!(
+            matches!(
+                error.kind(),
+                jsonwebtoken::errors::ErrorKind::ImmatureSignature
+            ),
+            "Expected ImmatureSignature error, but got: {:?}",
             error.kind()
         );
     }
