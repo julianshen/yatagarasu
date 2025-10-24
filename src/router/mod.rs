@@ -752,4 +752,44 @@ mod tests {
             "Expected empty string for exact prefix match with trailing slash"
         );
     }
+
+    #[test]
+    fn test_handles_path_prefix_without_trailing_slash() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Extract S3 key without trailing slash prefix
+        let s3_key = router.extract_s3_key("/products/folder/item.txt");
+        assert_eq!(
+            s3_key,
+            Some("folder/item.txt".to_string()),
+            "Expected S3 key to be 'folder/item.txt' without trailing slash prefix"
+        );
+
+        // Single file without trailing slash prefix
+        let s3_key2 = router.extract_s3_key("/products/item.txt");
+        assert_eq!(
+            s3_key2,
+            Some("item.txt".to_string()),
+            "Expected S3 key to be 'item.txt' without trailing slash prefix"
+        );
+
+        // Exact prefix match (just the prefix without trailing slash)
+        let s3_key3 = router.extract_s3_key("/products");
+        assert_eq!(
+            s3_key3,
+            Some("".to_string()),
+            "Expected empty string for exact prefix match without trailing slash"
+        );
+    }
 }
