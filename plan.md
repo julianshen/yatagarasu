@@ -180,7 +180,7 @@ yatagarasu/
 
 ### Router - Prefix Matching Edge Cases
 - [x] Test: Matches longest prefix when multiple prefixes match
-- [ ] Test: `/products/foo` matches `/products` not `/prod`
+- [x] Test: `/products/foo` matches `/products` not `/prod`
 - [ ] Test: Handles root path `/` correctly
 - [ ] Test: Handles path prefixes with query parameters
 - [ ] Test: Handles path prefixes with fragments (strips them)

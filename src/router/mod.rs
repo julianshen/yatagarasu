@@ -498,4 +498,40 @@ mod tests {
         assert_eq!(matched_bucket2.name, "prod");
         assert_eq!(matched_bucket2.path_prefix, "/prod");
     }
+
+    #[test]
+    fn test_products_foo_matches_products_not_prod() {
+        let bucket1 = BucketConfig {
+            name: "prod".to_string(),
+            path_prefix: "/prod".to_string(),
+            s3: S3Config {
+                bucket: "prod-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+            },
+        };
+        let bucket2 = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+            },
+        };
+        let buckets = vec![bucket1, bucket2];
+        let router = Router::new(buckets);
+
+        // /products/foo should match /products, not /prod
+        let result = router.route("/products/foo");
+        assert!(result.is_some(), "Expected /products/foo to match a bucket");
+        let matched_bucket = result.unwrap();
+        assert_eq!(
+            matched_bucket.name, "products",
+            "Expected /products/foo to match /products prefix, not /prod"
+        );
+        assert_eq!(matched_bucket.path_prefix, "/products");
+    }
 }
