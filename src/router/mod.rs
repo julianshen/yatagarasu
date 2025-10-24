@@ -406,4 +406,49 @@ mod tests {
         );
         assert_eq!(result5.unwrap().name, "products");
     }
+
+    #[test]
+    fn test_preserves_case_sensitivity_in_paths() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Exact case match should succeed
+        let result = router.route("/products/item.txt");
+        assert!(
+            result.is_some(),
+            "Expected to match path with exact case /products"
+        );
+        assert_eq!(result.unwrap().name, "products");
+
+        // Different case should not match
+        let result2 = router.route("/Products/item.txt");
+        assert!(
+            result2.is_none(),
+            "Expected to NOT match path with different case /Products"
+        );
+
+        let result3 = router.route("/PRODUCTS/item.txt");
+        assert!(
+            result3.is_none(),
+            "Expected to NOT match path with different case /PRODUCTS"
+        );
+
+        // Case sensitivity should apply to the entire path
+        let result4 = router.route("/products/Item.txt");
+        assert!(
+            result4.is_some(),
+            "Expected to match prefix but preserve case in filename"
+        );
+        assert_eq!(result4.unwrap().name, "products");
+    }
 }

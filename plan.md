@@ -176,7 +176,7 @@ yatagarasu/
 - [x] Test: Normalizes paths with trailing slash
 - [x] Test: Handles URL-encoded paths correctly
 - [x] Test: Handles special characters in paths
-- [ ] Test: Preserves case sensitivity in paths
+- [x] Test: Preserves case sensitivity in paths
 
 ### Router - Prefix Matching Edge Cases
 - [ ] Test: Matches longest prefix when multiple prefixes match
