@@ -1028,4 +1028,50 @@ mod tests {
             duration
         );
     }
+
+    #[test]
+    fn test_can_handle_100_plus_bucket_configurations_efficiently() {
+        use std::time::Instant;
+
+        // Create router with 150 buckets (larger than typical, testing scalability)
+        let mut buckets = Vec::new();
+        for i in 0..150 {
+            buckets.push(BucketConfig {
+                name: format!("bucket{}", i),
+                path_prefix: format!("/prefix{}", i),
+                s3: S3Config {
+                    bucket: format!("s3-bucket-{}", i),
+                    region: "us-west-2".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                },
+            });
+        }
+        let router = Router::new(buckets);
+
+        // Perform 10,000 lookups and measure time
+        let start = Instant::now();
+        for _ in 0..10_000 {
+            // Lookup various paths across the range
+            let _ = router.route("/prefix75/file.txt"); // Middle
+            let _ = router.route("/prefix0/item.txt"); // First
+            let _ = router.route("/prefix149/data.txt"); // Last
+            let _ = router.route("/unmapped/file.txt"); // No match
+        }
+        let duration = start.elapsed();
+
+        // Should complete in less than 300ms for 10,000 iterations with 150 buckets
+        // This is 3x the threshold for 50 buckets, accounting for O(n) scaling
+        assert!(
+            duration.as_millis() < 300,
+            "Router lookup too slow: {:?} for 10,000 iterations (40,000 lookups) with 150 buckets",
+            duration
+        );
+
+        // Verify router actually works correctly with this many buckets
+        assert!(router.route("/prefix0/test.txt").is_some());
+        assert!(router.route("/prefix75/test.txt").is_some());
+        assert!(router.route("/prefix149/test.txt").is_some());
+        assert!(router.route("/unmapped/test.txt").is_none());
+    }
 }
