@@ -213,7 +213,7 @@ yatagarasu/
 ### JWT - Token Extraction from Query Parameter
 - [x] Test: Extracts token from query parameter by name
 - [x] Test: Returns None when query parameter missing
-- [ ] Test: Handles URL-encoded token in query parameter
+- [x] Test: Handles URL-encoded token in query parameter
 - [ ] Test: Handles multiple query parameters (ignores others)
 - [ ] Test: Handles empty query parameter value
 

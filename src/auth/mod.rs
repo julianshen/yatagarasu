@@ -343,4 +343,50 @@ mod tests {
             "Expected None when 'access_token' parameter is missing"
         );
     }
+
+    #[test]
+    fn test_handles_url_encoded_token_in_query_parameter() {
+        // Note: In a real HTTP server, URL decoding happens before we receive query params
+        // This test verifies we correctly handle tokens with special characters that
+        // would typically be URL-encoded in transit (like +, /, =, etc.)
+
+        // Test token with characters that would be URL-encoded: + / =
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert(
+            "token".to_string(),
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U".to_string(),
+        );
+
+        let token = extract_query_token(&query_params, "token");
+
+        assert_eq!(
+            token,
+            Some("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U".to_string()),
+            "Expected to extract JWT token with dots and base64 characters"
+        );
+
+        // Test token that was decoded from URL encoding (spaces decoded from %20 or +)
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), "token with spaces".to_string());
+
+        let token2 = extract_query_token(&query_params2, "token");
+
+        assert_eq!(
+            token2,
+            Some("token with spaces".to_string()),
+            "Expected to extract token with spaces (decoded from URL encoding)"
+        );
+
+        // Test token with special characters (already decoded)
+        let mut query_params3 = std::collections::HashMap::new();
+        query_params3.insert("token".to_string(), "token&special=chars".to_string());
+
+        let token3 = extract_query_token(&query_params3, "token");
+
+        assert_eq!(
+            token3,
+            Some("token&special=chars".to_string()),
+            "Expected to extract token with special characters"
+        );
+    }
 }
