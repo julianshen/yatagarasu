@@ -1107,4 +1107,76 @@ mod tests {
             "Expected custom admin claim to be true"
         );
     }
+
+    #[test]
+    fn test_rejects_jwt_with_invalid_signature() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+
+        // Create a JWT token with one secret
+        let signing_secret = "correct_secret_key";
+        let wrong_secret = "wrong_secret_key";
+
+        // Create test claims
+        let mut claims_map = serde_json::Map::new();
+        claims_map.insert("sub".to_string(), json!("user123"));
+        claims_map.insert("name".to_string(), json!("John Doe"));
+
+        // Encode the JWT token with the correct secret
+        let token = encode(
+            &Header::default(),
+            &claims_map,
+            &EncodingKey::from_secret(signing_secret.as_ref()),
+        )
+        .expect("Failed to encode token");
+
+        // Try to validate with wrong secret - should fail
+        let result = validate_jwt(&token, wrong_secret);
+
+        assert!(
+            result.is_err(),
+            "Expected JWT with invalid signature to be rejected, but it was accepted"
+        );
+
+        // Verify the error is related to signature validation
+        let error = result.unwrap_err();
+        assert!(
+            matches!(
+                error.kind(),
+                jsonwebtoken::errors::ErrorKind::InvalidSignature
+            ),
+            "Expected InvalidSignature error, but got: {:?}",
+            error.kind()
+        );
+    }
+
+    #[test]
+    fn test_rejects_completely_tampered_jwt() {
+        // Create a valid token first
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+
+        let secret = "test_secret";
+        let mut claims_map = serde_json::Map::new();
+        claims_map.insert("sub".to_string(), json!("user123"));
+
+        let token = encode(
+            &Header::default(),
+            &claims_map,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode token");
+
+        // Tamper with the token by modifying a character in the signature part
+        let parts: Vec<&str> = token.split('.').collect();
+        let tampered_token = format!("{}.{}.{}X", parts[0], parts[1], parts[2]);
+
+        // Try to validate the tampered token
+        let result = validate_jwt(&tampered_token, secret);
+
+        assert!(
+            result.is_err(),
+            "Expected tampered JWT to be rejected, but it was accepted"
+        );
+    }
 }

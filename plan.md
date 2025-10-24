@@ -226,7 +226,7 @@ yatagarasu/
 
 ### JWT - Token Validation (HS256)
 - [x] Test: Validates correctly signed JWT with HS256
-- [ ] Test: Rejects JWT with invalid signature
+- [x] Test: Rejects JWT with invalid signature
 - [ ] Test: Rejects JWT with expired `exp` claim
 - [ ] Test: Rejects JWT with future `nbf` (not before) claim
 - [ ] Test: Accepts JWT with valid `exp` and `nbf` claims
