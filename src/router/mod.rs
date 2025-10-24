@@ -534,4 +534,57 @@ mod tests {
         );
         assert_eq!(matched_bucket.path_prefix, "/products");
     }
+
+    #[test]
+    fn test_handles_root_path_correctly() {
+        let bucket1 = BucketConfig {
+            name: "default".to_string(),
+            path_prefix: "/".to_string(),
+            s3: S3Config {
+                bucket: "default-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+            },
+        };
+        let bucket2 = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+            },
+        };
+        let buckets = vec![bucket1, bucket2];
+        let router = Router::new(buckets);
+
+        // Root path / should act as catch-all for unmapped paths
+        let result = router.route("/unmapped/file.txt");
+        assert!(
+            result.is_some(),
+            "Expected root path / to match as catch-all"
+        );
+        let matched_bucket = result.unwrap();
+        assert_eq!(matched_bucket.name, "default");
+        assert_eq!(matched_bucket.path_prefix, "/");
+
+        // More specific prefix should take precedence over root
+        let result2 = router.route("/products/item.txt");
+        assert!(result2.is_some(), "Expected /products/item.txt to match");
+        let matched_bucket2 = result2.unwrap();
+        assert_eq!(
+            matched_bucket2.name, "products",
+            "Expected /products to take precedence over root /"
+        );
+        assert_eq!(matched_bucket2.path_prefix, "/products");
+
+        // Root path itself should match
+        let result3 = router.route("/");
+        assert!(result3.is_some(), "Expected / to match root path");
+        let matched_bucket3 = result3.unwrap();
+        assert_eq!(matched_bucket3.name, "default");
+        assert_eq!(matched_bucket3.path_prefix, "/");
+    }
 }
