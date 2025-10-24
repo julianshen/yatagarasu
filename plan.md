@@ -202,7 +202,7 @@ yatagarasu/
 ## Phase 4: JWT Authentication
 
 ### JWT - Token Extraction from Header
-- [ ] Test: Extracts token from Authorization header with "Bearer " prefix
+- [x] Test: Extracts token from Authorization header with "Bearer " prefix
 - [ ] Test: Extracts token from Authorization header without prefix
 - [ ] Test: Extracts token from custom header (e.g., X-Auth-Token)
 - [ ] Test: Returns None when Authorization header missing
