@@ -225,7 +225,7 @@ yatagarasu/
 - [x] Test: Configurable source order is respected
 
 ### JWT - Token Validation (HS256)
-- [ ] Test: Validates correctly signed JWT with HS256
+- [x] Test: Validates correctly signed JWT with HS256
 - [ ] Test: Rejects JWT with invalid signature
 - [ ] Test: Rejects JWT with expired `exp` claim
 - [ ] Test: Rejects JWT with future `nbf` (not before) claim

@@ -1,6 +1,19 @@
 // Authentication module
 
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: Option<String>,
+    pub exp: Option<u64>,
+    pub iat: Option<u64>,
+    pub nbf: Option<u64>,
+    pub iss: Option<String>,
+    #[serde(flatten)]
+    pub custom: serde_json::Map<String, serde_json::Value>,
+}
 
 // Helper function to get header value with case-insensitive matching
 fn get_header_case_insensitive(
@@ -70,6 +83,21 @@ pub fn try_extract_token(
     }
 
     None
+}
+
+pub fn validate_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = false; // We'll handle expiration separately in later tests
+    validation.validate_nbf = false; // We'll handle not-before separately in later tests
+    validation.required_spec_claims.clear(); // Don't require exp, nbf, etc.
+
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &validation,
+    )?;
+
+    Ok(token_data.claims)
 }
 
 #[cfg(test)]
@@ -1028,6 +1056,55 @@ mod tests {
             token6,
             Some("query_token".to_string()),
             "Expected query_token with order [Query, Header, Bearer]"
+        );
+    }
+
+    #[test]
+    fn test_validates_correctly_signed_jwt_with_hs256() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+
+        // Create a test secret
+        let secret = "test_secret_key_123";
+
+        // Create test claims
+        let mut claims_map = serde_json::Map::new();
+        claims_map.insert("sub".to_string(), json!("user123"));
+        claims_map.insert("name".to_string(), json!("John Doe"));
+        claims_map.insert("admin".to_string(), json!(true));
+
+        // Encode the JWT token with HS256
+        let token = encode(
+            &Header::default(), // Default uses HS256
+            &claims_map,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode token");
+
+        // Validate the token
+        let result = validate_jwt(&token, secret);
+
+        assert!(
+            result.is_ok(),
+            "Expected valid JWT to be accepted, but got error: {:?}",
+            result.err()
+        );
+
+        let claims = result.unwrap();
+        assert_eq!(
+            claims.sub,
+            Some("user123".to_string()),
+            "Expected sub claim to be 'user123'"
+        );
+        assert_eq!(
+            claims.custom.get("name"),
+            Some(&json!("John Doe")),
+            "Expected custom name claim to be 'John Doe'"
+        );
+        assert_eq!(
+            claims.custom.get("admin"),
+            Some(&json!(true)),
+            "Expected custom admin claim to be true"
         );
     }
 }
