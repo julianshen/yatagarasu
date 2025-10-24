@@ -82,4 +82,34 @@ mod tests {
             "Expected to extract 'apikey456' from X-API-Key header"
         );
     }
+
+    #[test]
+    fn test_returns_none_when_authorization_header_missing() {
+        // Create empty headers
+        let headers = std::collections::HashMap::new();
+
+        // Try to extract from missing Authorization header
+        let token = extract_header_token(&headers, "Authorization");
+
+        assert_eq!(
+            token, None,
+            "Expected None when Authorization header is missing"
+        );
+
+        // Try to extract Bearer token from missing header
+        let bearer_token = extract_bearer_token(&headers);
+
+        assert_eq!(
+            bearer_token, None,
+            "Expected None when Authorization header is missing for Bearer extraction"
+        );
+
+        // Try to extract from missing custom header
+        let custom_token = extract_header_token(&headers, "X-Auth-Token");
+
+        assert_eq!(
+            custom_token, None,
+            "Expected None when custom header is missing"
+        );
+    }
 }
