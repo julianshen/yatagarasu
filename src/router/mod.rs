@@ -920,4 +920,72 @@ mod tests {
             "Expected S3 key to preserve single quotes and backticks"
         );
     }
+
+    #[test]
+    fn test_handles_empty_s3_key_when_prefix_is_full_path() {
+        let bucket = BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "products-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets = vec![bucket];
+        let router = Router::new(buckets);
+
+        // Exact match: path equals prefix (without trailing slash)
+        let s3_key = router.extract_s3_key("/products");
+        assert_eq!(
+            s3_key,
+            Some("".to_string()),
+            "Expected empty string when path exactly matches prefix without trailing slash"
+        );
+
+        // Test with bucket that has trailing slash in prefix
+        let bucket2 = BucketConfig {
+            name: "images".to_string(),
+            path_prefix: "/images/".to_string(),
+            s3: S3Config {
+                bucket: "images-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets2 = vec![bucket2];
+        let router2 = Router::new(buckets2);
+
+        // Exact match with trailing slash
+        let s3_key2 = router2.extract_s3_key("/images/");
+        assert_eq!(
+            s3_key2,
+            Some("".to_string()),
+            "Expected empty string when path exactly matches prefix with trailing slash"
+        );
+
+        // Test with root path bucket
+        let bucket3 = BucketConfig {
+            name: "root".to_string(),
+            path_prefix: "/".to_string(),
+            s3: S3Config {
+                bucket: "root-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            },
+        };
+        let buckets3 = vec![bucket3];
+        let router3 = Router::new(buckets3);
+
+        // Root path should give empty key
+        let s3_key3 = router3.extract_s3_key("/");
+        assert_eq!(
+            s3_key3,
+            Some("".to_string()),
+            "Expected empty string for root path /"
+        );
+    }
 }

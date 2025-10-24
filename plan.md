@@ -191,7 +191,7 @@ yatagarasu/
 - [x] Test: Handles path prefix without trailing slash
 - [x] Test: Extracts nested S3 keys correctly (e.g., `folder/subfolder/file.txt`)
 - [x] Test: Handles S3 key with special characters
-- [ ] Test: Handles empty S3 key (prefix is the full path)
+- [x] Test: Handles empty S3 key (prefix is the full path)
 
 ### Router - Performance
 - [ ] Test: Router lookup is O(1) or O(log n) for reasonable config sizes
