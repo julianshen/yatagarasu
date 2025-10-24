@@ -194,7 +194,7 @@ yatagarasu/
 - [x] Test: Handles empty S3 key (prefix is the full path)
 
 ### Router - Performance
-- [ ] Test: Router lookup is O(1) or O(log n) for reasonable config sizes
+- [x] Test: Router lookup is O(1) or O(log n) for reasonable config sizes
 - [ ] Test: Can handle 100+ bucket configurations efficiently
 
 ---

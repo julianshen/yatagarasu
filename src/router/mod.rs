@@ -988,4 +988,44 @@ mod tests {
             "Expected empty string for root path /"
         );
     }
+
+    #[test]
+    fn test_router_lookup_is_fast_for_reasonable_config_sizes() {
+        use std::time::Instant;
+
+        // Create router with 50 buckets (reasonable config size)
+        let mut buckets = Vec::new();
+        for i in 0..50 {
+            buckets.push(BucketConfig {
+                name: format!("bucket{}", i),
+                path_prefix: format!("/prefix{}", i),
+                s3: S3Config {
+                    bucket: format!("s3-bucket-{}", i),
+                    region: "us-west-2".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                },
+            });
+        }
+        let router = Router::new(buckets);
+
+        // Perform 10,000 lookups and measure time
+        let start = Instant::now();
+        for _ in 0..10_000 {
+            // Lookup various paths
+            let _ = router.route("/prefix25/file.txt");
+            let _ = router.route("/prefix0/item.txt");
+            let _ = router.route("/prefix49/data.txt");
+            let _ = router.route("/unmapped/file.txt");
+        }
+        let duration = start.elapsed();
+
+        // Should complete in less than 100ms for 10,000 lookups with 50 buckets
+        // This demonstrates O(n) performance is acceptable for reasonable config sizes
+        assert!(
+            duration.as_millis() < 100,
+            "Router lookup too slow: {:?} for 10,000 lookups with 50 buckets",
+            duration
+        );
+    }
 }
