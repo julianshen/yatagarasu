@@ -769,4 +769,93 @@ mod tests {
             "Expected None when sources list is empty (no configured sources)"
         );
     }
+
+    #[test]
+    fn test_header_source_checked_before_query_parameter() {
+        use crate::config::TokenSource;
+
+        // Configure sources: Header before query parameter
+        let sources = vec![
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        // Test 1: Token in both header and query param - should return header token
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("X-Auth-Token".to_string(), "header_token".to_string());
+
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), "query_token".to_string());
+
+        let token = try_extract_token(&headers, &query_params, &sources);
+
+        assert_eq!(
+            token,
+            Some("header_token".to_string()),
+            "Expected to return header token (higher priority) and ignore query param token"
+        );
+
+        // Test 2: Token only in query param - should return query param token
+        let headers2 = std::collections::HashMap::new();
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), "query_token".to_string());
+
+        let token2 = try_extract_token(&headers2, &query_params2, &sources);
+
+        assert_eq!(
+            token2,
+            Some("query_token".to_string()),
+            "Expected to return query param token when header is missing"
+        );
+
+        // Test 3: Token only in header - should return header token
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert("X-Auth-Token".to_string(), "header_token".to_string());
+        let query_params3 = std::collections::HashMap::new();
+
+        let token3 = try_extract_token(&headers3, &query_params3, &sources);
+
+        assert_eq!(
+            token3,
+            Some("header_token".to_string()),
+            "Expected to return header token when query param is missing"
+        );
+
+        // Test 4: Reverse order - query before header
+        let sources_reversed = vec![
+            TokenSource {
+                source_type: "query".to_string(),
+                name: Some("token".to_string()),
+                prefix: None,
+            },
+            TokenSource {
+                source_type: "header".to_string(),
+                name: Some("X-Auth-Token".to_string()),
+                prefix: None,
+            },
+        ];
+
+        // With reversed order and tokens in both, should return query token
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert("X-Auth-Token".to_string(), "header_token".to_string());
+
+        let mut query_params4 = std::collections::HashMap::new();
+        query_params4.insert("token".to_string(), "query_token".to_string());
+
+        let token4 = try_extract_token(&headers4, &query_params4, &sources_reversed);
+
+        assert_eq!(
+            token4,
+            Some("query_token".to_string()),
+            "Expected to return query token (higher priority in reversed order) and ignore header token"
+        );
+    }
 }
