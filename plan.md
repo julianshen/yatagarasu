@@ -215,7 +215,7 @@ yatagarasu/
 - [x] Test: Returns None when query parameter missing
 - [x] Test: Handles URL-encoded token in query parameter
 - [x] Test: Handles multiple query parameters (ignores others)
-- [ ] Test: Handles empty query parameter value
+- [x] Test: Handles empty query parameter value
 
 ### JWT - Token Extraction Priority
 - [ ] Test: Tries all configured sources in order

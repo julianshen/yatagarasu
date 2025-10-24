@@ -31,7 +31,10 @@ pub fn extract_query_token(
     query_params: &HashMap<String, String>,
     param_name: &str,
 ) -> Option<String> {
-    query_params.get(param_name).cloned()
+    query_params
+        .get(param_name)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
@@ -442,6 +445,50 @@ mod tests {
             token3,
             Some("token3".to_string()),
             "Expected to extract exact 'refresh_token' parameter"
+        );
+    }
+
+    #[test]
+    fn test_handles_empty_query_parameter_value() {
+        // Test with empty string value (e.g., ?token=)
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), "".to_string());
+
+        let token = extract_query_token(&query_params, "token");
+
+        assert_eq!(
+            token, None,
+            "Expected None when query parameter value is empty string"
+        );
+
+        // Test with empty value alongside other valid parameters
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), "".to_string());
+        query_params2.insert("user".to_string(), "john".to_string());
+        query_params2.insert("action".to_string(), "download".to_string());
+
+        let token2 = extract_query_token(&query_params2, "token");
+        let user = extract_query_token(&query_params2, "user");
+
+        assert_eq!(
+            token2, None,
+            "Expected None for empty 'token' parameter even with other valid parameters"
+        );
+        assert_eq!(
+            user,
+            Some("john".to_string()),
+            "Expected to extract valid 'user' parameter"
+        );
+
+        // Test with whitespace-only value (should also be treated as empty/invalid)
+        let mut query_params3 = std::collections::HashMap::new();
+        query_params3.insert("token".to_string(), "   ".to_string());
+
+        let token3 = extract_query_token(&query_params3, "token");
+
+        assert_eq!(
+            token3, None,
+            "Expected None when query parameter value is only whitespace"
         );
     }
 }
