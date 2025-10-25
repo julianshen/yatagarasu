@@ -246,7 +246,7 @@ yatagarasu/
 - [x] Test: Verifies string claim equals expected value
 - [x] Test: Verifies numeric claim equals expected value
 - [x] Test: Verifies boolean claim equals expected value
-- [ ] Test: Fails when claim value doesn't match
+- [x] Test: Fails when claim value doesn't match
 - [ ] Test: Fails when claim is missing
 - [ ] Test: Case-sensitive string comparison
 

@@ -2132,4 +2132,83 @@ mod tests {
             "Expected claim verification to pass when boolean claim equals false"
         );
     }
+
+    #[test]
+    fn test_fails_when_claim_value_doesnt_match() {
+        let secret = "test_secret";
+
+        // Create a JWT with custom claims
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("user".to_string()),
+        );
+        custom_map.insert(
+            "level".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(5)),
+        );
+        custom_map.insert("is_admin".to_string(), serde_json::Value::Bool(false));
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Test 1: String claim value doesn't match
+        let rules = vec![ClaimRule {
+            claim: "role".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::String("admin".to_string()), // Expected admin, but JWT has user
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail when string value doesn't match"
+        );
+
+        // Test 2: Numeric claim value doesn't match
+        let rules = vec![ClaimRule {
+            claim: "level".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::Number(serde_json::Number::from(10)), // Expected 10, but JWT has 5
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail when numeric value doesn't match"
+        );
+
+        // Test 3: Boolean claim value doesn't match
+        let rules = vec![ClaimRule {
+            claim: "is_admin".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::Bool(true), // Expected true, but JWT has false
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail when boolean value doesn't match"
+        );
+    }
 }
