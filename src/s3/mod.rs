@@ -4352,6 +4352,144 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_returns_206_partial_content_for_valid_range() {
+        use std::collections::HashMap;
+
+        // Test 206 response for single range request
+        let mut headers1 = HashMap::new();
+        headers1.insert("content-type".to_string(), "text/plain".to_string());
+        headers1.insert("content-length".to_string(), "1024".to_string());
+        headers1.insert("content-range".to_string(), "bytes 0-1023/5000".to_string());
+        headers1.insert("accept-ranges".to_string(), "bytes".to_string());
+
+        let response1 = S3Response::new(206, "Partial Content", headers1, vec![0u8; 1024]);
+
+        assert_eq!(
+            response1.status_code, 206,
+            "Should return 206 Partial Content for range request"
+        );
+        assert_eq!(
+            response1.status_text, "Partial Content",
+            "Status text should be 'Partial Content'"
+        );
+        assert!(
+            response1.is_success(),
+            "206 Partial Content is a success status (2xx)"
+        );
+
+        // Verify Content-Range header is present
+        let content_range = response1.get_header("content-range");
+        assert!(
+            content_range.is_some(),
+            "Content-Range header should be present in 206 response"
+        );
+        assert_eq!(
+            content_range.unwrap(),
+            "bytes 0-1023/5000",
+            "Content-Range should specify the byte range"
+        );
+
+        // Test 206 response for open-ended range (bytes 1000 to end)
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-type".to_string(), "video/mp4".to_string());
+        headers2.insert("content-length".to_string(), "4000".to_string());
+        headers2.insert(
+            "content-range".to_string(),
+            "bytes 1000-4999/5000".to_string(),
+        );
+        headers2.insert("accept-ranges".to_string(), "bytes".to_string());
+
+        let response2 = S3Response::new(206, "Partial Content", headers2, vec![0u8; 4000]);
+
+        assert_eq!(response2.status_code, 206);
+        assert_eq!(
+            response2.get_header("content-range"),
+            Some(&"bytes 1000-4999/5000".to_string())
+        );
+
+        // Test 206 response for suffix range (last 500 bytes)
+        let mut headers3 = HashMap::new();
+        headers3.insert("content-type".to_string(), "application/pdf".to_string());
+        headers3.insert("content-length".to_string(), "500".to_string());
+        headers3.insert(
+            "content-range".to_string(),
+            "bytes 4500-4999/5000".to_string(),
+        );
+        headers3.insert("accept-ranges".to_string(), "bytes".to_string());
+
+        let response3 = S3Response::new(206, "Partial Content", headers3, vec![0u8; 500]);
+
+        assert_eq!(response3.status_code, 206);
+        assert_eq!(
+            response3.get_header("content-range"),
+            Some(&"bytes 4500-4999/5000".to_string())
+        );
+
+        // Verify body size matches Content-Range
+        assert_eq!(
+            response3.body.len(),
+            500,
+            "Body size should match the range size"
+        );
+
+        // Test that 200 OK is different from 206
+        let mut headers_full = HashMap::new();
+        headers_full.insert("content-type".to_string(), "text/plain".to_string());
+        headers_full.insert("content-length".to_string(), "5000".to_string());
+        headers_full.insert("accept-ranges".to_string(), "bytes".to_string());
+
+        let response_full = S3Response::new(200, "OK", headers_full, vec![0u8; 5000]);
+
+        assert_eq!(response_full.status_code, 200, "Full file returns 200 OK");
+        assert_eq!(
+            response_full.get_header("content-range"),
+            None,
+            "200 OK response should not have Content-Range header"
+        );
+        assert_ne!(
+            response1.status_code, response_full.status_code,
+            "206 Partial Content should be different from 200 OK"
+        );
+
+        // Test 206 with multiple ranges (multipart/byteranges)
+        // Note: This is typically returned as multipart content
+        let mut headers_multi = HashMap::new();
+        headers_multi.insert(
+            "content-type".to_string(),
+            "multipart/byteranges; boundary=example".to_string(),
+        );
+        headers_multi.insert("content-length".to_string(), "300".to_string());
+
+        let response_multi = S3Response::new(206, "Partial Content", headers_multi, vec![0u8; 300]);
+
+        assert_eq!(
+            response_multi.status_code, 206,
+            "Multiple ranges also return 206"
+        );
+        assert!(
+            response_multi
+                .get_header("content-type")
+                .unwrap()
+                .contains("multipart/byteranges"),
+            "Multiple ranges use multipart content type"
+        );
+
+        // Test that 206 body size can be less than full file
+        assert!(
+            response1.body.len() < 5000,
+            "Partial content body should be smaller than full file"
+        );
+        assert!(
+            response2.body.len() < 5000,
+            "Partial content body should be smaller than full file"
+        );
+        assert!(
+            response3.body.len() < 5000,
+            "Partial content body should be smaller than full file"
+        );
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};
