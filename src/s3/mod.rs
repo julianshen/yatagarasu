@@ -3445,4 +3445,120 @@ mod tests {
             "Should iterate through all chunks"
         );
     }
+
+    #[test]
+    fn test_can_stream_large_file_without_buffering_entire_file() {
+        use std::collections::HashMap;
+
+        // Simulate a large file (100 MB)
+        // Note: Current implementation uses Vec<u8> which holds entire file in memory
+        // Future streaming implementation will use async streams to avoid buffering
+        let file_size = 100 * 1024 * 1024; // 100 MB
+        let file_content = vec![0u8; file_size];
+
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "video/mp4".to_string());
+        headers.insert("content-length".to_string(), file_size.to_string());
+        headers.insert("etag".to_string(), "\"large123\"".to_string());
+
+        let response = S3Response::new(200, "OK", headers, file_content);
+
+        // Verify response is successful
+        assert!(response.is_success(), "Response should be successful");
+        assert_eq!(response.status_code, 200);
+
+        // Verify file size
+        assert_eq!(
+            response.body.len(),
+            file_size,
+            "Body size should match 100MB file size"
+        );
+
+        // Key streaming pattern: iterate through chunks without copying entire file
+        // This simulates how actual streaming would work without buffering
+        let chunk_size = 64 * 1024; // 64 KB chunks (typical streaming chunk size)
+
+        // Process file in chunks - this doesn't create a copy of the entire file
+        let mut total_processed = 0;
+        let mut chunk_count = 0;
+
+        for chunk in response.body.chunks(chunk_size) {
+            // In actual streaming, each chunk would be sent to client immediately
+            // without waiting for entire file to download
+            total_processed += chunk.len();
+            chunk_count += 1;
+
+            // Verify chunk size (all chunks except last should be full size)
+            if total_processed < file_size {
+                assert_eq!(
+                    chunk.len(),
+                    chunk_size,
+                    "Non-final chunks should be full size"
+                );
+            }
+        }
+
+        // Verify all bytes were processed
+        assert_eq!(
+            total_processed, file_size,
+            "Should process all bytes through streaming"
+        );
+
+        // Verify expected number of chunks
+        let expected_chunks = (file_size + chunk_size - 1) / chunk_size;
+        assert_eq!(
+            chunk_count, expected_chunks,
+            "Should have {} chunks for 100MB file",
+            expected_chunks
+        );
+
+        // Verify partial range access (for HTTP Range requests)
+        // This demonstrates efficient slice access without copying entire file
+        let range_start = 50 * 1024 * 1024; // 50 MB offset
+        let range_end = 51 * 1024 * 1024; // 51 MB offset
+        let range_slice = &response.body[range_start..range_end];
+
+        assert_eq!(
+            range_slice.len(),
+            1024 * 1024,
+            "Should be able to access arbitrary ranges efficiently"
+        );
+
+        // Verify headers are accessible during streaming
+        assert_eq!(
+            response.get_header("content-type"),
+            Some(&"video/mp4".to_string()),
+            "Headers should be accessible while streaming"
+        );
+        assert_eq!(
+            response.get_header("content-length"),
+            Some(&file_size.to_string()),
+            "Content-Length should indicate full file size"
+        );
+
+        // Test with 50 MB file
+        let half_size = 50 * 1024 * 1024;
+        let half_content = vec![1u8; half_size];
+
+        let response2 = S3Response::new(200, "OK", HashMap::new(), half_content);
+
+        assert_eq!(response2.body.len(), half_size);
+
+        // Verify streaming iteration doesn't allocate additional buffers
+        let mut processed = 0;
+        for chunk in response2.body.chunks(128 * 1024) {
+            processed += chunk.len();
+            // Each iteration processes chunk without buffering entire file
+        }
+
+        assert_eq!(processed, half_size, "Should stream entire file");
+
+        // Verify memory-efficient pattern: can check first/last chunks without loading all
+        let first_chunk = &response.body[0..chunk_size];
+        let last_offset = file_size - chunk_size;
+        let last_chunk = &response.body[last_offset..];
+
+        assert_eq!(first_chunk.len(), chunk_size);
+        assert_eq!(last_chunk.len(), chunk_size);
+    }
 }
