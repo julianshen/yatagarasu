@@ -2105,4 +2105,96 @@ mod tests {
             "Last-Modified should contain comma after day name"
         );
     }
+
+    #[test]
+    fn test_preserves_custom_s3_metadata_headers() {
+        use std::collections::HashMap;
+
+        // Test with single custom metadata header
+        let mut headers = HashMap::new();
+        headers.insert("x-amz-meta-author".to_string(), "John Doe".to_string());
+        headers.insert("content-type".to_string(), "image/jpeg".to_string());
+
+        let response = S3Response::new(200, "OK", headers, vec![]);
+
+        assert_eq!(
+            response.get_header("x-amz-meta-author"),
+            Some(&"John Doe".to_string()),
+            "Should preserve custom x-amz-meta-author header"
+        );
+
+        // Test with multiple custom metadata headers
+        let mut headers2 = HashMap::new();
+        headers2.insert("x-amz-meta-author".to_string(), "Jane Smith".to_string());
+        headers2.insert("x-amz-meta-project".to_string(), "yatagarasu".to_string());
+        headers2.insert(
+            "x-amz-meta-environment".to_string(),
+            "production".to_string(),
+        );
+        headers2.insert("x-amz-meta-version".to_string(), "1.0.0".to_string());
+        headers2.insert("content-type".to_string(), "application/json".to_string());
+
+        let response2 = S3Response::new(200, "OK", headers2, vec![]);
+
+        assert_eq!(
+            response2.get_header("x-amz-meta-author"),
+            Some(&"Jane Smith".to_string())
+        );
+        assert_eq!(
+            response2.get_header("x-amz-meta-project"),
+            Some(&"yatagarasu".to_string())
+        );
+        assert_eq!(
+            response2.get_header("x-amz-meta-environment"),
+            Some(&"production".to_string())
+        );
+        assert_eq!(
+            response2.get_header("x-amz-meta-version"),
+            Some(&"1.0.0".to_string())
+        );
+
+        // Test with custom metadata containing special characters
+        let mut headers3 = HashMap::new();
+        headers3.insert(
+            "x-amz-meta-description".to_string(),
+            "User uploaded image, processed on 2024-01-15".to_string(),
+        );
+        headers3.insert(
+            "x-amz-meta-tags".to_string(),
+            "landscape,mountains,photography".to_string(),
+        );
+
+        let response3 = S3Response::new(200, "OK", headers3, vec![]);
+
+        assert_eq!(
+            response3.get_header("x-amz-meta-description"),
+            Some(&"User uploaded image, processed on 2024-01-15".to_string())
+        );
+        assert_eq!(
+            response3.get_header("x-amz-meta-tags"),
+            Some(&"landscape,mountains,photography".to_string())
+        );
+
+        // Test that non-existent metadata header returns None
+        let headers4 = HashMap::new();
+        let response4 = S3Response::new(200, "OK", headers4, vec![]);
+        assert_eq!(
+            response4.get_header("x-amz-meta-nonexistent"),
+            None,
+            "Should return None for missing metadata header"
+        );
+
+        // Test that metadata values are preserved exactly as received
+        let mut headers5 = HashMap::new();
+        headers5.insert(
+            "x-amz-meta-data".to_string(),
+            "  spaces and\ttabs  ".to_string(),
+        );
+        let response5 = S3Response::new(200, "OK", headers5, vec![]);
+        assert_eq!(
+            response5.get_header("x-amz-meta-data"),
+            Some(&"  spaces and\ttabs  ".to_string()),
+            "Should preserve exact value including whitespace"
+        );
+    }
 }
