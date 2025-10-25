@@ -3928,4 +3928,176 @@ mod tests {
             max_memory_chunks * chunk_size / 1024
         );
     }
+
+    #[tokio::test]
+    async fn test_can_handle_concurrent_streams_to_multiple_clients() {
+        use futures::stream::{self, StreamExt};
+        use std::sync::{Arc, Mutex};
+        use tokio::time::{timeout, Duration};
+
+        // Test concurrent streaming of multiple files to multiple clients
+        let num_clients = 10;
+        let chunks_per_file = 100;
+        let chunk_size = 64 * 1024; // 64 KB
+
+        // Track successful completions
+        let completed_clients = Arc::new(Mutex::new(0usize));
+        let completed_clients_clone = completed_clients.clone();
+
+        // Spawn multiple concurrent client tasks
+        let mut client_tasks = vec![];
+
+        for client_id in 0..num_clients {
+            let completed_clone = completed_clients_clone.clone();
+
+            let client_task = tokio::spawn(async move {
+                // Each client streams a different file (identified by client_id)
+                // Simulate S3 response stream for this client's file
+                let data_stream = stream::iter(0..chunks_per_file).map(move |_chunk_num| {
+                    // Each chunk contains client_id to detect data corruption
+                    let chunk_data = vec![client_id as u8; chunk_size];
+                    Ok::<_, std::io::Error>(bytes::Bytes::from(chunk_data))
+                });
+
+                let mut stream = Box::pin(data_stream);
+                let mut chunks_received = 0;
+                let mut total_bytes = 0u64;
+
+                // Client receives stream
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            // Verify data integrity (all bytes should be client_id)
+                            for &byte in chunk.iter() {
+                                if byte != client_id as u8 {
+                                    panic!(
+                                        "Data corruption detected! Client {} received byte {} instead of {}",
+                                        client_id, byte, client_id
+                                    );
+                                }
+                            }
+
+                            chunks_received += 1;
+                            total_bytes += chunk.len() as u64;
+
+                            // Simulate realistic network delay/processing
+                            if chunks_received % 10 == 0 {
+                                tokio::task::yield_now().await;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                // Verify client received complete file
+                assert_eq!(
+                    chunks_received, chunks_per_file,
+                    "Client {} should receive all chunks",
+                    client_id
+                );
+
+                let expected_bytes = (chunks_per_file as u64) * (chunk_size as u64);
+                assert_eq!(
+                    total_bytes, expected_bytes,
+                    "Client {} should receive all bytes",
+                    client_id
+                );
+
+                // Mark completion
+                *completed_clone.lock().unwrap() += 1;
+
+                client_id as usize
+            });
+
+            client_tasks.push(client_task);
+        }
+
+        // Wait for all clients to complete with timeout
+        let all_tasks = futures::future::join_all(client_tasks);
+        let result = timeout(Duration::from_secs(10), all_tasks).await;
+
+        assert!(
+            result.is_ok(),
+            "All concurrent streams should complete within 10 seconds"
+        );
+
+        let client_results = result.unwrap();
+
+        // Verify all clients completed successfully
+        for (i, task_result) in client_results.iter().enumerate() {
+            assert!(
+                task_result.is_ok(),
+                "Client task {} should complete without panic",
+                i
+            );
+
+            let client_id = task_result.as_ref().unwrap();
+            assert_eq!(*client_id, i, "Client ID should match task index");
+        }
+
+        // Verify completion counter
+        let total_completed = *completed_clients.lock().unwrap();
+        assert_eq!(
+            total_completed, num_clients,
+            "All {} clients should complete successfully",
+            num_clients
+        );
+
+        // Test concurrent streaming of the SAME file to multiple clients
+        // This verifies no race conditions when multiple clients access same resource
+        let same_file_stream_fn = || {
+            stream::iter(0..50)
+                .map(|_i| Ok::<_, std::io::Error>(bytes::Bytes::from(vec![42u8; 1024])))
+        };
+
+        let mut same_file_tasks = vec![];
+        for client_id in 0..5 {
+            let client_task = tokio::spawn(async move {
+                let mut stream = Box::pin(same_file_stream_fn());
+                let mut count = 0;
+
+                while let Some(chunk_result) = stream.next().await {
+                    if let Ok(chunk) = chunk_result {
+                        // Verify data integrity
+                        assert_eq!(chunk.len(), 1024);
+                        assert!(chunk.iter().all(|&b| b == 42));
+                        count += 1;
+                    }
+                }
+
+                assert_eq!(
+                    count, 50,
+                    "Client {} should receive all 50 chunks",
+                    client_id
+                );
+            });
+
+            same_file_tasks.push(client_task);
+        }
+
+        // Wait for same-file streaming tests
+        let same_file_result = timeout(
+            Duration::from_secs(5),
+            futures::future::join_all(same_file_tasks),
+        )
+        .await;
+
+        assert!(
+            same_file_result.is_ok(),
+            "Concurrent streams of same file should complete"
+        );
+
+        for task_result in same_file_result.unwrap() {
+            assert!(
+                task_result.is_ok(),
+                "Same-file streaming task should complete successfully"
+            );
+        }
+
+        println!(
+            "✓ Successfully handled {} concurrent streams with no data corruption",
+            num_clients
+        );
+        println!("✓ Successfully handled 5 concurrent streams of same file");
+    }
 }

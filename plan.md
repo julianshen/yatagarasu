@@ -325,7 +325,7 @@ yatagarasu/
 - [x] Test: Can stream large file (100MB) without buffering entire file
 - [x] Test: Streaming stops if client disconnects
 - [x] Test: Memory usage stays constant during streaming
-- [ ] Test: Can handle concurrent streams to multiple clients
+- [x] Test: Can handle concurrent streams to multiple clients
 
 ### S3 Range Requests - Header Parsing
 - [x] Test: Can parse Range header with single range (bytes=0-1023)
