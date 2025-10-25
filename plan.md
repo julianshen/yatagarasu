@@ -317,7 +317,7 @@ yatagarasu/
 - [x] Test: Handles 503 Service Unavailable from S3 (slow down)
 - [x] Test: Parses S3 XML error response body
 - [x] Test: Extracts error code and message from S3 error response
-- [ ] Test: Maps S3 errors to appropriate HTTP status codes
+- [x] Test: Maps S3 errors to appropriate HTTP status codes
 
 ### S3 Response - Streaming
 - [ ] Test: Can stream small file (<1MB) efficiently

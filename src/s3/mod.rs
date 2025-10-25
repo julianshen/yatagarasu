@@ -254,6 +254,60 @@ impl S3Response {
     }
 }
 
+/// Maps S3 error code to appropriate HTTP status code
+pub fn map_s3_error_to_status(error_code: &str) -> u16 {
+    match error_code {
+        // 404 - Not Found
+        "NoSuchKey" | "NoSuchBucket" | "NoSuchUpload" | "NoSuchVersion" => 404,
+
+        // 403 - Forbidden
+        "AccessDenied"
+        | "InvalidAccessKeyId"
+        | "SignatureDoesNotMatch"
+        | "AccountProblem"
+        | "InvalidSecurity" => 403,
+
+        // 400 - Bad Request
+        "InvalidArgument"
+        | "InvalidBucketName"
+        | "InvalidRange"
+        | "MalformedXML"
+        | "InvalidDigest"
+        | "InvalidRequest"
+        | "InvalidURI"
+        | "KeyTooLongError"
+        | "MalformedACLError"
+        | "MalformedPOSTRequest"
+        | "MetadataTooLarge"
+        | "MissingContentLength"
+        | "MissingRequestBodyError"
+        | "TooManyBuckets"
+        | "InvalidPart"
+        | "InvalidPartOrder" => 400,
+
+        // 409 - Conflict
+        "BucketAlreadyExists"
+        | "BucketNotEmpty"
+        | "BucketAlreadyOwnedByYou"
+        | "OperationAborted" => 409,
+
+        // 412 - Precondition Failed
+        "PreconditionFailed" => 412,
+
+        // 416 - Range Not Satisfiable
+        "InvalidRange416" => 416,
+
+        // 503 - Service Unavailable
+        "SlowDown" | "ServiceUnavailable" => 503,
+
+        // 500 - Internal Server Error
+        "InternalError" => 500,
+
+        // Default to 500 for unknown errors
+        _ => 500,
+    }
+}
+
 pub fn sign_request(params: &SigningParams) -> String {
     // Step 1 & 2: Create string to sign (includes canonical request generation)
     let string_to_sign = create_string_to_sign(params);
@@ -3066,6 +3120,103 @@ mod tests {
             response7.get_error_message(),
             Some("Invalid Argument: value must be &gt; 0".to_string()),
             "Should preserve XML entities in message"
+        );
+    }
+
+    #[test]
+    fn test_maps_s3_errors_to_appropriate_http_status_codes() {
+        // Test 404 errors
+        assert_eq!(
+            map_s3_error_to_status("NoSuchKey"),
+            404,
+            "NoSuchKey should map to 404"
+        );
+        assert_eq!(
+            map_s3_error_to_status("NoSuchBucket"),
+            404,
+            "NoSuchBucket should map to 404"
+        );
+
+        // Test 403 errors
+        assert_eq!(
+            map_s3_error_to_status("AccessDenied"),
+            403,
+            "AccessDenied should map to 403"
+        );
+        assert_eq!(
+            map_s3_error_to_status("InvalidAccessKeyId"),
+            403,
+            "InvalidAccessKeyId should map to 403"
+        );
+        assert_eq!(
+            map_s3_error_to_status("SignatureDoesNotMatch"),
+            403,
+            "SignatureDoesNotMatch should map to 403"
+        );
+
+        // Test 400 errors
+        assert_eq!(
+            map_s3_error_to_status("InvalidArgument"),
+            400,
+            "InvalidArgument should map to 400"
+        );
+        assert_eq!(
+            map_s3_error_to_status("InvalidBucketName"),
+            400,
+            "InvalidBucketName should map to 400"
+        );
+        assert_eq!(
+            map_s3_error_to_status("InvalidRange"),
+            400,
+            "InvalidRange should map to 400"
+        );
+        assert_eq!(
+            map_s3_error_to_status("MalformedXML"),
+            400,
+            "MalformedXML should map to 400"
+        );
+
+        // Test 409 errors
+        assert_eq!(
+            map_s3_error_to_status("BucketAlreadyExists"),
+            409,
+            "BucketAlreadyExists should map to 409"
+        );
+        assert_eq!(
+            map_s3_error_to_status("BucketNotEmpty"),
+            409,
+            "BucketNotEmpty should map to 409"
+        );
+
+        // Test 500 errors
+        assert_eq!(
+            map_s3_error_to_status("InternalError"),
+            500,
+            "InternalError should map to 500"
+        );
+
+        // Test 503 errors
+        assert_eq!(
+            map_s3_error_to_status("SlowDown"),
+            503,
+            "SlowDown should map to 503"
+        );
+        assert_eq!(
+            map_s3_error_to_status("ServiceUnavailable"),
+            503,
+            "ServiceUnavailable should map to 503"
+        );
+
+        // Test unknown error code (should default to 500)
+        assert_eq!(
+            map_s3_error_to_status("UnknownError"),
+            500,
+            "Unknown errors should default to 500"
+        );
+        assert_eq!(
+            map_s3_error_to_status(""),
+            500,
+            "Empty error code should default to 500"
         );
     }
 }
