@@ -1431,4 +1431,54 @@ mod tests {
             host_header
         );
     }
+
+    #[test]
+    fn test_get_request_handles_s3_keys_with_special_characters() {
+        let bucket = "test-bucket";
+        let region = "us-east-1";
+
+        // Test key with spaces
+        let key_with_spaces = "folder/my file.txt";
+        let request1 = build_get_object_request(bucket, key_with_spaces, region);
+        assert_eq!(request1.key, key_with_spaces);
+        let url1 = request1.get_url();
+        assert!(
+            url1.contains(key_with_spaces),
+            "URL should contain key with spaces: {}",
+            url1
+        );
+
+        // Test key with hyphens and underscores
+        let key_with_symbols = "my-folder/my_file-v2.txt";
+        let request2 = build_get_object_request(bucket, key_with_symbols, region);
+        assert_eq!(request2.key, key_with_symbols);
+        let url2 = request2.get_url();
+        assert!(
+            url2.contains(key_with_symbols),
+            "URL should contain key with hyphens/underscores: {}",
+            url2
+        );
+
+        // Test key with dots
+        let key_with_dots = "folder/file.backup.2023.txt";
+        let request3 = build_get_object_request(bucket, key_with_dots, region);
+        assert_eq!(request3.key, key_with_dots);
+        let url3 = request3.get_url();
+        assert!(
+            url3.contains(key_with_dots),
+            "URL should contain key with dots: {}",
+            url3
+        );
+
+        // Test key with parentheses
+        let key_with_parens = "folder/file(1).txt";
+        let request4 = build_get_object_request(bucket, key_with_parens, region);
+        assert_eq!(request4.key, key_with_parens);
+        let url4 = request4.get_url();
+        assert!(
+            url4.contains(key_with_parens),
+            "URL should contain key with parentheses: {}",
+            url4
+        );
+    }
 }
