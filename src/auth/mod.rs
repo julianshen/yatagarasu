@@ -2834,4 +2834,42 @@ mod tests {
             "Expected role claim to be extracted correctly"
         );
     }
+
+    #[test]
+    fn test_returns_missing_token_error_when_jwt_missing_and_auth_required() {
+        use crate::config::TokenSource;
+
+        // Create JWT config with auth enabled
+        let jwt_config = JwtConfig {
+            enabled: true,
+            secret: "test_secret".to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            }],
+            claims: vec![],
+        };
+
+        // Create empty headers and query params (no token provided)
+        let headers = HashMap::new();
+        let query_params = HashMap::new();
+
+        // Authenticate the request
+        let result = authenticate_request(&headers, &query_params, &jwt_config);
+
+        assert!(
+            result.is_err(),
+            "Expected authentication to fail when JWT is missing"
+        );
+
+        match result {
+            Err(AuthError::MissingToken) => {
+                // Expected error
+            }
+            Err(other) => panic!("Expected AuthError::MissingToken, got {:?}", other),
+            Ok(_) => panic!("Expected error but authentication succeeded"),
+        }
+    }
 }
