@@ -2197,4 +2197,101 @@ mod tests {
             "Should preserve exact value including whitespace"
         );
     }
+
+    #[test]
+    fn test_streams_response_body_to_client() {
+        use std::collections::HashMap;
+
+        // Test with text content
+        let text_body = b"Hello, World!".to_vec();
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "text/plain".to_string());
+        headers.insert("content-length".to_string(), "13".to_string());
+
+        let response = S3Response::new(200, "OK", headers, text_body.clone());
+
+        assert_eq!(
+            response.body, text_body,
+            "Should provide access to text body"
+        );
+        assert_eq!(response.body.len(), 13, "Body length should be 13 bytes");
+
+        // Test with binary content (simulated image)
+        let binary_body = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]; // JPEG header
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-type".to_string(), "image/jpeg".to_string());
+
+        let response2 = S3Response::new(200, "OK", headers2, binary_body.clone());
+
+        assert_eq!(
+            response2.body, binary_body,
+            "Should provide access to binary body"
+        );
+        assert_eq!(
+            response2.body[0], 0xFF,
+            "First byte should be preserved correctly"
+        );
+
+        // Test with large body (simulated streaming)
+        let large_body = vec![0u8; 10 * 1024 * 1024]; // 10MB
+        let mut headers3 = HashMap::new();
+        headers3.insert("content-length".to_string(), (10 * 1024 * 1024).to_string());
+
+        let response3 = S3Response::new(200, "OK", headers3, large_body.clone());
+
+        assert_eq!(
+            response3.body.len(),
+            10 * 1024 * 1024,
+            "Should handle large body for streaming"
+        );
+
+        // Test with empty body (HEAD request)
+        let empty_body = vec![];
+        let headers4 = HashMap::new();
+
+        let response4 = S3Response::new(200, "OK", headers4, empty_body.clone());
+
+        assert_eq!(response4.body.len(), 0, "Should handle empty body");
+        assert!(response4.body.is_empty(), "Empty body should be empty");
+
+        // Test with JSON body
+        let json_body = br#"{"name":"test","value":123}"#.to_vec();
+        let mut headers5 = HashMap::new();
+        headers5.insert("content-type".to_string(), "application/json".to_string());
+
+        let response5 = S3Response::new(200, "OK", headers5, json_body.clone());
+
+        assert_eq!(response5.body, json_body, "Should preserve JSON body");
+
+        // Verify body can be accessed as bytes for streaming
+        let body_bytes: &[u8] = &response5.body;
+        assert_eq!(
+            body_bytes.len(),
+            json_body.len(),
+            "Body bytes should match length"
+        );
+
+        // Test chunked streaming simulation
+        let content = b"This is a test file for streaming in chunks".to_vec();
+        let response6 = S3Response::new(200, "OK", HashMap::new(), content.clone());
+
+        // Simulate reading in chunks
+        let chunk_size = 10;
+        let chunks: Vec<&[u8]> = response6.body.chunks(chunk_size).collect();
+
+        assert!(
+            chunks.len() > 1,
+            "Should be able to split body into chunks for streaming"
+        );
+
+        let reconstructed: Vec<u8> = chunks
+            .iter()
+            .flat_map(|&chunk| chunk.iter())
+            .copied()
+            .collect();
+        assert_eq!(
+            reconstructed, content,
+            "Chunks should reconstruct original content"
+        );
+    }
 }

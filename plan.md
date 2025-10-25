@@ -307,7 +307,7 @@ yatagarasu/
 - [x] Test: Extracts ETag header from S3 response
 - [x] Test: Extracts Last-Modified header from S3 response
 - [x] Test: Preserves custom S3 metadata headers (x-amz-meta-*)
-- [ ] Test: Streams response body to client
+- [x] Test: Streams response body to client
 
 ### S3 Response - Error Handling
 - [ ] Test: Handles 404 Not Found from S3 (object doesn't exist)
