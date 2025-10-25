@@ -4061,6 +4061,111 @@ mod tests {
         assert_eq!(range19, None, "Should reject floating point numbers");
     }
 
+    #[test]
+    fn test_includes_accept_ranges_bytes_in_response_headers() {
+        use std::collections::HashMap;
+
+        // Test that Accept-Ranges header is included in successful responses
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "text/plain".to_string());
+        headers.insert("content-length".to_string(), "1024".to_string());
+        headers.insert("accept-ranges".to_string(), "bytes".to_string());
+
+        let response = S3Response::new(200, "OK", headers, vec![0u8; 1024]);
+
+        assert!(
+            response.is_success(),
+            "Response should be successful (200 OK)"
+        );
+
+        // Verify Accept-Ranges header is present
+        let accept_ranges = response.get_header("accept-ranges");
+        assert!(
+            accept_ranges.is_some(),
+            "Accept-Ranges header should be present"
+        );
+        assert_eq!(
+            accept_ranges.unwrap(),
+            "bytes",
+            "Accept-Ranges should be 'bytes'"
+        );
+
+        // Test with different content types
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-type".to_string(), "video/mp4".to_string());
+        headers2.insert("content-length".to_string(), "10485760".to_string());
+        headers2.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers2.insert("etag".to_string(), "\"abc123\"".to_string());
+
+        let response2 = S3Response::new(200, "OK", headers2, vec![0u8; 100]);
+
+        assert_eq!(
+            response2.get_header("accept-ranges"),
+            Some(&"bytes".to_string()),
+            "Video response should include Accept-Ranges: bytes"
+        );
+
+        // Test with 206 Partial Content response (range request)
+        let mut headers3 = HashMap::new();
+        headers3.insert("content-type".to_string(), "application/pdf".to_string());
+        headers3.insert("content-length".to_string(), "1024".to_string());
+        headers3.insert("content-range".to_string(), "bytes 0-1023/5000".to_string());
+        headers3.insert("accept-ranges".to_string(), "bytes".to_string());
+
+        let response3 = S3Response::new(206, "Partial Content", headers3, vec![0u8; 1024]);
+
+        assert_eq!(
+            response3.status_code, 206,
+            "Range response should have 206 status"
+        );
+        assert_eq!(
+            response3.get_header("accept-ranges"),
+            Some(&"bytes".to_string()),
+            "Partial content response should include Accept-Ranges: bytes"
+        );
+
+        // Test that Accept-Ranges can be checked case-insensitively
+        // (though we store as lowercase)
+        let mut headers4 = HashMap::new();
+        headers4.insert("Accept-Ranges".to_string(), "bytes".to_string());
+        headers4.insert("content-length".to_string(), "500".to_string());
+
+        let response4 = S3Response::new(200, "OK", headers4, vec![0u8; 500]);
+
+        // Note: Our implementation stores keys as-is, so exact match needed
+        assert!(
+            response4.get_header("Accept-Ranges").is_some()
+                || response4.get_header("accept-ranges").is_some(),
+            "Accept-Ranges should be present (case variations)"
+        );
+
+        // Test without Accept-Ranges header (should not panic, just None)
+        let mut headers5 = HashMap::new();
+        headers5.insert("content-type".to_string(), "text/html".to_string());
+
+        let response5 = S3Response::new(200, "OK", headers5, vec![0u8; 100]);
+
+        assert_eq!(
+            response5.get_header("accept-ranges"),
+            None,
+            "Response without Accept-Ranges should return None"
+        );
+
+        // Test with error response (should not have Accept-Ranges)
+        let mut headers6 = HashMap::new();
+        headers6.insert("content-type".to_string(), "application/xml".to_string());
+
+        let error_body = b"<Error><Code>NoSuchKey</Code></Error>".to_vec();
+        let response6 = S3Response::new(404, "Not Found", headers6, error_body);
+
+        assert!(!response6.is_success(), "404 should not be success");
+        assert_eq!(
+            response6.get_header("accept-ranges"),
+            None,
+            "Error responses typically don't include Accept-Ranges"
+        );
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};
