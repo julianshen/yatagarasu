@@ -1481,4 +1481,64 @@ mod tests {
             url4
         );
     }
+
+    #[test]
+    fn test_get_request_handles_s3_keys_with_url_unsafe_characters() {
+        let bucket = "test-bucket";
+        let region = "us-east-1";
+
+        // Test key with percent sign
+        let key_with_percent = "folder/file%20name.txt";
+        let request1 = build_get_object_request(bucket, key_with_percent, region);
+        assert_eq!(request1.key, key_with_percent);
+        assert!(
+            request1.get_url().contains(key_with_percent),
+            "URL should preserve percent sign in key"
+        );
+
+        // Test key with hash/pound sign
+        let key_with_hash = "folder/file#1.txt";
+        let request2 = build_get_object_request(bucket, key_with_hash, region);
+        assert_eq!(request2.key, key_with_hash);
+        assert!(
+            request2.get_url().contains(key_with_hash),
+            "URL should preserve hash sign in key"
+        );
+
+        // Test key with ampersand
+        let key_with_ampersand = "folder/file&data.txt";
+        let request3 = build_get_object_request(bucket, key_with_ampersand, region);
+        assert_eq!(request3.key, key_with_ampersand);
+        assert!(
+            request3.get_url().contains(key_with_ampersand),
+            "URL should preserve ampersand in key"
+        );
+
+        // Test key with plus sign
+        let key_with_plus = "folder/file+v2.txt";
+        let request4 = build_get_object_request(bucket, key_with_plus, region);
+        assert_eq!(request4.key, key_with_plus);
+        assert!(
+            request4.get_url().contains(key_with_plus),
+            "URL should preserve plus sign in key"
+        );
+
+        // Test key with equals sign
+        let key_with_equals = "folder/file=copy.txt";
+        let request5 = build_get_object_request(bucket, key_with_equals, region);
+        assert_eq!(request5.key, key_with_equals);
+        assert!(
+            request5.get_url().contains(key_with_equals),
+            "URL should preserve equals sign in key"
+        );
+
+        // Test key with question mark
+        let key_with_question = "folder/file?.txt";
+        let request6 = build_get_object_request(bucket, key_with_question, region);
+        assert_eq!(request6.key, key_with_question);
+        assert!(
+            request6.get_url().contains(key_with_question),
+            "URL should preserve question mark in key"
+        );
+    }
 }

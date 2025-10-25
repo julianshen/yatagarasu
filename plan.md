@@ -291,7 +291,7 @@ yatagarasu/
 - [x] Test: GET request includes correct bucket and key in URL
 - [x] Test: GET request includes proper AWS signature headers
 - [x] Test: GET request handles S3 keys with special characters
-- [ ] Test: GET request handles S3 keys with URL-unsafe characters
+- [x] Test: GET request handles S3 keys with URL-unsafe characters
 - [ ] Test: GET request preserves original path structure
 
 ### S3 Operations - HEAD Object
