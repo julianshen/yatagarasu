@@ -4,6 +4,9 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(test)]
+use jsonwebtoken::{encode, EncodingKey, Header};
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Option<String>,
@@ -1461,6 +1464,57 @@ mod tests {
         assert!(
             result4.is_err(),
             "Expected JWT with non-object JSON payload to be rejected"
+        );
+    }
+
+    #[test]
+    fn test_extracts_standard_claims() {
+        let secret = "test_secret";
+
+        // Create a JWT with standard claims
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999), // Far future
+            iat: Some(1234567890),
+            nbf: Some(1234567890),
+            iss: Some("test-issuer".to_string()),
+            custom: serde_json::Map::new(),
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Verify standard claims are extracted correctly
+        assert_eq!(
+            extracted_claims.sub,
+            Some("user123".to_string()),
+            "Subject claim not extracted correctly"
+        );
+        assert_eq!(
+            extracted_claims.iss,
+            Some("test-issuer".to_string()),
+            "Issuer claim not extracted correctly"
+        );
+        assert_eq!(
+            extracted_claims.exp,
+            Some(9999999999),
+            "Expiration claim not extracted correctly"
+        );
+        assert_eq!(
+            extracted_claims.iat,
+            Some(1234567890),
+            "Issued at claim not extracted correctly"
         );
     }
 }

@@ -235,7 +235,7 @@ yatagarasu/
 - [x] Test: Rejects JWT with invalid JSON in payload
 
 ### JWT - Claims Extraction
-- [ ] Test: Extracts standard claims (sub, iss, exp, iat)
+- [x] Test: Extracts standard claims (sub, iss, exp, iat)
 - [ ] Test: Extracts custom claims from payload
 - [ ] Test: Handles missing optional claims gracefully
 - [ ] Test: Handles nested claim structures
