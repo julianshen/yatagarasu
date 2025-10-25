@@ -3717,4 +3717,99 @@ mod tests {
             "Should parse range with spaces (after trimming)"
         );
     }
+
+    #[tokio::test]
+    async fn test_streaming_stops_if_client_disconnects() {
+        use futures::stream::{self, StreamExt};
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::mpsc;
+
+        // Track how many chunks were actually processed
+        let chunks_processed = Arc::new(Mutex::new(0usize));
+        let chunks_processed_clone = chunks_processed.clone();
+
+        // Simulate a large S3 response stream with 100 chunks
+        let total_chunks = 100;
+        let chunk_size = 64 * 1024; // 64 KB chunks
+        let data_stream = stream::iter(0..total_chunks).map(move |i| {
+            // Each chunk is 64KB of data
+            let chunk = vec![i as u8; chunk_size];
+            Ok::<_, std::io::Error>(bytes::Bytes::from(chunk))
+        });
+
+        // Create a channel to simulate client connection
+        // Small buffer to simulate realistic backpressure
+        let (tx, mut rx) = mpsc::channel::<bytes::Bytes>(4);
+
+        // Spawn a task to send stream chunks to client
+        let sender_task = tokio::spawn(async move {
+            let mut stream = Box::pin(data_stream);
+
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk) => {
+                        // Increment processed counter
+                        *chunks_processed_clone.lock().unwrap() += 1;
+
+                        // Try to send chunk to client
+                        // If client disconnected, send will fail
+                        if tx.send(chunk).await.is_err() {
+                            // Client disconnected - stop streaming!
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Client receives some chunks then disconnects
+        let mut received_chunks = 0;
+        let disconnect_after = 10; // Disconnect after 10 chunks
+
+        while let Some(_chunk) = rx.recv().await {
+            received_chunks += 1;
+
+            if received_chunks >= disconnect_after {
+                // Client disconnects by dropping receiver
+                drop(rx);
+                break;
+            }
+        }
+
+        // Wait a bit for sender task to detect disconnect
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Verify streaming stopped when client disconnected
+        let total_processed = *chunks_processed.lock().unwrap();
+
+        assert_eq!(
+            received_chunks, disconnect_after,
+            "Client should have received exactly {} chunks before disconnect",
+            disconnect_after
+        );
+
+        assert!(
+            total_processed <= disconnect_after + 4, // +4 for buffer size
+            "Streaming should stop shortly after client disconnect. Processed: {}, Expected: <= {}",
+            total_processed,
+            disconnect_after + 4
+        );
+
+        assert!(
+            total_processed < total_chunks,
+            "Should NOT process all {} chunks when client disconnects early. Processed: {}",
+            total_chunks,
+            total_processed
+        );
+
+        // Verify sender task completed (not hung)
+        let sender_result =
+            tokio::time::timeout(tokio::time::Duration::from_secs(1), sender_task).await;
+
+        assert!(
+            sender_result.is_ok(),
+            "Sender task should complete within 1 second after client disconnect"
+        );
+    }
 }
