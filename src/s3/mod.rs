@@ -222,6 +222,36 @@ impl S3Response {
     pub fn get_header(&self, name: &str) -> Option<&String> {
         self.headers.get(name)
     }
+
+    /// Extracts the error code from S3 XML error response
+    pub fn get_error_code(&self) -> Option<String> {
+        let body_str = String::from_utf8(self.body.clone()).ok()?;
+
+        // Find <Code> tag and extract its content
+        let start_tag = "<Code>";
+        let end_tag = "</Code>";
+
+        let start_pos = body_str.find(start_tag)?;
+        let content_start = start_pos + start_tag.len();
+        let content_end = body_str[content_start..].find(end_tag)?;
+
+        Some(body_str[content_start..content_start + content_end].to_string())
+    }
+
+    /// Extracts the error message from S3 XML error response
+    pub fn get_error_message(&self) -> Option<String> {
+        let body_str = String::from_utf8(self.body.clone()).ok()?;
+
+        // Find <Message> tag and extract its content
+        let start_tag = "<Message>";
+        let end_tag = "</Message>";
+
+        let start_pos = body_str.find(start_tag)?;
+        let content_start = start_pos + start_tag.len();
+        let content_end = body_str[content_start..].find(end_tag)?;
+
+        Some(body_str[content_start..content_start + content_end].to_string())
+    }
 }
 
 pub fn sign_request(params: &SigningParams) -> String {
@@ -2908,6 +2938,134 @@ mod tests {
         assert_eq!(
             body_str6, "Internal Server Error",
             "Should handle non-XML error body"
+        );
+    }
+
+    #[test]
+    fn test_extracts_error_code_and_message_from_s3_error_response() {
+        use std::collections::HashMap;
+
+        // Test extracting error code and message from NoSuchKey error
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>NoSuchKey</Code>
+    <Message>The specified key does not exist.</Message>
+    <Key>path/to/nonexistent.txt</Key>
+    <RequestId>ABC123</RequestId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(404, "Not Found", HashMap::new(), error_body);
+
+        assert_eq!(
+            response.get_error_code(),
+            Some("NoSuchKey".to_string()),
+            "Should extract error code"
+        );
+        assert_eq!(
+            response.get_error_message(),
+            Some("The specified key does not exist.".to_string()),
+            "Should extract error message"
+        );
+
+        // Test extracting from AccessDenied error
+        let error_body2 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>AccessDenied</Code>
+    <Message>Access Denied</Message>
+</Error>"#
+            .to_vec();
+
+        let response2 = S3Response::new(403, "Forbidden", HashMap::new(), error_body2);
+
+        assert_eq!(response2.get_error_code(), Some("AccessDenied".to_string()));
+        assert_eq!(
+            response2.get_error_message(),
+            Some("Access Denied".to_string())
+        );
+
+        // Test extracting from SlowDown error
+        let error_body3 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>SlowDown</Code>
+    <Message>Please reduce your request rate.</Message>
+</Error>"#
+            .to_vec();
+
+        let response3 = S3Response::new(503, "Service Unavailable", HashMap::new(), error_body3);
+
+        assert_eq!(response3.get_error_code(), Some("SlowDown".to_string()));
+        assert_eq!(
+            response3.get_error_message(),
+            Some("Please reduce your request rate.".to_string())
+        );
+
+        // Test with minimal XML (only code)
+        let error_body4 = b"<Error><Code>InternalError</Code></Error>".to_vec();
+
+        let response4 = S3Response::new(500, "Internal Server Error", HashMap::new(), error_body4);
+
+        assert_eq!(
+            response4.get_error_code(),
+            Some("InternalError".to_string())
+        );
+        assert_eq!(
+            response4.get_error_message(),
+            None,
+            "Should return None when Message tag missing"
+        );
+
+        // Test with empty body
+        let response5 = S3Response::new(500, "Internal Server Error", HashMap::new(), vec![]);
+
+        assert_eq!(
+            response5.get_error_code(),
+            None,
+            "Should return None for empty body"
+        );
+        assert_eq!(
+            response5.get_error_message(),
+            None,
+            "Should return None for empty body"
+        );
+
+        // Test with non-XML body
+        let response6 = S3Response::new(
+            500,
+            "Internal Server Error",
+            HashMap::new(),
+            b"Internal Server Error".to_vec(),
+        );
+
+        assert_eq!(
+            response6.get_error_code(),
+            None,
+            "Should return None for non-XML body"
+        );
+        assert_eq!(
+            response6.get_error_message(),
+            None,
+            "Should return None for non-XML body"
+        );
+
+        // Test error message with special characters
+        let error_body7 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InvalidArgument</Code>
+    <Message>Invalid Argument: value must be &gt; 0</Message>
+</Error>"#
+            .to_vec();
+
+        let response7 = S3Response::new(400, "Bad Request", HashMap::new(), error_body7);
+
+        assert_eq!(
+            response7.get_error_code(),
+            Some("InvalidArgument".to_string())
+        );
+        assert_eq!(
+            response7.get_error_message(),
+            Some("Invalid Argument: value must be &gt; 0".to_string()),
+            "Should preserve XML entities in message"
         );
     }
 }
