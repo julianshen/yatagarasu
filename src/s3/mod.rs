@@ -56,4 +56,55 @@ mod tests {
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
         );
     }
+
+    #[test]
+    fn test_can_create_s3_client_with_region_configuration() {
+        // Test with us-east-1
+        let config1 = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+        };
+
+        let result1 = create_s3_client(&config1);
+        assert!(result1.is_ok(), "Should create client with us-east-1");
+        assert_eq!(result1.unwrap().config.region, "us-east-1");
+
+        // Test with us-west-2
+        let config2 = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-west-2".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+        };
+
+        let result2 = create_s3_client(&config2);
+        assert!(result2.is_ok(), "Should create client with us-west-2");
+        assert_eq!(result2.unwrap().config.region, "us-west-2");
+
+        // Test with eu-west-1
+        let config3 = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "eu-west-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+        };
+
+        let result3 = create_s3_client(&config3);
+        assert!(result3.is_ok(), "Should create client with eu-west-1");
+        assert_eq!(result3.unwrap().config.region, "eu-west-1");
+
+        // Test with ap-southeast-1
+        let config4 = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "ap-southeast-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+        };
+
+        let result4 = create_s3_client(&config4);
+        assert!(result4.is_ok(), "Should create client with ap-southeast-1");
+        assert_eq!(result4.unwrap().config.region, "ap-southeast-1");
+    }
 }
