@@ -2294,4 +2294,81 @@ mod tests {
             "Chunks should reconstruct original content"
         );
     }
+
+    #[test]
+    fn test_handles_404_not_found_from_s3() {
+        use std::collections::HashMap;
+
+        // Test basic 404 response
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/xml".to_string());
+        headers.insert("x-amz-request-id".to_string(), "ABC123".to_string());
+
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>NoSuchKey</Code>
+    <Message>The specified key does not exist.</Message>
+    <Key>nonexistent/file.txt</Key>
+    <RequestId>ABC123</RequestId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(404, "Not Found", headers, error_body.clone());
+
+        assert_eq!(response.status_code, 404, "Status code should be 404");
+        assert_eq!(
+            response.status_text, "Not Found",
+            "Status text should be 'Not Found'"
+        );
+        assert!(!response.is_success(), "404 should not be success");
+        assert_eq!(
+            response.get_header("content-type"),
+            Some(&"application/xml".to_string()),
+            "Should preserve content-type header"
+        );
+        assert!(!response.body.is_empty(), "Should have error body");
+
+        // Test 404 with minimal headers
+        let headers2 = HashMap::new();
+        let response2 = S3Response::new(404, "Not Found", headers2, vec![]);
+
+        assert_eq!(response2.status_code, 404);
+        assert!(!response2.is_success());
+        assert_eq!(response2.body.len(), 0, "Empty body should be allowed");
+
+        // Test 404 with custom metadata headers (should still be preserved)
+        let mut headers3 = HashMap::new();
+        headers3.insert("x-amz-request-id".to_string(), "DEF456GHI789".to_string());
+        headers3.insert("x-amz-id-2".to_string(), "extended-request-id".to_string());
+
+        let response3 = S3Response::new(404, "Not Found", headers3, vec![]);
+
+        assert_eq!(
+            response3.get_header("x-amz-request-id"),
+            Some(&"DEF456GHI789".to_string()),
+            "Should preserve request ID header"
+        );
+        assert_eq!(
+            response3.get_header("x-amz-id-2"),
+            Some(&"extended-request-id".to_string()),
+            "Should preserve extended request ID"
+        );
+
+        // Verify status code is accessible for error handling
+        assert!(
+            response.status_code >= 400 && response.status_code < 500,
+            "404 is a client error (4xx)"
+        );
+
+        // Test that error body can be parsed
+        let body_str = String::from_utf8(response.body.clone()).unwrap();
+        assert!(
+            body_str.contains("NoSuchKey"),
+            "Error body should contain error code"
+        );
+        assert!(
+            body_str.contains("The specified key does not exist"),
+            "Error body should contain error message"
+        );
+    }
 }

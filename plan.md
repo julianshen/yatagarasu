@@ -310,7 +310,7 @@ yatagarasu/
 - [x] Test: Streams response body to client
 
 ### S3 Response - Error Handling
-- [ ] Test: Handles 404 Not Found from S3 (object doesn't exist)
+- [x] Test: Handles 404 Not Found from S3 (object doesn't exist)
 - [ ] Test: Handles 403 Forbidden from S3 (access denied)
 - [ ] Test: Handles 400 Bad Request from S3 (invalid request)
 - [ ] Test: Handles 500 Internal Server Error from S3
