@@ -251,7 +251,7 @@ yatagarasu/
 - [x] Test: Case-sensitive string comparison
 
 ### JWT - Claims Verification (Multiple Rules)
-- [ ] Test: Passes when all verification rules pass (AND logic)
+- [x] Test: Passes when all verification rules pass (AND logic)
 - [ ] Test: Fails when any verification rule fails
 - [ ] Test: Handles verification with empty rules list (always passes)
 - [ ] Test: Evaluates all rules even if first fails (for better error messages)

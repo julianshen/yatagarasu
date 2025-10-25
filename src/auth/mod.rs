@@ -2346,4 +2346,79 @@ mod tests {
             "Expected claim verification to fail with different case (ADMIN vs admin)"
         );
     }
+
+    #[test]
+    fn test_passes_when_all_verification_rules_pass() {
+        let secret = "test_secret";
+
+        // Create a JWT with multiple claims
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("admin".to_string()),
+        );
+        custom_map.insert(
+            "level".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(10)),
+        );
+        custom_map.insert("is_active".to_string(), serde_json::Value::Bool(true));
+        custom_map.insert(
+            "department".to_string(),
+            serde_json::Value::String("engineering".to_string()),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Create multiple verification rules (all should pass)
+        let rules = vec![
+            ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()),
+            },
+            ClaimRule {
+                claim: "level".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::Number(serde_json::Number::from(10)),
+            },
+            ClaimRule {
+                claim: "is_active".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::Bool(true),
+            },
+            ClaimRule {
+                claim: "department".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("engineering".to_string()),
+            },
+        ];
+
+        // Verify all claims
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            verified,
+            "Expected claim verification to pass when all rules match (AND logic)"
+        );
+    }
 }
