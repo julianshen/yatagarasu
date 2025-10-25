@@ -145,6 +145,25 @@ pub enum AuthError {
     ClaimsVerificationFailed,
 }
 
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthError::MissingToken => {
+                write!(f, "Authentication token not found in request")
+            }
+            AuthError::InvalidToken(reason) => {
+                write!(f, "Invalid authentication token: {}", reason)
+            }
+            AuthError::ClaimsVerificationFailed => {
+                write!(
+                    f,
+                    "JWT claims verification failed: required claims do not match"
+                )
+            }
+        }
+    }
+}
+
 pub fn authenticate_request(
     headers: &HashMap<String, String>,
     query_params: &HashMap<String, String>,
@@ -3127,5 +3146,131 @@ mod tests {
             user_role, "admin",
             "Claims should be usable for authorization decisions"
         );
+    }
+
+    #[test]
+    fn test_error_response_includes_clear_error_message() {
+        use crate::config::TokenSource;
+
+        // Test 1: MissingToken error message
+        let jwt_config = JwtConfig {
+            enabled: true,
+            secret: "test_secret".to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            }],
+            claims: vec![],
+        };
+
+        let headers = HashMap::new();
+        let query_params = HashMap::new();
+
+        let result = authenticate_request(&headers, &query_params, &jwt_config);
+        assert!(result.is_err());
+
+        if let Err(err) = result {
+            let error_message = err.to_string();
+            assert!(
+                !error_message.is_empty(),
+                "Error message should not be empty"
+            );
+            assert!(
+                error_message.contains("token") || error_message.contains("Token"),
+                "Error message should mention 'token' for MissingToken error, got: {}",
+                error_message
+            );
+        }
+
+        // Test 2: InvalidToken error message
+        let mut headers2 = HashMap::new();
+        headers2.insert(
+            "authorization".to_string(),
+            "Bearer invalid.jwt.token".to_string(),
+        );
+
+        let result2 = authenticate_request(&headers2, &query_params, &jwt_config);
+        assert!(result2.is_err());
+
+        if let Err(err) = result2 {
+            let error_message = err.to_string();
+            assert!(
+                !error_message.is_empty(),
+                "Error message should not be empty"
+            );
+            assert!(
+                error_message.contains("Invalid") || error_message.contains("invalid"),
+                "Error message should indicate invalid token, got: {}",
+                error_message
+            );
+        }
+
+        // Test 3: ClaimsVerificationFailed error message
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("user".to_string()),
+        );
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(now + 3600),
+            iat: Some(now),
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        let jwt_config3 = JwtConfig {
+            enabled: true,
+            secret: secret.to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            }],
+            claims: vec![ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()),
+            }],
+        };
+
+        let mut headers3 = HashMap::new();
+        headers3.insert("authorization".to_string(), format!("Bearer {}", token));
+
+        let result3 = authenticate_request(&headers3, &query_params, &jwt_config3);
+        assert!(result3.is_err());
+
+        if let Err(err) = result3 {
+            let error_message = err.to_string();
+            assert!(
+                !error_message.is_empty(),
+                "Error message should not be empty"
+            );
+            assert!(
+                error_message.contains("claim") || error_message.contains("Claim"),
+                "Error message should mention 'claim' for ClaimsVerificationFailed error, got: {}",
+                error_message
+            );
+        }
     }
 }

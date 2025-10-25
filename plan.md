@@ -263,7 +263,7 @@ yatagarasu/
 - [x] Test: Returns 401 when JWT invalid and auth required
 - [x] Test: Returns 403 when JWT valid but claims verification fails
 - [x] Test: Attaches validated claims to request context
-- [ ] Test: Error response includes clear error message
+- [x] Test: Error response includes clear error message
 
 ---
 
