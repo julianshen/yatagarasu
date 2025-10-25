@@ -1595,4 +1595,61 @@ mod tests {
             "Custom claim 'is_verified' not extracted correctly"
         );
     }
+
+    #[test]
+    fn test_handles_missing_optional_claims_gracefully() {
+        let secret = "test_secret";
+
+        // Create a JWT with minimal claims - only exp to ensure it's not expired
+        let claims = Claims {
+            sub: None,
+            exp: Some(9999999999), // Far future to pass expiration validation
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: serde_json::Map::new(),
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(
+            result.is_ok(),
+            "Expected JWT with missing optional claims to be accepted"
+        );
+
+        let extracted_claims = result.unwrap();
+
+        // Verify all optional claims are None
+        assert_eq!(
+            extracted_claims.sub, None,
+            "Expected 'sub' claim to be None when missing"
+        );
+        assert_eq!(
+            extracted_claims.iss, None,
+            "Expected 'iss' claim to be None when missing"
+        );
+        assert_eq!(
+            extracted_claims.iat, None,
+            "Expected 'iat' claim to be None when missing"
+        );
+        assert_eq!(
+            extracted_claims.nbf, None,
+            "Expected 'nbf' claim to be None when missing"
+        );
+
+        // Verify exp is still extracted
+        assert_eq!(
+            extracted_claims.exp,
+            Some(9999999999),
+            "Expected 'exp' claim to be extracted"
+        );
+    }
 }
