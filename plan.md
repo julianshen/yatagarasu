@@ -248,7 +248,7 @@ yatagarasu/
 - [x] Test: Verifies boolean claim equals expected value
 - [x] Test: Fails when claim value doesn't match
 - [x] Test: Fails when claim is missing
-- [ ] Test: Case-sensitive string comparison
+- [x] Test: Case-sensitive string comparison
 
 ### JWT - Claims Verification (Multiple Rules)
 - [ ] Test: Passes when all verification rules pass (AND logic)

@@ -2272,4 +2272,78 @@ mod tests {
             "Expected claim verification to fail when required claim is missing (string)"
         );
     }
+
+    #[test]
+    fn test_case_sensitive_string_comparison() {
+        let secret = "test_secret";
+
+        // Create a JWT with a lowercase role claim
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("admin".to_string()),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Test 1: Exact match should pass
+        let rules = vec![ClaimRule {
+            claim: "role".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::String("admin".to_string()),
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            verified,
+            "Expected claim verification to pass with exact case match"
+        );
+
+        // Test 2: Different case should fail (Admin vs admin)
+        let rules = vec![ClaimRule {
+            claim: "role".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::String("Admin".to_string()), // Capital A
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail with different case (Admin vs admin)"
+        );
+
+        // Test 3: All uppercase should fail (ADMIN vs admin)
+        let rules = vec![ClaimRule {
+            claim: "role".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::String("ADMIN".to_string()),
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail with different case (ADMIN vs admin)"
+        );
+    }
 }
