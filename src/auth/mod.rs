@@ -2211,4 +2211,65 @@ mod tests {
             "Expected claim verification to fail when boolean value doesn't match"
         );
     }
+
+    #[test]
+    fn test_fails_when_claim_is_missing() {
+        let secret = "test_secret";
+
+        // Create a JWT with only some claims (role is present, but admin_level is missing)
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("user".to_string()),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Create rule for a claim that doesn't exist in the JWT
+        let rules = vec![ClaimRule {
+            claim: "admin_level".to_string(), // This claim is not in the JWT
+            operator: "equals".to_string(),
+            value: serde_json::Value::Number(serde_json::Number::from(5)),
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail when required claim is missing"
+        );
+
+        // Create another rule for a different missing claim
+        let rules = vec![ClaimRule {
+            claim: "department".to_string(), // This claim is also not in the JWT
+            operator: "equals".to_string(),
+            value: serde_json::Value::String("engineering".to_string()),
+        }];
+
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected claim verification to fail when required claim is missing (string)"
+        );
+    }
 }
