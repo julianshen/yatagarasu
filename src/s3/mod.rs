@@ -520,4 +520,109 @@ mod tests {
             "Signature should only contain hex characters"
         );
     }
+
+    #[test]
+    fn test_signature_includes_all_required_headers() {
+        use std::collections::HashMap;
+
+        let method = "GET";
+        let uri = "/bucket/key";
+        let query_string = "";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+        let service = "s3";
+        let date = "20130524";
+        let datetime = "20130524T000000Z";
+
+        // Create headers with multiple required headers
+        let mut headers = HashMap::new();
+        headers.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers.insert("x-amz-date".to_string(), datetime.to_string());
+        headers.insert(
+            "x-amz-content-sha256".to_string(),
+            sha256_hex(b"").to_string(),
+        );
+        headers.insert("x-amz-security-token".to_string(), "test-token".to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+
+        let payload = b"";
+
+        let params = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers,
+            payload,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let authorization = sign_request(&params);
+
+        // Extract SignedHeaders from Authorization header
+        let signed_headers_part = authorization
+            .split("SignedHeaders=")
+            .nth(1)
+            .and_then(|s| s.split(',').next())
+            .expect("Should have SignedHeaders");
+
+        // Verify all headers are included in SignedHeaders (sorted alphabetically, lowercase)
+        assert!(
+            signed_headers_part.contains("content-type"),
+            "SignedHeaders should include content-type"
+        );
+        assert!(
+            signed_headers_part.contains("host"),
+            "SignedHeaders should include host"
+        );
+        assert!(
+            signed_headers_part.contains("x-amz-content-sha256"),
+            "SignedHeaders should include x-amz-content-sha256"
+        );
+        assert!(
+            signed_headers_part.contains("x-amz-date"),
+            "SignedHeaders should include x-amz-date"
+        );
+        assert!(
+            signed_headers_part.contains("x-amz-security-token"),
+            "SignedHeaders should include x-amz-security-token"
+        );
+
+        // Verify headers are in alphabetical order and semicolon-separated
+        assert_eq!(
+            signed_headers_part,
+            "content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token",
+            "SignedHeaders should be alphabetically sorted and semicolon-separated"
+        );
+
+        // Verify that changing the headers changes the signature
+        let mut headers2 = headers.clone();
+        headers2.remove("x-amz-security-token");
+
+        let params2 = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers2,
+            payload,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let authorization2 = sign_request(&params2);
+
+        assert_ne!(
+            authorization, authorization2,
+            "Signature should change when headers change"
+        );
+    }
 }
