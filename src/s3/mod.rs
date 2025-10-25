@@ -258,4 +258,78 @@ mod tests {
         let result5 = create_s3_client(&config_all_empty);
         assert!(result5.is_err(), "Should fail with all empty credentials");
     }
+
+    #[test]
+    fn test_can_create_multiple_independent_s3_clients() {
+        // Create config for products bucket
+        let products_config = S3Config {
+            bucket: "products-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAPRODUCTS1234567".to_string(),
+            secret_key: "ProductsSecretKey123456789".to_string(),
+            endpoint: None,
+        };
+
+        // Create config for users bucket
+        let users_config = S3Config {
+            bucket: "users-bucket".to_string(),
+            region: "us-west-2".to_string(),
+            access_key: "AKIAUSERS7654321ABC".to_string(),
+            secret_key: "UsersSecretKeyXYZ987654321".to_string(),
+            endpoint: None,
+        };
+
+        // Create config for images bucket with custom endpoint (MinIO)
+        let images_config = S3Config {
+            bucket: "images-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "minioadmin".to_string(),
+            secret_key: "minioadmin".to_string(),
+            endpoint: Some("http://localhost:9000".to_string()),
+        };
+
+        // Create all three clients
+        let products_client =
+            create_s3_client(&products_config).expect("Should create products client");
+        let users_client = create_s3_client(&users_config).expect("Should create users client");
+        let images_client = create_s3_client(&images_config).expect("Should create images client");
+
+        // Verify products client has correct configuration
+        assert_eq!(products_client.config.bucket, "products-bucket");
+        assert_eq!(products_client.config.region, "us-east-1");
+        assert_eq!(products_client.config.access_key, "AKIAPRODUCTS1234567");
+        assert_eq!(
+            products_client.config.secret_key,
+            "ProductsSecretKey123456789"
+        );
+        assert_eq!(products_client.config.endpoint, None);
+
+        // Verify users client has correct configuration
+        assert_eq!(users_client.config.bucket, "users-bucket");
+        assert_eq!(users_client.config.region, "us-west-2");
+        assert_eq!(users_client.config.access_key, "AKIAUSERS7654321ABC");
+        assert_eq!(users_client.config.secret_key, "UsersSecretKeyXYZ987654321");
+        assert_eq!(users_client.config.endpoint, None);
+
+        // Verify images client has correct configuration
+        assert_eq!(images_client.config.bucket, "images-bucket");
+        assert_eq!(images_client.config.region, "us-east-1");
+        assert_eq!(images_client.config.access_key, "minioadmin");
+        assert_eq!(images_client.config.secret_key, "minioadmin");
+        assert_eq!(
+            images_client.config.endpoint,
+            Some("http://localhost:9000".to_string())
+        );
+
+        // Verify credentials are truly independent (changing one doesn't affect others)
+        // This is verified by the fact that each client maintains its own config
+        assert_ne!(
+            products_client.config.access_key, users_client.config.access_key,
+            "Each client should have independent credentials"
+        );
+        assert_ne!(
+            users_client.config.region, products_client.config.region,
+            "Each client should have independent regions"
+        );
+    }
 }

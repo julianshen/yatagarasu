@@ -274,7 +274,7 @@ yatagarasu/
 - [x] Test: Can create S3 client with region configuration
 - [x] Test: Can create S3 client with custom endpoint (for MinIO/LocalStack)
 - [x] Test: Client creation fails with empty credentials
-- [ ] Test: Can create multiple independent S3 clients (one per bucket)
+- [x] Test: Can create multiple independent S3 clients (one per bucket)
 
 ### S3 Signature v4 - Request Signing
 - [ ] Test: Generates valid AWS Signature v4 for GET request
