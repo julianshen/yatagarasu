@@ -258,7 +258,7 @@ yatagarasu/
 
 ### JWT - Authentication Middleware
 - [x] Test: Passes request through when auth disabled for route
-- [ ] Test: Extracts and validates JWT when auth enabled
+- [x] Test: Extracts and validates JWT when auth enabled
 - [ ] Test: Returns 401 when JWT missing and auth required
 - [ ] Test: Returns 401 when JWT invalid and auth required
 - [ ] Test: Returns 403 when JWT valid but claims verification fails

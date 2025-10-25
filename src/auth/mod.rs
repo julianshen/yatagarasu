@@ -67,7 +67,16 @@ pub fn try_extract_token(
             "bearer" => extract_bearer_token(headers),
             "header" => {
                 if let Some(ref header_name) = source.name {
-                    extract_header_token(headers, header_name)
+                    if let Some(value) = extract_header_token(headers, header_name) {
+                        // Strip prefix if configured
+                        if let Some(ref prefix) = source.prefix {
+                            value.strip_prefix(prefix).map(|s| s.trim().to_string())
+                        } else {
+                            Some(value)
+                        }
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -127,6 +136,34 @@ pub fn is_auth_required(jwt_config: &Option<JwtConfig>) -> bool {
         Some(config) => config.enabled,
         None => false, // No JWT config means auth is not required
     }
+}
+
+#[derive(Debug)]
+pub enum AuthError {
+    MissingToken,
+    InvalidToken(String),
+    ClaimsVerificationFailed,
+}
+
+pub fn authenticate_request(
+    headers: &HashMap<String, String>,
+    query_params: &HashMap<String, String>,
+    jwt_config: &JwtConfig,
+) -> Result<Claims, AuthError> {
+    // Extract token from configured sources
+    let token = try_extract_token(headers, query_params, &jwt_config.token_sources)
+        .ok_or(AuthError::MissingToken)?;
+
+    // Validate JWT
+    let claims = validate_jwt(&token, &jwt_config.secret)
+        .map_err(|e| AuthError::InvalidToken(e.to_string()))?;
+
+    // Verify claims if rules are configured
+    if !verify_claims(&claims, &jwt_config.claims) {
+        return Err(AuthError::ClaimsVerificationFailed);
+    }
+
+    Ok(claims)
 }
 
 #[cfg(test)]
@@ -2707,6 +2744,94 @@ mod tests {
         assert!(
             auth_required,
             "Expected auth to be required when enabled=true"
+        );
+    }
+
+    #[test]
+    fn test_extracts_and_validates_jwt_when_auth_enabled() {
+        use crate::config::TokenSource;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+
+        // Create a JWT with custom claims
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("admin".to_string()),
+        );
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(now + 3600), // Valid for 1 hour
+            iat: Some(now),
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Create JWT config with token source and claim verification
+        let jwt_config = JwtConfig {
+            enabled: true,
+            secret: secret.to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "header".to_string(),
+                name: Some("Authorization".to_string()),
+                prefix: Some("Bearer ".to_string()),
+            }],
+            claims: vec![ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()),
+            }],
+        };
+
+        // Create headers with the JWT
+        let mut headers = HashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+        let query_params = HashMap::new();
+
+        // Authenticate the request
+        let result = authenticate_request(&headers, &query_params, &jwt_config);
+
+        if let Err(e) = &result {
+            println!("Authentication error: {:?}", e);
+        }
+
+        assert!(
+            result.is_ok(),
+            "Expected authentication to succeed with valid JWT and claims: {:?}",
+            result.err()
+        );
+
+        let authenticated_claims = result.unwrap();
+        assert_eq!(
+            authenticated_claims.sub,
+            Some("user123".to_string()),
+            "Expected subject to be extracted correctly"
+        );
+        assert_eq!(
+            authenticated_claims
+                .custom
+                .get("role")
+                .and_then(|v| v.as_str()),
+            Some("admin"),
+            "Expected role claim to be extracted correctly"
         );
     }
 }
