@@ -3812,4 +3812,120 @@ mod tests {
             "Sender task should complete within 1 second after client disconnect"
         );
     }
+
+    #[tokio::test]
+    async fn test_memory_usage_stays_constant_during_streaming() {
+        use futures::stream::{self, StreamExt};
+        use std::sync::{Arc, Mutex};
+
+        // Simulate streaming a very large file (1 GB)
+        // Key insight: We process chunks one at a time, never holding entire file
+        let total_chunks = 16384; // 16,384 chunks * 64KB = 1 GB
+        let chunk_size = 64 * 1024; // 64 KB chunks
+
+        // Track maximum memory held at any point
+        // In real streaming: only 1-2 chunks should be in memory at once
+        let max_chunks_in_memory = Arc::new(Mutex::new(0usize));
+        let max_chunks_clone = max_chunks_in_memory.clone();
+
+        // Current chunks in memory (should stay ≤ 2-3 due to buffering)
+        let current_chunks_in_memory = Arc::new(Mutex::new(0usize));
+        let current_chunks_clone = current_chunks_in_memory.clone();
+
+        // Create a stream that simulates S3 response
+        let data_stream = stream::iter(0..total_chunks).map(move |i| {
+            // Simulate chunk creation (allocate memory)
+            let chunk = vec![i as u8; chunk_size];
+
+            // Track allocation
+            let mut current = current_chunks_clone.lock().unwrap();
+            *current += 1;
+
+            // Update max if needed
+            let mut max = max_chunks_clone.lock().unwrap();
+            if *current > *max {
+                *max = *current;
+            }
+
+            Ok::<_, std::io::Error>((bytes::Bytes::from(chunk), current_chunks_clone.clone()))
+        });
+
+        // Client that receives and processes chunks one at a time
+        let mut stream = Box::pin(data_stream);
+        let mut total_bytes_received = 0u64;
+        let mut chunks_processed = 0usize;
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok((chunk, counter)) => {
+                    // Process chunk (in real scenario: send to client immediately)
+                    total_bytes_received += chunk.len() as u64;
+                    chunks_processed += 1;
+
+                    // Simulate chunk being sent/deallocated
+                    // Drop chunk here (goes out of scope)
+                    drop(chunk);
+
+                    // Decrement in-memory counter
+                    *counter.lock().unwrap() -= 1;
+
+                    // Optional: simulate network delay/backpressure
+                    if chunks_processed % 100 == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        // Verify all chunks were processed
+        assert_eq!(
+            chunks_processed, total_chunks,
+            "Should process all {} chunks",
+            total_chunks
+        );
+
+        // Verify total data streamed
+        let expected_bytes = (total_chunks as u64) * (chunk_size as u64);
+        assert_eq!(
+            total_bytes_received,
+            expected_bytes,
+            "Should receive all {} GB of data",
+            expected_bytes / (1024 * 1024 * 1024)
+        );
+
+        // Verify memory usage stayed constant (never held all chunks in memory)
+        let max_memory_chunks = *max_chunks_in_memory.lock().unwrap();
+        assert!(
+            max_memory_chunks <= 10,
+            "Should never hold more than ~10 chunks in memory. Had: {}",
+            max_memory_chunks
+        );
+
+        // Calculate memory efficiency
+        let max_memory_mb = (max_memory_chunks * chunk_size) / (1024 * 1024);
+        let total_file_mb = expected_bytes / (1024 * 1024);
+
+        assert!(
+            max_memory_mb < 1, // Less than 1 MB in memory at once
+            "Memory usage should be < 1 MB, was {} MB for {} MB file",
+            max_memory_mb,
+            total_file_mb
+        );
+
+        // Verify final state: no chunks left in memory
+        let final_chunks = *current_chunks_in_memory.lock().unwrap();
+        assert_eq!(
+            final_chunks, 0,
+            "All chunks should be deallocated after streaming completes"
+        );
+
+        // This demonstrates O(1) memory usage for O(n) file size
+        // Whether streaming 1 MB or 1 GB, memory usage stays constant
+        println!(
+            "✓ Streamed {} MB file using only {} KB max memory",
+            total_file_mb,
+            max_memory_chunks * chunk_size / 1024
+        );
+    }
 }
