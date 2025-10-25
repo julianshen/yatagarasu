@@ -1652,4 +1652,117 @@ mod tests {
             "Expected 'exp' claim to be extracted"
         );
     }
+
+    #[test]
+    fn test_handles_nested_claim_structures() {
+        let secret = "test_secret";
+
+        // Create a JWT with nested claim structures
+        let mut custom_map = serde_json::Map::new();
+
+        // Create nested address object
+        let mut address_obj = serde_json::Map::new();
+        address_obj.insert(
+            "street".to_string(),
+            serde_json::Value::String("123 Main St".to_string()),
+        );
+        address_obj.insert(
+            "city".to_string(),
+            serde_json::Value::String("San Francisco".to_string()),
+        );
+        address_obj.insert(
+            "zip".to_string(),
+            serde_json::Value::String("94102".to_string()),
+        );
+
+        custom_map.insert(
+            "address".to_string(),
+            serde_json::Value::Object(address_obj),
+        );
+
+        // Create nested metadata object
+        let mut metadata_obj = serde_json::Map::new();
+        metadata_obj.insert(
+            "created_at".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(1234567890)),
+        );
+        metadata_obj.insert("active".to_string(), serde_json::Value::Bool(true));
+
+        custom_map.insert(
+            "metadata".to_string(),
+            serde_json::Value::Object(metadata_obj),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Verify nested address object is extracted correctly
+        let address = extracted_claims
+            .custom
+            .get("address")
+            .and_then(|v| v.as_object());
+        assert!(
+            address.is_some(),
+            "Expected 'address' nested object to exist"
+        );
+
+        let address = address.unwrap();
+        assert_eq!(
+            address.get("street").and_then(|v| v.as_str()),
+            Some("123 Main St"),
+            "Nested 'address.street' not extracted correctly"
+        );
+        assert_eq!(
+            address.get("city").and_then(|v| v.as_str()),
+            Some("San Francisco"),
+            "Nested 'address.city' not extracted correctly"
+        );
+        assert_eq!(
+            address.get("zip").and_then(|v| v.as_str()),
+            Some("94102"),
+            "Nested 'address.zip' not extracted correctly"
+        );
+
+        // Verify nested metadata object is extracted correctly
+        let metadata = extracted_claims
+            .custom
+            .get("metadata")
+            .and_then(|v| v.as_object());
+        assert!(
+            metadata.is_some(),
+            "Expected 'metadata' nested object to exist"
+        );
+
+        let metadata = metadata.unwrap();
+        assert_eq!(
+            metadata.get("created_at").and_then(|v| v.as_i64()),
+            Some(1234567890),
+            "Nested 'metadata.created_at' not extracted correctly"
+        );
+        assert_eq!(
+            metadata.get("active").and_then(|v| v.as_bool()),
+            Some(true),
+            "Nested 'metadata.active' not extracted correctly"
+        );
+    }
 }

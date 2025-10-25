@@ -238,7 +238,7 @@ yatagarasu/
 - [x] Test: Extracts standard claims (sub, iss, exp, iat)
 - [x] Test: Extracts custom claims from payload
 - [x] Test: Handles missing optional claims gracefully
-- [ ] Test: Handles nested claim structures
+- [x] Test: Handles nested claim structures
 - [ ] Test: Handles array claims
 - [ ] Test: Handles null claim values
 
