@@ -270,7 +270,7 @@ yatagarasu/
 ## Phase 5: S3 Integration
 
 ### S3 Client - Basic Setup
-- [ ] Test: Can create S3 client with valid credentials
+- [x] Test: Can create S3 client with valid credentials
 - [ ] Test: Can create S3 client with region configuration
 - [ ] Test: Can create S3 client with custom endpoint (for MinIO/LocalStack)
 - [ ] Test: Client creation fails with empty credentials
