@@ -3862,6 +3862,100 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_can_parse_range_header_with_multiple_ranges() {
+        // Test "bytes=0-100,200-300" (two ranges)
+        let range = parse_range_header("bytes=0-100,200-300");
+        assert!(range.is_some(), "Should parse multiple ranges");
+
+        let parsed = range.unwrap();
+        assert_eq!(parsed.unit, "bytes", "Unit should be bytes");
+        assert_eq!(parsed.ranges.len(), 2, "Should have two ranges");
+
+        // Verify first range
+        assert_eq!(parsed.ranges[0].start, Some(0));
+        assert_eq!(parsed.ranges[0].end, Some(100));
+        assert_eq!(parsed.ranges[0].size(), Some(101)); // 0-100 is 101 bytes
+
+        // Verify second range
+        assert_eq!(parsed.ranges[1].start, Some(200));
+        assert_eq!(parsed.ranges[1].end, Some(300));
+        assert_eq!(parsed.ranges[1].size(), Some(101)); // 200-300 is 101 bytes
+
+        // Test "bytes=0-499,1000-1499,2000-2499" (three ranges)
+        let range2 = parse_range_header("bytes=0-499,1000-1499,2000-2499");
+        assert!(range2.is_some(), "Should parse three ranges");
+
+        let parsed2 = range2.unwrap();
+        assert_eq!(parsed2.ranges.len(), 3, "Should have three ranges");
+
+        assert_eq!(parsed2.ranges[0].start, Some(0));
+        assert_eq!(parsed2.ranges[0].end, Some(499));
+
+        assert_eq!(parsed2.ranges[1].start, Some(1000));
+        assert_eq!(parsed2.ranges[1].end, Some(1499));
+
+        assert_eq!(parsed2.ranges[2].start, Some(2000));
+        assert_eq!(parsed2.ranges[2].end, Some(2499));
+
+        // Test mixed range types: "bytes=0-100,500-,=200" (closed, open-ended, suffix)
+        let range3 = parse_range_header("bytes=0-100,500-,-200");
+        assert!(
+            range3.is_some(),
+            "Should parse mixed range types (closed, open-ended, suffix)"
+        );
+
+        let parsed3 = range3.unwrap();
+        assert_eq!(parsed3.ranges.len(), 3, "Should have three ranges");
+
+        // First: closed range 0-100
+        assert_eq!(parsed3.ranges[0].start, Some(0));
+        assert_eq!(parsed3.ranges[0].end, Some(100));
+
+        // Second: open-ended range 500-
+        assert_eq!(parsed3.ranges[1].start, Some(500));
+        assert_eq!(parsed3.ranges[1].end, None);
+
+        // Third: suffix range -200
+        assert_eq!(parsed3.ranges[2].start, None);
+        assert_eq!(parsed3.ranges[2].end, Some(200));
+
+        // Test with spaces "bytes= 0-100 , 200-300 "
+        let range4 = parse_range_header("bytes= 0-100 , 200-300 ");
+        assert!(range4.is_some(), "Should parse multiple ranges with spaces");
+
+        let parsed4 = range4.unwrap();
+        assert_eq!(parsed4.ranges.len(), 2);
+        assert_eq!(parsed4.ranges[0].start, Some(0));
+        assert_eq!(parsed4.ranges[0].end, Some(100));
+        assert_eq!(parsed4.ranges[1].start, Some(200));
+        assert_eq!(parsed4.ranges[1].end, Some(300));
+
+        // Test single range (should still work)
+        let range5 = parse_range_header("bytes=100-199");
+        assert!(range5.is_some(), "Should parse single range");
+
+        let parsed5 = range5.unwrap();
+        assert_eq!(parsed5.ranges.len(), 1, "Should have one range");
+        assert_eq!(parsed5.ranges[0].start, Some(100));
+        assert_eq!(parsed5.ranges[0].end, Some(199));
+
+        // Test many ranges (5 ranges)
+        let range6 = parse_range_header("bytes=0-99,100-199,200-299,300-399,400-499");
+        assert!(range6.is_some(), "Should parse five ranges");
+
+        let parsed6 = range6.unwrap();
+        assert_eq!(parsed6.ranges.len(), 5, "Should have five ranges");
+
+        for (i, range) in parsed6.ranges.iter().enumerate() {
+            let expected_start = i as u64 * 100;
+            let expected_end = expected_start + 99;
+            assert_eq!(range.start, Some(expected_start));
+            assert_eq!(range.end, Some(expected_end));
+            assert_eq!(range.size(), Some(100));
+        }
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};
