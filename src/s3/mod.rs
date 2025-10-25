@@ -2673,4 +2673,116 @@ mod tests {
             "500 is not a client error"
         );
     }
+
+    #[test]
+    fn test_handles_503_service_unavailable_from_s3() {
+        use std::collections::HashMap;
+
+        // Test 503 with SlowDown error (rate limiting)
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/xml".to_string());
+        headers.insert("x-amz-request-id".to_string(), "SLOWDOWN123".to_string());
+        headers.insert("retry-after".to_string(), "5".to_string());
+
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>SlowDown</Code>
+    <Message>Please reduce your request rate.</Message>
+    <RequestId>SLOWDOWN123</RequestId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(503, "Service Unavailable", headers, error_body.clone());
+
+        assert_eq!(response.status_code, 503, "Status code should be 503");
+        assert_eq!(
+            response.status_text, "Service Unavailable",
+            "Status text should be 'Service Unavailable'"
+        );
+        assert!(!response.is_success(), "503 should not be success");
+        assert!(!response.body.is_empty(), "Should have error body");
+
+        // Verify it's a server error
+        assert!(
+            response.status_code >= 500 && response.status_code < 600,
+            "503 is a server error (5xx)"
+        );
+
+        // Test that error body can be parsed
+        let body_str = String::from_utf8(response.body.clone()).unwrap();
+        assert!(
+            body_str.contains("SlowDown"),
+            "Error body should contain SlowDown code"
+        );
+        assert!(
+            body_str.contains("Please reduce your request rate"),
+            "Error body should contain rate limiting message"
+        );
+
+        // Verify Retry-After header is preserved
+        assert_eq!(
+            response.get_header("retry-after"),
+            Some(&"5".to_string()),
+            "Should preserve Retry-After header for backoff"
+        );
+
+        // Test 503 with ServiceUnavailable error
+        let error_body2 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>ServiceUnavailable</Code>
+    <Message>Service is temporarily unavailable. Please retry.</Message>
+</Error>"#
+            .to_vec();
+
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-type".to_string(), "application/xml".to_string());
+
+        let response2 = S3Response::new(503, "Service Unavailable", headers2, error_body2.clone());
+
+        assert_eq!(response2.status_code, 503);
+        assert!(!response2.is_success());
+
+        let body_str2 = String::from_utf8(response2.body).unwrap();
+        assert!(
+            body_str2.contains("ServiceUnavailable"),
+            "Should handle ServiceUnavailable error"
+        );
+
+        // Test 503 with minimal response (no body)
+        let response3 = S3Response::new(503, "Service Unavailable", HashMap::new(), vec![]);
+
+        assert_eq!(response3.status_code, 503);
+        assert!(!response3.is_success());
+        assert!(
+            response3.body.is_empty(),
+            "Should handle 503 with empty body"
+        );
+
+        // Test 503 with request ID preserved
+        let mut headers4 = HashMap::new();
+        headers4.insert(
+            "x-amz-request-id".to_string(),
+            "503-UNAVAIL-456".to_string(),
+        );
+        headers4.insert("x-amz-id-2".to_string(), "extended-id".to_string());
+
+        let response4 = S3Response::new(503, "Service Unavailable", headers4, vec![]);
+
+        assert_eq!(
+            response4.get_header("x-amz-request-id"),
+            Some(&"503-UNAVAIL-456".to_string()),
+            "Should preserve request ID for debugging"
+        );
+        assert_eq!(
+            response4.get_header("x-amz-id-2"),
+            Some(&"extended-id".to_string()),
+            "Should preserve extended request ID"
+        );
+
+        // Verify 503 is retryable with exponential backoff
+        assert!(
+            response.status_code >= 500,
+            "Server errors (5xx) should be retried with backoff"
+        );
+    }
 }

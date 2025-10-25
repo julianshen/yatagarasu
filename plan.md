@@ -314,7 +314,7 @@ yatagarasu/
 - [x] Test: Handles 403 Forbidden from S3 (access denied)
 - [x] Test: Handles 400 Bad Request from S3 (invalid request)
 - [x] Test: Handles 500 Internal Server Error from S3
-- [ ] Test: Handles 503 Service Unavailable from S3 (slow down)
+- [x] Test: Handles 503 Service Unavailable from S3 (slow down)
 - [ ] Test: Parses S3 XML error response body
 - [ ] Test: Extracts error code and message from S3 error response
 - [ ] Test: Maps S3 errors to appropriate HTTP status codes
