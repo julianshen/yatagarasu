@@ -111,6 +111,25 @@ fn derive_signing_key(secret_key: &str, date: &str, region: &str, service: &str)
     hmac_sha256(&k_service, b"aws4_request")
 }
 
+/// Represents an S3 GET/HEAD request
+#[derive(Debug)]
+pub struct S3Request {
+    pub method: String,
+    pub bucket: String,
+    pub key: String,
+    pub region: String,
+}
+
+/// Builds a GET object request for S3
+pub fn build_get_object_request(bucket: &str, key: &str, region: &str) -> S3Request {
+    S3Request {
+        method: "GET".to_string(),
+        bucket: bucket.to_string(),
+        key: key.to_string(),
+        region: region.to_string(),
+    }
+}
+
 pub fn sign_request(params: &SigningParams) -> String {
     // Step 1 & 2: Create string to sign (includes canonical request generation)
     let string_to_sign = create_string_to_sign(params);
@@ -1211,6 +1230,31 @@ mod tests {
         assert_eq!(
             signing_key, signing_key6,
             "Signing key should be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_can_build_get_object_request_with_key() {
+        let bucket = "test-bucket";
+        let key = "test-key.txt";
+        let region = "us-east-1";
+
+        let request = build_get_object_request(bucket, key, region);
+
+        // Verify the request has correct method
+        assert_eq!(request.method, "GET", "Request method should be GET");
+
+        // Verify the request includes bucket in path or host
+        let request_str = format!("{:?}", request);
+        assert!(
+            request_str.contains(bucket),
+            "Request should include bucket name"
+        );
+
+        // Verify the request includes key in path
+        assert!(
+            request_str.contains(key),
+            "Request should include object key"
         );
     }
 }

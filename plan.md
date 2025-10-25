@@ -287,7 +287,7 @@ yatagarasu/
 - [x] Test: Signing key derivation works correctly
 
 ### S3 Operations - GET Object
-- [ ] Test: Can build GET object request with key
+- [x] Test: Can build GET object request with key
 - [ ] Test: GET request includes correct bucket and key in URL
 - [ ] Test: GET request includes proper AWS signature headers
 - [ ] Test: GET request handles S3 keys with special characters
