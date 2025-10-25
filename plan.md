@@ -312,7 +312,7 @@ yatagarasu/
 ### S3 Response - Error Handling
 - [x] Test: Handles 404 Not Found from S3 (object doesn't exist)
 - [x] Test: Handles 403 Forbidden from S3 (access denied)
-- [ ] Test: Handles 400 Bad Request from S3 (invalid request)
+- [x] Test: Handles 400 Bad Request from S3 (invalid request)
 - [ ] Test: Handles 500 Internal Server Error from S3
 - [ ] Test: Handles 503 Service Unavailable from S3 (slow down)
 - [ ] Test: Parses S3 XML error response body

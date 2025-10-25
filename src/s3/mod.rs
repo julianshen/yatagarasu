@@ -2467,4 +2467,125 @@ mod tests {
             "Should handle 403 with empty body"
         );
     }
+
+    #[test]
+    fn test_handles_400_bad_request_from_s3() {
+        use std::collections::HashMap;
+
+        // Test basic 400 response for invalid request
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/xml".to_string());
+        headers.insert("x-amz-request-id".to_string(), "REQ123".to_string());
+
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InvalidArgument</Code>
+    <Message>Invalid Argument</Message>
+    <ArgumentName>marker</ArgumentName>
+    <ArgumentValue>invalid-value</ArgumentValue>
+    <RequestId>REQ123</RequestId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(400, "Bad Request", headers, error_body.clone());
+
+        assert_eq!(response.status_code, 400, "Status code should be 400");
+        assert_eq!(
+            response.status_text, "Bad Request",
+            "Status text should be 'Bad Request'"
+        );
+        assert!(!response.is_success(), "400 should not be success");
+        assert!(!response.body.is_empty(), "Should have error body");
+
+        // Verify it's a client error
+        assert!(
+            response.status_code >= 400 && response.status_code < 500,
+            "400 is a client error (4xx)"
+        );
+
+        // Test that error body can be parsed
+        let body_str = String::from_utf8(response.body.clone()).unwrap();
+        assert!(
+            body_str.contains("InvalidArgument"),
+            "Error body should contain InvalidArgument code"
+        );
+        assert!(
+            body_str.contains("Invalid Argument"),
+            "Error body should contain error message"
+        );
+
+        // Test 400 with InvalidBucketName
+        let error_body2 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InvalidBucketName</Code>
+    <Message>The specified bucket is not valid.</Message>
+    <BucketName>Invalid_Bucket_Name</BucketName>
+</Error>"#
+            .to_vec();
+
+        let response2 = S3Response::new(400, "Bad Request", HashMap::new(), error_body2.clone());
+
+        assert_eq!(response2.status_code, 400);
+        assert!(!response2.is_success());
+
+        let body_str2 = String::from_utf8(response2.body).unwrap();
+        assert!(
+            body_str2.contains("InvalidBucketName"),
+            "Should handle InvalidBucketName error"
+        );
+
+        // Test 400 with MalformedXML
+        let error_body3 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>MalformedXML</Code>
+    <Message>The XML you provided was not well-formed or did not validate against our published schema.</Message>
+</Error>"#
+            .to_vec();
+
+        let response3 = S3Response::new(400, "Bad Request", HashMap::new(), error_body3.clone());
+
+        assert_eq!(response3.status_code, 400);
+        let body_str3 = String::from_utf8(response3.body).unwrap();
+        assert!(
+            body_str3.contains("MalformedXML"),
+            "Should handle malformed XML errors"
+        );
+
+        // Test 400 with InvalidRange (for Range requests)
+        let error_body4 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InvalidRange</Code>
+    <Message>The requested range is not satisfiable</Message>
+    <RangeRequested>bytes=1000-2000</RangeRequested>
+    <ActualObjectSize>500</ActualObjectSize>
+</Error>"#
+            .to_vec();
+
+        let mut headers4 = HashMap::new();
+        headers4.insert("content-range".to_string(), "bytes */500".to_string());
+
+        let response4 = S3Response::new(400, "Bad Request", headers4, error_body4.clone());
+
+        assert_eq!(response4.status_code, 400);
+        assert_eq!(
+            response4.get_header("content-range"),
+            Some(&"bytes */500".to_string()),
+            "Should preserve content-range header"
+        );
+        let body_str4 = String::from_utf8(response4.body).unwrap();
+        assert!(
+            body_str4.contains("InvalidRange"),
+            "Should handle invalid range errors"
+        );
+
+        // Test 400 with empty body
+        let response5 = S3Response::new(400, "Bad Request", HashMap::new(), vec![]);
+
+        assert_eq!(response5.status_code, 400);
+        assert!(!response5.is_success());
+        assert!(
+            response5.body.is_empty(),
+            "Should handle 400 with empty body"
+        );
+    }
 }
