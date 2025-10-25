@@ -2,6 +2,7 @@
 
 use crate::config::S3Config;
 
+#[derive(Debug)]
 pub struct S3Client {
     #[allow(dead_code)]
     config: S3Config,
@@ -177,5 +178,84 @@ mod tests {
             Some("https://s3-compatible.example.com".to_string()),
             "HTTPS endpoint should be stored correctly"
         );
+    }
+
+    #[test]
+    fn test_client_creation_fails_with_empty_credentials() {
+        // Test with empty access_key
+        let config_empty_access_key = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
+        };
+
+        let result1 = create_s3_client(&config_empty_access_key);
+        assert!(result1.is_err(), "Should fail with empty access_key");
+        assert!(
+            result1.unwrap_err().contains("access key"),
+            "Error message should mention access key"
+        );
+
+        // Test with empty secret_key
+        let config_empty_secret_key = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "".to_string(),
+            endpoint: None,
+        };
+
+        let result2 = create_s3_client(&config_empty_secret_key);
+        assert!(result2.is_err(), "Should fail with empty secret_key");
+        assert!(
+            result2.unwrap_err().contains("secret key"),
+            "Error message should mention secret key"
+        );
+
+        // Test with empty region
+        let config_empty_region = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
+        };
+
+        let result3 = create_s3_client(&config_empty_region);
+        assert!(result3.is_err(), "Should fail with empty region");
+        assert!(
+            result3.unwrap_err().contains("region"),
+            "Error message should mention region"
+        );
+
+        // Test with empty bucket
+        let config_empty_bucket = S3Config {
+            bucket: "".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
+        };
+
+        let result4 = create_s3_client(&config_empty_bucket);
+        assert!(result4.is_err(), "Should fail with empty bucket");
+        assert!(
+            result4.unwrap_err().contains("bucket"),
+            "Error message should mention bucket"
+        );
+
+        // Test with all empty credentials
+        let config_all_empty = S3Config {
+            bucket: "".to_string(),
+            region: "".to_string(),
+            access_key: "".to_string(),
+            secret_key: "".to_string(),
+            endpoint: None,
+        };
+
+        let result5 = create_s3_client(&config_all_empty);
+        assert!(result5.is_err(), "Should fail with all empty credentials");
     }
 }
