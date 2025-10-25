@@ -1902,4 +1902,61 @@ mod tests {
             "Should handle header case variations"
         );
     }
+
+    #[test]
+    fn test_extracts_content_length_header_from_s3_response() {
+        use std::collections::HashMap;
+
+        // Test with small file
+        let mut headers = HashMap::new();
+        headers.insert("content-length".to_string(), "1024".to_string());
+        headers.insert("content-type".to_string(), "text/plain".to_string());
+
+        let response = S3Response::new(200, "OK", headers, vec![]);
+
+        let content_length = response.get_header("content-length");
+        assert_eq!(
+            content_length,
+            Some(&"1024".to_string()),
+            "Should extract content-length header"
+        );
+
+        // Test with large file
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-length".to_string(), "104857600".to_string()); // 100MB
+        let response2 = S3Response::new(200, "OK", headers2, vec![]);
+        assert_eq!(
+            response2.get_header("content-length"),
+            Some(&"104857600".to_string())
+        );
+
+        // Test with zero-length file
+        let mut headers3 = HashMap::new();
+        headers3.insert("content-length".to_string(), "0".to_string());
+        let response3 = S3Response::new(200, "OK", headers3, vec![]);
+        assert_eq!(
+            response3.get_header("content-length"),
+            Some(&"0".to_string())
+        );
+
+        // Test missing content-length header
+        let headers4 = HashMap::new();
+        let response4 = S3Response::new(200, "OK", headers4, vec![]);
+        assert_eq!(
+            response4.get_header("content-length"),
+            None,
+            "Should return None for missing header"
+        );
+
+        // Test parsing content-length value as number
+        let mut headers5 = HashMap::new();
+        headers5.insert("content-length".to_string(), "2048".to_string());
+        let response5 = S3Response::new(200, "OK", headers5, vec![]);
+        if let Some(length_str) = response5.get_header("content-length") {
+            let length: u64 = length_str.parse().expect("Should parse as number");
+            assert_eq!(length, 2048, "Content-length should be parseable as u64");
+        } else {
+            panic!("Content-length header should be present");
+        }
+    }
 }
