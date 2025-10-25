@@ -1959,4 +1959,78 @@ mod tests {
             panic!("Content-length header should be present");
         }
     }
+
+    #[test]
+    fn test_extracts_etag_header_from_s3_response() {
+        use std::collections::HashMap;
+
+        // Test with standard ETag (MD5 hash)
+        let mut headers = HashMap::new();
+        headers.insert(
+            "etag".to_string(),
+            "\"5d41402abc4b2a76b9719d911017c592\"".to_string(),
+        );
+        headers.insert("content-type".to_string(), "text/plain".to_string());
+
+        let response = S3Response::new(200, "OK", headers, vec![]);
+
+        let etag = response.get_header("etag");
+        assert_eq!(
+            etag,
+            Some(&"\"5d41402abc4b2a76b9719d911017c592\"".to_string()),
+            "Should extract ETag header with quotes"
+        );
+
+        // Test with multipart upload ETag (includes part count)
+        let mut headers2 = HashMap::new();
+        headers2.insert("etag".to_string(), "\"abc123-5\"".to_string());
+        let response2 = S3Response::new(200, "OK", headers2, vec![]);
+        assert_eq!(
+            response2.get_header("etag"),
+            Some(&"\"abc123-5\"".to_string()),
+            "Should extract multipart ETag"
+        );
+
+        // Test with weak ETag (W/ prefix)
+        let mut headers3 = HashMap::new();
+        headers3.insert("etag".to_string(), "W/\"abc123\"".to_string());
+        let response3 = S3Response::new(200, "OK", headers3, vec![]);
+        assert_eq!(
+            response3.get_header("etag"),
+            Some(&"W/\"abc123\"".to_string()),
+            "Should extract weak ETag"
+        );
+
+        // Test missing ETag header
+        let headers4 = HashMap::new();
+        let response4 = S3Response::new(200, "OK", headers4, vec![]);
+        assert_eq!(
+            response4.get_header("etag"),
+            None,
+            "Should return None for missing ETag"
+        );
+
+        // Test ETag without quotes (edge case)
+        let mut headers5 = HashMap::new();
+        headers5.insert("etag".to_string(), "abc123".to_string());
+        let response5 = S3Response::new(200, "OK", headers5, vec![]);
+        assert_eq!(
+            response5.get_header("etag"),
+            Some(&"abc123".to_string()),
+            "Should handle ETag without quotes"
+        );
+
+        // Test that ETag is preserved exactly as received
+        let mut headers6 = HashMap::new();
+        headers6.insert(
+            "etag".to_string(),
+            "\"d41d8cd98f00b204e9800998ecf8427e\"".to_string(),
+        );
+        let response6 = S3Response::new(200, "OK", headers6, vec![]);
+        let etag_value = response6.get_header("etag").unwrap();
+        assert!(
+            etag_value.starts_with('"') && etag_value.ends_with('"'),
+            "ETag should preserve surrounding quotes"
+        );
+    }
 }

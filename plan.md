@@ -304,7 +304,7 @@ yatagarasu/
 - [x] Test: Parses 200 OK response from S3
 - [x] Test: Extracts content-type header from S3 response
 - [x] Test: Extracts content-length header from S3 response
-- [ ] Test: Extracts ETag header from S3 response
+- [x] Test: Extracts ETag header from S3 response
 - [ ] Test: Extracts Last-Modified header from S3 response
 - [ ] Test: Preserves custom S3 metadata headers (x-amz-meta-*)
 - [ ] Test: Streams response body to client
