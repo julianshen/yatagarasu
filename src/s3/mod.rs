@@ -2785,4 +2785,129 @@ mod tests {
             "Server errors (5xx) should be retried with backoff"
         );
     }
+
+    #[test]
+    fn test_parses_s3_xml_error_response_body() {
+        use std::collections::HashMap;
+
+        // Test parsing complete S3 error response
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>NoSuchKey</Code>
+    <Message>The specified key does not exist.</Message>
+    <Key>path/to/nonexistent.txt</Key>
+    <RequestId>ABC123DEF456</RequestId>
+    <HostId>host-id-string-here</HostId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(404, "Not Found", HashMap::new(), error_body.clone());
+
+        // Convert body to string for parsing
+        let body_str = String::from_utf8(response.body.clone()).unwrap();
+
+        // Verify XML structure is present
+        assert!(
+            body_str.contains("<?xml version=\"1.0\""),
+            "Should contain XML declaration"
+        );
+        assert!(
+            body_str.contains("<Error>"),
+            "Should contain Error root element"
+        );
+        assert!(
+            body_str.contains("</Error>"),
+            "Should have closing Error tag"
+        );
+
+        // Verify error code is extractable
+        assert!(
+            body_str.contains("<Code>NoSuchKey</Code>"),
+            "Should contain error code"
+        );
+
+        // Verify error message is extractable
+        assert!(
+            body_str.contains("<Message>The specified key does not exist.</Message>"),
+            "Should contain error message"
+        );
+
+        // Verify additional fields are present
+        assert!(
+            body_str.contains("<Key>path/to/nonexistent.txt</Key>"),
+            "Should contain Key field"
+        );
+        assert!(
+            body_str.contains("<RequestId>ABC123DEF456</RequestId>"),
+            "Should contain RequestId"
+        );
+        assert!(
+            body_str.contains("<HostId>host-id-string-here</HostId>"),
+            "Should contain HostId"
+        );
+
+        // Test parsing AccessDenied error
+        let error_body2 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>AccessDenied</Code>
+    <Message>Access Denied</Message>
+    <RequestId>XYZ789</RequestId>
+</Error>"#
+            .to_vec();
+
+        let response2 = S3Response::new(403, "Forbidden", HashMap::new(), error_body2.clone());
+        let body_str2 = String::from_utf8(response2.body).unwrap();
+
+        assert!(body_str2.contains("<Code>AccessDenied</Code>"));
+        assert!(body_str2.contains("<Message>Access Denied</Message>"));
+
+        // Test parsing error with special characters in message
+        let error_body3 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InvalidArgument</Code>
+    <Message>Invalid Argument: marker must be a valid token &amp; not empty</Message>
+    <ArgumentName>marker</ArgumentName>
+    <ArgumentValue></ArgumentValue>
+</Error>"#
+            .to_vec();
+
+        let response3 = S3Response::new(400, "Bad Request", HashMap::new(), error_body3.clone());
+        let body_str3 = String::from_utf8(response3.body).unwrap();
+
+        assert!(
+            body_str3.contains("<Code>InvalidArgument</Code>"),
+            "Should handle error codes"
+        );
+        assert!(body_str3.contains("&amp;"), "Should preserve XML entities");
+
+        // Test malformed/minimal XML
+        let error_body4 = b"<Error><Code>InternalError</Code></Error>".to_vec();
+
+        let response4 = S3Response::new(500, "Internal Server Error", HashMap::new(), error_body4);
+        let body_str4 = String::from_utf8(response4.body).unwrap();
+
+        assert!(
+            body_str4.contains("<Code>InternalError</Code>"),
+            "Should handle minimal XML"
+        );
+
+        // Test empty error body
+        let response5 = S3Response::new(500, "Internal Server Error", HashMap::new(), vec![]);
+
+        assert!(response5.body.is_empty(), "Should handle empty error body");
+
+        // Test non-XML error body
+        let response6 = S3Response::new(
+            500,
+            "Internal Server Error",
+            HashMap::new(),
+            b"Internal Server Error".to_vec(),
+        );
+
+        let body_str6 = String::from_utf8(response6.body).unwrap();
+        assert_eq!(
+            body_str6, "Internal Server Error",
+            "Should handle non-XML error body"
+        );
+    }
 }
