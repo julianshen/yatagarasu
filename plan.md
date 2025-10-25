@@ -243,7 +243,7 @@ yatagarasu/
 - [x] Test: Handles null claim values
 
 ### JWT - Claims Verification (Equals Operator)
-- [ ] Test: Verifies string claim equals expected value
+- [x] Test: Verifies string claim equals expected value
 - [ ] Test: Verifies numeric claim equals expected value
 - [ ] Test: Verifies boolean claim equals expected value
 - [ ] Test: Fails when claim value doesn't match

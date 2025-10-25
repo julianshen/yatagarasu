@@ -7,6 +7,8 @@ use std::collections::HashMap;
 #[cfg(test)]
 use jsonwebtoken::{encode, EncodingKey, Header};
 
+use crate::config::ClaimRule;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Option<String>,
@@ -101,6 +103,23 @@ pub fn validate_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::e
     )?;
 
     Ok(token_data.claims)
+}
+
+pub fn verify_claims(claims: &Claims, rules: &[ClaimRule]) -> bool {
+    for rule in rules {
+        let claim_value = claims.custom.get(&rule.claim);
+
+        match rule.operator.as_str() {
+            "equals" => {
+                if claim_value != Some(&rule.value) {
+                    return false;
+                }
+            }
+            _ => return false, // Unknown operator
+        }
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -1934,6 +1953,55 @@ mod tests {
             email.unwrap().as_str(),
             Some("user@example.com"),
             "Expected 'email' to have correct value"
+        );
+    }
+
+    #[test]
+    fn test_verifies_string_claim_equals_expected_value() {
+        let secret = "test_secret";
+
+        // Create a JWT with a custom string claim
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("admin".to_string()),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Create claim verification rule
+        let rules = vec![ClaimRule {
+            claim: "role".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::String("admin".to_string()),
+        }];
+
+        // Verify claims
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            verified,
+            "Expected claim verification to pass when string claim equals expected value"
         );
     }
 }
