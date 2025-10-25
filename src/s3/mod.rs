@@ -2033,4 +2033,76 @@ mod tests {
             "ETag should preserve surrounding quotes"
         );
     }
+
+    #[test]
+    fn test_extracts_last_modified_header_from_s3_response() {
+        use std::collections::HashMap;
+
+        // Test with standard Last-Modified format (HTTP date)
+        let mut headers = HashMap::new();
+        headers.insert(
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        );
+        headers.insert("content-type".to_string(), "text/plain".to_string());
+
+        let response = S3Response::new(200, "OK", headers, vec![]);
+
+        let last_modified = response.get_header("last-modified");
+        assert_eq!(
+            last_modified,
+            Some(&"Wed, 21 Oct 2015 07:28:00 GMT".to_string()),
+            "Should extract Last-Modified header in HTTP date format"
+        );
+
+        // Test with different date
+        let mut headers2 = HashMap::new();
+        headers2.insert(
+            "last-modified".to_string(),
+            "Fri, 01 Jan 2021 00:00:00 GMT".to_string(),
+        );
+        let response2 = S3Response::new(200, "OK", headers2, vec![]);
+        assert_eq!(
+            response2.get_header("last-modified"),
+            Some(&"Fri, 01 Jan 2021 00:00:00 GMT".to_string())
+        );
+
+        // Test with recent date
+        let mut headers3 = HashMap::new();
+        headers3.insert(
+            "last-modified".to_string(),
+            "Mon, 15 May 2023 14:30:45 GMT".to_string(),
+        );
+        let response3 = S3Response::new(200, "OK", headers3, vec![]);
+        assert_eq!(
+            response3.get_header("last-modified"),
+            Some(&"Mon, 15 May 2023 14:30:45 GMT".to_string())
+        );
+
+        // Test missing Last-Modified header
+        let headers4 = HashMap::new();
+        let response4 = S3Response::new(200, "OK", headers4, vec![]);
+        assert_eq!(
+            response4.get_header("last-modified"),
+            None,
+            "Should return None for missing Last-Modified"
+        );
+
+        // Test that Last-Modified is preserved exactly as received
+        let mut headers5 = HashMap::new();
+        headers5.insert(
+            "last-modified".to_string(),
+            "Tue, 25 Dec 2024 12:00:00 GMT".to_string(),
+        );
+        let response5 = S3Response::new(200, "OK", headers5, vec![]);
+        let last_mod_value = response5.get_header("last-modified").unwrap();
+        assert!(
+            last_mod_value.ends_with("GMT"),
+            "Last-Modified should end with GMT"
+        );
+        assert!(
+            last_mod_value.contains(','),
+            "Last-Modified should contain comma after day name"
+        );
+    }
 }
