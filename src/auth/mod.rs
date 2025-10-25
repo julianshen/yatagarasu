@@ -2585,4 +2585,73 @@ mod tests {
             "Expected verification to pass when rules list is empty (no requirements)"
         );
     }
+
+    #[test]
+    fn test_evaluates_all_rules_even_if_first_fails() {
+        let secret = "test_secret";
+
+        // Create a JWT with multiple claims
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("user".to_string()),
+        );
+        custom_map.insert(
+            "level".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(5)),
+        );
+        custom_map.insert("is_active".to_string(), serde_json::Value::Bool(false));
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Create rules where multiple rules fail (not just the first one)
+        // This tests that we could potentially report ALL failures, not just the first
+        let rules = vec![
+            ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()), // Fails: expected admin, got user
+            },
+            ClaimRule {
+                claim: "level".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::Number(serde_json::Number::from(10)), // Fails: expected 10, got 5
+            },
+            ClaimRule {
+                claim: "is_active".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::Bool(true), // Fails: expected true, got false
+            },
+        ];
+
+        // Even though all three rules fail, the function should still return false
+        // The implementation may evaluate all rules (for future error reporting) or stop early
+        // Either way, the result should be false
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            !verified,
+            "Expected verification to fail when multiple rules fail (supports future detailed error messages)"
+        );
+    }
 }

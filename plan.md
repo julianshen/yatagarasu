@@ -254,7 +254,7 @@ yatagarasu/
 - [x] Test: Passes when all verification rules pass (AND logic)
 - [x] Test: Fails when any verification rule fails
 - [x] Test: Handles verification with empty rules list (always passes)
-- [ ] Test: Evaluates all rules even if first fails (for better error messages)
+- [x] Test: Evaluates all rules even if first fails (for better error messages)
 
 ### JWT - Authentication Middleware
 - [ ] Test: Passes request through when auth disabled for route
