@@ -296,7 +296,7 @@ yatagarasu/
 
 ### S3 Operations - HEAD Object
 - [x] Test: Can build HEAD object request with key
-- [ ] Test: HEAD request includes correct HTTP method
+- [x] Test: HEAD request includes correct HTTP method
 - [ ] Test: HEAD request includes same headers as GET
 - [ ] Test: HEAD request returns object metadata without body
 

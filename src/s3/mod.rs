@@ -1635,4 +1635,35 @@ mod tests {
         // Verify the request includes region
         assert_eq!(request.region, region);
     }
+
+    #[test]
+    fn test_head_request_includes_correct_http_method() {
+        let bucket = "my-bucket";
+        let key = "documents/report.pdf";
+        let region = "us-west-2";
+
+        let request = build_head_object_request(bucket, key, region);
+
+        // Verify method is exactly "HEAD" (not "head" or "Head")
+        assert_eq!(
+            request.method, "HEAD",
+            "HEAD request must use uppercase HEAD method"
+        );
+
+        // Verify method is not GET
+        assert_ne!(
+            request.method, "GET",
+            "HEAD request should not use GET method"
+        );
+
+        // Test with different keys to ensure method is always HEAD
+        let request2 = build_head_object_request("another-bucket", "file.txt", "eu-west-1");
+        assert_eq!(
+            request2.method, "HEAD",
+            "Method should always be HEAD regardless of parameters"
+        );
+
+        let request3 = build_head_object_request("bucket3", "path/to/object", "ap-south-1");
+        assert_eq!(request3.method, "HEAD");
+    }
 }
