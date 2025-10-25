@@ -328,7 +328,7 @@ yatagarasu/
 - [ ] Test: Can handle concurrent streams to multiple clients
 
 ### S3 Range Requests - Header Parsing
-- [ ] Test: Can parse Range header with single range (bytes=0-1023)
+- [x] Test: Can parse Range header with single range (bytes=0-1023)
 - [ ] Test: Can parse Range header with open-ended range (bytes=1000-)
 - [ ] Test: Can parse Range header with suffix range (bytes=-1000)
 - [ ] Test: Can parse Range header with multiple ranges

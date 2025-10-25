@@ -308,6 +308,102 @@ pub fn map_s3_error_to_status(error_code: &str) -> u16 {
     }
 }
 
+/// Represents a single byte range
+#[derive(Debug, Clone, PartialEq)]
+pub struct ByteRange {
+    /// Start position (None for suffix ranges)
+    pub start: Option<u64>,
+    /// End position (None for open-ended ranges)
+    pub end: Option<u64>,
+}
+
+impl ByteRange {
+    /// Calculate the size of this range (end - start + 1)
+    pub fn size(&self) -> Option<u64> {
+        match (self.start, self.end) {
+            (Some(start), Some(end)) => {
+                if end >= start {
+                    Some(end - start + 1)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Represents a parsed Range header
+#[derive(Debug, Clone)]
+pub struct RangeHeader {
+    /// Unit (typically "bytes")
+    pub unit: String,
+    /// List of ranges
+    pub ranges: Vec<ByteRange>,
+}
+
+/// Parses an HTTP Range header value
+/// Supports formats like:
+/// - bytes=0-1023 (single range)
+/// - bytes=1000- (open-ended)
+/// - bytes=-1000 (suffix)
+/// - bytes=0-100,200-300 (multiple ranges)
+pub fn parse_range_header(header_value: &str) -> Option<RangeHeader> {
+    let header_value = header_value.trim();
+
+    // Split into unit and ranges
+    let parts: Vec<&str> = header_value.split('=').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let unit = parts[0].trim();
+    let ranges_str = parts[1].trim();
+
+    // Parse individual ranges
+    let mut ranges = Vec::new();
+
+    for range_str in ranges_str.split(',') {
+        let range_str = range_str.trim();
+
+        // Parse single range (e.g., "0-1023", "1000-", "-1000")
+        if let Some(dash_pos) = range_str.find('-') {
+            let start_str = range_str[..dash_pos].trim();
+            let end_str = range_str[dash_pos + 1..].trim();
+
+            let start = if start_str.is_empty() {
+                None
+            } else {
+                start_str.parse::<u64>().ok()
+            };
+
+            let end = if end_str.is_empty() {
+                None
+            } else {
+                end_str.parse::<u64>().ok()
+            };
+
+            // Valid range must have at least start or end
+            if start.is_some() || end.is_some() {
+                ranges.push(ByteRange { start, end });
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+
+    if ranges.is_empty() {
+        return None;
+    }
+
+    Some(RangeHeader {
+        unit: unit.to_string(),
+        ranges,
+    })
+}
+
 pub fn sign_request(params: &SigningParams) -> String {
     // Step 1 & 2: Create string to sign (includes canonical request generation)
     let string_to_sign = create_string_to_sign(params);
@@ -3560,5 +3656,65 @@ mod tests {
 
         assert_eq!(first_chunk.len(), chunk_size);
         assert_eq!(last_chunk.len(), chunk_size);
+    }
+
+    #[test]
+    fn test_can_parse_range_header_with_single_range() {
+        // Test parsing "bytes=0-1023"
+        let range = parse_range_header("bytes=0-1023");
+        assert!(range.is_some(), "Should parse valid range header");
+
+        let parsed = range.unwrap();
+        assert_eq!(parsed.unit, "bytes", "Unit should be bytes");
+        assert_eq!(parsed.ranges.len(), 1, "Should have one range");
+
+        let first_range = &parsed.ranges[0];
+        assert_eq!(first_range.start, Some(0), "Start should be 0");
+        assert_eq!(first_range.end, Some(1023), "End should be 1023");
+
+        // Test parsing "bytes=100-199"
+        let range2 = parse_range_header("bytes=100-199");
+        assert!(range2.is_some(), "Should parse range");
+
+        let parsed2 = range2.unwrap();
+        assert_eq!(parsed2.ranges.len(), 1);
+        assert_eq!(parsed2.ranges[0].start, Some(100));
+        assert_eq!(parsed2.ranges[0].end, Some(199));
+
+        // Test parsing "bytes=0-0" (single byte)
+        let range3 = parse_range_header("bytes=0-0");
+        assert!(range3.is_some(), "Should parse single byte range");
+
+        let parsed3 = range3.unwrap();
+        assert_eq!(parsed3.ranges[0].start, Some(0));
+        assert_eq!(parsed3.ranges[0].end, Some(0));
+
+        // Test parsing "bytes=1000000-1999999" (large range)
+        let range4 = parse_range_header("bytes=1000000-1999999");
+        assert!(range4.is_some(), "Should parse large range");
+
+        let parsed4 = range4.unwrap();
+        assert_eq!(parsed4.ranges[0].start, Some(1000000));
+        assert_eq!(parsed4.ranges[0].end, Some(1999999));
+
+        // Test range size calculation
+        let range5 = parse_range_header("bytes=0-1023");
+        let parsed5 = range5.unwrap();
+        let size = parsed5.ranges[0].size();
+        assert_eq!(size, Some(1024), "Range 0-1023 should be 1024 bytes");
+
+        // Test range with no spaces
+        let range6 = parse_range_header("bytes=50-99");
+        assert!(range6.is_some(), "Should parse range without spaces");
+        let parsed6 = range6.unwrap();
+        assert_eq!(parsed6.ranges[0].start, Some(50));
+        assert_eq!(parsed6.ranges[0].end, Some(99));
+
+        // Test range with spaces (should still parse)
+        let range7 = parse_range_header("bytes= 10 - 20 ");
+        assert!(
+            range7.is_some(),
+            "Should parse range with spaces (after trimming)"
+        );
     }
 }
