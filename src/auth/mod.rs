@@ -1273,4 +1273,65 @@ mod tests {
             error.kind()
         );
     }
+
+    #[test]
+    fn test_accepts_jwt_with_valid_exp_and_nbf_claims() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use serde_json::json;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+
+        // Get current timestamp
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Create claims with valid nbf (1 hour ago) and exp (1 hour from now)
+        let mut claims_map = serde_json::Map::new();
+        claims_map.insert("sub".to_string(), json!("user123"));
+        claims_map.insert("name".to_string(), json!("John Doe"));
+        claims_map.insert("nbf".to_string(), json!(now - 3600)); // 1 hour ago (valid)
+        claims_map.insert("exp".to_string(), json!(now + 3600)); // 1 hour from now (not expired)
+
+        // Encode the JWT token
+        let token = encode(
+            &Header::default(),
+            &claims_map,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode token");
+
+        // Validate the token - should succeed
+        let result = validate_jwt(&token, secret);
+
+        assert!(
+            result.is_ok(),
+            "Expected JWT with valid exp and nbf to be accepted, but got error: {:?}",
+            result.err()
+        );
+
+        let claims = result.unwrap();
+        assert_eq!(
+            claims.sub,
+            Some("user123".to_string()),
+            "Expected sub claim to be 'user123'"
+        );
+        assert_eq!(
+            claims.custom.get("name"),
+            Some(&json!("John Doe")),
+            "Expected custom name claim to be 'John Doe'"
+        );
+        assert_eq!(
+            claims.nbf,
+            Some(now - 3600),
+            "Expected nbf claim to be preserved"
+        );
+        assert_eq!(
+            claims.exp,
+            Some(now + 3600),
+            "Expected exp claim to be preserved"
+        );
+    }
 }

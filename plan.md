@@ -229,7 +229,7 @@ yatagarasu/
 - [x] Test: Rejects JWT with invalid signature
 - [x] Test: Rejects JWT with expired `exp` claim
 - [x] Test: Rejects JWT with future `nbf` (not before) claim
-- [ ] Test: Accepts JWT with valid `exp` and `nbf` claims
+- [x] Test: Accepts JWT with valid `exp` and `nbf` claims
 - [ ] Test: Rejects malformed JWT (not 3 parts)
 - [ ] Test: Rejects JWT with invalid Base64 encoding
 - [ ] Test: Rejects JWT with invalid JSON in payload
