@@ -2371,4 +2371,100 @@ mod tests {
             "Error body should contain error message"
         );
     }
+
+    #[test]
+    fn test_handles_403_forbidden_from_s3() {
+        use std::collections::HashMap;
+
+        // Test basic 403 response for access denied
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/xml".to_string());
+        headers.insert("x-amz-request-id".to_string(), "XYZ789".to_string());
+
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>AccessDenied</Code>
+    <Message>Access Denied</Message>
+    <RequestId>XYZ789</RequestId>
+    <HostId>host-id-string</HostId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(403, "Forbidden", headers, error_body.clone());
+
+        assert_eq!(response.status_code, 403, "Status code should be 403");
+        assert_eq!(
+            response.status_text, "Forbidden",
+            "Status text should be 'Forbidden'"
+        );
+        assert!(!response.is_success(), "403 should not be success");
+        assert!(!response.body.is_empty(), "Should have error body");
+
+        // Verify it's a client error
+        assert!(
+            response.status_code >= 400 && response.status_code < 500,
+            "403 is a client error (4xx)"
+        );
+
+        // Test that error body can be parsed
+        let body_str = String::from_utf8(response.body.clone()).unwrap();
+        assert!(
+            body_str.contains("AccessDenied"),
+            "Error body should contain AccessDenied code"
+        );
+        assert!(
+            body_str.contains("Access Denied"),
+            "Error body should contain error message"
+        );
+
+        // Test 403 with different error code (e.g., InvalidAccessKeyId)
+        let error_body2 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InvalidAccessKeyId</Code>
+    <Message>The AWS Access Key Id you provided does not exist in our records.</Message>
+    <AWSAccessKeyId>INVALIDKEY</AWSAccessKeyId>
+</Error>"#
+            .to_vec();
+
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-type".to_string(), "application/xml".to_string());
+
+        let response2 = S3Response::new(403, "Forbidden", headers2, error_body2.clone());
+
+        assert_eq!(response2.status_code, 403);
+        assert!(!response2.is_success());
+
+        let body_str2 = String::from_utf8(response2.body).unwrap();
+        assert!(
+            body_str2.contains("InvalidAccessKeyId"),
+            "Should handle InvalidAccessKeyId error"
+        );
+
+        // Test 403 with SignatureDoesNotMatch
+        let error_body3 = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>SignatureDoesNotMatch</Code>
+    <Message>The request signature we calculated does not match the signature you provided.</Message>
+</Error>"#
+            .to_vec();
+
+        let response3 = S3Response::new(403, "Forbidden", HashMap::new(), error_body3.clone());
+
+        assert_eq!(response3.status_code, 403);
+        let body_str3 = String::from_utf8(response3.body).unwrap();
+        assert!(
+            body_str3.contains("SignatureDoesNotMatch"),
+            "Should handle signature mismatch errors"
+        );
+
+        // Test 403 with minimal response (no body)
+        let response4 = S3Response::new(403, "Forbidden", HashMap::new(), vec![]);
+
+        assert_eq!(response4.status_code, 403);
+        assert!(!response4.is_success());
+        assert!(
+            response4.body.is_empty(),
+            "Should handle 403 with empty body"
+        );
+    }
 }
