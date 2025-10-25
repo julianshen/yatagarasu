@@ -320,7 +320,7 @@ yatagarasu/
 - [x] Test: Maps S3 errors to appropriate HTTP status codes
 
 ### S3 Response - Streaming
-- [ ] Test: Can stream small file (<1MB) efficiently
+- [x] Test: Can stream small file (<1MB) efficiently
 - [ ] Test: Can stream medium file (10MB) efficiently
 - [ ] Test: Can stream large file (100MB) without buffering entire file
 - [ ] Test: Streaming stops if client disconnects

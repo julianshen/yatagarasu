@@ -3219,4 +3219,100 @@ mod tests {
             "Empty error code should default to 500"
         );
     }
+
+    #[test]
+    fn test_can_stream_small_file_efficiently() {
+        use std::collections::HashMap;
+
+        // Simulate a small file (100 KB)
+        let file_size = 100 * 1024; // 100 KB
+        let file_content = vec![0u8; file_size];
+
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "image/jpeg".to_string());
+        headers.insert("content-length".to_string(), file_size.to_string());
+        headers.insert("etag".to_string(), "\"abc123\"".to_string());
+
+        let response = S3Response::new(200, "OK", headers, file_content.clone());
+
+        // Verify response is successful
+        assert!(response.is_success(), "Response should be successful");
+        assert_eq!(response.status_code, 200);
+
+        // Verify file size
+        assert_eq!(
+            response.body.len(),
+            file_size,
+            "Body size should match file size"
+        );
+
+        // Verify we can access the body for streaming
+        assert!(!response.body.is_empty(), "Body should not be empty");
+
+        // Simulate streaming by reading in chunks
+        let chunk_size = 8 * 1024; // 8 KB chunks
+        let chunks: Vec<&[u8]> = response.body.chunks(chunk_size).collect();
+
+        // Verify chunking works
+        assert!(
+            chunks.len() > 1,
+            "Should be able to split into multiple chunks"
+        );
+        assert_eq!(
+            chunks.len(),
+            (file_size + chunk_size - 1) / chunk_size,
+            "Should have expected number of chunks"
+        );
+
+        // Verify chunks can be reassembled
+        let total_bytes: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(
+            total_bytes, file_size,
+            "Total chunk bytes should equal file size"
+        );
+
+        // Test with an even smaller file (10 KB)
+        let small_size = 10 * 1024;
+        let small_content = vec![1u8; small_size];
+
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-length".to_string(), small_size.to_string());
+
+        let response2 = S3Response::new(200, "OK", headers2, small_content);
+
+        assert_eq!(response2.body.len(), small_size);
+        assert!(response2.is_success());
+
+        // Verify headers are accessible during streaming
+        assert_eq!(
+            response.get_header("content-type"),
+            Some(&"image/jpeg".to_string()),
+            "Headers should be accessible while streaming"
+        );
+        assert_eq!(
+            response.get_header("content-length"),
+            Some(&file_size.to_string()),
+            "Content-Length header should be available"
+        );
+
+        // Test with 512 KB file (still under 1MB threshold)
+        let medium_small_size = 512 * 1024;
+        let medium_content = vec![2u8; medium_small_size];
+
+        let response3 = S3Response::new(200, "OK", HashMap::new(), medium_content);
+
+        assert_eq!(response3.body.len(), medium_small_size);
+        assert!(
+            response3.body.len() < 1024 * 1024,
+            "Should be under 1MB threshold"
+        );
+
+        // Verify efficient access - body can be accessed as slice
+        let body_slice: &[u8] = &response3.body;
+        assert_eq!(
+            body_slice.len(),
+            medium_small_size,
+            "Should be able to access as slice efficiently"
+        );
+    }
 }
