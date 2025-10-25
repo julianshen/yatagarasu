@@ -104,6 +104,13 @@ fn create_string_to_sign(params: &SigningParams) -> String {
     )
 }
 
+fn derive_signing_key(secret_key: &str, date: &str, region: &str, service: &str) -> Vec<u8> {
+    let k_date = hmac_sha256(format!("AWS4{}", secret_key).as_bytes(), date.as_bytes());
+    let k_region = hmac_sha256(&k_date, region.as_bytes());
+    let k_service = hmac_sha256(&k_region, service.as_bytes());
+    hmac_sha256(&k_service, b"aws4_request")
+}
+
 pub fn sign_request(params: &SigningParams) -> String {
     // Step 1 & 2: Create string to sign (includes canonical request generation)
     let string_to_sign = create_string_to_sign(params);
@@ -124,13 +131,12 @@ pub fn sign_request(params: &SigningParams) -> String {
     );
 
     // Step 3: Calculate signing key
-    let k_date = hmac_sha256(
-        format!("AWS4{}", params.secret_key).as_bytes(),
-        params.date.as_bytes(),
+    let k_signing = derive_signing_key(
+        params.secret_key,
+        params.date,
+        params.region,
+        params.service,
     );
-    let k_region = hmac_sha256(&k_date, params.region.as_bytes());
-    let k_service = hmac_sha256(&k_region, params.service.as_bytes());
-    let k_signing = hmac_sha256(&k_service, b"aws4_request");
 
     // Step 4: Calculate signature
     let signature = hex::encode(hmac_sha256(&k_signing, string_to_sign.as_bytes()));
@@ -1150,6 +1156,61 @@ mod tests {
         assert_ne!(
             lines[3], lines2[3],
             "Canonical request hash should be different"
+        );
+    }
+
+    #[test]
+    fn test_signing_key_derivation_works_correctly() {
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let date = "20130524";
+        let region = "us-east-1";
+        let service = "s3";
+
+        let signing_key = derive_signing_key(secret_key, date, region, service);
+
+        // Verify signing key is not empty
+        assert!(!signing_key.is_empty(), "Signing key should not be empty");
+
+        // Verify signing key is 32 bytes (HMAC-SHA256 output)
+        assert_eq!(
+            signing_key.len(),
+            32,
+            "Signing key should be 32 bytes (HMAC-SHA256 output)"
+        );
+
+        // Verify signing key changes with different secret keys
+        let signing_key2 = derive_signing_key("different-secret-key", date, region, service);
+        assert_ne!(
+            signing_key, signing_key2,
+            "Signing key should change with different secret key"
+        );
+
+        // Verify signing key changes with different dates
+        let signing_key3 = derive_signing_key(secret_key, "20130525", region, service);
+        assert_ne!(
+            signing_key, signing_key3,
+            "Signing key should change with different date"
+        );
+
+        // Verify signing key changes with different regions
+        let signing_key4 = derive_signing_key(secret_key, date, "us-west-2", service);
+        assert_ne!(
+            signing_key, signing_key4,
+            "Signing key should change with different region"
+        );
+
+        // Verify signing key changes with different services
+        let signing_key5 = derive_signing_key(secret_key, date, region, "ec2");
+        assert_ne!(
+            signing_key, signing_key5,
+            "Signing key should change with different service"
+        );
+
+        // Verify signing key is deterministic (same inputs = same output)
+        let signing_key6 = derive_signing_key(secret_key, date, region, service);
+        assert_eq!(
+            signing_key, signing_key6,
+            "Signing key should be deterministic"
         );
     }
 }
