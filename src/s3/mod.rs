@@ -3315,4 +3315,134 @@ mod tests {
             "Should be able to access as slice efficiently"
         );
     }
+
+    #[test]
+    fn test_can_stream_medium_file_efficiently() {
+        use std::collections::HashMap;
+
+        // Simulate a medium file (10 MB)
+        let file_size = 10 * 1024 * 1024; // 10 MB
+        let file_content = vec![0u8; file_size];
+
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "video/mp4".to_string());
+        headers.insert("content-length".to_string(), file_size.to_string());
+        headers.insert("etag".to_string(), "\"def456\"".to_string());
+
+        let response = S3Response::new(200, "OK", headers, file_content.clone());
+
+        // Verify response is successful
+        assert!(response.is_success(), "Response should be successful");
+        assert_eq!(response.status_code, 200);
+
+        // Verify file size
+        assert_eq!(
+            response.body.len(),
+            file_size,
+            "Body size should match 10MB file size"
+        );
+
+        // Verify we can access the body for streaming
+        assert!(!response.body.is_empty(), "Body should not be empty");
+
+        // Simulate streaming by reading in larger chunks (64 KB)
+        let chunk_size = 64 * 1024; // 64 KB chunks
+        let chunks: Vec<&[u8]> = response.body.chunks(chunk_size).collect();
+
+        // Verify chunking works for medium file
+        assert!(
+            chunks.len() > 1,
+            "Should be able to split into multiple chunks"
+        );
+
+        let expected_chunks = (file_size + chunk_size - 1) / chunk_size;
+        assert_eq!(
+            chunks.len(),
+            expected_chunks,
+            "Should have {} chunks for 10MB file with 64KB chunks",
+            expected_chunks
+        );
+
+        // Verify chunks can be reassembled
+        let total_bytes: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(
+            total_bytes, file_size,
+            "Total chunk bytes should equal file size"
+        );
+
+        // Verify all chunks except last are full size
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i < chunks.len() - 1 {
+                assert_eq!(
+                    chunk.len(),
+                    chunk_size,
+                    "All chunks except last should be full size"
+                );
+            }
+        }
+
+        // Test with 5 MB file
+        let mid_size = 5 * 1024 * 1024;
+        let mid_content = vec![1u8; mid_size];
+
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-length".to_string(), mid_size.to_string());
+        headers2.insert("content-type".to_string(), "application/pdf".to_string());
+
+        let response2 = S3Response::new(200, "OK", headers2, mid_content);
+
+        assert_eq!(response2.body.len(), mid_size);
+        assert!(response2.is_success());
+
+        // Verify headers are accessible during streaming
+        assert_eq!(
+            response.get_header("content-type"),
+            Some(&"video/mp4".to_string()),
+            "Headers should be accessible while streaming"
+        );
+        assert_eq!(
+            response.get_header("content-length"),
+            Some(&file_size.to_string()),
+            "Content-Length header should be available"
+        );
+
+        // Verify efficient access - body can be accessed as slice
+        let body_slice: &[u8] = &response.body;
+        assert_eq!(
+            body_slice.len(),
+            file_size,
+            "Should be able to access as slice efficiently"
+        );
+
+        // Simulate partial read (useful for Range requests)
+        let partial_start = 1024 * 1024; // 1 MB offset
+        let partial_end = 2 * 1024 * 1024; // 2 MB offset
+        let partial_slice = &response.body[partial_start..partial_end];
+
+        assert_eq!(
+            partial_slice.len(),
+            1024 * 1024,
+            "Should be able to read partial ranges efficiently"
+        );
+
+        // Test with 8 MB file
+        let large_medium_size = 8 * 1024 * 1024;
+        let large_content = vec![2u8; large_medium_size];
+
+        let response3 = S3Response::new(200, "OK", HashMap::new(), large_content);
+
+        assert_eq!(response3.body.len(), large_medium_size);
+
+        // Verify chunked iteration is efficient
+        let mut chunk_count = 0;
+        for _chunk in response3.body.chunks(128 * 1024) {
+            chunk_count += 1;
+        }
+
+        assert_eq!(
+            chunk_count,
+            (large_medium_size + 128 * 1024 - 1) / (128 * 1024),
+            "Should iterate through all chunks"
+        );
+    }
 }
