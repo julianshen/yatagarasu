@@ -1765,4 +1765,114 @@ mod tests {
             "Nested 'metadata.active' not extracted correctly"
         );
     }
+
+    #[test]
+    fn test_handles_array_claims() {
+        let secret = "test_secret";
+
+        // Create a JWT with array claims
+        let mut custom_map = serde_json::Map::new();
+
+        // Array of strings
+        let roles_array = vec![
+            serde_json::Value::String("admin".to_string()),
+            serde_json::Value::String("user".to_string()),
+            serde_json::Value::String("moderator".to_string()),
+        ];
+        custom_map.insert("roles".to_string(), serde_json::Value::Array(roles_array));
+
+        // Array of numbers
+        let scores_array = vec![
+            serde_json::Value::Number(serde_json::Number::from(100)),
+            serde_json::Value::Number(serde_json::Number::from(95)),
+            serde_json::Value::Number(serde_json::Number::from(87)),
+        ];
+        custom_map.insert("scores".to_string(), serde_json::Value::Array(scores_array));
+
+        // Array of mixed types
+        let mixed_array = vec![
+            serde_json::Value::String("test".to_string()),
+            serde_json::Value::Number(serde_json::Number::from(42)),
+            serde_json::Value::Bool(true),
+        ];
+        custom_map.insert("mixed".to_string(), serde_json::Value::Array(mixed_array));
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Verify roles array is extracted correctly
+        let roles = extracted_claims
+            .custom
+            .get("roles")
+            .and_then(|v| v.as_array());
+        assert!(roles.is_some(), "Expected 'roles' array to exist");
+
+        let roles = roles.unwrap();
+        assert_eq!(roles.len(), 3, "Expected 3 roles in array");
+        assert_eq!(
+            roles[0].as_str(),
+            Some("admin"),
+            "First role should be 'admin'"
+        );
+        assert_eq!(
+            roles[1].as_str(),
+            Some("user"),
+            "Second role should be 'user'"
+        );
+        assert_eq!(
+            roles[2].as_str(),
+            Some("moderator"),
+            "Third role should be 'moderator'"
+        );
+
+        // Verify scores array is extracted correctly
+        let scores = extracted_claims
+            .custom
+            .get("scores")
+            .and_then(|v| v.as_array());
+        assert!(scores.is_some(), "Expected 'scores' array to exist");
+
+        let scores = scores.unwrap();
+        assert_eq!(scores.len(), 3, "Expected 3 scores in array");
+        assert_eq!(scores[0].as_i64(), Some(100), "First score should be 100");
+        assert_eq!(scores[1].as_i64(), Some(95), "Second score should be 95");
+        assert_eq!(scores[2].as_i64(), Some(87), "Third score should be 87");
+
+        // Verify mixed array is extracted correctly
+        let mixed = extracted_claims
+            .custom
+            .get("mixed")
+            .and_then(|v| v.as_array());
+        assert!(mixed.is_some(), "Expected 'mixed' array to exist");
+
+        let mixed = mixed.unwrap();
+        assert_eq!(mixed.len(), 3, "Expected 3 items in mixed array");
+        assert_eq!(
+            mixed[0].as_str(),
+            Some("test"),
+            "First item should be 'test'"
+        );
+        assert_eq!(mixed[1].as_i64(), Some(42), "Second item should be 42");
+        assert_eq!(mixed[2].as_bool(), Some(true), "Third item should be true");
+    }
 }
