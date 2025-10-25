@@ -3718,6 +3718,73 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_can_parse_range_header_with_open_ended_range() {
+        // Test "bytes=1000-" (from byte 1000 to end of file)
+        let range = parse_range_header("bytes=1000-");
+        assert!(range.is_some(), "Should parse open-ended range header");
+
+        let parsed = range.unwrap();
+        assert_eq!(parsed.unit, "bytes", "Unit should be bytes");
+        assert_eq!(parsed.ranges.len(), 1, "Should have one range");
+
+        let first_range = &parsed.ranges[0];
+        assert_eq!(first_range.start, Some(1000), "Start should be 1000");
+        assert_eq!(
+            first_range.end, None,
+            "End should be None for open-ended range"
+        );
+
+        // Test "bytes=0-" (entire file from beginning)
+        let range2 = parse_range_header("bytes=0-");
+        assert!(range2.is_some(), "Should parse range starting from 0");
+
+        let parsed2 = range2.unwrap();
+        assert_eq!(parsed2.ranges.len(), 1);
+        assert_eq!(parsed2.ranges[0].start, Some(0));
+        assert_eq!(parsed2.ranges[0].end, None);
+
+        // Test "bytes=5000000-" (large offset)
+        let range3 = parse_range_header("bytes=5000000-");
+        assert!(
+            range3.is_some(),
+            "Should parse large offset open-ended range"
+        );
+
+        let parsed3 = range3.unwrap();
+        assert_eq!(parsed3.ranges[0].start, Some(5000000));
+        assert_eq!(parsed3.ranges[0].end, None);
+
+        // Test size calculation for open-ended range (should return None)
+        let range4 = parse_range_header("bytes=100-");
+        let parsed4 = range4.unwrap();
+        let size = parsed4.ranges[0].size();
+        assert_eq!(
+            size, None,
+            "Size should be None for open-ended range (unknown until file size known)"
+        );
+
+        // Test with spaces "bytes=1000- " (trailing space)
+        let range5 = parse_range_header("bytes=1000- ");
+        assert!(
+            range5.is_some(),
+            "Should parse open-ended range with trailing space"
+        );
+        let parsed5 = range5.unwrap();
+        assert_eq!(parsed5.ranges[0].start, Some(1000));
+        assert_eq!(parsed5.ranges[0].end, None);
+
+        // Test with spaces " bytes = 1000 - "
+        let range6 = parse_range_header(" bytes = 1000 - ");
+        assert!(
+            range6.is_some(),
+            "Should parse open-ended range with spaces around tokens"
+        );
+        let parsed6 = range6.unwrap();
+        assert_eq!(parsed6.ranges[0].start, Some(1000));
+        assert_eq!(parsed6.ranges[0].end, None);
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};
