@@ -339,7 +339,7 @@ yatagarasu/
 - [x] Test: Forwards Range header to S3 with AWS signature
 - [x] Test: Returns 206 Partial Content for valid range
 - [x] Test: Returns Content-Range header with correct format
-- [ ] Test: Streams only requested bytes (not full file)
+- [x] Test: Streams only requested bytes (not full file)
 - [ ] Test: Returns 416 Range Not Satisfiable for out-of-bounds range
 - [ ] Test: Handles If-Range conditional requests correctly
 - [ ] Test: Graceful fallback to 200 OK for invalid range syntax

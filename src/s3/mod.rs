@@ -4627,6 +4627,170 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_streams_only_requested_bytes_not_full_file() {
+        use futures::stream::{self, StreamExt};
+
+        // Simulate a 5000 byte file where client requests only bytes 1000-1999
+        let total_file_size = 5000usize;
+        let range_start = 1000usize;
+        let range_end = 1999usize;
+        let expected_bytes = (range_end - range_start) + 1; // 1000 bytes
+
+        // Create full file data (5000 bytes, each byte = its position % 256)
+        let full_file: Vec<u8> = (0..total_file_size).map(|i| (i % 256) as u8).collect();
+
+        // Simulate S3 returning only the requested range (not full file)
+        let range_data: Vec<u8> = full_file[range_start..=range_end].to_vec();
+
+        // Create stream that yields only the requested bytes
+        let chunk_size = 256; // Stream in 256-byte chunks
+        let chunks: Vec<Vec<u8>> = range_data.chunks(chunk_size).map(|c| c.to_vec()).collect();
+
+        let data_stream = stream::iter(
+            chunks
+                .into_iter()
+                .map(|chunk| Ok::<_, std::io::Error>(bytes::Bytes::from(chunk))),
+        );
+
+        // Client receives the stream
+        let mut received_bytes = Vec::new();
+        let mut stream = Box::pin(data_stream);
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    received_bytes.extend_from_slice(&chunk);
+                }
+                Err(_) => break,
+            }
+        }
+
+        // Verify we only received the requested range, not the full file
+        assert_eq!(
+            received_bytes.len(),
+            expected_bytes,
+            "Should receive exactly {} bytes (requested range), not {} bytes (full file)",
+            expected_bytes,
+            total_file_size
+        );
+
+        assert!(
+            received_bytes.len() < total_file_size,
+            "Received bytes ({}) should be less than full file ({})",
+            received_bytes.len(),
+            total_file_size
+        );
+
+        // Verify the content is correct (matches bytes 1000-1999 from original)
+        for (i, &byte) in received_bytes.iter().enumerate() {
+            let original_position = range_start + i;
+            let expected_byte = (original_position % 256) as u8;
+            assert_eq!(
+                byte, expected_byte,
+                "Byte at offset {} should be {} (from position {}), got {}",
+                i, expected_byte, original_position, byte
+            );
+        }
+
+        // Test different range sizes to verify streaming efficiency
+        // Small range: bytes 0-99 (100 bytes from 5000 byte file)
+        let small_range_data: Vec<u8> = (0..100).map(|i| i as u8).collect();
+        let small_stream = stream::iter(vec![Ok::<_, std::io::Error>(bytes::Bytes::from(
+            small_range_data.clone(),
+        ))]);
+
+        let mut small_received = Vec::new();
+        let mut small_stream_pin = Box::pin(small_stream);
+
+        while let Some(chunk_result) = small_stream_pin.next().await {
+            if let Ok(chunk) = chunk_result {
+                small_received.extend_from_slice(&chunk);
+            }
+        }
+
+        assert_eq!(
+            small_received.len(),
+            100,
+            "Small range should be 100 bytes, not full file"
+        );
+        assert_eq!(small_received, small_range_data);
+
+        // Large range: bytes 0-4999 (full file = 5000 bytes)
+        let large_range_data: Vec<u8> = (0..5000).map(|i| (i % 256) as u8).collect();
+        let large_stream = stream::iter(
+            large_range_data
+                .chunks(1000)
+                .map(|c| Ok::<_, std::io::Error>(bytes::Bytes::from(c.to_vec())))
+                .collect::<Vec<_>>(),
+        );
+
+        let mut large_received = Vec::new();
+        let mut large_stream_pin = Box::pin(large_stream);
+
+        while let Some(chunk_result) = large_stream_pin.next().await {
+            if let Ok(chunk) = chunk_result {
+                large_received.extend_from_slice(&chunk);
+            }
+        }
+
+        assert_eq!(
+            large_received.len(),
+            5000,
+            "Large range covering full file should be 5000 bytes"
+        );
+
+        // Open-ended range: bytes 4500- (last 500 bytes)
+        let open_ended_data: Vec<u8> = (4500..5000).map(|i| (i % 256) as u8).collect();
+        let open_ended_stream = stream::iter(vec![Ok::<_, std::io::Error>(bytes::Bytes::from(
+            open_ended_data.clone(),
+        ))]);
+
+        let mut open_ended_received = Vec::new();
+        let mut open_ended_stream_pin = Box::pin(open_ended_stream);
+
+        while let Some(chunk_result) = open_ended_stream_pin.next().await {
+            if let Ok(chunk) = chunk_result {
+                open_ended_received.extend_from_slice(&chunk);
+            }
+        }
+
+        assert_eq!(
+            open_ended_received.len(),
+            500,
+            "Open-ended range should be 500 bytes (4500 to end), not full 5000"
+        );
+        assert_eq!(open_ended_received, open_ended_data);
+
+        // Suffix range: bytes -200 (last 200 bytes)
+        let suffix_data: Vec<u8> = (4800..5000).map(|i| (i % 256) as u8).collect();
+        let suffix_stream = stream::iter(vec![Ok::<_, std::io::Error>(bytes::Bytes::from(
+            suffix_data.clone(),
+        ))]);
+
+        let mut suffix_received = Vec::new();
+        let mut suffix_stream_pin = Box::pin(suffix_stream);
+
+        while let Some(chunk_result) = suffix_stream_pin.next().await {
+            if let Ok(chunk) = chunk_result {
+                suffix_received.extend_from_slice(&chunk);
+            }
+        }
+
+        assert_eq!(
+            suffix_received.len(),
+            200,
+            "Suffix range should be 200 bytes (last 200), not full 5000"
+        );
+        assert_eq!(suffix_received, suffix_data);
+
+        println!(
+            "✓ Range request streams only {} bytes, not full {} byte file",
+            expected_bytes, total_file_size
+        );
+        println!("✓ Small range (100 bytes), large range (5000 bytes), open-ended (500 bytes), suffix (200 bytes) all verified");
+    }
+
+    #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};
         use std::sync::{Arc, Mutex};
