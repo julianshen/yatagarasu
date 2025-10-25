@@ -217,6 +217,11 @@ impl S3Response {
     pub fn is_success(&self) -> bool {
         self.status_code >= 200 && self.status_code < 300
     }
+
+    /// Gets a header value by name
+    pub fn get_header(&self, name: &str) -> Option<&String> {
+        self.headers.get(name)
+    }
 }
 
 pub fn sign_request(params: &SigningParams) -> String {
@@ -1837,5 +1842,64 @@ mod tests {
 
         // Verify body is preserved
         assert_eq!(response.body, body, "Response body should be preserved");
+    }
+
+    #[test]
+    fn test_extracts_content_type_header_from_s3_response() {
+        use std::collections::HashMap;
+
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-length".to_string(), "100".to_string());
+
+        let response = S3Response::new(200, "OK", headers, vec![]);
+
+        // Test extracting content-type header
+        let content_type = response.get_header("content-type");
+        assert_eq!(
+            content_type,
+            Some(&"application/json".to_string()),
+            "Should extract content-type header"
+        );
+
+        // Test with different content types
+        let mut headers2 = HashMap::new();
+        headers2.insert(
+            "content-type".to_string(),
+            "text/html; charset=utf-8".to_string(),
+        );
+        let response2 = S3Response::new(200, "OK", headers2, vec![]);
+        assert_eq!(
+            response2.get_header("content-type"),
+            Some(&"text/html; charset=utf-8".to_string())
+        );
+
+        // Test with image content type
+        let mut headers3 = HashMap::new();
+        headers3.insert("content-type".to_string(), "image/png".to_string());
+        let response3 = S3Response::new(200, "OK", headers3, vec![]);
+        assert_eq!(
+            response3.get_header("content-type"),
+            Some(&"image/png".to_string())
+        );
+
+        // Test missing content-type header
+        let headers4 = HashMap::new();
+        let response4 = S3Response::new(200, "OK", headers4, vec![]);
+        assert_eq!(
+            response4.get_header("content-type"),
+            None,
+            "Should return None for missing header"
+        );
+
+        // Test case-insensitive header lookup
+        let mut headers5 = HashMap::new();
+        headers5.insert("Content-Type".to_string(), "text/plain".to_string());
+        let response5 = S3Response::new(200, "OK", headers5, vec![]);
+        assert!(
+            response5.get_header("content-type").is_some()
+                || response5.get_header("Content-Type").is_some(),
+            "Should handle header case variations"
+        );
     }
 }
