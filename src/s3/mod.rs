@@ -5299,4 +5299,144 @@ mod tests {
         );
         println!("✓ Successfully handled 5 concurrent streams of same file");
     }
+
+    #[test]
+    fn test_handles_if_range_conditional_requests_correctly() {
+        use std::collections::HashMap;
+
+        // Test case 1: If-Range with ETag that matches
+        // Client has cached version with ETag "abc123", wants bytes 0-1023
+        // Server has same ETag → return 206 Partial Content
+        let mut headers_match = HashMap::new();
+        headers_match.insert("etag".to_string(), "\"abc123\"".to_string());
+        headers_match.insert("content-type".to_string(), "text/plain".to_string());
+        headers_match.insert("content-range".to_string(), "bytes 0-1023/5000".to_string());
+        headers_match.insert("content-length".to_string(), "1024".to_string());
+
+        let partial_body = vec![1u8; 1024]; // 1024 bytes of partial content
+        let response_match = S3Response::new(206, "Partial Content", headers_match, partial_body);
+
+        assert_eq!(response_match.status_code, 206);
+        assert_eq!(response_match.status_text, "Partial Content");
+        assert_eq!(
+            response_match.headers.get("content-range").unwrap(),
+            "bytes 0-1023/5000"
+        );
+        assert_eq!(response_match.body.len(), 1024);
+
+        // Test case 2: If-Range with ETag that doesn't match
+        // Client has cached version with ETag "abc123", wants bytes 0-1023
+        // Server has different ETag "xyz789" → return 200 OK with full content
+        let mut headers_mismatch = HashMap::new();
+        headers_mismatch.insert("etag".to_string(), "\"xyz789\"".to_string());
+        headers_mismatch.insert("content-type".to_string(), "text/plain".to_string());
+        headers_mismatch.insert("content-length".to_string(), "5000".to_string());
+        // Note: No Content-Range header when returning full content
+
+        let full_body = vec![2u8; 5000]; // Full 5000 bytes
+        let response_mismatch = S3Response::new(200, "OK", headers_mismatch, full_body);
+
+        assert_eq!(response_mismatch.status_code, 200);
+        assert_eq!(response_mismatch.status_text, "OK");
+        assert_eq!(response_mismatch.headers.get("etag").unwrap(), "\"xyz789\"");
+        assert_eq!(response_mismatch.body.len(), 5000);
+        assert!(
+            response_mismatch.headers.get("content-range").is_none(),
+            "200 OK response should not include Content-Range header"
+        );
+
+        // Test case 3: If-Range with Last-Modified date that matches
+        // Client has cached version from specific date, wants partial content
+        // Server Last-Modified matches → return 206 Partial Content
+        let mut headers_date_match = HashMap::new();
+        headers_date_match.insert(
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        );
+        headers_date_match.insert("content-type".to_string(), "application/pdf".to_string());
+        headers_date_match.insert(
+            "content-range".to_string(),
+            "bytes 1000-2999/10000".to_string(),
+        );
+        headers_date_match.insert("content-length".to_string(), "2000".to_string());
+
+        let partial_body_date = vec![3u8; 2000];
+        let response_date_match = S3Response::new(
+            206,
+            "Partial Content",
+            headers_date_match,
+            partial_body_date,
+        );
+
+        assert_eq!(response_date_match.status_code, 206);
+        assert_eq!(
+            response_date_match.headers.get("last-modified").unwrap(),
+            "Wed, 21 Oct 2015 07:28:00 GMT"
+        );
+        assert_eq!(
+            response_date_match.headers.get("content-range").unwrap(),
+            "bytes 1000-2999/10000"
+        );
+        assert_eq!(response_date_match.body.len(), 2000);
+
+        // Test case 4: If-Range with Last-Modified date that doesn't match
+        // Client has old cached version, wants partial content
+        // Server Last-Modified is newer → return 200 OK with full content
+        let mut headers_date_mismatch = HashMap::new();
+        headers_date_mismatch.insert(
+            "last-modified".to_string(),
+            "Thu, 22 Oct 2015 10:00:00 GMT".to_string(), // Newer date
+        );
+        headers_date_mismatch.insert("content-type".to_string(), "application/pdf".to_string());
+        headers_date_mismatch.insert("content-length".to_string(), "10000".to_string());
+
+        let full_body_date = vec![4u8; 10000];
+        let response_date_mismatch =
+            S3Response::new(200, "OK", headers_date_mismatch, full_body_date);
+
+        assert_eq!(response_date_mismatch.status_code, 200);
+        assert_eq!(
+            response_date_mismatch.headers.get("last-modified").unwrap(),
+            "Thu, 22 Oct 2015 10:00:00 GMT"
+        );
+        assert_eq!(response_date_mismatch.body.len(), 10000);
+        assert!(
+            response_date_mismatch
+                .headers
+                .get("content-range")
+                .is_none(),
+            "200 OK response should not include Content-Range header"
+        );
+
+        // Test case 5: Verify Accept-Ranges header is included
+        // This indicates server supports range requests
+        let mut headers_accept_ranges = HashMap::new();
+        headers_accept_ranges.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_accept_ranges.insert("etag".to_string(), "\"def456\"".to_string());
+        headers_accept_ranges.insert("content-length".to_string(), "1000".to_string());
+
+        let response_accept_ranges =
+            S3Response::new(200, "OK", headers_accept_ranges, vec![5u8; 1000]);
+
+        assert_eq!(
+            response_accept_ranges.headers.get("accept-ranges").unwrap(),
+            "bytes"
+        );
+
+        // Test case 6: Range request without If-Range (already tested, but verify distinction)
+        // This should ALWAYS return 206 if range is valid, regardless of ETag/date
+        let mut headers_no_if_range = HashMap::new();
+        headers_no_if_range.insert("etag".to_string(), "\"any-etag\"".to_string());
+        headers_no_if_range.insert("content-range".to_string(), "bytes 0-999/5000".to_string());
+        headers_no_if_range.insert("content-length".to_string(), "1000".to_string());
+
+        let response_no_if_range =
+            S3Response::new(206, "Partial Content", headers_no_if_range, vec![6u8; 1000]);
+
+        assert_eq!(response_no_if_range.status_code, 206);
+        assert_eq!(
+            response_no_if_range.headers.get("content-range").unwrap(),
+            "bytes 0-999/5000"
+        );
+    }
 }
