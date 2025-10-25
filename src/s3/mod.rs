@@ -1,6 +1,10 @@
 // S3 client module
 
 use crate::config::S3Config;
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug)]
 pub struct S3Client {
@@ -26,6 +30,94 @@ pub fn create_s3_client(config: &S3Config) -> Result<S3Client, String> {
     Ok(S3Client {
         config: config.clone(),
     })
+}
+
+// AWS Signature v4 implementation
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+pub struct SigningParams<'a> {
+    pub method: &'a str,
+    pub uri: &'a str,
+    pub query_string: &'a str,
+    pub headers: &'a std::collections::HashMap<String, String>,
+    pub payload: &'a [u8],
+    pub access_key: &'a str,
+    pub secret_key: &'a str,
+    pub region: &'a str,
+    pub service: &'a str,
+    pub date: &'a str,     // Format: YYYYMMDD
+    pub datetime: &'a str, // Format: YYYYMMDDTHHMMSSZ
+}
+
+pub fn sign_request(params: &SigningParams) -> String {
+    // Step 1: Create canonical request
+    let payload_hash = sha256_hex(params.payload);
+
+    // Sort headers by lowercase key
+    let mut sorted_headers: Vec<(&String, &String)> = params.headers.iter().collect();
+    sorted_headers.sort_by_key(|(k, _)| k.to_lowercase());
+
+    let canonical_headers = sorted_headers
+        .iter()
+        .map(|(k, v)| format!("{}:{}", k.to_lowercase(), v.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let signed_headers = sorted_headers
+        .iter()
+        .map(|(k, _)| k.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(";");
+
+    let canonical_request = format!(
+        "{}\n{}\n{}\n{}\n\n{}\n{}",
+        params.method,
+        params.uri,
+        params.query_string,
+        canonical_headers,
+        signed_headers,
+        payload_hash
+    );
+
+    let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
+
+    // Step 2: Create string to sign
+    let credential_scope = format!(
+        "{}/{}/{}/aws4_request",
+        params.date, params.region, params.service
+    );
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        params.datetime, credential_scope, canonical_request_hash
+    );
+
+    // Step 3: Calculate signing key
+    let k_date = hmac_sha256(
+        format!("AWS4{}", params.secret_key).as_bytes(),
+        params.date.as_bytes(),
+    );
+    let k_region = hmac_sha256(&k_date, params.region.as_bytes());
+    let k_service = hmac_sha256(&k_region, params.service.as_bytes());
+    let k_signing = hmac_sha256(&k_service, b"aws4_request");
+
+    // Step 4: Calculate signature
+    let signature = hex::encode(hmac_sha256(&k_signing, string_to_sign.as_bytes()));
+
+    // Step 5: Create Authorization header
+    format!(
+        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+        params.access_key, credential_scope, signed_headers, signature
+    )
 }
 
 #[cfg(test)]
@@ -330,6 +422,102 @@ mod tests {
         assert_ne!(
             users_client.config.region, products_client.config.region,
             "Each client should have independent regions"
+        );
+    }
+
+    #[test]
+    fn test_generates_valid_aws_signature_v4_for_get_request() {
+        use std::collections::HashMap;
+
+        // Test parameters (based on AWS Signature v4 test suite)
+        let method = "GET";
+        let uri = "/test-bucket/test-key.txt";
+        let query_string = "";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+        let service = "s3";
+        let date = "20130524";
+        let datetime = "20130524T000000Z";
+
+        // Headers required for AWS Signature v4
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "test-bucket.s3.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), datetime.to_string());
+        headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
+
+        // Empty payload for GET request
+        let payload = b"";
+
+        // Generate signature
+        let params = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers,
+            payload,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let authorization = sign_request(&params);
+
+        // Verify Authorization header format
+        assert!(
+            authorization.starts_with("AWS4-HMAC-SHA256"),
+            "Authorization header should start with AWS4-HMAC-SHA256"
+        );
+        assert!(
+            authorization.contains("Credential="),
+            "Authorization header should contain Credential"
+        );
+        assert!(
+            authorization.contains("SignedHeaders="),
+            "Authorization header should contain SignedHeaders"
+        );
+        assert!(
+            authorization.contains("Signature="),
+            "Authorization header should contain Signature"
+        );
+
+        // Verify credential scope is included
+        assert!(
+            authorization.contains(&format!("{}/{}/{}/aws4_request", date, region, service)),
+            "Authorization header should contain correct credential scope"
+        );
+
+        // Verify access key is included
+        assert!(
+            authorization.contains(access_key),
+            "Authorization header should contain access key"
+        );
+
+        // Verify signed headers are included
+        assert!(
+            authorization.contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date"),
+            "Authorization header should contain correct signed headers"
+        );
+
+        // Verify signature is a valid hex string (64 characters for SHA256)
+        let signature_part = authorization
+            .split("Signature=")
+            .nth(1)
+            .expect("Should have Signature part");
+        assert_eq!(
+            signature_part.len(),
+            64,
+            "Signature should be 64 hex characters"
+        );
+        assert!(
+            signature_part.chars().all(|c| c.is_ascii_hexdigit()),
+            "Signature should only contain hex characters"
         );
     }
 }

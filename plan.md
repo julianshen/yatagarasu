@@ -277,7 +277,7 @@ yatagarasu/
 - [x] Test: Can create multiple independent S3 clients (one per bucket)
 
 ### S3 Signature v4 - Request Signing
-- [ ] Test: Generates valid AWS Signature v4 for GET request
+- [x] Test: Generates valid AWS Signature v4 for GET request
 - [ ] Test: Signature includes all required headers
 - [ ] Test: Signature includes Authorization header with correct format
 - [ ] Test: Signature includes x-amz-date header
