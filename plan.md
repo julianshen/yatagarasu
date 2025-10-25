@@ -236,7 +236,7 @@ yatagarasu/
 
 ### JWT - Claims Extraction
 - [x] Test: Extracts standard claims (sub, iss, exp, iat)
-- [ ] Test: Extracts custom claims from payload
+- [x] Test: Extracts custom claims from payload
 - [ ] Test: Handles missing optional claims gracefully
 - [ ] Test: Handles nested claim structures
 - [ ] Test: Handles array claims

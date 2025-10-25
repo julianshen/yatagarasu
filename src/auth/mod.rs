@@ -1517,4 +1517,82 @@ mod tests {
             "Issued at claim not extracted correctly"
         );
     }
+
+    #[test]
+    fn test_extracts_custom_claims_from_payload() {
+        let secret = "test_secret";
+
+        // Create a JWT with custom claims
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "user_role".to_string(),
+            serde_json::Value::String("admin".to_string()),
+        );
+        custom_map.insert(
+            "permissions".to_string(),
+            serde_json::Value::String("read,write,delete".to_string()),
+        );
+        custom_map.insert(
+            "user_id".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(42)),
+        );
+        custom_map.insert("is_verified".to_string(), serde_json::Value::Bool(true));
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Verify custom claims are extracted correctly
+        assert_eq!(
+            extracted_claims
+                .custom
+                .get("user_role")
+                .and_then(|v| v.as_str()),
+            Some("admin"),
+            "Custom claim 'user_role' not extracted correctly"
+        );
+        assert_eq!(
+            extracted_claims
+                .custom
+                .get("permissions")
+                .and_then(|v| v.as_str()),
+            Some("read,write,delete"),
+            "Custom claim 'permissions' not extracted correctly"
+        );
+        assert_eq!(
+            extracted_claims
+                .custom
+                .get("user_id")
+                .and_then(|v| v.as_i64()),
+            Some(42),
+            "Custom claim 'user_id' not extracted correctly"
+        );
+        assert_eq!(
+            extracted_claims
+                .custom
+                .get("is_verified")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "Custom claim 'is_verified' not extracted correctly"
+        );
+    }
 }
