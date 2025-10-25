@@ -736,4 +736,99 @@ mod tests {
             "Second part must start with 'Credential='"
         );
     }
+
+    #[test]
+    fn test_signature_includes_x_amz_date_header() {
+        use std::collections::HashMap;
+
+        let method = "GET";
+        let uri = "/bucket/key";
+        let query_string = "";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+        let service = "s3";
+        let date = "20130524";
+        let datetime1 = "20130524T000000Z";
+        let datetime2 = "20130524T120000Z";
+
+        // Create first signature with datetime1
+        let mut headers1 = HashMap::new();
+        headers1.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers1.insert("x-amz-date".to_string(), datetime1.to_string());
+        headers1.insert(
+            "x-amz-content-sha256".to_string(),
+            sha256_hex(b"").to_string(),
+        );
+
+        let payload = b"";
+
+        let params1 = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers1,
+            payload,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime: datetime1,
+        };
+
+        let authorization1 = sign_request(&params1);
+
+        // Verify x-amz-date is in SignedHeaders
+        assert!(
+            authorization1.contains("x-amz-date"),
+            "SignedHeaders must include x-amz-date"
+        );
+
+        // Create second signature with datetime2 (different time)
+        let mut headers2 = HashMap::new();
+        headers2.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers2.insert("x-amz-date".to_string(), datetime2.to_string());
+        headers2.insert(
+            "x-amz-content-sha256".to_string(),
+            sha256_hex(b"").to_string(),
+        );
+
+        let params2 = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers2,
+            payload,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime: datetime2,
+        };
+
+        let authorization2 = sign_request(&params2);
+
+        // Verify that changing x-amz-date value changes the signature
+        assert_ne!(
+            authorization1, authorization2,
+            "Signature must change when x-amz-date header value changes"
+        );
+
+        // Extract signatures to verify they're different
+        let sig1 = authorization1
+            .split("Signature=")
+            .nth(1)
+            .expect("Should have Signature");
+        let sig2 = authorization2
+            .split("Signature=")
+            .nth(1)
+            .expect("Should have Signature");
+
+        assert_ne!(
+            sig1, sig2,
+            "Signature value must be different when x-amz-date is different"
+        );
+    }
 }
