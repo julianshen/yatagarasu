@@ -1666,4 +1666,64 @@ mod tests {
         let request3 = build_head_object_request("bucket3", "path/to/object", "ap-south-1");
         assert_eq!(request3.method, "HEAD");
     }
+
+    #[test]
+    fn test_head_request_includes_same_headers_as_get() {
+        let bucket = "test-bucket";
+        let key = "documents/file.pdf";
+        let region = "us-east-1";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+        // Build GET request and get headers
+        let get_request = build_get_object_request(bucket, key, region);
+        let get_headers = get_request.get_signed_headers(access_key, secret_key);
+
+        // Build HEAD request and get headers
+        let head_request = build_head_object_request(bucket, key, region);
+        let head_headers = head_request.get_signed_headers(access_key, secret_key);
+
+        // Verify both have the same header keys
+        let get_keys: std::collections::HashSet<_> = get_headers.keys().collect();
+        let head_keys: std::collections::HashSet<_> = head_headers.keys().collect();
+        assert_eq!(
+            get_keys, head_keys,
+            "HEAD and GET requests should have the same header keys"
+        );
+
+        // Verify both include required AWS headers
+        assert!(
+            head_headers.contains_key("host"),
+            "HEAD request should include host header"
+        );
+        assert!(
+            head_headers.contains_key("x-amz-date"),
+            "HEAD request should include x-amz-date header"
+        );
+        assert!(
+            head_headers.contains_key("x-amz-content-sha256"),
+            "HEAD request should include x-amz-content-sha256 header"
+        );
+        assert!(
+            head_headers.contains_key("authorization"),
+            "HEAD request should include authorization header"
+        );
+
+        // Verify host header is the same (independent of method)
+        assert_eq!(
+            get_headers.get("host"),
+            head_headers.get("host"),
+            "Host header should be identical for GET and HEAD"
+        );
+
+        // Verify x-amz-content-sha256 is the same (empty payload for both)
+        assert_eq!(
+            get_headers.get("x-amz-content-sha256"),
+            head_headers.get("x-amz-content-sha256"),
+            "Content SHA256 should be identical for GET and HEAD"
+        );
+
+        // Note: x-amz-date might differ due to timestamp generation
+        // Note: Authorization signature will differ because method is different
+    }
 }
