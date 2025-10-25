@@ -232,7 +232,7 @@ yatagarasu/
 - [x] Test: Accepts JWT with valid `exp` and `nbf` claims
 - [x] Test: Rejects malformed JWT (not 3 parts)
 - [x] Test: Rejects JWT with invalid Base64 encoding
-- [ ] Test: Rejects JWT with invalid JSON in payload
+- [x] Test: Rejects JWT with invalid JSON in payload
 
 ### JWT - Claims Extraction
 - [ ] Test: Extracts standard claims (sub, iss, exp, iat)

@@ -1418,4 +1418,49 @@ mod tests {
             "Expected JWT with multiple invalid Base64 characters to be rejected"
         );
     }
+
+    #[test]
+    fn test_rejects_jwt_with_invalid_json_in_payload() {
+        let secret = "test_secret";
+
+        // Test 1: Valid Base64 but payload contains plain text instead of JSON
+        // Header: {"alg":"HS256","typ":"JWT"} (valid)
+        // Payload: "not json at all" (base64: bm90IGpzb24gYXQgYWxs)
+        let plain_text_payload =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.bm90IGpzb24gYXQgYWxs.signature";
+        let result1 = validate_jwt(plain_text_payload, secret);
+        assert!(
+            result1.is_err(),
+            "Expected JWT with plain text payload to be rejected"
+        );
+
+        // Test 2: Malformed JSON - missing closing brace
+        // Payload: {"sub":"user123" (base64: eyJzdWIiOiJ1c2VyMTIzIg==)
+        let malformed_json =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIg.signature";
+        let result2 = validate_jwt(malformed_json, secret);
+        assert!(
+            result2.is_err(),
+            "Expected JWT with malformed JSON in payload to be rejected"
+        );
+
+        // Test 3: Invalid JSON - single quotes instead of double quotes
+        // Payload: {'sub':'user'} (base64: eydzdWInOid1c2VyJ30=)
+        let single_quotes_json =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eydzdWInOid1c2VyJ30.signature";
+        let result3 = validate_jwt(single_quotes_json, secret);
+        assert!(
+            result3.is_err(),
+            "Expected JWT with single-quoted JSON to be rejected"
+        );
+
+        // Test 4: Just a number (valid JSON but not an object)
+        // Payload: 12345 (base64: MTIzNDU=)
+        let number_payload = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.MTIzNDU.signature";
+        let result4 = validate_jwt(number_payload, secret);
+        assert!(
+            result4.is_err(),
+            "Expected JWT with non-object JSON payload to be rejected"
+        );
+    }
 }
