@@ -1875,4 +1875,65 @@ mod tests {
         assert_eq!(mixed[1].as_i64(), Some(42), "Second item should be 42");
         assert_eq!(mixed[2].as_bool(), Some(true), "Third item should be true");
     }
+
+    #[test]
+    fn test_handles_null_claim_values() {
+        let secret = "test_secret";
+
+        // Create a JWT with null claim values
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert("middle_name".to_string(), serde_json::Value::Null);
+        custom_map.insert("phone".to_string(), serde_json::Value::Null);
+        custom_map.insert(
+            "email".to_string(),
+            serde_json::Value::String("user@example.com".to_string()),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Verify null values are handled correctly
+        let middle_name = extracted_claims.custom.get("middle_name");
+        assert!(middle_name.is_some(), "Expected 'middle_name' key to exist");
+        assert!(
+            middle_name.unwrap().is_null(),
+            "Expected 'middle_name' value to be null"
+        );
+
+        let phone = extracted_claims.custom.get("phone");
+        assert!(phone.is_some(), "Expected 'phone' key to exist");
+        assert!(
+            phone.unwrap().is_null(),
+            "Expected 'phone' value to be null"
+        );
+
+        // Verify non-null value still works
+        let email = extracted_claims.custom.get("email");
+        assert!(email.is_some(), "Expected 'email' key to exist");
+        assert_eq!(
+            email.unwrap().as_str(),
+            Some("user@example.com"),
+            "Expected 'email' to have correct value"
+        );
+    }
 }

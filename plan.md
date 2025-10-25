@@ -240,7 +240,7 @@ yatagarasu/
 - [x] Test: Handles missing optional claims gracefully
 - [x] Test: Handles nested claim structures
 - [x] Test: Handles array claims
-- [ ] Test: Handles null claim values
+- [x] Test: Handles null claim values
 
 ### JWT - Claims Verification (Equals Operator)
 - [ ] Test: Verifies string claim equals expected value
