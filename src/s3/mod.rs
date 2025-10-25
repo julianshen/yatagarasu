@@ -178,6 +178,16 @@ pub fn build_get_object_request(bucket: &str, key: &str, region: &str) -> S3Requ
     }
 }
 
+/// Builds a HEAD object request for S3
+pub fn build_head_object_request(bucket: &str, key: &str, region: &str) -> S3Request {
+    S3Request {
+        method: "HEAD".to_string(),
+        bucket: bucket.to_string(),
+        key: key.to_string(),
+        region: region.to_string(),
+    }
+}
+
 pub fn sign_request(params: &SigningParams) -> String {
     // Step 1 & 2: Create string to sign (includes canonical request generation)
     let string_to_sign = create_string_to_sign(params);
@@ -1603,5 +1613,26 @@ mod tests {
             request5.key, leading_slash,
             "Key with leading slash should be preserved"
         );
+    }
+
+    #[test]
+    fn test_can_build_head_object_request_with_key() {
+        let bucket = "test-bucket";
+        let key = "test-key.txt";
+        let region = "us-east-1";
+
+        let request = build_head_object_request(bucket, key, region);
+
+        // Verify the request has correct method
+        assert_eq!(request.method, "HEAD", "Request method should be HEAD");
+
+        // Verify the request includes bucket
+        assert_eq!(request.bucket, bucket);
+
+        // Verify the request includes key
+        assert_eq!(request.key, key);
+
+        // Verify the request includes region
+        assert_eq!(request.region, region);
     }
 }

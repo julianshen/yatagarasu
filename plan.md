@@ -295,7 +295,7 @@ yatagarasu/
 - [x] Test: GET request preserves original path structure
 
 ### S3 Operations - HEAD Object
-- [ ] Test: Can build HEAD object request with key
+- [x] Test: Can build HEAD object request with key
 - [ ] Test: HEAD request includes correct HTTP method
 - [ ] Test: HEAD request includes same headers as GET
 - [ ] Test: HEAD request returns object metadata without body
