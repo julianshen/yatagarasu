@@ -2915,4 +2915,83 @@ mod tests {
             Ok(_) => panic!("Expected error but authentication succeeded"),
         }
     }
+
+    #[test]
+    fn test_returns_claims_verification_failed_when_jwt_valid_but_claims_dont_match() {
+        use crate::config::TokenSource;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+
+        // Create a valid JWT with role="user"
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("user".to_string()),
+        );
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(now + 3600), // Valid for 1 hour
+            iat: Some(now),
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Create JWT config that requires role="admin" (but token has role="user")
+        let jwt_config = JwtConfig {
+            enabled: true,
+            secret: secret.to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            }],
+            claims: vec![ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()),
+            }],
+        };
+
+        // Create headers with the valid JWT
+        let mut headers = HashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+        let query_params = HashMap::new();
+
+        // Authenticate the request
+        let result = authenticate_request(&headers, &query_params, &jwt_config);
+
+        assert!(
+            result.is_err(),
+            "Expected authentication to fail when claims verification fails"
+        );
+
+        match result {
+            Err(AuthError::ClaimsVerificationFailed) => {
+                // Expected error - JWT is valid but claims don't match
+            }
+            Err(other) => panic!(
+                "Expected AuthError::ClaimsVerificationFailed, got {:?}",
+                other
+            ),
+            Ok(_) => panic!("Expected error but authentication succeeded"),
+        }
+    }
 }
