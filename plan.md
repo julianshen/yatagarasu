@@ -332,7 +332,7 @@ yatagarasu/
 - [x] Test: Can parse Range header with open-ended range (bytes=1000-)
 - [x] Test: Can parse Range header with suffix range (bytes=-1000)
 - [x] Test: Can parse Range header with multiple ranges
-- [ ] Test: Handles invalid Range header syntax gracefully
+- [x] Test: Handles invalid Range header syntax gracefully
 - [ ] Test: Includes Accept-Ranges: bytes in response headers
 
 ### S3 Range Requests - Request Handling

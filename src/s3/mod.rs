@@ -371,16 +371,24 @@ pub fn parse_range_header(header_value: &str) -> Option<RangeHeader> {
             let start_str = range_str[..dash_pos].trim();
             let end_str = range_str[dash_pos + 1..].trim();
 
+            // Parse start: None if empty (suffix range), Some if valid number, error if invalid
             let start = if start_str.is_empty() {
                 None
             } else {
-                start_str.parse::<u64>().ok()
+                match start_str.parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => return None, // Invalid start number
+                }
             };
 
+            // Parse end: None if empty (open-ended range), Some if valid number, error if invalid
             let end = if end_str.is_empty() {
                 None
             } else {
-                end_str.parse::<u64>().ok()
+                match end_str.parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => return None, // Invalid end number
+                }
             };
 
             // Valid range must have at least start or end
@@ -3954,6 +3962,103 @@ mod tests {
             assert_eq!(range.end, Some(expected_end));
             assert_eq!(range.size(), Some(100));
         }
+    }
+
+    #[test]
+    fn test_handles_invalid_range_header_syntax_gracefully() {
+        // Test empty string
+        let range1 = parse_range_header("");
+        assert_eq!(range1, None, "Should reject empty string");
+
+        // Test missing "bytes=" unit
+        let range2 = parse_range_header("0-1023");
+        assert_eq!(range2, None, "Should reject missing unit");
+
+        // Test invalid unit (not "bytes")
+        let range3 = parse_range_header("chars=0-1023");
+        assert!(
+            range3.is_some(),
+            "Should parse with different unit (HTTP spec allows it)"
+        );
+        assert_eq!(range3.unwrap().unit, "chars");
+
+        // Test missing equals sign
+        let range4 = parse_range_header("bytes 0-1023");
+        assert_eq!(range4, None, "Should reject missing equals sign");
+
+        // Test missing dash in range
+        let range5 = parse_range_header("bytes=01023");
+        assert_eq!(range5, None, "Should reject missing dash");
+
+        // Test invalid start (not a number)
+        let range6 = parse_range_header("bytes=abc-1023");
+        assert_eq!(range6, None, "Should reject non-numeric start");
+
+        // Test invalid end (not a number)
+        let range7 = parse_range_header("bytes=0-xyz");
+        assert_eq!(range7, None, "Should reject non-numeric end");
+
+        // Test both start and end invalid
+        let range8 = parse_range_header("bytes=abc-xyz");
+        assert_eq!(range8, None, "Should reject non-numeric start and end");
+
+        // Test negative start (not suffix range)
+        let range9 = parse_range_header("bytes=-100-200");
+        assert_eq!(
+            range9, None,
+            "Should reject negative start in non-suffix range"
+        );
+
+        // Test start greater than end
+        let range10 = parse_range_header("bytes=1000-100");
+        assert!(
+            range10.is_some(),
+            "Should parse start > end (spec says satisfiable or not depends on content)"
+        );
+        let parsed10 = range10.unwrap();
+        assert_eq!(parsed10.ranges[0].start, Some(1000));
+        assert_eq!(parsed10.ranges[0].end, Some(100));
+        assert_eq!(
+            parsed10.ranges[0].size(),
+            None,
+            "Size should be None for invalid range (start > end)"
+        );
+
+        // Test missing both start and end (just dash)
+        let range11 = parse_range_header("bytes=-");
+        assert_eq!(range11, None, "Should reject missing both start and end");
+
+        // Test multiple equals signs
+        let range12 = parse_range_header("bytes=0=1023");
+        assert_eq!(range12, None, "Should reject multiple equals signs");
+
+        // Test trailing comma
+        let range13 = parse_range_header("bytes=0-1023,");
+        assert_eq!(range13, None, "Should reject trailing comma");
+
+        // Test leading comma
+        let range14 = parse_range_header("bytes=,0-1023");
+        assert_eq!(range14, None, "Should reject leading comma");
+
+        // Test double comma
+        let range15 = parse_range_header("bytes=0-100,,200-300");
+        assert_eq!(range15, None, "Should reject double comma");
+
+        // Test whitespace only
+        let range16 = parse_range_header("   ");
+        assert_eq!(range16, None, "Should reject whitespace only");
+
+        // Test missing value after equals
+        let range17 = parse_range_header("bytes=");
+        assert_eq!(range17, None, "Should reject missing value after equals");
+
+        // Test special characters
+        let range18 = parse_range_header("bytes=0-1023!");
+        assert_eq!(range18, None, "Should reject special characters");
+
+        // Test floating point (not allowed)
+        let range19 = parse_range_header("bytes=0.5-1023.5");
+        assert_eq!(range19, None, "Should reject floating point numbers");
     }
 
     #[tokio::test]
