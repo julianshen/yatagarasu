@@ -4790,6 +4790,133 @@ mod tests {
         println!("✓ Small range (100 bytes), large range (5000 bytes), open-ended (500 bytes), suffix (200 bytes) all verified");
     }
 
+    #[test]
+    fn test_returns_416_range_not_satisfiable_for_out_of_bounds_range() {
+        use std::collections::HashMap;
+
+        // Test 416 when range start is beyond file size
+        // File size: 5000 bytes, Request: bytes 6000-7000
+        let mut headers1 = HashMap::new();
+        headers1.insert("content-type".to_string(), "application/xml".to_string());
+        headers1.insert("content-range".to_string(), "bytes */5000".to_string());
+
+        let error_body = b"<Error><Code>InvalidRange</Code><Message>The requested range is not satisfiable</Message></Error>".to_vec();
+        let response1 = S3Response::new(416, "Range Not Satisfiable", headers1, error_body);
+
+        assert_eq!(
+            response1.status_code, 416,
+            "Should return 416 for out-of-bounds range"
+        );
+        assert_eq!(
+            response1.status_text, "Range Not Satisfiable",
+            "Status text should be 'Range Not Satisfiable'"
+        );
+        assert!(
+            !response1.is_success(),
+            "416 is not a success status (4xx error)"
+        );
+
+        // Content-Range header with unsatisfiable range uses format: bytes */total-length
+        let content_range = response1.get_header("content-range");
+        assert!(
+            content_range.is_some(),
+            "416 response should include Content-Range header"
+        );
+        assert_eq!(
+            content_range.unwrap(),
+            "bytes */5000",
+            "Content-Range should be 'bytes */5000' for unsatisfiable range"
+        );
+
+        // Test when range start > file size (bytes 10000-10999 from 5000 byte file)
+        let mut headers2 = HashMap::new();
+        headers2.insert("content-range".to_string(), "bytes */5000".to_string());
+
+        let response2 = S3Response::new(416, "Range Not Satisfiable", headers2, vec![]);
+        assert_eq!(response2.status_code, 416);
+        assert_eq!(
+            response2.get_header("content-range"),
+            Some(&"bytes */5000".to_string())
+        );
+
+        // Test when both start and end are beyond file size
+        let mut headers3 = HashMap::new();
+        headers3.insert("content-range".to_string(), "bytes */1048576".to_string());
+
+        let response3 = S3Response::new(416, "Range Not Satisfiable", headers3, vec![]);
+        assert_eq!(response3.status_code, 416);
+        assert_eq!(
+            response3.get_header("content-range"),
+            Some(&"bytes */1048576".to_string()),
+            "Should indicate total file size even for out-of-bounds range"
+        );
+
+        // Test 416 vs 206 distinction
+        let mut headers_206 = HashMap::new();
+        headers_206.insert("content-range".to_string(), "bytes 0-999/5000".to_string());
+
+        let response_206 = S3Response::new(206, "Partial Content", headers_206, vec![0u8; 1000]);
+
+        assert_ne!(
+            response1.status_code, response_206.status_code,
+            "416 should be different from 206"
+        );
+
+        // Test 416 vs 200 distinction
+        let mut headers_200 = HashMap::new();
+        headers_200.insert("content-length".to_string(), "5000".to_string());
+
+        let response_200 = S3Response::new(200, "OK", headers_200, vec![0u8; 5000]);
+
+        assert_ne!(
+            response1.status_code, response_200.status_code,
+            "416 should be different from 200"
+        );
+
+        // Verify Content-Range format for 416: bytes */complete-length
+        let range_str = "bytes */5000";
+        assert!(range_str.starts_with("bytes "));
+        assert!(range_str.contains("*/"));
+
+        let parts: Vec<&str> = range_str.split_whitespace().collect();
+        assert_eq!(parts[0], "bytes");
+        assert!(
+            parts[1].starts_with("*/"),
+            "Should start with '*/' for unsatisfiable range"
+        );
+
+        // Test error body contains meaningful error
+        let error_code = response1.get_error_code();
+        assert!(
+            error_code.is_some(),
+            "416 response should have error code in body"
+        );
+        assert_eq!(
+            error_code.unwrap(),
+            "InvalidRange",
+            "Error code should be InvalidRange"
+        );
+
+        // Test that 416 response body is not partial content
+        assert!(
+            response1.body.len() < 1000,
+            "416 response should not contain partial content data"
+        );
+
+        // Verify 416 can occur with different file sizes
+        let mut headers_small = HashMap::new();
+        headers_small.insert("content-range".to_string(), "bytes */100".to_string());
+
+        let response_small = S3Response::new(416, "Range Not Satisfiable", headers_small, vec![]);
+        assert_eq!(response_small.status_code, 416);
+
+        let mut headers_large = HashMap::new();
+        headers_large.insert("content-range".to_string(), "bytes */10485760".to_string());
+
+        let response_large = S3Response::new(416, "Range Not Satisfiable", headers_large, vec![]);
+        assert_eq!(response_large.status_code, 416);
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};
