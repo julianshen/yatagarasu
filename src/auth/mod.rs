@@ -2004,4 +2004,71 @@ mod tests {
             "Expected claim verification to pass when string claim equals expected value"
         );
     }
+
+    #[test]
+    fn test_verifies_numeric_claim_equals_expected_value() {
+        let secret = "test_secret";
+
+        // Create a JWT with a custom numeric claim
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "user_id".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(12345)),
+        );
+        custom_map.insert(
+            "age".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(30)),
+        );
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            exp: Some(9999999999),
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Validate and extract claims
+        let result = validate_jwt(&token, secret);
+        assert!(result.is_ok(), "Expected valid JWT to be accepted");
+
+        let extracted_claims = result.unwrap();
+
+        // Create claim verification rule for user_id
+        let rules = vec![ClaimRule {
+            claim: "user_id".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::Number(serde_json::Number::from(12345)),
+        }];
+
+        // Verify claims
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            verified,
+            "Expected claim verification to pass when numeric claim equals expected value"
+        );
+
+        // Create claim verification rule for age
+        let rules = vec![ClaimRule {
+            claim: "age".to_string(),
+            operator: "equals".to_string(),
+            value: serde_json::Value::Number(serde_json::Number::from(30)),
+        }];
+
+        // Verify claims
+        let verified = verify_claims(&extracted_claims, &rules);
+        assert!(
+            verified,
+            "Expected claim verification to pass when age claim equals expected value"
+        );
+    }
 }
