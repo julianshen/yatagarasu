@@ -257,7 +257,7 @@ yatagarasu/
 - [x] Test: Evaluates all rules even if first fails (for better error messages)
 
 ### JWT - Authentication Middleware
-- [ ] Test: Passes request through when auth disabled for route
+- [x] Test: Passes request through when auth disabled for route
 - [ ] Test: Extracts and validates JWT when auth enabled
 - [ ] Test: Returns 401 when JWT missing and auth required
 - [ ] Test: Returns 401 when JWT invalid and auth required

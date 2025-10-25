@@ -7,7 +7,7 @@ use std::collections::HashMap;
 #[cfg(test)]
 use jsonwebtoken::{encode, EncodingKey, Header};
 
-use crate::config::ClaimRule;
+use crate::config::{ClaimRule, JwtConfig};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -120,6 +120,13 @@ pub fn verify_claims(claims: &Claims, rules: &[ClaimRule]) -> bool {
     }
 
     true
+}
+
+pub fn is_auth_required(jwt_config: &Option<JwtConfig>) -> bool {
+    match jwt_config {
+        Some(config) => config.enabled,
+        None => false, // No JWT config means auth is not required
+    }
 }
 
 #[cfg(test)]
@@ -2652,6 +2659,54 @@ mod tests {
         assert!(
             !verified,
             "Expected verification to fail when multiple rules fail (supports future detailed error messages)"
+        );
+    }
+
+    #[test]
+    fn test_passes_request_through_when_auth_disabled() {
+        use crate::config::TokenSource;
+
+        // Test 1: Auth is explicitly disabled (enabled = false)
+        let jwt_config = Some(JwtConfig {
+            enabled: false,
+            secret: "test_secret".to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![],
+            claims: vec![],
+        });
+
+        let auth_required = is_auth_required(&jwt_config);
+        assert!(
+            !auth_required,
+            "Expected auth not to be required when enabled=false"
+        );
+
+        // Test 2: No JWT config at all (None)
+        let no_jwt_config: Option<JwtConfig> = None;
+
+        let auth_required = is_auth_required(&no_jwt_config);
+        assert!(
+            !auth_required,
+            "Expected auth not to be required when JWT config is None"
+        );
+
+        // Test 3: Auth is enabled (enabled = true)
+        let jwt_config_enabled = Some(JwtConfig {
+            enabled: true,
+            secret: "test_secret".to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "header".to_string(),
+                name: Some("Authorization".to_string()),
+                prefix: Some("Bearer ".to_string()),
+            }],
+            claims: vec![],
+        });
+
+        let auth_required = is_auth_required(&jwt_config_enabled);
+        assert!(
+            auth_required,
+            "Expected auth to be required when enabled=true"
         );
     }
 }
