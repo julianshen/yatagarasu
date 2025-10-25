@@ -289,7 +289,7 @@ yatagarasu/
 ### S3 Operations - GET Object
 - [x] Test: Can build GET object request with key
 - [x] Test: GET request includes correct bucket and key in URL
-- [ ] Test: GET request includes proper AWS signature headers
+- [x] Test: GET request includes proper AWS signature headers
 - [ ] Test: GET request handles S3 keys with special characters
 - [ ] Test: GET request handles S3 keys with URL-unsafe characters
 - [ ] Test: GET request preserves original path structure

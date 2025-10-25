@@ -125,6 +125,47 @@ impl S3Request {
     pub fn get_url(&self) -> String {
         format!("/{}/{}", self.bucket, self.key)
     }
+
+    /// Returns signed headers for the S3 request including Authorization header
+    pub fn get_signed_headers(
+        &self,
+        access_key: &str,
+        secret_key: &str,
+    ) -> std::collections::HashMap<String, String> {
+        use std::collections::HashMap;
+
+        // Generate timestamp (hardcoded for now, will use actual time later)
+        let datetime = "20130524T000000Z";
+        let date = "20130524";
+
+        // Build headers
+        let mut headers = HashMap::new();
+        let host = format!("{}.s3.{}.amazonaws.com", self.bucket, self.region);
+        headers.insert("host".to_string(), host);
+        headers.insert("x-amz-date".to_string(), datetime.to_string());
+        headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
+
+        // Create signing params
+        let params = SigningParams {
+            method: &self.method,
+            uri: &self.get_url(),
+            query_string: "",
+            headers: &headers,
+            payload: b"",
+            access_key,
+            secret_key,
+            region: &self.region,
+            service: "s3",
+            date,
+            datetime,
+        };
+
+        // Generate Authorization header
+        let authorization = sign_request(&params);
+        headers.insert("authorization".to_string(), authorization);
+
+        headers
+    }
 }
 
 /// Builds a GET object request for S3
@@ -1304,6 +1345,90 @@ mod tests {
             url2.contains("simple.txt"),
             "URL should contain key: {}",
             url2
+        );
+    }
+
+    #[test]
+    fn test_get_request_includes_proper_aws_signature_headers() {
+        let bucket = "test-bucket";
+        let key = "test-key.txt";
+        let region = "us-east-1";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+        let request = build_get_object_request(bucket, key, region);
+        let headers = request.get_signed_headers(access_key, secret_key);
+
+        // Verify x-amz-date header is present
+        assert!(
+            headers.contains_key("x-amz-date"),
+            "Request should include x-amz-date header"
+        );
+
+        // Verify x-amz-date is in correct format (YYYYMMDDTHHMMSSZ)
+        let date_header = headers.get("x-amz-date").unwrap();
+        assert_eq!(
+            date_header.len(),
+            16,
+            "x-amz-date should be 16 characters (YYYYMMDDTHHMMSSZ)"
+        );
+        assert!(date_header.ends_with('Z'), "x-amz-date should end with Z");
+
+        // Verify x-amz-content-sha256 header is present
+        assert!(
+            headers.contains_key("x-amz-content-sha256"),
+            "Request should include x-amz-content-sha256 header"
+        );
+
+        // Verify x-amz-content-sha256 is a valid SHA256 hex (64 characters)
+        let content_sha_header = headers.get("x-amz-content-sha256").unwrap();
+        assert_eq!(
+            content_sha_header.len(),
+            64,
+            "x-amz-content-sha256 should be 64 hex characters"
+        );
+        assert!(
+            content_sha_header.chars().all(|c| c.is_ascii_hexdigit()),
+            "x-amz-content-sha256 should only contain hex characters"
+        );
+
+        // Verify Authorization header is present
+        assert!(
+            headers.contains_key("authorization"),
+            "Request should include Authorization header"
+        );
+
+        // Verify Authorization header has correct format
+        let auth_header = headers.get("authorization").unwrap();
+        assert!(
+            auth_header.starts_with("AWS4-HMAC-SHA256"),
+            "Authorization header should start with AWS4-HMAC-SHA256"
+        );
+        assert!(
+            auth_header.contains("Credential="),
+            "Authorization header should contain Credential="
+        );
+        assert!(
+            auth_header.contains("SignedHeaders="),
+            "Authorization header should contain SignedHeaders="
+        );
+        assert!(
+            auth_header.contains("Signature="),
+            "Authorization header should contain Signature="
+        );
+
+        // Verify host header is present
+        assert!(
+            headers.contains_key("host"),
+            "Request should include host header"
+        );
+
+        // Verify host header includes bucket and region
+        let host_header = headers.get("host").unwrap();
+        assert!(
+            host_header.contains(bucket) || host_header.contains("s3"),
+            "Host header should include bucket or s3: {}",
+            host_header
         );
     }
 }
