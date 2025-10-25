@@ -330,7 +330,7 @@ yatagarasu/
 ### S3 Range Requests - Header Parsing
 - [x] Test: Can parse Range header with single range (bytes=0-1023)
 - [x] Test: Can parse Range header with open-ended range (bytes=1000-)
-- [ ] Test: Can parse Range header with suffix range (bytes=-1000)
+- [x] Test: Can parse Range header with suffix range (bytes=-1000)
 - [ ] Test: Can parse Range header with multiple ranges
 - [ ] Test: Handles invalid Range header syntax gracefully
 - [ ] Test: Includes Accept-Ranges: bytes in response headers

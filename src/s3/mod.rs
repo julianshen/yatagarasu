@@ -334,7 +334,7 @@ impl ByteRange {
 }
 
 /// Represents a parsed Range header
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RangeHeader {
     /// Unit (typically "bytes")
     pub unit: String,
@@ -3783,6 +3783,83 @@ mod tests {
         let parsed6 = range6.unwrap();
         assert_eq!(parsed6.ranges[0].start, Some(1000));
         assert_eq!(parsed6.ranges[0].end, None);
+    }
+
+    #[test]
+    fn test_can_parse_range_header_with_suffix_range() {
+        // Test "bytes=-1000" (last 1000 bytes of file)
+        let range = parse_range_header("bytes=-1000");
+        assert!(range.is_some(), "Should parse suffix range header");
+
+        let parsed = range.unwrap();
+        assert_eq!(parsed.unit, "bytes", "Unit should be bytes");
+        assert_eq!(parsed.ranges.len(), 1, "Should have one range");
+
+        let first_range = &parsed.ranges[0];
+        assert_eq!(
+            first_range.start, None,
+            "Start should be None for suffix range"
+        );
+        assert_eq!(first_range.end, Some(1000), "End should be 1000");
+
+        // Test "bytes=-500" (last 500 bytes)
+        let range2 = parse_range_header("bytes=-500");
+        assert!(range2.is_some(), "Should parse suffix range with 500 bytes");
+
+        let parsed2 = range2.unwrap();
+        assert_eq!(parsed2.ranges.len(), 1);
+        assert_eq!(parsed2.ranges[0].start, None);
+        assert_eq!(parsed2.ranges[0].end, Some(500));
+
+        // Test "bytes=-1" (last byte only)
+        let range3 = parse_range_header("bytes=-1");
+        assert!(range3.is_some(), "Should parse suffix range for last byte");
+
+        let parsed3 = range3.unwrap();
+        assert_eq!(parsed3.ranges[0].start, None);
+        assert_eq!(parsed3.ranges[0].end, Some(1));
+
+        // Test "bytes=-10485760" (last 10MB)
+        let range4 = parse_range_header("bytes=-10485760");
+        assert!(range4.is_some(), "Should parse large suffix range (10MB)");
+
+        let parsed4 = range4.unwrap();
+        assert_eq!(parsed4.ranges[0].start, None);
+        assert_eq!(parsed4.ranges[0].end, Some(10485760));
+
+        // Test size calculation for suffix range (should return None)
+        // Actual size depends on file size: if file is 5000 bytes, "bytes=-1000" means bytes 4000-4999
+        let range5 = parse_range_header("bytes=-100");
+        let parsed5 = range5.unwrap();
+        let size = parsed5.ranges[0].size();
+        assert_eq!(
+            size, None,
+            "Size should be None for suffix range (depends on file size)"
+        );
+
+        // Test with spaces "bytes= -1000 "
+        let range6 = parse_range_header("bytes= -1000 ");
+        assert!(range6.is_some(), "Should parse suffix range with spaces");
+        let parsed6 = range6.unwrap();
+        assert_eq!(parsed6.ranges[0].start, None);
+        assert_eq!(parsed6.ranges[0].end, Some(1000));
+
+        // Test with spaces " bytes = - 1000 "
+        let range7 = parse_range_header(" bytes = - 1000 ");
+        assert!(
+            range7.is_some(),
+            "Should parse suffix range with spaces around tokens"
+        );
+        let parsed7 = range7.unwrap();
+        assert_eq!(parsed7.ranges[0].start, None);
+        assert_eq!(parsed7.ranges[0].end, Some(1000));
+
+        // Test that "bytes=-" (no number) fails
+        let range_invalid = parse_range_header("bytes=-");
+        assert_eq!(
+            range_invalid, None,
+            "Should not parse suffix range without number"
+        );
     }
 
     #[tokio::test]
