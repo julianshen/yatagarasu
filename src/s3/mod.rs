@@ -4490,6 +4490,142 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_returns_content_range_header_with_correct_format() {
+        use std::collections::HashMap;
+
+        // Test Content-Range format: "bytes start-end/total"
+        // RFC 7233 specifies: Content-Range: bytes-unit SP first-byte-pos "-" last-byte-pos "/" complete-length
+
+        // Test single range: bytes 0-1023/5000
+        let mut headers1 = HashMap::new();
+        headers1.insert("content-type".to_string(), "text/plain".to_string());
+        headers1.insert("content-length".to_string(), "1024".to_string());
+        headers1.insert("content-range".to_string(), "bytes 0-1023/5000".to_string());
+
+        let response1 = S3Response::new(206, "Partial Content", headers1, vec![0u8; 1024]);
+
+        let content_range = response1.get_header("content-range");
+        assert!(
+            content_range.is_some(),
+            "Content-Range header must be present"
+        );
+
+        let range_value = content_range.unwrap();
+        assert_eq!(
+            range_value, "bytes 0-1023/5000",
+            "Content-Range should be 'bytes 0-1023/5000'"
+        );
+
+        // Verify format components
+        assert!(
+            range_value.starts_with("bytes "),
+            "Should start with 'bytes '"
+        );
+        assert!(range_value.contains("-"), "Should contain '-' separator");
+        assert!(range_value.contains("/"), "Should contain '/' before total");
+
+        // Test open-ended range result: bytes 1000-4999/5000
+        let mut headers2 = HashMap::new();
+        headers2.insert(
+            "content-range".to_string(),
+            "bytes 1000-4999/5000".to_string(),
+        );
+
+        let response2 = S3Response::new(206, "Partial Content", headers2, vec![0u8; 4000]);
+        assert_eq!(
+            response2.get_header("content-range"),
+            Some(&"bytes 1000-4999/5000".to_string())
+        );
+
+        // Test suffix range result: bytes 4500-4999/5000 (last 500 bytes)
+        let mut headers3 = HashMap::new();
+        headers3.insert(
+            "content-range".to_string(),
+            "bytes 4500-4999/5000".to_string(),
+        );
+
+        let response3 = S3Response::new(206, "Partial Content", headers3, vec![0u8; 500]);
+        assert_eq!(
+            response3.get_header("content-range"),
+            Some(&"bytes 4500-4999/5000".to_string())
+        );
+
+        // Test large file: bytes 0-1048575/10485760 (first MB of 10MB file)
+        let mut headers4 = HashMap::new();
+        headers4.insert(
+            "content-range".to_string(),
+            "bytes 0-1048575/10485760".to_string(),
+        );
+
+        let response4 = S3Response::new(206, "Partial Content", headers4, vec![0u8; 1048576]);
+
+        let range4 = response4.get_header("content-range").unwrap();
+        assert_eq!(range4, "bytes 0-1048575/10485760");
+        assert!(range4.starts_with("bytes "));
+        assert!(range4.contains("-"));
+        assert!(range4.contains("/10485760"));
+
+        // Test unknown total size: bytes 0-1023/* (when total size unknown)
+        let mut headers5 = HashMap::new();
+        headers5.insert("content-range".to_string(), "bytes 0-1023/*".to_string());
+
+        let response5 = S3Response::new(206, "Partial Content", headers5, vec![0u8; 1024]);
+        assert_eq!(
+            response5.get_header("content-range"),
+            Some(&"bytes 0-1023/*".to_string()),
+            "Content-Range with unknown size should use '*'"
+        );
+
+        // Test edge case: single byte range (bytes 0-0/100)
+        let mut headers6 = HashMap::new();
+        headers6.insert("content-range".to_string(), "bytes 0-0/100".to_string());
+
+        let response6 = S3Response::new(206, "Partial Content", headers6, vec![0u8; 1]);
+        assert_eq!(
+            response6.get_header("content-range"),
+            Some(&"bytes 0-0/100".to_string()),
+            "Single byte range should be 'bytes 0-0/total'"
+        );
+
+        // Test edge case: last byte (bytes 99-99/100)
+        let mut headers7 = HashMap::new();
+        headers7.insert("content-range".to_string(), "bytes 99-99/100".to_string());
+
+        let response7 = S3Response::new(206, "Partial Content", headers7, vec![0u8; 1]);
+        assert_eq!(
+            response7.get_header("content-range"),
+            Some(&"bytes 99-99/100".to_string())
+        );
+
+        // Verify parsing components from Content-Range header
+        let range_str = "bytes 100-199/500";
+        let parts: Vec<&str> = range_str.split_whitespace().collect();
+        assert_eq!(parts[0], "bytes", "First part should be 'bytes'");
+
+        let byte_range = parts[1];
+        let range_parts: Vec<&str> = byte_range.split('/').collect();
+        assert_eq!(range_parts.len(), 2, "Should have range and total");
+
+        let positions: Vec<&str> = range_parts[0].split('-').collect();
+        assert_eq!(positions.len(), 2, "Should have start and end");
+        assert_eq!(positions[0], "100", "Start should be 100");
+        assert_eq!(positions[1], "199", "End should be 199");
+        assert_eq!(range_parts[1], "500", "Total should be 500");
+
+        // Test that 200 OK response doesn't have Content-Range
+        let mut headers_full = HashMap::new();
+        headers_full.insert("content-type".to_string(), "text/plain".to_string());
+        headers_full.insert("content-length".to_string(), "5000".to_string());
+
+        let response_full = S3Response::new(200, "OK", headers_full, vec![0u8; 5000]);
+        assert_eq!(
+            response_full.get_header("content-range"),
+            None,
+            "200 OK should not have Content-Range header"
+        );
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};

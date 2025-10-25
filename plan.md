@@ -338,7 +338,7 @@ yatagarasu/
 ### S3 Range Requests - Request Handling
 - [x] Test: Forwards Range header to S3 with AWS signature
 - [x] Test: Returns 206 Partial Content for valid range
-- [ ] Test: Returns Content-Range header with correct format
+- [x] Test: Returns Content-Range header with correct format
 - [ ] Test: Streams only requested bytes (not full file)
 - [ ] Test: Returns 416 Range Not Satisfiable for out-of-bounds range
 - [ ] Test: Handles If-Range conditional requests correctly
