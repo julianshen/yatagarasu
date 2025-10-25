@@ -625,4 +625,115 @@ mod tests {
             "Signature should change when headers change"
         );
     }
+
+    #[test]
+    fn test_signature_includes_authorization_header_with_correct_format() {
+        use std::collections::HashMap;
+
+        let method = "GET";
+        let uri = "/bucket/key";
+        let query_string = "";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+        let service = "s3";
+        let date = "20130524";
+        let datetime = "20130524T000000Z";
+
+        let mut headers = HashMap::new();
+        headers.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers.insert("x-amz-date".to_string(), datetime.to_string());
+        headers.insert(
+            "x-amz-content-sha256".to_string(),
+            sha256_hex(b"").to_string(),
+        );
+
+        let payload = b"";
+
+        let params = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers,
+            payload,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let authorization = sign_request(&params);
+
+        // Verify format: AWS4-HMAC-SHA256 Credential=..., SignedHeaders=..., Signature=...
+
+        // 1. Must start with AWS4-HMAC-SHA256
+        assert!(
+            authorization.starts_with("AWS4-HMAC-SHA256 "),
+            "Authorization header must start with 'AWS4-HMAC-SHA256 '"
+        );
+
+        // 2. Must contain Credential= with access key and credential scope
+        assert!(
+            authorization.contains("Credential="),
+            "Authorization header must contain 'Credential='"
+        );
+
+        let expected_credential_scope = format!("{}/{}/{}/aws4_request", date, region, service);
+        assert!(
+            authorization.contains(&format!("Credential={}/{}", access_key, expected_credential_scope)),
+            "Credential must be in format 'Credential=<access_key>/<date>/<region>/<service>/aws4_request'"
+        );
+
+        // 3. Must contain SignedHeaders=
+        assert!(
+            authorization.contains("SignedHeaders="),
+            "Authorization header must contain 'SignedHeaders='"
+        );
+
+        // 4. Must contain Signature=
+        assert!(
+            authorization.contains("Signature="),
+            "Authorization header must contain 'Signature='"
+        );
+
+        // 5. Verify the order: Credential, SignedHeaders, Signature
+        let credential_pos = authorization.find("Credential=").unwrap();
+        let signed_headers_pos = authorization.find("SignedHeaders=").unwrap();
+        let signature_pos = authorization.find("Signature=").unwrap();
+
+        assert!(
+            credential_pos < signed_headers_pos,
+            "Credential must come before SignedHeaders"
+        );
+        assert!(
+            signed_headers_pos < signature_pos,
+            "SignedHeaders must come before Signature"
+        );
+
+        // 6. Verify components are comma-separated
+        assert!(
+            authorization.contains(", SignedHeaders="),
+            "Components must be separated by ', '"
+        );
+        assert!(
+            authorization.contains(", Signature="),
+            "Components must be separated by ', '"
+        );
+
+        // 7. Verify complete format with regex-like check
+        let parts: Vec<&str> = authorization.split(' ').collect();
+        assert_eq!(
+            parts[0], "AWS4-HMAC-SHA256",
+            "First part must be 'AWS4-HMAC-SHA256'"
+        );
+
+        // Remaining parts should be "Credential=..., SignedHeaders=..., Signature=..."
+        let components = parts[1..].join(" ");
+        assert!(
+            components.starts_with("Credential="),
+            "Second part must start with 'Credential='"
+        );
+    }
 }

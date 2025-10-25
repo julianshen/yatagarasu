@@ -279,7 +279,7 @@ yatagarasu/
 ### S3 Signature v4 - Request Signing
 - [x] Test: Generates valid AWS Signature v4 for GET request
 - [x] Test: Signature includes all required headers
-- [ ] Test: Signature includes Authorization header with correct format
+- [x] Test: Signature includes Authorization header with correct format
 - [ ] Test: Signature includes x-amz-date header
 - [ ] Test: Signature includes x-amz-content-sha256 header
 - [ ] Test: Canonical request is generated correctly
