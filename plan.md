@@ -283,7 +283,7 @@ yatagarasu/
 - [x] Test: Signature includes x-amz-date header
 - [x] Test: Signature includes x-amz-content-sha256 header
 - [x] Test: Canonical request is generated correctly
-- [ ] Test: String to sign is generated correctly
+- [x] Test: String to sign is generated correctly
 - [ ] Test: Signing key derivation works correctly
 
 ### S3 Operations - GET Object

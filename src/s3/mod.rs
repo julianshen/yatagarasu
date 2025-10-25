@@ -89,10 +89,24 @@ fn create_canonical_request(params: &SigningParams) -> String {
     )
 }
 
-pub fn sign_request(params: &SigningParams) -> String {
-    // Step 1: Create canonical request
+fn create_string_to_sign(params: &SigningParams) -> String {
     let canonical_request = create_canonical_request(params);
     let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
+
+    let credential_scope = format!(
+        "{}/{}/{}/aws4_request",
+        params.date, params.region, params.service
+    );
+
+    format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        params.datetime, credential_scope, canonical_request_hash
+    )
+}
+
+pub fn sign_request(params: &SigningParams) -> String {
+    // Step 1 & 2: Create string to sign (includes canonical request generation)
+    let string_to_sign = create_string_to_sign(params);
 
     // Calculate signed_headers for Authorization header
     let mut sorted_headers: Vec<(&String, &String)> = params.headers.iter().collect();
@@ -103,14 +117,10 @@ pub fn sign_request(params: &SigningParams) -> String {
         .collect::<Vec<_>>()
         .join(";");
 
-    // Step 2: Create string to sign
+    // Calculate credential scope for Authorization header
     let credential_scope = format!(
         "{}/{}/{}/aws4_request",
         params.date, params.region, params.service
-    );
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        params.datetime, credential_scope, canonical_request_hash
     );
 
     // Step 3: Calculate signing key
@@ -1030,6 +1040,116 @@ mod tests {
         assert!(
             host_pos < sha256_pos && sha256_pos < date_pos,
             "Headers should be sorted alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_string_to_sign_is_generated_correctly() {
+        use std::collections::HashMap;
+
+        let method = "GET";
+        let uri = "/test-bucket/test-key.txt";
+        let query_string = "";
+        let region = "us-east-1";
+        let service = "s3";
+        let date = "20130524";
+        let datetime = "20130524T000000Z";
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "test-bucket.s3.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), datetime.to_string());
+        headers.insert(
+            "x-amz-content-sha256".to_string(),
+            sha256_hex(b"").to_string(),
+        );
+
+        let payload = b"";
+
+        let params = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers,
+            payload,
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let string_to_sign = create_string_to_sign(&params);
+
+        // Verify format: AWS4-HMAC-SHA256\n<datetime>\n<credential_scope>\n<canonical_request_hash>
+        let lines: Vec<&str> = string_to_sign.split('\n').collect();
+
+        // Line 0: Algorithm identifier
+        assert_eq!(
+            lines[0], "AWS4-HMAC-SHA256",
+            "First line should be algorithm identifier"
+        );
+
+        // Line 1: Datetime
+        assert_eq!(
+            lines[1], datetime,
+            "Second line should be datetime in format YYYYMMDDTHHMMSSZ"
+        );
+
+        // Line 2: Credential scope
+        let expected_credential_scope = format!("{}/{}/{}/aws4_request", date, region, service);
+        assert_eq!(
+            lines[2], expected_credential_scope,
+            "Third line should be credential scope in format date/region/service/aws4_request"
+        );
+
+        // Line 3: Canonical request hash (SHA256 hex, 64 characters)
+        assert_eq!(
+            lines[3].len(),
+            64,
+            "Fourth line should be canonical request hash (64 hex characters)"
+        );
+        assert!(
+            lines[3].chars().all(|c| c.is_ascii_hexdigit()),
+            "Canonical request hash should only contain hex characters"
+        );
+
+        // Verify that changing the canonical request changes the string to sign
+        let mut headers2 = headers.clone();
+        headers2.insert("x-custom-header".to_string(), "value".to_string());
+
+        let params2 = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers2,
+            payload,
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let string_to_sign2 = create_string_to_sign(&params2);
+
+        assert_ne!(
+            string_to_sign, string_to_sign2,
+            "String to sign should change when canonical request changes"
+        );
+
+        // Verify only the canonical request hash line is different
+        let lines2: Vec<&str> = string_to_sign2.split('\n').collect();
+        assert_eq!(lines[0], lines2[0], "Algorithm should be the same");
+        assert_eq!(lines[1], lines2[1], "Datetime should be the same");
+        assert_eq!(lines[2], lines2[2], "Credential scope should be the same");
+        assert_ne!(
+            lines[3], lines2[3],
+            "Canonical request hash should be different"
         );
     }
 }
