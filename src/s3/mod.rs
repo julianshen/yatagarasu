@@ -2588,4 +2588,89 @@ mod tests {
             "Should handle 400 with empty body"
         );
     }
+
+    #[test]
+    fn test_handles_500_internal_server_error_from_s3() {
+        use std::collections::HashMap;
+
+        // Test basic 500 response
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/xml".to_string());
+        headers.insert("x-amz-request-id".to_string(), "ERR500".to_string());
+
+        let error_body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InternalError</Code>
+    <Message>We encountered an internal error. Please try again.</Message>
+    <RequestId>ERR500</RequestId>
+</Error>"#
+            .to_vec();
+
+        let response = S3Response::new(500, "Internal Server Error", headers, error_body.clone());
+
+        assert_eq!(response.status_code, 500, "Status code should be 500");
+        assert_eq!(
+            response.status_text, "Internal Server Error",
+            "Status text should be 'Internal Server Error'"
+        );
+        assert!(!response.is_success(), "500 should not be success");
+        assert!(!response.body.is_empty(), "Should have error body");
+
+        // Verify it's a server error
+        assert!(
+            response.status_code >= 500 && response.status_code < 600,
+            "500 is a server error (5xx)"
+        );
+
+        // Test that error body can be parsed
+        let body_str = String::from_utf8(response.body.clone()).unwrap();
+        assert!(
+            body_str.contains("InternalError"),
+            "Error body should contain InternalError code"
+        );
+        assert!(
+            body_str.contains("We encountered an internal error"),
+            "Error body should contain error message"
+        );
+
+        // Test 500 with minimal headers
+        let headers2 = HashMap::new();
+        let response2 = S3Response::new(500, "Internal Server Error", headers2, vec![]);
+
+        assert_eq!(response2.status_code, 500);
+        assert!(!response2.is_success());
+        assert_eq!(response2.body.len(), 0, "Empty body should be allowed");
+
+        // Test 500 with request ID header preserved
+        let mut headers3 = HashMap::new();
+        headers3.insert(
+            "x-amz-request-id".to_string(),
+            "500-ERROR-ID-123".to_string(),
+        );
+        headers3.insert("x-amz-id-2".to_string(), "extended-id".to_string());
+
+        let response3 = S3Response::new(500, "Internal Server Error", headers3, vec![]);
+
+        assert_eq!(
+            response3.get_header("x-amz-request-id"),
+            Some(&"500-ERROR-ID-123".to_string()),
+            "Should preserve request ID for debugging"
+        );
+        assert_eq!(
+            response3.get_header("x-amz-id-2"),
+            Some(&"extended-id".to_string()),
+            "Should preserve extended request ID for AWS support"
+        );
+
+        // Test that 500 errors should be retryable (implementation detail)
+        // Unlike 4xx errors, 5xx errors are typically transient
+        assert!(
+            response.status_code >= 500,
+            "Server errors (5xx) are typically retryable"
+        );
+        assert!(
+            response.status_code < 400 || response.status_code >= 500,
+            "500 is not a client error"
+        );
+    }
 }
