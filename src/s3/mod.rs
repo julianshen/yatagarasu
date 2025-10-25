@@ -59,8 +59,7 @@ pub struct SigningParams<'a> {
     pub datetime: &'a str, // Format: YYYYMMDDTHHMMSSZ
 }
 
-pub fn sign_request(params: &SigningParams) -> String {
-    // Step 1: Create canonical request
+fn create_canonical_request(params: &SigningParams) -> String {
     let payload_hash = sha256_hex(params.payload);
 
     // Sort headers by lowercase key
@@ -79,7 +78,7 @@ pub fn sign_request(params: &SigningParams) -> String {
         .collect::<Vec<_>>()
         .join(";");
 
-    let canonical_request = format!(
+    format!(
         "{}\n{}\n{}\n{}\n\n{}\n{}",
         params.method,
         params.uri,
@@ -87,9 +86,22 @@ pub fn sign_request(params: &SigningParams) -> String {
         canonical_headers,
         signed_headers,
         payload_hash
-    );
+    )
+}
 
+pub fn sign_request(params: &SigningParams) -> String {
+    // Step 1: Create canonical request
+    let canonical_request = create_canonical_request(params);
     let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
+
+    // Calculate signed_headers for Authorization header
+    let mut sorted_headers: Vec<(&String, &String)> = params.headers.iter().collect();
+    sorted_headers.sort_by_key(|(k, _)| k.to_lowercase());
+    let signed_headers = sorted_headers
+        .iter()
+        .map(|(k, _)| k.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(";");
 
     // Step 2: Create string to sign
     let credential_scope = format!(
@@ -927,6 +939,97 @@ mod tests {
         assert_ne!(
             payload1_hash, payload2_hash,
             "Payload hashes should be different for different payloads"
+        );
+    }
+
+    #[test]
+    fn test_canonical_request_is_generated_correctly() {
+        use std::collections::HashMap;
+
+        let method = "GET";
+        let uri = "/test-bucket/test-key.txt";
+        let query_string = "";
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "test-bucket.s3.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), "20130524T000000Z".to_string());
+        headers.insert(
+            "x-amz-content-sha256".to_string(),
+            sha256_hex(b"").to_string(),
+        );
+
+        let payload = b"";
+
+        let params = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers,
+            payload,
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20130524",
+            datetime: "20130524T000000Z",
+        };
+
+        let canonical_request = create_canonical_request(&params);
+
+        // Verify format: METHOD\nURI\nQUERY_STRING\nCANONICAL_HEADERS\n\nSIGNED_HEADERS\nPAYLOAD_HASH
+        let lines: Vec<&str> = canonical_request.split('\n').collect();
+
+        // Line 0: HTTP method
+        assert_eq!(lines[0], "GET", "First line should be HTTP method");
+
+        // Line 1: Canonical URI
+        assert_eq!(
+            lines[1], "/test-bucket/test-key.txt",
+            "Second line should be canonical URI"
+        );
+
+        // Line 2: Canonical query string (empty in this test)
+        assert_eq!(lines[2], "", "Third line should be canonical query string");
+
+        // Lines 3+: Canonical headers (sorted, lowercase keys, trimmed values)
+        // Should include: host, x-amz-content-sha256, x-amz-date (alphabetically)
+        assert!(
+            canonical_request.contains("host:test-bucket.s3.amazonaws.com\n"),
+            "Canonical request should include host header"
+        );
+        assert!(
+            canonical_request.contains("x-amz-content-sha256:"),
+            "Canonical request should include x-amz-content-sha256 header"
+        );
+        assert!(
+            canonical_request.contains("x-amz-date:20130524T000000Z\n"),
+            "Canonical request should include x-amz-date header"
+        );
+
+        // Verify signed headers list (second to last line, separated by empty line)
+        assert!(
+            canonical_request.contains("host;x-amz-content-sha256;x-amz-date"),
+            "Canonical request should contain signed headers list"
+        );
+
+        // Verify payload hash (last line)
+        let payload_hash = sha256_hex(b"");
+        assert!(
+            canonical_request.ends_with(&payload_hash),
+            "Canonical request should end with payload hash"
+        );
+
+        // Verify headers are sorted alphabetically (case-insensitive)
+        let host_pos = canonical_request.find("host:").unwrap();
+        let sha256_pos = canonical_request.find("x-amz-content-sha256:").unwrap();
+        let date_pos = canonical_request.find("x-amz-date:").unwrap();
+
+        assert!(
+            host_pos < sha256_pos && sha256_pos < date_pos,
+            "Headers should be sorted alphabetically"
         );
     }
 }

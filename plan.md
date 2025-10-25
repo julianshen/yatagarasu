@@ -282,7 +282,7 @@ yatagarasu/
 - [x] Test: Signature includes Authorization header with correct format
 - [x] Test: Signature includes x-amz-date header
 - [x] Test: Signature includes x-amz-content-sha256 header
-- [ ] Test: Canonical request is generated correctly
+- [x] Test: Canonical request is generated correctly
 - [ ] Test: String to sign is generated correctly
 - [ ] Test: Signing key derivation works correctly
 
