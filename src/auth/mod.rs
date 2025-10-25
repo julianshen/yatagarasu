@@ -2872,4 +2872,47 @@ mod tests {
             Ok(_) => panic!("Expected error but authentication succeeded"),
         }
     }
+
+    #[test]
+    fn test_returns_invalid_token_error_when_jwt_invalid_and_auth_required() {
+        use crate::config::TokenSource;
+
+        // Create JWT config with auth enabled
+        let jwt_config = JwtConfig {
+            enabled: true,
+            secret: "test_secret".to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            }],
+            claims: vec![],
+        };
+
+        // Create headers with an invalid JWT (malformed, wrong signature, expired, etc.)
+        let mut headers = HashMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            "Bearer invalid.jwt.token".to_string(),
+        );
+
+        let query_params = HashMap::new();
+
+        // Authenticate the request
+        let result = authenticate_request(&headers, &query_params, &jwt_config);
+
+        assert!(
+            result.is_err(),
+            "Expected authentication to fail when JWT is invalid"
+        );
+
+        match result {
+            Err(AuthError::InvalidToken(_)) => {
+                // Expected error
+            }
+            Err(other) => panic!("Expected AuthError::InvalidToken, got {:?}", other),
+            Ok(_) => panic!("Expected error but authentication succeeded"),
+        }
+    }
 }
