@@ -1334,4 +1334,50 @@ mod tests {
             "Expected exp claim to be preserved"
         );
     }
+
+    #[test]
+    fn test_rejects_malformed_jwt_not_3_parts() {
+        let secret = "test_secret";
+
+        // Test 1: JWT with only 2 parts (missing signature)
+        let two_part_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0";
+        let result = validate_jwt(two_part_token, secret);
+        assert!(
+            result.is_err(),
+            "Expected JWT with only 2 parts to be rejected, but it was accepted"
+        );
+
+        // Test 2: JWT with only 1 part
+        let one_part_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+        let result2 = validate_jwt(one_part_token, secret);
+        assert!(
+            result2.is_err(),
+            "Expected JWT with only 1 part to be rejected, but it was accepted"
+        );
+
+        // Test 3: JWT with 4 parts (too many)
+        let four_part_token =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0.signature.extra";
+        let result3 = validate_jwt(four_part_token, secret);
+        assert!(
+            result3.is_err(),
+            "Expected JWT with 4 parts to be rejected, but it was accepted"
+        );
+
+        // Test 4: Empty string
+        let empty_token = "";
+        let result4 = validate_jwt(empty_token, secret);
+        assert!(
+            result4.is_err(),
+            "Expected empty token to be rejected, but it was accepted"
+        );
+
+        // Test 5: Just dots
+        let dots_token = "..";
+        let result5 = validate_jwt(dots_token, secret);
+        assert!(
+            result5.is_err(),
+            "Expected token with just dots to be rejected, but it was accepted"
+        );
+    }
 }
