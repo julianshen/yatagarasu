@@ -4166,6 +4166,192 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_forwards_range_header_to_s3_with_aws_signature() {
+        use std::collections::HashMap;
+
+        // Test that Range header is included in S3 request and AWS signature
+        let mut headers = HashMap::new();
+        headers.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers.insert("x-amz-date".to_string(), "20231201T120000Z".to_string());
+        headers.insert(
+            "x-amz-content-sha256".to_string(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+        );
+        headers.insert("range".to_string(), "bytes=0-1023".to_string());
+
+        let params = SigningParams {
+            method: "GET",
+            uri: "/my-bucket/test.txt",
+            query_string: "",
+            headers: &headers,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231201",
+            datetime: "20231201T120000Z",
+        };
+
+        let authorization = sign_request(&params);
+
+        // Verify authorization header is generated
+        assert!(
+            authorization.starts_with("AWS4-HMAC-SHA256"),
+            "Should generate AWS4-HMAC-SHA256 signature"
+        );
+
+        // Verify it contains SignedHeaders including range
+        assert!(
+            authorization.contains("SignedHeaders="),
+            "Should include SignedHeaders"
+        );
+
+        // The canonical request should include range header in sorted order
+        let canonical = create_canonical_request(&params);
+
+        // Range header should be in canonical request (lowercase)
+        assert!(
+            canonical.contains("range:bytes=0-1023"),
+            "Canonical request should include range header: {}",
+            canonical
+        );
+
+        // Verify signed headers includes range
+        assert!(
+            canonical.contains("range") || authorization.contains("range"),
+            "Signature should include range header"
+        );
+
+        // Test with different range formats
+        let mut headers2 = HashMap::new();
+        headers2.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers2.insert("x-amz-date".to_string(), "20231201T120000Z".to_string());
+        headers2.insert(
+            "x-amz-content-sha256".to_string(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+        );
+        headers2.insert("range".to_string(), "bytes=1000-".to_string()); // open-ended
+
+        let params2 = SigningParams {
+            method: "GET",
+            uri: "/my-bucket/video.mp4",
+            query_string: "",
+            headers: &headers2,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231201",
+            datetime: "20231201T120000Z",
+        };
+
+        let authorization2 = sign_request(&params2);
+        assert!(
+            authorization2.starts_with("AWS4-HMAC-SHA256"),
+            "Should generate signature for open-ended range"
+        );
+
+        let canonical2 = create_canonical_request(&params2);
+        assert!(
+            canonical2.contains("range:bytes=1000-"),
+            "Should include open-ended range in canonical request"
+        );
+
+        // Test with suffix range
+        let mut headers3 = HashMap::new();
+        headers3.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers3.insert("x-amz-date".to_string(), "20231201T120000Z".to_string());
+        headers3.insert(
+            "x-amz-content-sha256".to_string(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+        );
+        headers3.insert("range".to_string(), "bytes=-500".to_string()); // suffix
+
+        let params3 = SigningParams {
+            method: "GET",
+            uri: "/my-bucket/data.bin",
+            query_string: "",
+            headers: &headers3,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231201",
+            datetime: "20231201T120000Z",
+        };
+
+        let authorization3 = sign_request(&params3);
+        assert!(
+            authorization3.starts_with("AWS4-HMAC-SHA256"),
+            "Should generate signature for suffix range"
+        );
+
+        let canonical3 = create_canonical_request(&params3);
+        assert!(
+            canonical3.contains("range:bytes=-500"),
+            "Should include suffix range in canonical request"
+        );
+
+        // Test with multiple ranges
+        let mut headers4 = HashMap::new();
+        headers4.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers4.insert("x-amz-date".to_string(), "20231201T120000Z".to_string());
+        headers4.insert(
+            "x-amz-content-sha256".to_string(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+        );
+        headers4.insert("range".to_string(), "bytes=0-100,200-300".to_string());
+
+        let params4 = SigningParams {
+            method: "GET",
+            uri: "/my-bucket/file.dat",
+            query_string: "",
+            headers: &headers4,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231201",
+            datetime: "20231201T120000Z",
+        };
+
+        let authorization4 = sign_request(&params4);
+        assert!(
+            authorization4.starts_with("AWS4-HMAC-SHA256"),
+            "Should generate signature for multiple ranges"
+        );
+
+        let canonical4 = create_canonical_request(&params4);
+        assert!(
+            canonical4.contains("range:bytes=0-100,200-300"),
+            "Should include multiple ranges in canonical request"
+        );
+
+        // Verify different range headers produce different signatures
+        let sig_single = authorization;
+        let sig_open = authorization2;
+        let sig_suffix = authorization3;
+        let sig_multi = authorization4;
+
+        assert_ne!(
+            sig_single, sig_open,
+            "Different range values should produce different signatures"
+        );
+        assert_ne!(
+            sig_single, sig_suffix,
+            "Different range types should produce different signatures"
+        );
+        assert_ne!(
+            sig_single, sig_multi,
+            "Multiple ranges should produce different signature"
+        );
+    }
+
     #[tokio::test]
     async fn test_streaming_stops_if_client_disconnects() {
         use futures::stream::{self, StreamExt};

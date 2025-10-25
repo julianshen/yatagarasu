@@ -336,7 +336,7 @@ yatagarasu/
 - [x] Test: Includes Accept-Ranges: bytes in response headers
 
 ### S3 Range Requests - Request Handling
-- [ ] Test: Forwards Range header to S3 with AWS signature
+- [x] Test: Forwards Range header to S3 with AWS signature
 - [ ] Test: Returns 206 Partial Content for valid range
 - [ ] Test: Returns Content-Range header with correct format
 - [ ] Test: Streams only requested bytes (not full file)
