@@ -1380,4 +1380,42 @@ mod tests {
             "Expected token with just dots to be rejected, but it was accepted"
         );
     }
+
+    #[test]
+    fn test_rejects_jwt_with_invalid_base64_encoding() {
+        let secret = "test_secret";
+
+        // Test 1: Invalid Base64 characters in header (@ is not valid base64)
+        let invalid_header = "@@@invalid@@@.eyJzdWIiOiJ1c2VyMTIzIn0.signature";
+        let result1 = validate_jwt(invalid_header, secret);
+        assert!(
+            result1.is_err(),
+            "Expected JWT with invalid Base64 in header to be rejected"
+        );
+
+        // Test 2: Invalid Base64 characters in payload (! is not valid base64)
+        let invalid_payload = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.!!!invalid!!!.signature";
+        let result2 = validate_jwt(invalid_payload, secret);
+        assert!(
+            result2.is_err(),
+            "Expected JWT with invalid Base64 in payload to be rejected"
+        );
+
+        // Test 3: Invalid Base64 characters in signature (spaces are not valid base64)
+        let invalid_signature =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0.invalid signature with spaces";
+        let result3 = validate_jwt(invalid_signature, secret);
+        assert!(
+            result3.is_err(),
+            "Expected JWT with invalid Base64 in signature to be rejected"
+        );
+
+        // Test 4: Mix of invalid characters ($, #, %)
+        let mixed_invalid = "$invalid#header%.{invalid}payload.signature~with~tildes";
+        let result4 = validate_jwt(mixed_invalid, secret);
+        assert!(
+            result4.is_err(),
+            "Expected JWT with multiple invalid Base64 characters to be rejected"
+        );
+    }
 }
