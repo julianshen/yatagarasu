@@ -120,6 +120,13 @@ pub struct S3Request {
     pub region: String,
 }
 
+impl S3Request {
+    /// Returns the URL path for the S3 request (path-style: /bucket/key)
+    pub fn get_url(&self) -> String {
+        format!("/{}/{}", self.bucket, self.key)
+    }
+}
+
 /// Builds a GET object request for S3
 pub fn build_get_object_request(bucket: &str, key: &str, region: &str) -> S3Request {
     S3Request {
@@ -1255,6 +1262,48 @@ mod tests {
         assert!(
             request_str.contains(key),
             "Request should include object key"
+        );
+    }
+
+    #[test]
+    fn test_get_request_includes_correct_bucket_and_key_in_url() {
+        let bucket = "my-bucket";
+        let key = "folder/file.txt";
+        let region = "us-east-1";
+
+        let request = build_get_object_request(bucket, key, region);
+        let url = request.get_url();
+
+        // Verify URL contains bucket name
+        assert!(
+            url.contains(bucket),
+            "URL should contain bucket name: {}",
+            url
+        );
+
+        // Verify URL contains key (path-style: /bucket/key)
+        assert!(url.contains(key), "URL should contain object key: {}", url);
+
+        // Verify path-style URL format: /bucket/key
+        let expected_path = format!("/{}/{}", bucket, key);
+        assert!(
+            url.contains(&expected_path) || url.contains(&format!("{}.s3", bucket)),
+            "URL should use either path-style (/bucket/key) or virtual-hosted-style (bucket.s3...): {}",
+            url
+        );
+
+        // Test with simple key (no slash)
+        let request2 = build_get_object_request("test-bucket", "simple.txt", "us-west-2");
+        let url2 = request2.get_url();
+        assert!(
+            url2.contains("test-bucket"),
+            "URL should contain bucket: {}",
+            url2
+        );
+        assert!(
+            url2.contains("simple.txt"),
+            "URL should contain key: {}",
+            url2
         );
     }
 }
