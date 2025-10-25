@@ -2994,4 +2994,138 @@ mod tests {
             Ok(_) => panic!("Expected error but authentication succeeded"),
         }
     }
+
+    #[test]
+    fn test_attaches_validated_claims_to_request_context() {
+        use crate::config::TokenSource;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let secret = "test_secret";
+
+        // Create a JWT with both standard and custom claims
+        let mut custom_map = serde_json::Map::new();
+        custom_map.insert(
+            "role".to_string(),
+            serde_json::Value::String("admin".to_string()),
+        );
+        custom_map.insert(
+            "department".to_string(),
+            serde_json::Value::String("engineering".to_string()),
+        );
+        custom_map.insert(
+            "level".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(5)),
+        );
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let claims = Claims {
+            sub: Some("user123".to_string()),
+            iss: Some("https://auth.example.com".to_string()),
+            exp: Some(now + 3600),
+            iat: Some(now),
+            nbf: None,
+            custom: custom_map,
+        };
+
+        // Encode the JWT
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .expect("Failed to encode JWT");
+
+        // Create JWT config
+        let jwt_config = JwtConfig {
+            enabled: true,
+            secret: secret.to_string(),
+            algorithm: "HS256".to_string(),
+            token_sources: vec![TokenSource {
+                source_type: "bearer".to_string(),
+                name: None,
+                prefix: None,
+            }],
+            claims: vec![],
+        };
+
+        // Create headers with the JWT
+        let mut headers = HashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+        let query_params = HashMap::new();
+
+        // Authenticate the request
+        let result = authenticate_request(&headers, &query_params, &jwt_config);
+
+        assert!(
+            result.is_ok(),
+            "Expected authentication to succeed: {:?}",
+            result.err()
+        );
+
+        // Verify that the returned claims contain all the information
+        let authenticated_claims = result.unwrap();
+
+        // Verify standard claims are accessible
+        assert_eq!(
+            authenticated_claims.sub,
+            Some("user123".to_string()),
+            "Subject claim should be accessible"
+        );
+        assert_eq!(
+            authenticated_claims.iss,
+            Some("https://auth.example.com".to_string()),
+            "Issuer claim should be accessible"
+        );
+        assert!(
+            authenticated_claims.exp.is_some(),
+            "Expiration claim should be accessible"
+        );
+        assert!(
+            authenticated_claims.iat.is_some(),
+            "Issued at claim should be accessible"
+        );
+
+        // Verify custom claims are accessible
+        assert_eq!(
+            authenticated_claims
+                .custom
+                .get("role")
+                .and_then(|v| v.as_str()),
+            Some("admin"),
+            "Role claim should be accessible for authorization"
+        );
+        assert_eq!(
+            authenticated_claims
+                .custom
+                .get("department")
+                .and_then(|v| v.as_str()),
+            Some("engineering"),
+            "Department claim should be accessible"
+        );
+        assert_eq!(
+            authenticated_claims
+                .custom
+                .get("level")
+                .and_then(|v| v.as_i64()),
+            Some(5),
+            "Level claim should be accessible"
+        );
+
+        // Verify claims can be used for authorization decisions
+        // (This simulates what the proxy middleware would do with the claims)
+        let user_role = authenticated_claims
+            .custom
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            user_role, "admin",
+            "Claims should be usable for authorization decisions"
+        );
+    }
 }
