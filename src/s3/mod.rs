@@ -831,4 +831,102 @@ mod tests {
             "Signature value must be different when x-amz-date is different"
         );
     }
+
+    #[test]
+    fn test_signature_includes_x_amz_content_sha256_header() {
+        use std::collections::HashMap;
+
+        let method = "GET";
+        let uri = "/bucket/key";
+        let query_string = "";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+        let service = "s3";
+        let date = "20130524";
+        let datetime = "20130524T000000Z";
+
+        // Create first signature with empty payload hash
+        let payload1 = b"";
+        let payload1_hash = sha256_hex(payload1);
+
+        let mut headers1 = HashMap::new();
+        headers1.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers1.insert("x-amz-date".to_string(), datetime.to_string());
+        headers1.insert("x-amz-content-sha256".to_string(), payload1_hash.clone());
+
+        let params1 = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers1,
+            payload: payload1,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let authorization1 = sign_request(&params1);
+
+        // Verify x-amz-content-sha256 is in SignedHeaders
+        assert!(
+            authorization1.contains("x-amz-content-sha256"),
+            "SignedHeaders must include x-amz-content-sha256"
+        );
+
+        // Create second signature with different payload hash
+        let payload2 = b"test-payload";
+        let payload2_hash = sha256_hex(payload2);
+
+        let mut headers2 = HashMap::new();
+        headers2.insert("host".to_string(), "bucket.s3.amazonaws.com".to_string());
+        headers2.insert("x-amz-date".to_string(), datetime.to_string());
+        headers2.insert("x-amz-content-sha256".to_string(), payload2_hash.clone());
+
+        let params2 = SigningParams {
+            method,
+            uri,
+            query_string,
+            headers: &headers2,
+            payload: payload2,
+            access_key,
+            secret_key,
+            region,
+            service,
+            date,
+            datetime,
+        };
+
+        let authorization2 = sign_request(&params2);
+
+        // Verify that changing x-amz-content-sha256 value changes the signature
+        assert_ne!(
+            authorization1, authorization2,
+            "Signature must change when x-amz-content-sha256 header value changes"
+        );
+
+        // Extract signatures to verify they're different
+        let sig1 = authorization1
+            .split("Signature=")
+            .nth(1)
+            .expect("Should have Signature");
+        let sig2 = authorization2
+            .split("Signature=")
+            .nth(1)
+            .expect("Should have Signature");
+
+        assert_ne!(
+            sig1, sig2,
+            "Signature value must be different when x-amz-content-sha256 is different"
+        );
+
+        // Verify that the payload hash values are actually different
+        assert_ne!(
+            payload1_hash, payload2_hash,
+            "Payload hashes should be different for different payloads"
+        );
+    }
 }
