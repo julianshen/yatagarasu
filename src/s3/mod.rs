@@ -1541,4 +1541,67 @@ mod tests {
             "URL should preserve question mark in key"
         );
     }
+
+    #[test]
+    fn test_get_request_preserves_original_path_structure() {
+        let bucket = "test-bucket";
+        let region = "us-east-1";
+
+        // Test deeply nested path
+        let nested_key = "level1/level2/level3/level4/file.txt";
+        let request1 = build_get_object_request(bucket, nested_key, region);
+        assert_eq!(request1.key, nested_key, "Key should be preserved exactly");
+        let url1 = request1.get_url();
+        assert!(
+            url1.contains(nested_key),
+            "URL should preserve nested path structure: {}",
+            url1
+        );
+        // Verify all path levels are present
+        assert!(url1.contains("level1/level2/level3/level4/file.txt"));
+
+        // Test path with trailing slash (folder marker)
+        let folder_key = "folder/subfolder/";
+        let request2 = build_get_object_request(bucket, folder_key, region);
+        assert_eq!(request2.key, folder_key, "Folder key should be preserved");
+        let url2 = request2.get_url();
+        assert!(
+            url2.ends_with("/"),
+            "URL should preserve trailing slash: {}",
+            url2
+        );
+
+        // Test single-level path
+        let single_level = "document.pdf";
+        let request3 = build_get_object_request(bucket, single_level, region);
+        assert_eq!(request3.key, single_level);
+        let url3 = request3.get_url();
+        assert!(
+            url3.contains(single_level),
+            "URL should preserve single-level path: {}",
+            url3
+        );
+
+        // Test path with multiple slashes (edge case)
+        let multiple_slashes = "folder//subfolder/file.txt";
+        let request4 = build_get_object_request(bucket, multiple_slashes, region);
+        assert_eq!(
+            request4.key, multiple_slashes,
+            "Key with multiple slashes should be preserved exactly"
+        );
+        let url4 = request4.get_url();
+        assert!(
+            url4.contains(multiple_slashes),
+            "URL should preserve multiple slashes: {}",
+            url4
+        );
+
+        // Test path starting with slash (edge case)
+        let leading_slash = "/folder/file.txt";
+        let request5 = build_get_object_request(bucket, leading_slash, region);
+        assert_eq!(
+            request5.key, leading_slash,
+            "Key with leading slash should be preserved"
+        );
+    }
 }
