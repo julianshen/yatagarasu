@@ -188,6 +188,37 @@ pub fn build_head_object_request(bucket: &str, key: &str, region: &str) -> S3Req
     }
 }
 
+/// Represents an S3 response
+#[derive(Debug)]
+pub struct S3Response {
+    pub status_code: u16,
+    pub status_text: String,
+    pub headers: std::collections::HashMap<String, String>,
+    pub body: Vec<u8>,
+}
+
+impl S3Response {
+    /// Creates a new S3Response
+    pub fn new(
+        status_code: u16,
+        status_text: &str,
+        headers: std::collections::HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Self {
+        S3Response {
+            status_code,
+            status_text: status_text.to_string(),
+            headers,
+            body,
+        }
+    }
+
+    /// Returns true if the response indicates success (2xx status code)
+    pub fn is_success(&self) -> bool {
+        self.status_code >= 200 && self.status_code < 300
+    }
+}
+
 pub fn sign_request(params: &SigningParams) -> String {
     // Step 1 & 2: Create string to sign (includes canonical request generation)
     let string_to_sign = create_string_to_sign(params);
@@ -1774,5 +1805,37 @@ mod tests {
             get_request.get_url(),
             "HEAD and GET should request the same resource URL"
         );
+    }
+
+    #[test]
+    fn test_parses_200_ok_response_from_s3() {
+        use std::collections::HashMap;
+
+        // Simulate a 200 OK response from S3
+        let status_code = 200;
+        let status_text = "OK";
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "text/plain".to_string());
+        headers.insert("content-length".to_string(), "13".to_string());
+        headers.insert("etag".to_string(), "\"abc123\"".to_string());
+
+        let body = b"Hello, World!";
+
+        let response = S3Response::new(status_code, status_text, headers, body.to_vec());
+
+        // Verify status code is parsed correctly
+        assert_eq!(response.status_code, 200, "Status code should be 200");
+
+        // Verify status text is parsed correctly
+        assert_eq!(response.status_text, "OK", "Status text should be OK");
+
+        // Verify response is successful
+        assert!(
+            response.is_success(),
+            "200 OK response should be considered successful"
+        );
+
+        // Verify body is preserved
+        assert_eq!(response.body, body, "Response body should be preserved");
     }
 }
