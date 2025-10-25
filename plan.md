@@ -272,7 +272,7 @@ yatagarasu/
 ### S3 Client - Basic Setup
 - [x] Test: Can create S3 client with valid credentials
 - [x] Test: Can create S3 client with region configuration
-- [ ] Test: Can create S3 client with custom endpoint (for MinIO/LocalStack)
+- [x] Test: Can create S3 client with custom endpoint (for MinIO/LocalStack)
 - [ ] Test: Client creation fails with empty credentials
 - [ ] Test: Can create multiple independent S3 clients (one per bucket)
 

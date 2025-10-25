@@ -76,6 +76,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -94,6 +95,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: None,
             },
         };
         let bucket2 = BucketConfig {
@@ -104,6 +106,7 @@ mod tests {
                 region: "us-east-1".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: None,
             },
         };
         let bucket3 = BucketConfig {
@@ -114,6 +117,7 @@ mod tests {
                 region: "eu-west-1".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket1, bucket2, bucket3];
@@ -132,6 +136,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -155,6 +160,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -181,6 +187,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -201,6 +208,7 @@ mod tests {
                 region: "us-east-1".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: None,
             },
         };
         let bucket2 = BucketConfig {
@@ -211,6 +219,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: None,
             },
         };
         let bucket3 = BucketConfig {
@@ -221,6 +230,7 @@ mod tests {
                 region: "eu-west-1".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket1, bucket2, bucket3];
@@ -244,6 +254,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -267,6 +278,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -301,6 +313,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -335,6 +348,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -378,6 +392,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -431,6 +446,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -476,6 +492,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: None,
             },
         };
         let bucket2 = BucketConfig {
@@ -486,6 +503,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket1, bucket2];
@@ -522,6 +540,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: None,
             },
         };
         let bucket2 = BucketConfig {
@@ -532,6 +551,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket1, bucket2];
@@ -558,6 +578,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: None,
             },
         };
         let bucket2 = BucketConfig {
@@ -568,6 +589,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket1, bucket2];
@@ -611,6 +633,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -652,6 +675,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -687,6 +711,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -723,6 +748,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -763,6 +789,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -803,6 +830,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -851,6 +879,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -931,6 +960,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets = vec![bucket];
@@ -953,6 +983,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets2 = vec![bucket2];
@@ -975,6 +1006,7 @@ mod tests {
                 region: "us-west-2".to_string(),
                 access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                endpoint: None,
             },
         };
         let buckets3 = vec![bucket3];
@@ -1004,6 +1036,7 @@ mod tests {
                     region: "us-west-2".to_string(),
                     access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                     secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                    endpoint: None,
                 },
             });
         }
@@ -1045,6 +1078,7 @@ mod tests {
                     region: "us-west-2".to_string(),
                     access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
                     secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+                    endpoint: None,
                 },
             });
         }

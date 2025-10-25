@@ -38,6 +38,7 @@ mod tests {
             region: "us-east-1".to_string(),
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
         };
 
         let result = create_s3_client(&config);
@@ -65,6 +66,7 @@ mod tests {
             region: "us-east-1".to_string(),
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
         };
 
         let result1 = create_s3_client(&config1);
@@ -77,6 +79,7 @@ mod tests {
             region: "us-west-2".to_string(),
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
         };
 
         let result2 = create_s3_client(&config2);
@@ -89,6 +92,7 @@ mod tests {
             region: "eu-west-1".to_string(),
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
         };
 
         let result3 = create_s3_client(&config3);
@@ -101,10 +105,77 @@ mod tests {
             region: "ap-southeast-1".to_string(),
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
         };
 
         let result4 = create_s3_client(&config4);
         assert!(result4.is_ok(), "Should create client with ap-southeast-1");
         assert_eq!(result4.unwrap().config.region, "ap-southeast-1");
+    }
+
+    #[test]
+    fn test_can_create_s3_client_with_custom_endpoint() {
+        // Test with MinIO endpoint
+        let minio_config = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "minioadmin".to_string(),
+            secret_key: "minioadmin".to_string(),
+            endpoint: Some("http://localhost:9000".to_string()),
+        };
+
+        let result = create_s3_client(&minio_config);
+        assert!(result.is_ok(), "Should create client with MinIO endpoint");
+
+        let client = result.unwrap();
+        assert_eq!(
+            client.config.endpoint,
+            Some("http://localhost:9000".to_string()),
+            "Endpoint should be stored correctly"
+        );
+
+        // Test with LocalStack endpoint
+        let localstack_config = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: Some("http://localhost:4566".to_string()),
+        };
+
+        let result2 = create_s3_client(&localstack_config);
+        assert!(
+            result2.is_ok(),
+            "Should create client with LocalStack endpoint"
+        );
+
+        let client2 = result2.unwrap();
+        assert_eq!(
+            client2.config.endpoint,
+            Some("http://localhost:4566".to_string()),
+            "LocalStack endpoint should be stored correctly"
+        );
+
+        // Test with HTTPS endpoint
+        let https_config = S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: Some("https://s3-compatible.example.com".to_string()),
+        };
+
+        let result3 = create_s3_client(&https_config);
+        assert!(
+            result3.is_ok(),
+            "Should create client with HTTPS custom endpoint"
+        );
+
+        let client3 = result3.unwrap();
+        assert_eq!(
+            client3.config.endpoint,
+            Some("https://s3-compatible.example.com".to_string()),
+            "HTTPS endpoint should be stored correctly"
+        );
     }
 }

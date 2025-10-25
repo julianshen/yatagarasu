@@ -137,6 +137,8 @@ pub struct S3Config {
     pub region: String,
     pub access_key: String,
     pub secret_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
