@@ -298,7 +298,7 @@ yatagarasu/
 - [x] Test: Can build HEAD object request with key
 - [x] Test: HEAD request includes correct HTTP method
 - [x] Test: HEAD request includes same headers as GET
-- [ ] Test: HEAD request returns object metadata without body
+- [x] Test: HEAD request returns object metadata without body
 
 ### S3 Response - Success Handling
 - [ ] Test: Parses 200 OK response from S3

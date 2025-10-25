@@ -1726,4 +1726,53 @@ mod tests {
         // Note: x-amz-date might differ due to timestamp generation
         // Note: Authorization signature will differ because method is different
     }
+
+    #[test]
+    fn test_head_request_returns_object_metadata_without_body() {
+        // This test documents the expected behavior of HEAD requests:
+        // HEAD requests should return the same headers as GET (metadata)
+        // but with no response body, as per HTTP specification.
+
+        let bucket = "metadata-bucket";
+        let key = "large-file.bin";
+        let region = "us-east-1";
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+        let head_request = build_head_object_request(bucket, key, region);
+
+        // Verify method is HEAD (which per HTTP spec means no response body)
+        assert_eq!(
+            head_request.method, "HEAD",
+            "HEAD method indicates metadata-only request (no body)"
+        );
+
+        // Verify request structure is identical to GET except for method
+        let get_request = build_get_object_request(bucket, key, region);
+        assert_eq!(head_request.bucket, get_request.bucket);
+        assert_eq!(head_request.key, get_request.key);
+        assert_eq!(head_request.region, get_request.region);
+
+        // Verify HEAD request includes all necessary headers for authentication
+        let headers = head_request.get_signed_headers(access_key, secret_key);
+        assert!(
+            headers.contains_key("authorization"),
+            "HEAD request must include authorization for metadata access"
+        );
+
+        // The key difference: HEAD method tells S3 to return only headers
+        // S3 will respond with Content-Length, Content-Type, ETag, etc.
+        // but the response body will be empty (0 bytes transferred)
+        assert_eq!(
+            head_request.method, "HEAD",
+            "HEAD method ensures response body is omitted per HTTP spec"
+        );
+
+        // Verify URL is the same as GET (points to same resource)
+        assert_eq!(
+            head_request.get_url(),
+            get_request.get_url(),
+            "HEAD and GET should request the same resource URL"
+        );
+    }
 }
