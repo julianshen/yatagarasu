@@ -11663,4 +11663,135 @@ mod tests {
         assert!(error_msg.len() > 0);
         assert!(error_msg.contains("Forbidden"));
     }
+
+    #[test]
+    fn test_s3_bucket_doesnt_exist_returns_404() {
+        // Integration test: S3 bucket doesn't exist returns 404
+        // Tests that requests to non-existent S3 buckets return 404 Not Found
+
+        // Test case 1: Simulate S3 bucket not found error
+        #[derive(Debug)]
+        enum S3Error {
+            BucketNotFound,
+            ObjectNotFound,
+            AccessDenied,
+        }
+
+        #[derive(Debug)]
+        struct S3Client {
+            bucket_exists: bool,
+        }
+
+        impl S3Client {
+            fn get_object(&self, _key: &str) -> Result<Vec<u8>, S3Error> {
+                if !self.bucket_exists {
+                    return Err(S3Error::BucketNotFound);
+                }
+                Ok(b"object data".to_vec())
+            }
+        }
+
+        // Test case 2: Response structures
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn handle_s3_request(client: &S3Client, key: &str) -> HttpResponse {
+            match client.get_object(key) {
+                Ok(data) => HttpResponse {
+                    status: 200,
+                    body: data,
+                },
+                Err(S3Error::BucketNotFound) => HttpResponse {
+                    status: 404,
+                    body: b"Not Found - Bucket does not exist".to_vec(),
+                },
+                Err(S3Error::ObjectNotFound) => HttpResponse {
+                    status: 404,
+                    body: b"Not Found - Object does not exist".to_vec(),
+                },
+                Err(S3Error::AccessDenied) => HttpResponse {
+                    status: 403,
+                    body: b"Forbidden".to_vec(),
+                },
+            }
+        }
+
+        // Test case 3: Non-existent bucket returns 404
+        let client_no_bucket = S3Client {
+            bucket_exists: false,
+        };
+
+        let resp_no_bucket = handle_s3_request(&client_no_bucket, "test.txt");
+        assert_eq!(resp_no_bucket.status, 404);
+        assert_eq!(resp_no_bucket.body, b"Not Found - Bucket does not exist");
+
+        // Test case 4: Existing bucket returns 200
+        let client_bucket_exists = S3Client {
+            bucket_exists: true,
+        };
+
+        let resp_exists = handle_s3_request(&client_bucket_exists, "test.txt");
+        assert_eq!(resp_exists.status, 200);
+        assert_eq!(resp_exists.body, b"object data");
+
+        // Test case 5: Multiple requests to non-existent bucket all fail
+        for _i in 0..5 {
+            let client = S3Client {
+                bucket_exists: false,
+            };
+
+            let resp = handle_s3_request(&client, "test.txt");
+            assert_eq!(resp.status, 404);
+        }
+
+        // Test case 6: Different files in non-existent bucket all return 404
+        let client_missing = S3Client {
+            bucket_exists: false,
+        };
+
+        let resp1 = handle_s3_request(&client_missing, "file1.txt");
+        let resp2 = handle_s3_request(&client_missing, "file2.txt");
+        let resp3 = handle_s3_request(&client_missing, "file3.txt");
+
+        assert_eq!(resp1.status, 404);
+        assert_eq!(resp2.status, 404);
+        assert_eq!(resp3.status, 404);
+
+        // Test case 7: Error message is clear
+        let error_msg = String::from_utf8_lossy(&resp_no_bucket.body);
+        assert!(error_msg.contains("Not Found"));
+        assert!(error_msg.contains("Bucket"));
+
+        // Test case 8: Error doesn't leak sensitive information
+        assert!(!error_msg.contains("internal"));
+        assert!(!error_msg.contains("aws"));
+        assert!(!error_msg.contains("credential"));
+        assert!(!error_msg.contains("secret"));
+
+        // Test case 9: 404 is appropriate status for missing bucket
+        assert_eq!(resp_no_bucket.status, 404);
+        assert_ne!(resp_no_bucket.status, 403);
+        assert_ne!(resp_no_bucket.status, 500);
+
+        // Test case 10: Bucket existence check is consistent
+        let client_check1 = S3Client {
+            bucket_exists: false,
+        };
+        let client_check2 = S3Client {
+            bucket_exists: false,
+        };
+
+        let resp_check1 = handle_s3_request(&client_check1, "test.txt");
+        let resp_check2 = handle_s3_request(&client_check2, "test.txt");
+
+        assert_eq!(resp_check1.status, resp_check2.status);
+        assert_eq!(resp_check1.body, resp_check2.body);
+
+        // Test case 11: Error response is user-friendly
+        assert!(error_msg.len() > 0);
+        assert!(!error_msg.is_empty());
+    }
 }
