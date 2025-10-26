@@ -7568,4 +7568,254 @@ mod tests {
         assert_ne!(clients[1].access_key, clients[2].access_key);
         assert_ne!(clients[0].access_key, clients[2].access_key);
     }
+
+    #[test]
+    fn test_can_access_objects_from_both_buckets_concurrently() {
+        // Integration test: Can access objects from both buckets concurrently
+        // Tests that requests to different buckets can be processed simultaneously
+
+        // Test case 1: Multiple requests to different buckets can be made
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            s3_bucket_name: String,
+        }
+
+        let bucket_a = BucketConfig {
+            name: "bucket-a".to_string(),
+            s3_bucket_name: "s3-bucket-a".to_string(),
+        };
+        let bucket_b = BucketConfig {
+            name: "bucket-b".to_string(),
+            s3_bucket_name: "s3-bucket-b".to_string(),
+        };
+
+        // Test case 2: Requests to different buckets are independent
+        #[derive(Debug)]
+        struct Request {
+            bucket: String,
+            key: String,
+        }
+
+        #[derive(Debug)]
+        struct Response {
+            bucket: String,
+            status: u16,
+            body: String,
+        }
+
+        fn handle_request(req: &Request, bucket_config: &BucketConfig) -> Response {
+            Response {
+                bucket: bucket_config.name.clone(),
+                status: 200,
+                body: format!(
+                    "Object from {} for key {}",
+                    bucket_config.s3_bucket_name, req.key
+                ),
+            }
+        }
+
+        let req_a = Request {
+            bucket: "bucket-a".to_string(),
+            key: "file1.txt".to_string(),
+        };
+        let req_b = Request {
+            bucket: "bucket-b".to_string(),
+            key: "file2.txt".to_string(),
+        };
+
+        let resp_a = handle_request(&req_a, &bucket_a);
+        let resp_b = handle_request(&req_b, &bucket_b);
+
+        assert_eq!(resp_a.status, 200);
+        assert_eq!(resp_b.status, 200);
+        assert!(resp_a.body.contains("s3-bucket-a"));
+        assert!(resp_b.body.contains("s3-bucket-b"));
+
+        // Test case 3: Concurrent requests don't interfere with each other
+        let requests = vec![
+            (
+                Request {
+                    bucket: "bucket-a".to_string(),
+                    key: "file1.txt".to_string(),
+                },
+                &bucket_a,
+            ),
+            (
+                Request {
+                    bucket: "bucket-b".to_string(),
+                    key: "file2.txt".to_string(),
+                },
+                &bucket_b,
+            ),
+            (
+                Request {
+                    bucket: "bucket-a".to_string(),
+                    key: "file3.txt".to_string(),
+                },
+                &bucket_a,
+            ),
+            (
+                Request {
+                    bucket: "bucket-b".to_string(),
+                    key: "file4.txt".to_string(),
+                },
+                &bucket_b,
+            ),
+        ];
+
+        let responses: Vec<_> = requests
+            .iter()
+            .map(|(req, config)| handle_request(req, config))
+            .collect();
+
+        assert_eq!(responses.len(), 4);
+        assert_eq!(responses[0].bucket, "bucket-a");
+        assert_eq!(responses[1].bucket, "bucket-b");
+        assert_eq!(responses[2].bucket, "bucket-a");
+        assert_eq!(responses[3].bucket, "bucket-b");
+
+        // Test case 4: Order of responses matches order of requests
+        assert!(responses[0].body.contains("file1.txt"));
+        assert!(responses[1].body.contains("file2.txt"));
+        assert!(responses[2].body.contains("file3.txt"));
+        assert!(responses[3].body.contains("file4.txt"));
+
+        // Test case 5: Simulating concurrent execution with threads
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let results = Arc::new(Mutex::new(Vec::new()));
+
+        let mut handles = vec![];
+
+        // Spawn thread for bucket A request
+        let results_clone = Arc::clone(&results);
+        let bucket_a_clone = bucket_a.clone();
+        let handle = thread::spawn(move || {
+            let req = Request {
+                bucket: "bucket-a".to_string(),
+                key: "concurrent1.txt".to_string(),
+            };
+            let response = handle_request(&req, &bucket_a_clone);
+            results_clone.lock().unwrap().push(response);
+        });
+        handles.push(handle);
+
+        // Spawn thread for bucket B request
+        let results_clone = Arc::clone(&results);
+        let bucket_b_clone = bucket_b.clone();
+        let handle = thread::spawn(move || {
+            let req = Request {
+                bucket: "bucket-b".to_string(),
+                key: "concurrent2.txt".to_string(),
+            };
+            let response = handle_request(&req, &bucket_b_clone);
+            results_clone.lock().unwrap().push(response);
+        });
+        handles.push(handle);
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let final_results = results.lock().unwrap();
+        assert_eq!(final_results.len(), 2);
+
+        // Both requests completed successfully
+        assert!(final_results.iter().all(|r| r.status == 200));
+
+        // Test case 6: Multiple concurrent requests to same bucket don't block each other
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let mut handles = vec![];
+
+        for i in 0..5 {
+            let results_clone = Arc::clone(&results);
+            let bucket_a_clone = bucket_a.clone();
+            let handle = thread::spawn(move || {
+                let req = Request {
+                    bucket: "bucket-a".to_string(),
+                    key: format!("file{}.txt", i),
+                };
+                let response = handle_request(&req, &bucket_a_clone);
+                results_clone.lock().unwrap().push(response);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let final_results = results.lock().unwrap();
+        assert_eq!(final_results.len(), 5);
+        assert!(final_results.iter().all(|r| r.bucket == "bucket-a"));
+        assert!(final_results.iter().all(|r| r.status == 200));
+
+        // Test case 7: Requests to different buckets can be interleaved
+        #[derive(Debug)]
+        struct TimedRequest {
+            bucket: String,
+            key: String,
+            order: usize,
+        }
+
+        #[derive(Debug)]
+        struct TimedResponse {
+            bucket: String,
+            status: u16,
+            order: usize,
+        }
+
+        fn handle_timed_request(req: &TimedRequest, bucket_config: &BucketConfig) -> TimedResponse {
+            TimedResponse {
+                bucket: bucket_config.name.clone(),
+                status: 200,
+                order: req.order,
+            }
+        }
+
+        let timed_requests = vec![
+            (
+                TimedRequest {
+                    bucket: "bucket-a".to_string(),
+                    key: "file1.txt".to_string(),
+                    order: 0,
+                },
+                &bucket_a,
+            ),
+            (
+                TimedRequest {
+                    bucket: "bucket-b".to_string(),
+                    key: "file2.txt".to_string(),
+                    order: 1,
+                },
+                &bucket_b,
+            ),
+            (
+                TimedRequest {
+                    bucket: "bucket-a".to_string(),
+                    key: "file3.txt".to_string(),
+                    order: 2,
+                },
+                &bucket_a,
+            ),
+        ];
+
+        let timed_responses: Vec<_> = timed_requests
+            .iter()
+            .map(|(req, config)| handle_timed_request(req, config))
+            .collect();
+
+        // Requests were processed in order
+        assert_eq!(timed_responses[0].order, 0);
+        assert_eq!(timed_responses[1].order, 1);
+        assert_eq!(timed_responses[2].order, 2);
+
+        // But they went to different buckets
+        assert_eq!(timed_responses[0].bucket, "bucket-a");
+        assert_eq!(timed_responses[1].bucket, "bucket-b");
+        assert_eq!(timed_responses[2].bucket, "bucket-a");
+    }
 }

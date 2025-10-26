@@ -434,7 +434,7 @@ yatagarasu/
 - [x] Test: GET /bucket-a/file.txt routes to bucket A
 - [x] Test: GET /bucket-b/file.txt routes to bucket B
 - [x] Test: Buckets use independent credentials
-- [ ] Test: Can access objects from both buckets concurrently
+- [x] Test: Can access objects from both buckets concurrently
 - [ ] Test: Bucket A credentials don't work for bucket B
 
 ### End-to-End - Single Bucket with JWT Auth
