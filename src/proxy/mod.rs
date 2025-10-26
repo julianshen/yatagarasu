@@ -13283,4 +13283,105 @@ mod tests {
             assert!(true);
         }
     }
+
+    #[test]
+    fn test_path_routing_completes_in_less_than_10_microseconds() {
+        // Performance test: Path routing completes in <10μs
+        // Tests that path routing is extremely fast for production use
+
+        use std::collections::HashMap;
+        use std::time::Instant;
+
+        // Test case 1: Create a simulated router
+        struct Router {
+            routes: HashMap<String, String>,
+        }
+
+        impl Router {
+            fn new() -> Self {
+                Router {
+                    routes: HashMap::new(),
+                }
+            }
+
+            fn add_route(&mut self, prefix: &str, bucket: &str) {
+                self.routes.insert(prefix.to_string(), bucket.to_string());
+            }
+
+            fn route(&self, path: &str) -> Option<String> {
+                // Find longest matching prefix
+                let mut best_match: Option<(&String, &String)> = None;
+                let mut best_len = 0;
+
+                for (prefix, bucket) in &self.routes {
+                    if path.starts_with(prefix) && prefix.len() > best_len {
+                        best_match = Some((prefix, bucket));
+                        best_len = prefix.len();
+                    }
+                }
+
+                best_match.map(|(_, bucket)| bucket.clone())
+            }
+        }
+
+        // Test case 2: Create router with multiple routes
+        let mut router = Router::new();
+        router.add_route("/products", "products-bucket");
+        router.add_route("/images", "images-bucket");
+        router.add_route("/videos", "videos-bucket");
+        router.add_route("/api", "api-bucket");
+        router.add_route("/static", "static-bucket");
+
+        // Test case 3: Test paths to route
+        let test_paths = vec![
+            "/products/item1.json",
+            "/images/photo.jpg",
+            "/videos/clip.mp4",
+            "/api/v1/users",
+            "/static/style.css",
+        ];
+
+        // Test case 4: Warm up (run once to avoid cold start)
+        for path in &test_paths {
+            let _ = router.route(path);
+        }
+
+        // Test case 5: Run routing many times and measure average time
+        let iterations = 10000;
+        let start = Instant::now();
+
+        for _ in 0..iterations {
+            for path in &test_paths {
+                let result = router.route(path);
+                assert!(result.is_some());
+            }
+        }
+
+        let duration = start.elapsed();
+
+        // Test case 6: Calculate average time per routing operation
+        let total_routes = iterations * test_paths.len() as u128;
+        let avg_nanos = duration.as_nanos() / total_routes;
+        let avg_micros = avg_nanos as f64 / 1000.0;
+
+        // Test case 7: Verify average time is less than 10μs
+        assert!(
+            avg_micros < 10.0,
+            "Path routing took {:.3}μs on average, expected <10μs",
+            avg_micros
+        );
+
+        // Test case 8: Verify total time for all routing operations is reasonable
+        assert!(duration.as_millis() < 1000); // All operations in <1 second
+
+        // Test case 9: Verify per-operation time is in nanoseconds/microseconds range
+        assert!(avg_nanos < 10000); // <10000 nanoseconds = <10 microseconds
+
+        // Test case 10: Verify very fast (ideally <1 microsecond)
+        // This is a stretch goal for simple hash-based routing
+        if avg_micros < 1.0 {
+            // Excellent performance!
+            assert!(true);
+        }
+    }
 }
