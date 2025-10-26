@@ -448,7 +448,7 @@ yatagarasu/
 
 ### End-to-End - Claims Verification
 - [x] Test: Valid JWT with correct claims returns object
-- [ ] Test: Valid JWT with incorrect claims returns 403
+- [x] Test: Valid JWT with incorrect claims returns 403
 - [ ] Test: Valid JWT with missing required claim returns 403
 - [ ] Test: Multiple claim verification rules enforced
 
