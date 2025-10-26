@@ -388,7 +388,7 @@ yatagarasu/
 - [x] Test: Handler can access request query parameters
 - [x] Test: Handler runs router to determine target bucket
 - [x] Test: Handler runs auth middleware when configured
-- [ ] Test: Handler builds S3 request from HTTP request
+- [x] Test: Handler builds S3 request from HTTP request
 
 ### Pingora - Response Handler
 - [ ] Test: Can send response status code

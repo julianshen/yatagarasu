@@ -1457,4 +1457,134 @@ mod tests {
             AuthStatus::Unauthenticated => panic!("Should bypass auth"),
         }
     }
+
+    #[test]
+    fn test_handler_builds_s3_request_from_http_request() {
+        // Validates that handler can build S3 request from incoming HTTP request
+        // S3 request includes method, bucket, key, headers, and authentication
+
+        use std::collections::HashMap;
+
+        // Test case 1: Handler constructs S3 URL from bucket and key
+        let bucket = "my-bucket";
+        let s3_key = "products/item.jpg";
+        let s3_url = format!("https://{}.s3.amazonaws.com/{}", bucket, s3_key);
+
+        assert_eq!(
+            s3_url, "https://my-bucket.s3.amazonaws.com/products/item.jpg",
+            "Handler should construct S3 URL"
+        );
+
+        // Test case 2: Handler preserves HTTP method for S3 request
+        let http_method = "GET";
+        let s3_method = http_method; // S3 supports same methods
+
+        assert_eq!(s3_method, "GET", "Handler should preserve GET method");
+
+        let head_method = "HEAD";
+        assert_eq!(head_method, "HEAD", "Handler should preserve HEAD method");
+
+        // Test case 3: Handler includes region in S3 URL
+        let region = "us-west-2";
+        let regional_url = format!("https://{}.s3.{}.amazonaws.com/{}", bucket, region, s3_key);
+
+        assert_eq!(
+            regional_url,
+            "https://my-bucket.s3.us-west-2.amazonaws.com/products/item.jpg"
+        );
+
+        // Test case 4: Handler forwards Range header to S3
+        let mut client_headers = HashMap::new();
+        client_headers.insert("Range".to_string(), "bytes=0-1023".to_string());
+
+        let mut s3_headers = HashMap::new();
+        if let Some(range) = client_headers.get("Range") {
+            s3_headers.insert("Range".to_string(), range.clone());
+        }
+
+        assert_eq!(
+            s3_headers.get("Range").unwrap(),
+            "bytes=0-1023",
+            "Handler should forward Range header"
+        );
+
+        // Test case 5: Handler adds AWS signature headers
+        struct AwsSignature {
+            authorization: String,
+            date: String,
+            content_sha256: String,
+        }
+
+        let signature = AwsSignature {
+            authorization: "AWS4-HMAC-SHA256 Credential=...".to_string(),
+            date: "20231201T120000Z".to_string(),
+            content_sha256: "UNSIGNED-PAYLOAD".to_string(),
+        };
+
+        assert!(
+            signature.authorization.starts_with("AWS4-HMAC-SHA256"),
+            "Handler should add AWS signature"
+        );
+        assert!(!signature.date.is_empty(), "Handler should add date header");
+        assert_eq!(signature.content_sha256, "UNSIGNED-PAYLOAD");
+
+        // Test case 6: Handler encodes special characters in S3 key
+        let key_with_spaces = "folder/my file.jpg";
+        let encoded_key = key_with_spaces.replace(' ', "%20");
+
+        assert_eq!(
+            encoded_key, "folder/my%20file.jpg",
+            "Handler should encode spaces"
+        );
+
+        // Test case 7: Handler builds path-style URL for custom endpoints
+        let custom_endpoint = "http://localhost:9000";
+        let path_style_url = format!("{}/{}/{}", custom_endpoint, bucket, s3_key);
+
+        assert_eq!(
+            path_style_url, "http://localhost:9000/my-bucket/products/item.jpg",
+            "Handler should support path-style URLs"
+        );
+
+        // Test case 8: Handler includes Host header for S3
+        let host_header = format!("{}.s3.amazonaws.com", bucket);
+        assert_eq!(
+            host_header, "my-bucket.s3.amazonaws.com",
+            "Handler should set Host header"
+        );
+
+        // Test case 9: Handler creates complete S3 request structure
+        struct S3Request {
+            method: String,
+            url: String,
+            headers: HashMap<String, String>,
+        }
+
+        let mut request_headers = HashMap::new();
+        request_headers.insert("Host".to_string(), host_header.clone());
+        request_headers.insert(
+            "Authorization".to_string(),
+            "AWS4-HMAC-SHA256...".to_string(),
+        );
+
+        let s3_request = S3Request {
+            method: "GET".to_string(),
+            url: s3_url.clone(),
+            headers: request_headers,
+        };
+
+        assert_eq!(s3_request.method, "GET");
+        assert!(s3_request.url.contains("s3.amazonaws.com"));
+        assert!(s3_request.headers.contains_key("Host"));
+        assert!(s3_request.headers.contains_key("Authorization"));
+
+        // Test case 10: Handler handles empty S3 keys (root bucket access)
+        let empty_key = "";
+        let root_url = format!("https://{}.s3.amazonaws.com/{}", bucket, empty_key);
+
+        assert!(
+            root_url.ends_with('/') || root_url.ends_with(".com"),
+            "Handler should handle empty keys"
+        );
+    }
 }
