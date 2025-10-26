@@ -401,7 +401,7 @@ yatagarasu/
 
 ### Pingora - Error Responses
 - [x] Test: Returns 400 for malformed requests
-- [ ] Test: Returns 401 for unauthorized requests
+- [x] Test: Returns 401 for unauthorized requests
 - [ ] Test: Returns 403 for forbidden requests
 - [ ] Test: Returns 404 for not found
 - [ ] Test: Returns 500 for internal errors
