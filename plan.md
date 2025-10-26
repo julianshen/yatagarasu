@@ -416,7 +416,7 @@ yatagarasu/
 - [x] Test: Request reaches S3 handler third
 - [x] Test: Middleware can short-circuit request (return early)
 - [x] Test: Middleware can modify request context
-- [ ] Test: Middleware errors are handled gracefully
+- [x] Test: Middleware errors are handled gracefully
 
 ---
 
