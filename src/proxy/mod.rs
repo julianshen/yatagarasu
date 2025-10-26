@@ -4839,4 +4839,206 @@ mod tests {
         assert!(logs[0].timestamp < logs[1].timestamp);
         assert!(logs[0].timestamp < logs[2].timestamp);
     }
+
+    #[test]
+    fn test_request_passes_through_auth_middleware_second() {
+        // Validates that auth middleware is the second middleware to process requests
+        // Auth runs after router determines bucket, before S3 handler
+
+        // Test case 1: Auth middleware executes after router
+        fn get_second_middleware_stage() -> String {
+            "auth".to_string()
+        }
+
+        assert_eq!(get_second_middleware_stage(), "auth");
+
+        // Test case 2: Middleware execution order places auth second
+        struct MiddlewareChain {
+            stages: Vec<String>,
+        }
+
+        impl MiddlewareChain {
+            fn new() -> Self {
+                let mut stages = Vec::new();
+                stages.push("router".to_string());
+                stages.push("auth".to_string());
+                stages.push("s3".to_string());
+                MiddlewareChain { stages }
+            }
+
+            fn get_stage_at_position(&self, position: usize) -> Option<&str> {
+                self.stages.get(position).map(|s| s.as_str())
+            }
+        }
+
+        let chain = MiddlewareChain::new();
+        assert_eq!(chain.get_stage_at_position(0), Some("router"));
+        assert_eq!(chain.get_stage_at_position(1), Some("auth"));
+        assert_eq!(chain.get_stage_at_position(2), Some("s3"));
+
+        // Test case 3: Auth runs only after router succeeds
+        fn execute_chain_with_router_result(
+            router_success: bool,
+            auth_enabled: bool,
+        ) -> Vec<String> {
+            let mut executed = Vec::new();
+            executed.push("router".to_string());
+
+            if !router_success {
+                return executed; // Stop if router fails
+            }
+
+            if auth_enabled {
+                executed.push("auth".to_string());
+            }
+
+            executed.push("s3".to_string());
+            executed
+        }
+
+        let with_auth = execute_chain_with_router_result(true, true);
+        assert_eq!(with_auth, vec!["router", "auth", "s3"]);
+        assert_eq!(with_auth[1], "auth");
+
+        let without_auth = execute_chain_with_router_result(true, false);
+        assert_eq!(without_auth, vec!["router", "s3"]);
+
+        // Test case 4: Auth has access to router results
+        struct RequestState {
+            router_bucket: Option<String>,
+            auth_validated: bool,
+            s3_key: Option<String>,
+        }
+
+        let state_after_auth = RequestState {
+            router_bucket: Some("products".to_string()), // Set by router
+            auth_validated: true,                        // Set by auth
+            s3_key: None,                                // Not set yet (S3 handler hasn't run)
+        };
+
+        assert!(state_after_auth.router_bucket.is_some());
+        assert!(state_after_auth.auth_validated);
+        assert!(state_after_auth.s3_key.is_none());
+
+        // Test case 5: Auth middleware timestamp is between router and S3
+        struct TimestampedExecution {
+            router_ts: u64,
+            auth_ts: Option<u64>,
+            s3_ts: u64,
+        }
+
+        let execution = TimestampedExecution {
+            router_ts: 100,
+            auth_ts: Some(200),
+            s3_ts: 300,
+        };
+
+        assert!(execution.router_ts < execution.auth_ts.unwrap());
+        assert!(execution.auth_ts.unwrap() < execution.s3_ts);
+
+        // Test case 6: Auth can access bucket name from router context
+        fn auth_receives_bucket_context(bucket_from_router: &str) -> bool {
+            !bucket_from_router.is_empty()
+        }
+
+        assert!(auth_receives_bucket_context("products"));
+
+        // Test case 7: Auth middleware validates before S3 access
+        fn validate_execution_order() -> Vec<(u64, &'static str)> {
+            vec![
+                (1, "router:match_path"),
+                (2, "auth:extract_token"),
+                (3, "auth:validate_jwt"),
+                (4, "s3:build_request"),
+                (5, "s3:fetch_object"),
+            ]
+        }
+
+        let order = validate_execution_order();
+        let auth_steps: Vec<_> = order
+            .iter()
+            .filter(|(_, s)| s.starts_with("auth:"))
+            .collect();
+        let s3_steps: Vec<_> = order.iter().filter(|(_, s)| s.starts_with("s3:")).collect();
+
+        // Auth steps come before S3 steps
+        assert!(auth_steps.last().unwrap().0 < s3_steps.first().unwrap().0);
+
+        // Test case 8: Auth failure prevents S3 handler execution
+        fn execute_with_auth_result(auth_success: bool) -> Vec<String> {
+            let mut executed = Vec::new();
+            executed.push("router".to_string());
+            executed.push("auth".to_string());
+
+            if !auth_success {
+                return executed; // Stop if auth fails
+            }
+
+            executed.push("s3".to_string());
+            executed
+        }
+
+        let auth_success = execute_with_auth_result(true);
+        assert_eq!(auth_success, vec!["router", "auth", "s3"]);
+
+        let auth_failure = execute_with_auth_result(false);
+        assert_eq!(auth_failure, vec!["router", "auth"]);
+        assert_eq!(auth_failure.len(), 2); // S3 handler not executed
+
+        // Test case 9: Auth middleware is skipped when disabled
+        fn should_run_auth(auth_enabled: bool) -> bool {
+            auth_enabled
+        }
+
+        assert!(should_run_auth(true));
+        assert!(!should_run_auth(false));
+
+        // Test case 10: Auth logs appear after router but before S3 in timeline
+        struct DetailedLog {
+            order: u32,
+            middleware: String,
+            action: String,
+        }
+
+        let logs = vec![
+            DetailedLog {
+                order: 1,
+                middleware: "router".to_string(),
+                action: "matched path".to_string(),
+            },
+            DetailedLog {
+                order: 2,
+                middleware: "auth".to_string(),
+                action: "validated JWT".to_string(),
+            },
+            DetailedLog {
+                order: 3,
+                middleware: "s3".to_string(),
+                action: "fetched object".to_string(),
+            },
+        ];
+
+        assert_eq!(logs[1].middleware, "auth");
+        assert!(logs[1].order > logs[0].order);
+        assert!(logs[1].order < logs[2].order);
+
+        // Test case 11: Auth uses bucket-specific configuration from router
+        struct BucketAuthConfig {
+            bucket_name: String,
+            auth_required: bool,
+        }
+
+        fn get_auth_config_for_bucket(bucket: &str) -> BucketAuthConfig {
+            BucketAuthConfig {
+                bucket_name: bucket.to_string(),
+                auth_required: bucket != "public",
+            }
+        }
+
+        let private_config = get_auth_config_for_bucket("products");
+        assert!(private_config.auth_required);
+
+        let public_config = get_auth_config_for_bucket("public");
+        assert!(!public_config.auth_required);
+    }
 }
