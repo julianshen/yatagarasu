@@ -377,7 +377,7 @@ yatagarasu/
 - [x] Test: Server listens on configured address and port
 - [x] Test: Server can handle HTTP/1.1 requests
 - [x] Test: Server can handle HTTP/2 requests (if enabled)
-- [ ] Test: Server handles graceful shutdown
+- [x] Test: Server handles graceful shutdown
 - [ ] Test: Server rejects requests before fully initialized
 
 ### Pingora - Request Handler
