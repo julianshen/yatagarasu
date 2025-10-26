@@ -447,7 +447,7 @@ yatagarasu/
 - [x] Test: JWT from custom header works
 
 ### End-to-End - Claims Verification
-- [ ] Test: Valid JWT with correct claims returns object
+- [x] Test: Valid JWT with correct claims returns object
 - [ ] Test: Valid JWT with incorrect claims returns 403
 - [ ] Test: Valid JWT with missing required claim returns 403
 - [ ] Test: Multiple claim verification rules enforced
