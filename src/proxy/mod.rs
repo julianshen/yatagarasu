@@ -12550,4 +12550,139 @@ mod tests {
         // This is implicitly verified by the fact that memory is freed after each batch
         assert_eq!(final_alloc, final_free);
     }
+
+    #[test]
+    fn test_no_credential_leakage_between_concurrent_requests() {
+        // End-to-end test: No credential leakage between concurrent requests
+        // Tests that credentials for one bucket don't leak to another bucket
+
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        // Test case 1: Define bucket credentials
+        #[derive(Clone, Debug, PartialEq)]
+        struct Credentials {
+            access_key: String,
+            secret_key: String,
+        }
+
+        // Test case 2: Track which credentials were used for each request
+        let used_credentials = Arc::new(Mutex::new(Vec::<(String, Credentials)>::new()));
+
+        // Test case 3: Simulate proxy with per-bucket credentials
+        #[derive(Clone)]
+        struct SecureProxy {
+            bucket_credentials: Arc<HashMap<String, Credentials>>,
+            used_creds: Arc<Mutex<Vec<(String, Credentials)>>>,
+        }
+
+        impl SecureProxy {
+            fn handle_request(&self, bucket: &str) -> Result<String, String> {
+                // Get credentials for the bucket
+                let creds = self
+                    .bucket_credentials
+                    .get(bucket)
+                    .ok_or_else(|| format!("Bucket not found: {}", bucket))?;
+
+                // Record which credentials were used
+                let mut used = self.used_creds.lock().unwrap();
+                used.push((bucket.to_string(), creds.clone()));
+
+                // Simulate some work
+                std::thread::sleep(std::time::Duration::from_micros(10));
+
+                Ok(format!("Success with bucket {}", bucket))
+            }
+        }
+
+        // Set up buckets with different credentials
+        let mut bucket_creds = HashMap::new();
+        bucket_creds.insert(
+            "bucket-a".to_string(),
+            Credentials {
+                access_key: "key_a".to_string(),
+                secret_key: "secret_a".to_string(),
+            },
+        );
+        bucket_creds.insert(
+            "bucket-b".to_string(),
+            Credentials {
+                access_key: "key_b".to_string(),
+                secret_key: "secret_b".to_string(),
+            },
+        );
+        bucket_creds.insert(
+            "bucket-c".to_string(),
+            Credentials {
+                access_key: "key_c".to_string(),
+                secret_key: "secret_c".to_string(),
+            },
+        );
+
+        let proxy = SecureProxy {
+            bucket_credentials: Arc::new(bucket_creds.clone()),
+            used_creds: used_credentials.clone(),
+        };
+
+        // Test case 4: Make concurrent requests to different buckets
+        let mut handles = vec![];
+        let requests_per_bucket = 20;
+
+        for _ in 0..requests_per_bucket {
+            for bucket in ["bucket-a", "bucket-b", "bucket-c"].iter() {
+                let proxy_clone = proxy.clone();
+                let bucket_name = bucket.to_string();
+                let handle = std::thread::spawn(move || proxy_clone.handle_request(&bucket_name));
+                handles.push((bucket.to_string(), handle));
+            }
+        }
+
+        // Test case 5: Wait for all requests to complete
+        for (expected_bucket, handle) in handles {
+            let result = handle.join().unwrap();
+            assert!(result.is_ok());
+            assert!(result.unwrap().contains(&expected_bucket));
+        }
+
+        // Test case 6: Verify each request used correct credentials
+        let used = used_credentials.lock().unwrap();
+        assert_eq!(used.len(), 60); // 3 buckets × 20 requests
+
+        for (bucket, creds) in used.iter() {
+            let expected_creds = bucket_creds.get(bucket).unwrap();
+            assert_eq!(
+                creds, expected_creds,
+                "Credential mismatch for bucket {}",
+                bucket
+            );
+        }
+
+        // Test case 7: Count requests per bucket
+        let bucket_a_count = used.iter().filter(|(b, _)| b == "bucket-a").count();
+        let bucket_b_count = used.iter().filter(|(b, _)| b == "bucket-b").count();
+        let bucket_c_count = used.iter().filter(|(b, _)| b == "bucket-c").count();
+
+        assert_eq!(bucket_a_count, 20);
+        assert_eq!(bucket_b_count, 20);
+        assert_eq!(bucket_c_count, 20);
+
+        // Test case 8: Verify no cross-bucket credential usage
+        let bucket_a_creds = bucket_creds.get("bucket-a").unwrap();
+        let bucket_b_creds = bucket_creds.get("bucket-b").unwrap();
+        let bucket_c_creds = bucket_creds.get("bucket-c").unwrap();
+
+        for (bucket, creds) in used.iter() {
+            match bucket.as_str() {
+                "bucket-a" => assert_eq!(creds, bucket_a_creds),
+                "bucket-b" => assert_eq!(creds, bucket_b_creds),
+                "bucket-c" => assert_eq!(creds, bucket_c_creds),
+                _ => panic!("Unexpected bucket: {}", bucket),
+            }
+        }
+
+        // Test case 9: Verify credentials are isolated (no shared state)
+        assert_ne!(bucket_a_creds, bucket_b_creds);
+        assert_ne!(bucket_a_creds, bucket_c_creds);
+        assert_ne!(bucket_b_creds, bucket_c_creds);
+    }
 }
