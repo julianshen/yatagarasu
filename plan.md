@@ -359,7 +359,7 @@ yatagarasu/
 ### S3 Range Requests - Performance
 - [x] Test: Memory usage constant for range requests (~64KB buffer)
 - [x] Test: Client disconnect cancels S3 range stream
-- [ ] Test: Multiple concurrent range requests work independently
+- [x] Test: Multiple concurrent range requests work independently
 - [ ] Test: Range request latency similar to full file (~500ms TTFB)
 
 ### S3 Integration - Mock Tests

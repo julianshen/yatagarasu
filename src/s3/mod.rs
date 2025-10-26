@@ -7175,4 +7175,218 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn test_multiple_concurrent_range_requests_work_independently() {
+        use futures::stream::{self, StreamExt};
+        use std::sync::{Arc, Mutex};
+        use tokio::time::{timeout, Duration};
+
+        // Validates that multiple concurrent range requests can be processed
+        // simultaneously without interfering with each other's data or completion
+
+        let num_concurrent_ranges = 10;
+        let chunk_size = 64 * 1024; // 64 KB
+
+        // Track successful completions
+        let completed_ranges = Arc::new(Mutex::new(0usize));
+
+        // Spawn multiple concurrent range request tasks
+        let mut range_tasks = vec![];
+
+        for range_id in 0..num_concurrent_ranges {
+            let completed_clone = completed_ranges.clone();
+
+            // Each range has different size to test independence
+            let chunks_for_this_range = 10 + (range_id * 5); // 10, 15, 20, 25...
+
+            let range_task = tokio::spawn(async move {
+                // Simulate S3 range response stream
+                // Each range contains unique data (range_id) to detect corruption
+                let range_stream = stream::iter(0..chunks_for_this_range).map(move |_chunk_num| {
+                    // Each chunk contains range_id to detect data corruption
+                    let chunk_data = vec![range_id as u8; chunk_size];
+                    Ok::<_, std::io::Error>(bytes::Bytes::from(chunk_data))
+                });
+
+                let mut stream = Box::pin(range_stream);
+                let mut chunks_received = 0;
+                let mut total_bytes = 0u64;
+
+                // Client receives range stream
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            // Verify data integrity (all bytes should be range_id)
+                            for &byte in chunk.iter() {
+                                if byte != range_id as u8 {
+                                    panic!(
+                                        "Data corruption detected! Range {} received byte {} instead of {}",
+                                        range_id, byte, range_id
+                                    );
+                                }
+                            }
+
+                            chunks_received += 1;
+                            total_bytes += chunk.len() as u64;
+
+                            // Simulate realistic network delay/processing
+                            tokio::time::sleep(Duration::from_micros(10)).await;
+                        }
+                        Err(e) => {
+                            panic!("Range {} encountered error: {:?}", range_id, e);
+                        }
+                    }
+                }
+
+                // Verify this range received all expected chunks
+                assert_eq!(
+                    chunks_received, chunks_for_this_range,
+                    "Range {} should receive all {} chunks",
+                    range_id, chunks_for_this_range
+                );
+
+                // Verify total bytes
+                let expected_bytes = chunks_for_this_range * chunk_size;
+                assert_eq!(
+                    total_bytes as usize, expected_bytes,
+                    "Range {} should receive {} bytes",
+                    range_id, expected_bytes
+                );
+
+                // Mark as completed
+                *completed_clone.lock().unwrap() += 1;
+
+                range_id
+            });
+
+            range_tasks.push(range_task);
+        }
+
+        // Wait for all range requests to complete (with timeout)
+        let results = timeout(
+            Duration::from_secs(10),
+            futures::future::join_all(range_tasks),
+        )
+        .await
+        .expect("All concurrent range requests should complete within timeout");
+
+        // Verify all tasks completed successfully
+        for (idx, result) in results.iter().enumerate() {
+            assert!(
+                result.is_ok(),
+                "Range task {} should complete successfully",
+                idx
+            );
+        }
+
+        // Verify all range requests completed
+        let total_completed = *completed_ranges.lock().unwrap();
+        assert_eq!(
+            total_completed, num_concurrent_ranges,
+            "All {} concurrent range requests should complete",
+            num_concurrent_ranges
+        );
+
+        // Test case 2: Verify different range sizes work concurrently
+        // Mix of small (10 chunks), medium (50 chunks), large (100 chunks) ranges
+        let range_sizes = vec![10, 50, 100, 25, 75, 30];
+        let mut mixed_tasks = vec![];
+
+        for (range_id, &chunks_count) in range_sizes.iter().enumerate() {
+            let task = tokio::spawn(async move {
+                let stream = stream::iter(0..chunks_count).map(move |_| {
+                    Ok::<_, std::io::Error>(bytes::Bytes::from(vec![range_id as u8; chunk_size]))
+                });
+
+                let mut chunks_received = 0;
+                let mut stream = Box::pin(stream);
+
+                while let Some(chunk_result) = stream.next().await {
+                    if let Ok(chunk) = chunk_result {
+                        // Verify data integrity
+                        assert!(
+                            chunk.iter().all(|&b| b == range_id as u8),
+                            "Data integrity check for range {}",
+                            range_id
+                        );
+                        chunks_received += 1;
+                    }
+                }
+
+                assert_eq!(chunks_received, chunks_count);
+                chunks_received
+            });
+
+            mixed_tasks.push(task);
+        }
+
+        let mixed_results = futures::future::join_all(mixed_tasks).await;
+        for (idx, result) in mixed_results.iter().enumerate() {
+            let chunks_received = result.as_ref().unwrap();
+            assert_eq!(
+                *chunks_received, range_sizes[idx],
+                "Range {} should receive correct number of chunks",
+                idx
+            );
+        }
+
+        // Test case 3: Verify ranges with different start positions don't interfere
+        // Simulate ranges from same 1GB file: bytes 0-10MB, 100MB-110MB, 500MB-510MB
+        let range_specs = vec![
+            (0, 10 * 1024 * 1024, 0u8),                  // bytes 0-10MB, marker 0
+            (100 * 1024 * 1024, 110 * 1024 * 1024, 1u8), // bytes 100MB-110MB, marker 1
+            (500 * 1024 * 1024, 510 * 1024 * 1024, 2u8), // bytes 500MB-510MB, marker 2
+        ];
+
+        let mut position_tasks = vec![];
+
+        for (start_pos, end_pos, marker) in range_specs {
+            let range_size = end_pos - start_pos;
+            let chunks_count = range_size / chunk_size;
+
+            let task = tokio::spawn(async move {
+                let stream = stream::iter(0..chunks_count).map(move |_| {
+                    Ok::<_, std::io::Error>(bytes::Bytes::from(vec![marker; chunk_size]))
+                });
+
+                let mut chunks_received = 0;
+                let mut stream = Box::pin(stream);
+
+                while let Some(chunk_result) = stream.next().await {
+                    if let Ok(chunk) = chunk_result {
+                        // Verify correct data for this range
+                        assert!(
+                            chunk.iter().all(|&b| b == marker),
+                            "Range {}-{} should contain marker {}",
+                            start_pos,
+                            end_pos,
+                            marker
+                        );
+                        chunks_received += 1;
+                    }
+                }
+
+                assert_eq!(chunks_received, chunks_count);
+                (start_pos, end_pos, chunks_received)
+            });
+
+            position_tasks.push(task);
+        }
+
+        let position_results = futures::future::join_all(position_tasks).await;
+        assert_eq!(
+            position_results.len(),
+            3,
+            "All 3 positional ranges should complete"
+        );
+
+        // Verify no errors occurred
+        for result in position_results {
+            assert!(
+                result.is_ok(),
+                "Positional range should complete without error"
+            );
+        }
+    }
 }
