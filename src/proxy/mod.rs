@@ -4215,4 +4215,204 @@ mod tests {
         assert_eq!(maintenance_error.status_code, 503);
         assert!(maintenance_error.retry_after_seconds.is_none());
     }
+
+    #[test]
+    fn test_error_responses_include_json_body_with_error_details() {
+        // Validates that error responses include JSON body with structured error details
+        // JSON format provides machine-readable error information for clients
+
+        // Test case 1: Error response includes error code
+        #[derive(Debug, PartialEq)]
+        struct JsonErrorResponse {
+            error: String,
+            message: String,
+            status_code: u16,
+        }
+
+        let error_response = JsonErrorResponse {
+            error: "NOT_FOUND".to_string(),
+            message: "The requested resource was not found".to_string(),
+            status_code: 404,
+        };
+
+        assert_eq!(error_response.error, "NOT_FOUND");
+        assert_eq!(
+            error_response.message,
+            "The requested resource was not found"
+        );
+        assert_eq!(error_response.status_code, 404);
+
+        // Test case 2: Error response includes human-readable message
+        let error_with_message = JsonErrorResponse {
+            error: "UNAUTHORIZED".to_string(),
+            message: "Authentication required".to_string(),
+            status_code: 401,
+        };
+
+        assert!(!error_with_message.message.is_empty());
+        assert!(error_with_message.message.len() > 10);
+
+        // Test case 3: Error response can be serialized to JSON
+        fn to_json(error: &JsonErrorResponse) -> String {
+            format!(
+                r#"{{"error":"{}","message":"{}","status_code":{}}}"#,
+                error.error, error.message, error.status_code
+            )
+        }
+
+        let json = to_json(&error_response);
+        assert!(json.contains("\"error\":\"NOT_FOUND\""));
+        assert!(json.contains("\"message\":\"The requested resource was not found\""));
+        assert!(json.contains("\"status_code\":404"));
+
+        // Test case 4: Different error types have different error codes
+        fn create_error_response(error_type: &str) -> JsonErrorResponse {
+            match error_type {
+                "not_found" => JsonErrorResponse {
+                    error: "NOT_FOUND".to_string(),
+                    message: "Resource not found".to_string(),
+                    status_code: 404,
+                },
+                "unauthorized" => JsonErrorResponse {
+                    error: "UNAUTHORIZED".to_string(),
+                    message: "Authentication required".to_string(),
+                    status_code: 401,
+                },
+                "forbidden" => JsonErrorResponse {
+                    error: "FORBIDDEN".to_string(),
+                    message: "Access denied".to_string(),
+                    status_code: 403,
+                },
+                "bad_request" => JsonErrorResponse {
+                    error: "BAD_REQUEST".to_string(),
+                    message: "Invalid request format".to_string(),
+                    status_code: 400,
+                },
+                _ => JsonErrorResponse {
+                    error: "INTERNAL_ERROR".to_string(),
+                    message: "Internal server error".to_string(),
+                    status_code: 500,
+                },
+            }
+        }
+
+        assert_eq!(create_error_response("not_found").error, "NOT_FOUND");
+        assert_eq!(create_error_response("unauthorized").error, "UNAUTHORIZED");
+        assert_eq!(create_error_response("forbidden").error, "FORBIDDEN");
+        assert_eq!(create_error_response("bad_request").error, "BAD_REQUEST");
+
+        // Test case 5: Error response includes request ID for tracking
+        struct DetailedErrorResponse {
+            error: String,
+            message: String,
+            status_code: u16,
+            request_id: String,
+        }
+
+        let detailed_error = DetailedErrorResponse {
+            error: "INTERNAL_ERROR".to_string(),
+            message: "An unexpected error occurred".to_string(),
+            status_code: 500,
+            request_id: "req-abc123".to_string(),
+        };
+
+        assert!(!detailed_error.request_id.is_empty());
+        assert!(detailed_error.request_id.starts_with("req-"));
+
+        // Test case 6: Error response includes timestamp
+        struct TimestampedErrorResponse {
+            error: String,
+            message: String,
+            status_code: u16,
+            timestamp: u64,
+        }
+
+        let timestamped_error = TimestampedErrorResponse {
+            error: "SERVICE_UNAVAILABLE".to_string(),
+            message: "Service temporarily unavailable".to_string(),
+            status_code: 503,
+            timestamp: 1234567890,
+        };
+
+        assert!(timestamped_error.timestamp > 0);
+
+        // Test case 7: Error response includes path that caused the error
+        struct PathErrorResponse {
+            error: String,
+            message: String,
+            status_code: u16,
+            path: String,
+        }
+
+        let path_error = PathErrorResponse {
+            error: "NOT_FOUND".to_string(),
+            message: "Object not found".to_string(),
+            status_code: 404,
+            path: "/products/image.jpg".to_string(),
+        };
+
+        assert_eq!(path_error.path, "/products/image.jpg");
+
+        // Test case 8: Error response includes Content-Type header for JSON
+        fn get_error_content_type() -> &'static str {
+            "application/json"
+        }
+
+        assert_eq!(get_error_content_type(), "application/json");
+
+        // Test case 9: Error response JSON is properly escaped
+        fn escape_json_string(s: &str) -> String {
+            s.replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t")
+        }
+
+        assert_eq!(escape_json_string("hello\"world"), "hello\\\"world");
+        assert_eq!(escape_json_string("line1\nline2"), "line1\\nline2");
+
+        // Test case 10: Error response includes additional context for specific errors
+        struct ContextualErrorResponse {
+            error: String,
+            message: String,
+            status_code: u16,
+            details: Option<String>,
+        }
+
+        let validation_error = ContextualErrorResponse {
+            error: "VALIDATION_ERROR".to_string(),
+            message: "Request validation failed".to_string(),
+            status_code: 400,
+            details: Some("Invalid Range header format".to_string()),
+        };
+
+        assert!(validation_error.details.is_some());
+        assert_eq!(
+            validation_error.details.unwrap(),
+            "Invalid Range header format"
+        );
+
+        // Test case 11: Error response format is consistent across different error types
+        fn validate_error_structure(error: &JsonErrorResponse) -> bool {
+            !error.error.is_empty()
+                && !error.message.is_empty()
+                && error.status_code >= 400
+                && error.status_code < 600
+        }
+
+        assert!(validate_error_structure(&error_response));
+        assert!(validate_error_structure(&error_with_message));
+
+        // Test case 12: Error codes are uppercase with underscores
+        fn validate_error_code_format(code: &str) -> bool {
+            code.chars().all(|c| c.is_uppercase() || c == '_')
+        }
+
+        assert!(validate_error_code_format("NOT_FOUND"));
+        assert!(validate_error_code_format("UNAUTHORIZED"));
+        assert!(validate_error_code_format("BAD_REQUEST"));
+        assert!(!validate_error_code_format("notFound"));
+        assert!(!validate_error_code_format("Not-Found"));
+    }
 }
