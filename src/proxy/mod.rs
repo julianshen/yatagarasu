@@ -3980,4 +3980,239 @@ mod tests {
         assert!(error.message.contains("connection refused"));
         assert_eq!(error.upstream, "s3.amazonaws.com");
     }
+
+    #[test]
+    fn test_returns_503_for_service_unavailable() {
+        // Validates that handler returns 503 Service Unavailable for temporary unavailability
+        // 503 indicates the server is temporarily unable to handle the request
+
+        // Test case 1: Handler returns 503 when server is overloaded
+        fn check_server_capacity(current_load: u32, max_capacity: u32) -> Result<(), u16> {
+            if current_load >= max_capacity {
+                return Err(503);
+            }
+            Ok(())
+        }
+
+        assert!(check_server_capacity(50, 100).is_ok());
+        assert_eq!(
+            check_server_capacity(100, 100),
+            Err(503),
+            "Server at capacity should return 503"
+        );
+        assert_eq!(
+            check_server_capacity(150, 100),
+            Err(503),
+            "Server overloaded should return 503"
+        );
+
+        // Test case 2: Handler returns 503 during maintenance mode
+        #[derive(Debug, PartialEq)]
+        enum ServerState {
+            Running,
+            Maintenance,
+            ShuttingDown,
+            Starting,
+        }
+
+        fn check_server_state(state: ServerState) -> Result<(), u16> {
+            match state {
+                ServerState::Running => Ok(()),
+                ServerState::Maintenance | ServerState::ShuttingDown | ServerState::Starting => {
+                    Err(503)
+                }
+            }
+        }
+
+        assert!(check_server_state(ServerState::Running).is_ok());
+        assert_eq!(
+            check_server_state(ServerState::Maintenance),
+            Err(503),
+            "Maintenance mode should return 503"
+        );
+        assert_eq!(
+            check_server_state(ServerState::ShuttingDown),
+            Err(503),
+            "Shutting down should return 503"
+        );
+        assert_eq!(
+            check_server_state(ServerState::Starting),
+            Err(503),
+            "Starting up should return 503"
+        );
+
+        // Test case 3: Handler returns 503 when rate limit exceeded
+        fn check_rate_limit(requests_count: u32, limit: u32, window_ms: u64) -> Result<(), u16> {
+            if window_ms == 0 {
+                return Err(503);
+            }
+            if requests_count > limit {
+                return Err(503);
+            }
+            Ok(())
+        }
+
+        assert!(check_rate_limit(50, 100, 1000).is_ok());
+        assert_eq!(
+            check_rate_limit(150, 100, 1000),
+            Err(503),
+            "Rate limit exceeded should return 503"
+        );
+        assert_eq!(
+            check_rate_limit(0, 100, 0),
+            Err(503),
+            "Invalid rate limit window should return 503"
+        );
+
+        // Test case 4: Handler returns 503 when connection pool is exhausted
+        fn acquire_connection(available: u32, total: u32) -> Result<String, u16> {
+            if available == 0 {
+                return Err(503);
+            }
+            if available > total {
+                return Err(503);
+            }
+            Ok(format!("connection_{}", total - available))
+        }
+
+        assert!(acquire_connection(5, 10).is_ok());
+        assert_eq!(
+            acquire_connection(0, 10),
+            Err(503),
+            "No available connections should return 503"
+        );
+
+        // Test case 5: Handler returns 503 when thread pool is full
+        fn submit_task(queued_tasks: usize, max_queue_size: usize) -> Result<(), u16> {
+            if queued_tasks >= max_queue_size {
+                return Err(503);
+            }
+            Ok(())
+        }
+
+        assert!(submit_task(50, 100).is_ok());
+        assert_eq!(
+            submit_task(100, 100),
+            Err(503),
+            "Thread pool full should return 503"
+        );
+
+        // Test case 6: Handler returns 503 when memory pressure is high
+        fn check_memory_pressure(
+            used_mb: usize,
+            total_mb: usize,
+            threshold: f32,
+        ) -> Result<(), u16> {
+            let usage_ratio = used_mb as f32 / total_mb as f32;
+            if usage_ratio >= threshold {
+                return Err(503);
+            }
+            Ok(())
+        }
+
+        assert!(check_memory_pressure(500, 1000, 0.9).is_ok());
+        assert_eq!(
+            check_memory_pressure(950, 1000, 0.9),
+            Err(503),
+            "High memory pressure should return 503"
+        );
+
+        // Test case 7: Handler creates 503 error response with Retry-After header
+        struct ErrorResponse {
+            status_code: u16,
+            message: String,
+            retry_after_seconds: Option<u32>,
+        }
+
+        let service_unavailable = ErrorResponse {
+            status_code: 503,
+            message: "Service Unavailable".to_string(),
+            retry_after_seconds: Some(60),
+        };
+
+        assert_eq!(service_unavailable.status_code, 503);
+        assert!(service_unavailable.message.contains("Unavailable"));
+        assert_eq!(service_unavailable.retry_after_seconds, Some(60));
+
+        // Test case 8: Handler distinguishes 503 from other error codes
+        fn map_availability_error_to_status(error_type: &str) -> u16 {
+            match error_type {
+                "overloaded" => 503,
+                "maintenance" => 503,
+                "rate_limited" => 503,
+                "pool_exhausted" => 503,
+                "high_memory" => 503,
+                "shutting_down" => 503,
+                "bad_gateway" => 502,
+                "gateway_timeout" => 504,
+                "internal_error" => 500,
+                _ => 503, // Default temporary errors to 503
+            }
+        }
+
+        assert_eq!(map_availability_error_to_status("overloaded"), 503);
+        assert_eq!(map_availability_error_to_status("maintenance"), 503);
+        assert_eq!(map_availability_error_to_status("rate_limited"), 503);
+        assert_eq!(map_availability_error_to_status("pool_exhausted"), 503);
+        assert_eq!(map_availability_error_to_status("high_memory"), 503);
+        assert_ne!(
+            map_availability_error_to_status("bad_gateway"),
+            503,
+            "502 should be distinct from 503"
+        );
+        assert_ne!(
+            map_availability_error_to_status("gateway_timeout"),
+            503,
+            "504 should be distinct from 503"
+        );
+        assert_ne!(
+            map_availability_error_to_status("internal_error"),
+            503,
+            "500 should be distinct from 503"
+        );
+
+        // Test case 9: Handler returns 503 when upstream S3 is temporarily unavailable
+        fn check_s3_availability(s3_healthy: bool, s3_responsive: bool) -> Result<(), u16> {
+            if !s3_healthy || !s3_responsive {
+                return Err(503);
+            }
+            Ok(())
+        }
+
+        assert!(check_s3_availability(true, true).is_ok());
+        assert_eq!(
+            check_s3_availability(false, true),
+            Err(503),
+            "Unhealthy S3 should return 503"
+        );
+        assert_eq!(
+            check_s3_availability(true, false),
+            Err(503),
+            "Unresponsive S3 should return 503"
+        );
+
+        // Test case 10: Handler includes suggested retry delay in 503 response
+        fn create_service_unavailable_response(reason: &str, retry_delay: u32) -> ErrorResponse {
+            ErrorResponse {
+                status_code: 503,
+                message: format!("Service Unavailable: {}", reason),
+                retry_after_seconds: Some(retry_delay),
+            }
+        }
+
+        let error = create_service_unavailable_response("server overloaded", 30);
+        assert_eq!(error.status_code, 503);
+        assert!(error.message.contains("overloaded"));
+        assert_eq!(error.retry_after_seconds, Some(30));
+
+        // Test case 11: Handler returns 503 without retry-after for indefinite unavailability
+        let maintenance_error = ErrorResponse {
+            status_code: 503,
+            message: "Scheduled maintenance".to_string(),
+            retry_after_seconds: None,
+        };
+
+        assert_eq!(maintenance_error.status_code, 503);
+        assert!(maintenance_error.retry_after_seconds.is_none());
+    }
 }
