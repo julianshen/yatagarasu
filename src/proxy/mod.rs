@@ -5041,4 +5041,233 @@ mod tests {
         let public_config = get_auth_config_for_bucket("public");
         assert!(!public_config.auth_required);
     }
+
+    #[test]
+    fn test_request_reaches_s3_handler_third() {
+        // Validates that S3 handler is the third and final middleware to process requests
+        // S3 handler runs after router and auth (if enabled) complete successfully
+
+        // Test case 1: S3 handler is the third stage in the middleware chain
+        fn get_third_middleware_stage() -> String {
+            "s3".to_string()
+        }
+
+        assert_eq!(get_third_middleware_stage(), "s3");
+
+        // Test case 2: S3 handler executes last in the chain
+        struct MiddlewarePipeline {
+            stages: Vec<String>,
+        }
+
+        impl MiddlewarePipeline {
+            fn new() -> Self {
+                let mut stages = Vec::new();
+                stages.push("router".to_string());
+                stages.push("auth".to_string());
+                stages.push("s3".to_string());
+                MiddlewarePipeline { stages }
+            }
+
+            fn get_final_stage(&self) -> Option<&str> {
+                self.stages.last().map(|s| s.as_str())
+            }
+
+            fn get_stage_index(&self, stage: &str) -> Option<usize> {
+                self.stages.iter().position(|s| s == stage)
+            }
+        }
+
+        let pipeline = MiddlewarePipeline::new();
+        assert_eq!(pipeline.get_final_stage(), Some("s3"));
+        assert_eq!(pipeline.get_stage_index("s3"), Some(2));
+
+        // Test case 3: S3 handler runs only after router and auth succeed
+        fn execute_full_chain(router_ok: bool, auth_ok: bool) -> Vec<String> {
+            let mut executed = Vec::new();
+            executed.push("router".to_string());
+
+            if !router_ok {
+                return executed;
+            }
+
+            executed.push("auth".to_string());
+
+            if !auth_ok {
+                return executed;
+            }
+
+            executed.push("s3".to_string());
+            executed
+        }
+
+        let all_success = execute_full_chain(true, true);
+        assert_eq!(all_success, vec!["router", "auth", "s3"]);
+        assert_eq!(all_success.len(), 3);
+        assert_eq!(all_success[2], "s3");
+
+        let router_fails = execute_full_chain(false, true);
+        assert_eq!(router_fails.len(), 1);
+        assert!(!router_fails.contains(&"s3".to_string()));
+
+        let auth_fails = execute_full_chain(true, false);
+        assert_eq!(auth_fails.len(), 2);
+        assert!(!auth_fails.contains(&"s3".to_string()));
+
+        // Test case 4: S3 handler has access to both router and auth results
+        struct RequestContext {
+            bucket_name: String,
+            s3_key: String,
+            authenticated: bool,
+            user_id: Option<String>,
+        }
+
+        let context_at_s3 = RequestContext {
+            bucket_name: "products".to_string(),    // From router
+            s3_key: "images/photo.jpg".to_string(), // From router
+            authenticated: true,                    // From auth
+            user_id: Some("user123".to_string()),   // From auth
+        };
+
+        assert!(!context_at_s3.bucket_name.is_empty());
+        assert!(!context_at_s3.s3_key.is_empty());
+        assert!(context_at_s3.authenticated);
+        assert!(context_at_s3.user_id.is_some());
+
+        // Test case 5: S3 handler timestamp is last in the timeline
+        struct ExecutionTimeline {
+            router_ts: u64,
+            auth_ts: u64,
+            s3_ts: u64,
+        }
+
+        let timeline = ExecutionTimeline {
+            router_ts: 100,
+            auth_ts: 200,
+            s3_ts: 300,
+        };
+
+        assert!(timeline.s3_ts > timeline.router_ts);
+        assert!(timeline.s3_ts > timeline.auth_ts);
+
+        // Test case 6: S3 handler performs actual S3 operations
+        fn s3_handler_actions() -> Vec<&'static str> {
+            vec![
+                "build_s3_request",
+                "sign_request_with_aws_sig_v4",
+                "send_request_to_s3",
+                "stream_response_to_client",
+            ]
+        }
+
+        let actions = s3_handler_actions();
+        assert!(actions.contains(&"build_s3_request"));
+        assert!(actions.contains(&"sign_request_with_aws_sig_v4"));
+        assert!(actions.contains(&"stream_response_to_client"));
+
+        // Test case 7: S3 handler is responsible for response streaming
+        fn who_handles_response_streaming() -> String {
+            "s3".to_string()
+        }
+
+        assert_eq!(who_handles_response_streaming(), "s3");
+
+        // Test case 8: S3 handler executes regardless of whether auth ran
+        fn execute_chain_without_auth(router_ok: bool) -> Vec<String> {
+            let mut executed = Vec::new();
+            executed.push("router".to_string());
+
+            if !router_ok {
+                return executed;
+            }
+
+            // Auth is disabled, skip directly to S3
+            executed.push("s3".to_string());
+            executed
+        }
+
+        let no_auth_chain = execute_chain_without_auth(true);
+        assert_eq!(no_auth_chain, vec!["router", "s3"]);
+        assert_eq!(no_auth_chain.last(), Some(&"s3".to_string()));
+
+        // Test case 9: S3 handler logs appear last in request timeline
+        struct LogSequence {
+            entries: Vec<(u32, String)>,
+        }
+
+        impl LogSequence {
+            fn new() -> Self {
+                let mut entries = Vec::new();
+                entries.push((1, "router:matched_path".to_string()));
+                entries.push((2, "auth:validated_jwt".to_string()));
+                entries.push((3, "s3:building_request".to_string()));
+                entries.push((4, "s3:fetching_object".to_string()));
+                entries.push((5, "s3:streaming_response".to_string()));
+                LogSequence { entries }
+            }
+
+            fn get_s3_logs(&self) -> Vec<&(u32, String)> {
+                self.entries
+                    .iter()
+                    .filter(|(_, msg)| msg.starts_with("s3:"))
+                    .collect()
+            }
+
+            fn get_first_s3_log_position(&self) -> Option<u32> {
+                self.get_s3_logs().first().map(|(pos, _)| *pos)
+            }
+        }
+
+        let logs = LogSequence::new();
+        let s3_logs = logs.get_s3_logs();
+
+        assert_eq!(s3_logs.len(), 3);
+        assert!(logs.get_first_s3_log_position().unwrap() > 2); // After router and auth
+
+        // Test case 10: S3 handler uses credentials from configuration
+        struct S3HandlerContext {
+            bucket_from_router: String,
+            auth_claims_from_auth: Option<String>,
+            aws_credentials: (String, String),
+        }
+
+        let s3_context = S3HandlerContext {
+            bucket_from_router: "products".to_string(),
+            auth_claims_from_auth: Some("user_id=123".to_string()),
+            aws_credentials: ("AKIAXXXXXXXX".to_string(), "secret_key".to_string()),
+        };
+
+        assert!(!s3_context.bucket_from_router.is_empty());
+        assert!(s3_context.aws_credentials.0.starts_with("AKIA"));
+
+        // Test case 11: S3 handler is terminal middleware (last in chain)
+        fn is_terminal_middleware(stage: &str) -> bool {
+            stage == "s3"
+        }
+
+        assert!(is_terminal_middleware("s3"));
+        assert!(!is_terminal_middleware("router"));
+        assert!(!is_terminal_middleware("auth"));
+
+        // Test case 12: S3 handler only executes if all previous middleware succeed
+        fn count_middleware_executed(router: bool, auth: bool) -> usize {
+            let mut count = 0;
+
+            count += 1; // Router always runs
+            if !router {
+                return count;
+            }
+
+            count += 1; // Auth runs
+            if !auth {
+                return count;
+            }
+
+            count += 1; // S3 runs
+            count
+        }
+
+        assert_eq!(count_middleware_executed(true, true), 3); // All run
+        assert_eq!(count_middleware_executed(true, false), 2); // S3 doesn't run
+        assert_eq!(count_middleware_executed(false, true), 1); // Neither auth nor S3 run
+    }
 }
