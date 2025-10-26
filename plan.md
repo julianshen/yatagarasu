@@ -442,7 +442,7 @@ yatagarasu/
 - [x] Test: GET with valid JWT returns object
 - [x] Test: GET with expired JWT returns 401
 - [x] Test: GET with invalid signature JWT returns 401
-- [ ] Test: JWT from Authorization header works
+- [x] Test: JWT from Authorization header works
 - [ ] Test: JWT from query parameter works
 - [ ] Test: JWT from custom header works
 

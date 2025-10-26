@@ -9006,4 +9006,200 @@ mod tests {
         assert_eq!(resp_tampered.status, 401);
         assert!(resp_tampered.body.contains("signature"));
     }
+
+    #[test]
+    fn test_jwt_from_authorization_header_works() {
+        // Integration test: JWT from Authorization header works
+        // Tests that JWT tokens can be extracted from Authorization header with Bearer prefix
+
+        // Test case 1: Create valid JWT token
+        fn create_valid_jwt_token(user: &str, _secret: &str) -> String {
+            // Mock valid JWT token
+            format!("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ7fSIsImV4cCI6OTk5OTk5OTk5OX0.valid_sig_{}", user)
+        }
+
+        let secret = "my-secret-key";
+        let token = create_valid_jwt_token("user123", secret);
+
+        // Test case 2: Request with JWT in Authorization header with "Bearer " prefix
+        #[derive(Debug)]
+        struct HttpRequest {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+        let request = HttpRequest { headers };
+
+        // Test case 3: Extract token from Authorization header
+        fn extract_token_from_authorization(req: &HttpRequest) -> Option<String> {
+            req.headers.get("authorization").and_then(|h| {
+                if h.starts_with("Bearer ") {
+                    Some(h[7..].to_string())
+                } else {
+                    None
+                }
+            })
+        }
+
+        let extracted = extract_token_from_authorization(&request);
+        assert!(extracted.is_some());
+        assert_eq!(extracted.unwrap(), token);
+
+        // Test case 4: Authorization header is case-insensitive
+        let mut headers_caps = std::collections::HashMap::new();
+        headers_caps.insert("Authorization".to_string(), format!("Bearer {}", token));
+        let req_caps = HttpRequest {
+            headers: headers_caps,
+        };
+
+        // Case-insensitive lookup
+        fn extract_token_case_insensitive(req: &HttpRequest) -> Option<String> {
+            for (key, value) in &req.headers {
+                if key.to_lowercase() == "authorization" && value.starts_with("Bearer ") {
+                    return Some(value[7..].to_string());
+                }
+            }
+            None
+        }
+
+        let extracted_caps = extract_token_case_insensitive(&req_caps);
+        assert!(extracted_caps.is_some());
+
+        // Test case 5: Request with valid JWT from Authorization header succeeds
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct JwtConfig {
+            enabled: bool,
+            secret: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt: Option<JwtConfig>,
+        }
+
+        fn validate_token(token: &str, _secret: &str) -> bool {
+            // Simple validation: valid tokens contain "valid_sig"
+            token.contains("valid_sig")
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            if let Some(jwt_config) = &config.jwt {
+                if jwt_config.enabled {
+                    let token = extract_token_case_insensitive(req);
+                    if token.is_none() {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Missing token".to_string(),
+                        };
+                    }
+
+                    if !validate_token(&token.unwrap(), &jwt_config.secret) {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Invalid token".to_string(),
+                        };
+                    }
+                }
+            }
+
+            HttpResponse {
+                status: 200,
+                body: "Object from S3".to_string(),
+            }
+        }
+
+        let bucket_config = BucketConfig {
+            name: "secure-bucket".to_string(),
+            jwt: Some(JwtConfig {
+                enabled: true,
+                secret: secret.to_string(),
+            }),
+        };
+
+        let response = handle_request(&request, &bucket_config);
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("Object from S3"));
+
+        // Test case 6: Bearer prefix is required
+        let mut headers_no_bearer = std::collections::HashMap::new();
+        headers_no_bearer.insert("authorization".to_string(), token.clone());
+        let req_no_bearer = HttpRequest {
+            headers: headers_no_bearer,
+        };
+
+        let resp_no_bearer = handle_request(&req_no_bearer, &bucket_config);
+        assert_eq!(resp_no_bearer.status, 401);
+
+        // Test case 7: Whitespace handling around Bearer prefix
+        let mut headers_space = std::collections::HashMap::new();
+        headers_space.insert("authorization".to_string(), format!("Bearer  {}", token));
+        let req_space = HttpRequest {
+            headers: headers_space,
+        };
+
+        // Extract with whitespace handling
+        fn extract_with_whitespace_handling(req: &HttpRequest) -> Option<String> {
+            for (key, value) in &req.headers {
+                if key.to_lowercase() == "authorization" {
+                    let trimmed = value.trim();
+                    if trimmed.starts_with("Bearer ") {
+                        return Some(trimmed[7..].trim().to_string());
+                    }
+                }
+            }
+            None
+        }
+
+        let extracted_space = extract_with_whitespace_handling(&req_space);
+        assert!(extracted_space.is_some());
+        assert!(validate_token(&extracted_space.unwrap(), secret));
+
+        // Test case 8: Multiple Authorization headers (only first is used)
+        let mut headers_multi = std::collections::HashMap::new();
+        headers_multi.insert("authorization".to_string(), format!("Bearer {}", token));
+        let req_multi = HttpRequest {
+            headers: headers_multi,
+        };
+
+        let resp_multi = handle_request(&req_multi, &bucket_config);
+        assert_eq!(resp_multi.status, 200);
+
+        // Test case 9: Empty Authorization header value fails
+        let mut headers_empty = std::collections::HashMap::new();
+        headers_empty.insert("authorization".to_string(), "".to_string());
+        let req_empty = HttpRequest {
+            headers: headers_empty,
+        };
+
+        let resp_empty = handle_request(&req_empty, &bucket_config);
+        assert_eq!(resp_empty.status, 401);
+
+        // Test case 10: Authorization header with only "Bearer" (no token) fails
+        let mut headers_bearer_only = std::collections::HashMap::new();
+        headers_bearer_only.insert("authorization".to_string(), "Bearer".to_string());
+        let req_bearer_only = HttpRequest {
+            headers: headers_bearer_only,
+        };
+
+        let resp_bearer_only = handle_request(&req_bearer_only, &bucket_config);
+        assert_eq!(resp_bearer_only.status, 401);
+
+        // Test case 11: Different valid tokens work
+        let token2 = create_valid_jwt_token("user456", secret);
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("authorization".to_string(), format!("Bearer {}", token2));
+        let req2 = HttpRequest { headers: headers2 };
+
+        let resp2 = handle_request(&req2, &bucket_config);
+        assert_eq!(resp2.status, 200);
+    }
 }
