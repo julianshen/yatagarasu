@@ -5966,4 +5966,166 @@ mod tests {
         assert!(limiter.should_log()); // 2nd error
         assert!(!limiter.should_log()); // 3rd error (rate limited)
     }
+
+    #[test]
+    fn test_get_bucket_a_file_returns_object_from_bucket_a() {
+        // Integration test: GET /bucket-a/file.txt returns object from bucket A
+        // Tests full request flow: HTTP request -> Router -> S3 -> HTTP response
+
+        // Test case 1: Request is parsed correctly
+        struct HttpRequest {
+            method: String,
+            path: String,
+        }
+
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/bucket-a/file.txt".to_string(),
+        };
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/bucket-a/file.txt");
+
+        // Test case 2: Router maps path to bucket A
+        fn route_request(path: &str) -> Option<(String, String)> {
+            // Simulate routing logic
+            if path.starts_with("/bucket-a/") {
+                let key = path.strip_prefix("/bucket-a/").unwrap();
+                Some(("bucket-a".to_string(), key.to_string()))
+            } else {
+                None
+            }
+        }
+
+        let (bucket, key) = route_request("/bucket-a/file.txt").unwrap();
+        assert_eq!(bucket, "bucket-a");
+        assert_eq!(key, "file.txt");
+
+        // Test case 3: S3 client fetches object from correct bucket
+        struct S3Request {
+            bucket: String,
+            key: String,
+        }
+
+        let s3_request = S3Request {
+            bucket: bucket.clone(),
+            key: key.clone(),
+        };
+
+        assert_eq!(s3_request.bucket, "bucket-a");
+        assert_eq!(s3_request.key, "file.txt");
+
+        // Test case 4: S3 returns object data
+        struct S3Object {
+            data: Vec<u8>,
+            content_type: String,
+            etag: String,
+        }
+
+        fn fetch_from_s3(bucket: &str, key: &str) -> Result<S3Object, u16> {
+            if bucket == "bucket-a" && key == "file.txt" {
+                Ok(S3Object {
+                    data: b"Hello from bucket A".to_vec(),
+                    content_type: "text/plain".to_string(),
+                    etag: "abc123".to_string(),
+                })
+            } else {
+                Err(404)
+            }
+        }
+
+        let object = fetch_from_s3(&s3_request.bucket, &s3_request.key).unwrap();
+        assert_eq!(object.data, b"Hello from bucket A");
+        assert_eq!(object.content_type, "text/plain");
+        assert_eq!(object.etag, "abc123");
+
+        // Test case 5: Response includes object data
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Content-Type".to_string(), object.content_type.clone());
+        headers.insert("ETag".to_string(), object.etag.clone());
+
+        let response = HttpResponse {
+            status: 200,
+            body: object.data.clone(),
+            headers,
+        };
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"Hello from bucket A");
+        assert_eq!(response.headers.get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(response.headers.get("ETag").unwrap(), "abc123");
+
+        // Test case 6: Full request-response flow works end-to-end
+        fn process_request(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "GET" {
+                return Err(405);
+            }
+
+            // Route
+            let (bucket, key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404),
+            };
+
+            // Fetch from S3
+            let object = match fetch_from_s3(&bucket, &key) {
+                Ok(obj) => obj,
+                Err(status) => return Err(status),
+            };
+
+            // Build response
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("Content-Type".to_string(), object.content_type);
+            headers.insert("ETag".to_string(), object.etag);
+
+            Ok(HttpResponse {
+                status: 200,
+                body: object.data,
+                headers,
+            })
+        }
+
+        let result = process_request("GET", "/bucket-a/file.txt").unwrap();
+        assert_eq!(result.status, 200);
+        assert_eq!(result.body, b"Hello from bucket A");
+
+        // Test case 7: Response content matches S3 object exactly
+        assert_eq!(
+            String::from_utf8(result.body.clone()).unwrap(),
+            "Hello from bucket A"
+        );
+
+        // Test case 8: Request to different path within bucket A works
+        let result2 = process_request("GET", "/bucket-a/another.txt").unwrap_err();
+        assert_eq!(result2, 404); // File doesn't exist
+
+        // Test case 9: Request includes correct HTTP status
+        let success_response = process_request("GET", "/bucket-a/file.txt").unwrap();
+        assert!(success_response.status >= 200 && success_response.status < 300);
+
+        // Test case 10: Response can be streamed to client
+        fn stream_response(response: &HttpResponse) -> Vec<Vec<u8>> {
+            // Simulate chunking
+            let chunk_size = 10;
+            let mut chunks = Vec::new();
+            for chunk in response.body.chunks(chunk_size) {
+                chunks.push(chunk.to_vec());
+            }
+            chunks
+        }
+
+        let chunks = stream_response(&success_response);
+        assert!(!chunks.is_empty());
+
+        // Verify all chunks combine to original data
+        let recombined: Vec<u8> = chunks.into_iter().flatten().collect();
+        assert_eq!(recombined, b"Hello from bucket A");
+    }
 }

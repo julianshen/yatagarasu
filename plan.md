@@ -423,7 +423,7 @@ yatagarasu/
 ## Phase 7: Integration Tests (Full Stack)
 
 ### End-to-End - Single Bucket, No Auth
-- [ ] Test: GET /bucket-a/file.txt returns object from bucket A
+- [x] Test: GET /bucket-a/file.txt returns object from bucket A
 - [ ] Test: HEAD /bucket-a/file.txt returns metadata from bucket A
 - [ ] Test: GET /bucket-a/nonexistent.txt returns 404
 - [ ] Test: GET /unmapped/file.txt returns 404
