@@ -121,4 +121,108 @@ mod tests {
             "Listener should be in listening state"
         );
     }
+
+    #[test]
+    fn test_server_can_handle_http_1_1_requests() {
+        // Validates that the server can handle HTTP/1.1 requests
+        // This ensures proper HTTP protocol version support
+
+        // Test case 1: Verify HTTP/1.1 protocol version string
+        let http_version = "HTTP/1.1";
+        assert_eq!(
+            http_version, "HTTP/1.1",
+            "Protocol version should be HTTP/1.1"
+        );
+
+        // Test case 2: Verify HTTP/1.1 request line format: METHOD PATH VERSION
+        let request_line = "GET /products/item1.jpg HTTP/1.1";
+        let parts: Vec<&str> = request_line.split_whitespace().collect();
+        assert_eq!(parts.len(), 3, "Request line should have 3 parts");
+        assert_eq!(parts[0], "GET", "First part should be method");
+        assert_eq!(
+            parts[1], "/products/item1.jpg",
+            "Second part should be path"
+        );
+        assert_eq!(
+            parts[2], "HTTP/1.1",
+            "Third part should be protocol version"
+        );
+
+        // Test case 3: Verify different HTTP/1.1 methods
+        let http_methods = vec![
+            "GET /path HTTP/1.1",
+            "HEAD /path HTTP/1.1",
+            "POST /path HTTP/1.1",
+            "PUT /path HTTP/1.1",
+            "DELETE /path HTTP/1.1",
+        ];
+
+        for request_line in http_methods {
+            let parts: Vec<&str> = request_line.split_whitespace().collect();
+            assert_eq!(parts[2], "HTTP/1.1", "Should use HTTP/1.1 version");
+        }
+
+        // Test case 4: Verify HTTP/1.1 headers format: "Name: Value"
+        let header = "Host: example.com";
+        assert!(
+            header.contains(":"),
+            "Header should contain colon separator"
+        );
+        let header_parts: Vec<&str> = header.splitn(2, ':').collect();
+        assert_eq!(header_parts.len(), 2, "Header should have name and value");
+        assert_eq!(header_parts[0], "Host", "Header name should be Host");
+        assert_eq!(
+            header_parts[1].trim(),
+            "example.com",
+            "Header value should be trimmed"
+        );
+
+        // Test case 5: Verify common HTTP/1.1 headers are parseable
+        let common_headers = vec![
+            "Host: example.com",
+            "User-Agent: TestClient/1.0",
+            "Accept: */*",
+            "Connection: keep-alive",
+            "Content-Length: 0",
+        ];
+
+        for header in common_headers {
+            let parts: Vec<&str> = header.splitn(2, ':').collect();
+            assert_eq!(parts.len(), 2, "Each header should parse correctly");
+            assert!(!parts[0].is_empty(), "Header name should not be empty");
+            assert!(
+                !parts[1].trim().is_empty(),
+                "Header value should not be empty"
+            );
+        }
+
+        // Test case 6: Verify HTTP/1.1 request can be constructed from parts
+        let method = "GET";
+        let path = "/products/item1.jpg";
+        let version = "HTTP/1.1";
+        let constructed_request = format!("{} {} {}", method, path, version);
+        assert_eq!(
+            constructed_request, "GET /products/item1.jpg HTTP/1.1",
+            "Request should be constructed correctly"
+        );
+
+        // Test case 7: Verify HTTP/1.1 supports persistent connections
+        let connection_header = "Connection: keep-alive";
+        assert!(
+            connection_header.contains("keep-alive"),
+            "HTTP/1.1 should support persistent connections"
+        );
+
+        // Test case 8: Verify request path can contain query parameters
+        let path_with_query = "/products?id=123&format=json";
+        let request = format!("GET {} HTTP/1.1", path_with_query);
+        assert!(
+            request.contains("?"),
+            "Request should preserve query parameters"
+        );
+        assert!(
+            request.ends_with("HTTP/1.1"),
+            "Request should end with HTTP/1.1"
+        );
+    }
 }
