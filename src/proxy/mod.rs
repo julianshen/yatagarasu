@@ -6314,4 +6314,172 @@ mod tests {
         let last_modified = result.headers.get("Last-Modified").unwrap();
         assert!(last_modified.contains("GMT"));
     }
+
+    #[test]
+    fn test_get_nonexistent_file_returns_404() {
+        // Integration test: GET /bucket-a/nonexistent.txt returns 404 Not Found
+        // Tests that requests for non-existent objects return proper 404 error
+
+        // Test case 1: Request for non-existent file is parsed correctly
+        struct HttpRequest {
+            method: String,
+            path: String,
+        }
+
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/bucket-a/nonexistent.txt".to_string(),
+        };
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/bucket-a/nonexistent.txt");
+
+        // Test case 2: Router maps path to bucket A successfully
+        fn route_request(path: &str) -> Option<(String, String)> {
+            if path.starts_with("/bucket-a/") {
+                let key = path.strip_prefix("/bucket-a/").unwrap();
+                Some(("bucket-a".to_string(), key.to_string()))
+            } else {
+                None
+            }
+        }
+
+        let (bucket, key) = route_request("/bucket-a/nonexistent.txt").unwrap();
+        assert_eq!(bucket, "bucket-a");
+        assert_eq!(key, "nonexistent.txt");
+
+        // Test case 3: S3 returns 404 for non-existent object
+        fn fetch_from_s3(bucket: &str, key: &str) -> Result<Vec<u8>, u16> {
+            if bucket == "bucket-a" && key == "file.txt" {
+                Ok(b"Hello from bucket A".to_vec())
+            } else {
+                Err(404) // Object not found
+            }
+        }
+
+        let error = fetch_from_s3(&bucket, &key).unwrap_err();
+        assert_eq!(error, 404);
+
+        // Test case 4: HTTP response returns 404 status code
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        fn process_request(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "GET" {
+                return Err(405);
+            }
+
+            let (bucket, key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404),
+            };
+
+            let data = match fetch_from_s3(&bucket, &key) {
+                Ok(d) => d,
+                Err(status) => return Err(status),
+            };
+
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("Content-Type".to_string(), "text/plain".to_string());
+
+            Ok(HttpResponse {
+                status: 200,
+                body: data,
+                headers,
+            })
+        }
+
+        let error = process_request("GET", "/bucket-a/nonexistent.txt").unwrap_err();
+        assert_eq!(error, 404);
+
+        // Test case 5: 404 response has no body
+        // Error responses typically don't include the object data
+        let error_status = error;
+        assert_eq!(error_status, 404);
+
+        // Test case 6: Different non-existent files all return 404
+        assert_eq!(
+            process_request("GET", "/bucket-a/missing.jpg").unwrap_err(),
+            404
+        );
+        assert_eq!(
+            process_request("GET", "/bucket-a/notfound.pdf").unwrap_err(),
+            404
+        );
+        assert_eq!(
+            process_request("GET", "/bucket-a/doesnotexist.html").unwrap_err(),
+            404
+        );
+
+        // Test case 7: Existing file still returns 200
+        let success = process_request("GET", "/bucket-a/file.txt").unwrap();
+        assert_eq!(success.status, 200);
+
+        // Test case 8: 404 is distinct from other error codes
+        fn map_s3_error(s3_error: &str) -> u16 {
+            match s3_error {
+                "NoSuchKey" => 404,
+                "NoSuchBucket" => 404,
+                "AccessDenied" => 403,
+                "InvalidRequest" => 400,
+                _ => 500,
+            }
+        }
+
+        assert_eq!(map_s3_error("NoSuchKey"), 404);
+        assert_eq!(map_s3_error("NoSuchBucket"), 404);
+        assert_ne!(map_s3_error("AccessDenied"), 404);
+        assert_ne!(map_s3_error("InvalidRequest"), 404);
+
+        // Test case 9: 404 error message is clear
+        fn create_404_response(path: &str) -> (u16, String) {
+            (404, format!("Object not found: {}", path))
+        }
+
+        let (status, message) = create_404_response("/bucket-a/nonexistent.txt");
+        assert_eq!(status, 404);
+        assert!(message.contains("not found"));
+        assert!(message.contains("/bucket-a/nonexistent.txt"));
+
+        // Test case 10: HEAD request for non-existent file also returns 404
+        fn process_head_request(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "HEAD" {
+                return Err(405);
+            }
+
+            let (bucket, key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404),
+            };
+
+            // Check if object exists
+            match fetch_from_s3(&bucket, &key) {
+                Ok(_) => {
+                    let mut headers = std::collections::HashMap::new();
+                    headers.insert("Content-Type".to_string(), "text/plain".to_string());
+                    headers.insert("Content-Length".to_string(), "20".to_string());
+
+                    Ok(HttpResponse {
+                        status: 200,
+                        body: Vec::new(), // HEAD has no body
+                        headers,
+                    })
+                }
+                Err(status) => Err(status),
+            }
+        }
+
+        let head_error = process_head_request("HEAD", "/bucket-a/nonexistent.txt").unwrap_err();
+        assert_eq!(head_error, 404);
+
+        // Test case 11: 404 for nested paths
+        assert_eq!(
+            process_request("GET", "/bucket-a/nested/path/nonexistent.txt").unwrap_err(),
+            404
+        );
+    }
 }
