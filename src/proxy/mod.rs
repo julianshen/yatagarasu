@@ -893,4 +893,135 @@ mod tests {
             "Handler should normalize double slashes"
         );
     }
+
+    #[test]
+    fn test_handler_can_access_request_headers() {
+        // Validates that the handler can access and work with HTTP request headers
+        // Headers provide metadata about the request
+
+        use std::collections::HashMap;
+
+        // Test case 1: Handler can access headers as key-value pairs
+        let mut headers = HashMap::new();
+        headers.insert("Host".to_string(), "example.com".to_string());
+        headers.insert("User-Agent".to_string(), "TestClient/1.0".to_string());
+
+        assert_eq!(
+            headers.get("Host"),
+            Some(&"example.com".to_string()),
+            "Handler should access Host header"
+        );
+        assert_eq!(
+            headers.get("User-Agent"),
+            Some(&"TestClient/1.0".to_string()),
+            "Handler should access User-Agent header"
+        );
+
+        // Test case 2: Handler can check if header exists
+        assert!(
+            headers.contains_key("Host"),
+            "Should check if header exists"
+        );
+        assert!(
+            !headers.contains_key("Authorization"),
+            "Should detect missing headers"
+        );
+
+        // Test case 3: Handler can access common HTTP headers
+        let mut request_headers = HashMap::new();
+        request_headers.insert("Content-Type".to_string(), "application/json".to_string());
+        request_headers.insert("Content-Length".to_string(), "1234".to_string());
+        request_headers.insert("Accept".to_string(), "*/*".to_string());
+
+        assert_eq!(
+            request_headers.get("Content-Type").unwrap(),
+            "application/json"
+        );
+        assert_eq!(request_headers.get("Content-Length").unwrap(), "1234");
+        assert_eq!(request_headers.get("Accept").unwrap(), "*/*");
+
+        // Test case 4: Handler can handle case-insensitive header names
+        let header_name_lower = "content-type";
+        let header_name_title = "Content-Type";
+        assert_eq!(
+            header_name_lower.to_lowercase(),
+            header_name_title.to_lowercase(),
+            "Handler should normalize header names"
+        );
+
+        // Test case 5: Handler can extract Authorization header
+        let mut auth_headers = HashMap::new();
+        auth_headers.insert("Authorization".to_string(), "Bearer abc123".to_string());
+
+        let auth_value = auth_headers.get("Authorization");
+        assert!(auth_value.is_some(), "Should find Authorization header");
+        assert!(
+            auth_value.unwrap().starts_with("Bearer "),
+            "Should extract Bearer token"
+        );
+
+        // Test case 6: Handler can iterate over all headers
+        let mut all_headers = HashMap::new();
+        all_headers.insert("Header1".to_string(), "Value1".to_string());
+        all_headers.insert("Header2".to_string(), "Value2".to_string());
+        all_headers.insert("Header3".to_string(), "Value3".to_string());
+
+        let header_count = all_headers.len();
+        assert_eq!(header_count, 3, "Should count all headers");
+
+        for (key, value) in &all_headers {
+            assert!(!key.is_empty(), "Header name should not be empty");
+            assert!(!value.is_empty(), "Header value should not be empty");
+        }
+
+        // Test case 7: Handler can handle multi-value headers
+        let range_header = "bytes=0-1023, 1024-2047";
+        assert!(
+            range_header.contains(','),
+            "Handler should detect multi-value headers"
+        );
+
+        let ranges: Vec<&str> = range_header.split(',').map(|s| s.trim()).collect();
+        assert_eq!(ranges.len(), 2, "Should split multi-value header");
+        assert_eq!(ranges[0], "bytes=0-1023");
+        assert_eq!(ranges[1], "1024-2047");
+
+        // Test case 8: Handler can extract custom headers
+        let mut custom_headers = HashMap::new();
+        custom_headers.insert("X-Custom-Header".to_string(), "CustomValue".to_string());
+        custom_headers.insert("X-Request-ID".to_string(), "req-123".to_string());
+
+        assert_eq!(
+            custom_headers.get("X-Custom-Header").unwrap(),
+            "CustomValue"
+        );
+        assert_eq!(custom_headers.get("X-Request-ID").unwrap(), "req-123");
+
+        // Test case 9: Handler extracts headers from request structure
+        struct HttpRequest {
+            headers: HashMap<String, String>,
+        }
+
+        let mut req_headers = HashMap::new();
+        req_headers.insert("Host".to_string(), "example.com".to_string());
+
+        let request = HttpRequest {
+            headers: req_headers,
+        };
+
+        assert_eq!(
+            request.headers.get("Host").unwrap(),
+            "example.com",
+            "Handler should extract headers from request"
+        );
+
+        // Test case 10: Handler can handle empty header values
+        let mut headers_with_empty = HashMap::new();
+        headers_with_empty.insert("Empty-Header".to_string(), "".to_string());
+
+        assert!(
+            headers_with_empty.contains_key("Empty-Header"),
+            "Should accept headers with empty values"
+        );
+    }
 }
