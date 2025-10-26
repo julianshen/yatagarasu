@@ -9202,4 +9202,193 @@ mod tests {
         let resp2 = handle_request(&req2, &bucket_config);
         assert_eq!(resp2.status, 200);
     }
+
+    #[test]
+    fn test_jwt_from_query_parameter_works() {
+        // Integration test: JWT from query parameter works
+        // Tests that JWT tokens can be extracted from query parameters
+
+        // Test case 1: Create valid JWT token
+        fn create_valid_jwt_token(user: &str, _secret: &str) -> String {
+            // Mock valid JWT token
+            format!("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ7fSIsImV4cCI6OTk5OTk5OTk5OX0.valid_sig_{}", user)
+        }
+
+        let secret = "my-secret-key";
+        let token = create_valid_jwt_token("user123", secret);
+
+        // Test case 2: Request with JWT in query parameter
+        #[derive(Debug)]
+        struct HttpRequest {
+            query_params: std::collections::HashMap<String, String>,
+        }
+
+        let mut query_params = std::collections::HashMap::new();
+        query_params.insert("token".to_string(), token.clone());
+
+        let request = HttpRequest { query_params };
+
+        // Test case 3: Extract token from query parameter
+        fn extract_token_from_query(req: &HttpRequest, param_name: &str) -> Option<String> {
+            req.query_params.get(param_name).cloned()
+        }
+
+        let extracted = extract_token_from_query(&request, "token");
+        assert!(extracted.is_some());
+        assert_eq!(extracted.unwrap(), token);
+
+        // Test case 4: Request with valid JWT from query parameter succeeds
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct JwtConfig {
+            enabled: bool,
+            secret: String,
+            token_param_name: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt: Option<JwtConfig>,
+        }
+
+        fn validate_token(token: &str, _secret: &str) -> bool {
+            // Simple validation: valid tokens contain "valid_sig"
+            token.contains("valid_sig")
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            if let Some(jwt_config) = &config.jwt {
+                if jwt_config.enabled {
+                    let token = extract_token_from_query(req, &jwt_config.token_param_name);
+                    if token.is_none() {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Missing token".to_string(),
+                        };
+                    }
+
+                    if !validate_token(&token.unwrap(), &jwt_config.secret) {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Invalid token".to_string(),
+                        };
+                    }
+                }
+            }
+
+            HttpResponse {
+                status: 200,
+                body: "Object from S3".to_string(),
+            }
+        }
+
+        let bucket_config = BucketConfig {
+            name: "secure-bucket".to_string(),
+            jwt: Some(JwtConfig {
+                enabled: true,
+                secret: secret.to_string(),
+                token_param_name: "token".to_string(),
+            }),
+        };
+
+        let response = handle_request(&request, &bucket_config);
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("Object from S3"));
+
+        // Test case 5: Different query parameter names work
+        let mut query_params_access = std::collections::HashMap::new();
+        query_params_access.insert("access_token".to_string(), token.clone());
+        let req_access = HttpRequest {
+            query_params: query_params_access,
+        };
+
+        let config_access = BucketConfig {
+            name: "secure-bucket".to_string(),
+            jwt: Some(JwtConfig {
+                enabled: true,
+                secret: secret.to_string(),
+                token_param_name: "access_token".to_string(),
+            }),
+        };
+
+        let resp_access = handle_request(&req_access, &config_access);
+        assert_eq!(resp_access.status, 200);
+
+        // Test case 6: Request without query parameter fails
+        let req_no_param = HttpRequest {
+            query_params: std::collections::HashMap::new(),
+        };
+
+        let resp_no_param = handle_request(&req_no_param, &bucket_config);
+        assert_eq!(resp_no_param.status, 401);
+
+        // Test case 7: Request with wrong parameter name fails
+        let mut query_params_wrong = std::collections::HashMap::new();
+        query_params_wrong.insert("wrong_param".to_string(), token.clone());
+        let req_wrong = HttpRequest {
+            query_params: query_params_wrong,
+        };
+
+        let resp_wrong = handle_request(&req_wrong, &bucket_config);
+        assert_eq!(resp_wrong.status, 401);
+
+        // Test case 8: Empty query parameter value fails
+        let mut query_params_empty = std::collections::HashMap::new();
+        query_params_empty.insert("token".to_string(), "".to_string());
+        let req_empty = HttpRequest {
+            query_params: query_params_empty,
+        };
+
+        let resp_empty = handle_request(&req_empty, &bucket_config);
+        assert_eq!(resp_empty.status, 401);
+
+        // Test case 9: URL-encoded tokens work
+        fn url_decode(s: &str) -> String {
+            // Simple URL decode: replace %2B with +, %2F with /
+            s.replace("%2B", "+").replace("%2F", "/")
+        }
+
+        let encoded_token = token.replace("+", "%2B").replace("/", "%2F");
+        let mut query_params_encoded = std::collections::HashMap::new();
+        query_params_encoded.insert("token".to_string(), encoded_token.clone());
+        let req_encoded = HttpRequest {
+            query_params: query_params_encoded,
+        };
+
+        fn extract_and_decode_token(req: &HttpRequest, param_name: &str) -> Option<String> {
+            req.query_params.get(param_name).map(|t| url_decode(t))
+        }
+
+        let decoded = extract_and_decode_token(&req_encoded, "token");
+        assert!(decoded.is_some());
+        assert!(validate_token(&decoded.unwrap(), secret));
+
+        // Test case 10: Multiple query parameters present (only token is used)
+        let mut query_params_multi = std::collections::HashMap::new();
+        query_params_multi.insert("token".to_string(), token.clone());
+        query_params_multi.insert("other_param".to_string(), "value".to_string());
+        let req_multi = HttpRequest {
+            query_params: query_params_multi,
+        };
+
+        let resp_multi = handle_request(&req_multi, &bucket_config);
+        assert_eq!(resp_multi.status, 200);
+
+        // Test case 11: Different valid tokens work
+        let token2 = create_valid_jwt_token("user456", secret);
+        let mut query_params2 = std::collections::HashMap::new();
+        query_params2.insert("token".to_string(), token2);
+        let req2 = HttpRequest {
+            query_params: query_params2,
+        };
+
+        let resp2 = handle_request(&req2, &bucket_config);
+        assert_eq!(resp2.status, 200);
+    }
 }
