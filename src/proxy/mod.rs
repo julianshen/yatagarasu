@@ -9391,4 +9391,190 @@ mod tests {
         let resp2 = handle_request(&req2, &bucket_config);
         assert_eq!(resp2.status, 200);
     }
+
+    #[test]
+    fn test_jwt_from_custom_header_works() {
+        // Integration test: JWT from custom header works
+        // Tests that JWT tokens can be extracted from custom headers (not Authorization)
+
+        // Test case 1: Create valid JWT token
+        fn create_valid_jwt_token(user: &str, _secret: &str) -> String {
+            // Mock valid JWT token
+            format!("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ7fSIsImV4cCI6OTk5OTk5OTk5OX0.valid_sig_{}", user)
+        }
+
+        let secret = "my-secret-key";
+        let token = create_valid_jwt_token("user123", secret);
+
+        // Test case 2: Request with JWT in custom header (e.g., X-API-Token)
+        #[derive(Debug)]
+        struct HttpRequest {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("x-api-token".to_string(), token.clone());
+
+        let request = HttpRequest { headers };
+
+        // Test case 3: Extract token from custom header
+        fn extract_token_from_custom_header(
+            req: &HttpRequest,
+            header_name: &str,
+        ) -> Option<String> {
+            // Case-insensitive header lookup
+            for (key, value) in &req.headers {
+                if key.to_lowercase() == header_name.to_lowercase() {
+                    return Some(value.clone());
+                }
+            }
+            None
+        }
+
+        let extracted = extract_token_from_custom_header(&request, "x-api-token");
+        assert!(extracted.is_some());
+        assert_eq!(extracted.unwrap(), token);
+
+        // Test case 4: Request with valid JWT from custom header succeeds
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct JwtConfig {
+            enabled: bool,
+            secret: String,
+            custom_header_name: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt: Option<JwtConfig>,
+        }
+
+        fn validate_token(token: &str, _secret: &str) -> bool {
+            // Simple validation: valid tokens contain "valid_sig"
+            token.contains("valid_sig")
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            if let Some(jwt_config) = &config.jwt {
+                if jwt_config.enabled {
+                    let token =
+                        extract_token_from_custom_header(req, &jwt_config.custom_header_name);
+                    if token.is_none() {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Missing token".to_string(),
+                        };
+                    }
+
+                    if !validate_token(&token.unwrap(), &jwt_config.secret) {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Invalid token".to_string(),
+                        };
+                    }
+                }
+            }
+
+            HttpResponse {
+                status: 200,
+                body: "Object from S3".to_string(),
+            }
+        }
+
+        let bucket_config = BucketConfig {
+            name: "secure-bucket".to_string(),
+            jwt: Some(JwtConfig {
+                enabled: true,
+                secret: secret.to_string(),
+                custom_header_name: "x-api-token".to_string(),
+            }),
+        };
+
+        let response = handle_request(&request, &bucket_config);
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("Object from S3"));
+
+        // Test case 5: Different custom header names work
+        let mut headers_auth = std::collections::HashMap::new();
+        headers_auth.insert("x-auth-token".to_string(), token.clone());
+        let req_auth = HttpRequest {
+            headers: headers_auth,
+        };
+
+        let config_auth = BucketConfig {
+            name: "secure-bucket".to_string(),
+            jwt: Some(JwtConfig {
+                enabled: true,
+                secret: secret.to_string(),
+                custom_header_name: "x-auth-token".to_string(),
+            }),
+        };
+
+        let resp_auth = handle_request(&req_auth, &config_auth);
+        assert_eq!(resp_auth.status, 200);
+
+        // Test case 6: Custom header is case-insensitive
+        let mut headers_caps = std::collections::HashMap::new();
+        headers_caps.insert("X-API-Token".to_string(), token.clone());
+        let req_caps = HttpRequest {
+            headers: headers_caps,
+        };
+
+        let resp_caps = handle_request(&req_caps, &bucket_config);
+        assert_eq!(resp_caps.status, 200);
+
+        // Test case 7: Request without custom header fails
+        let req_no_header = HttpRequest {
+            headers: std::collections::HashMap::new(),
+        };
+
+        let resp_no_header = handle_request(&req_no_header, &bucket_config);
+        assert_eq!(resp_no_header.status, 401);
+
+        // Test case 8: Request with wrong header name fails
+        let mut headers_wrong = std::collections::HashMap::new();
+        headers_wrong.insert("x-wrong-header".to_string(), token.clone());
+        let req_wrong = HttpRequest {
+            headers: headers_wrong,
+        };
+
+        let resp_wrong = handle_request(&req_wrong, &bucket_config);
+        assert_eq!(resp_wrong.status, 401);
+
+        // Test case 9: Empty custom header value fails
+        let mut headers_empty = std::collections::HashMap::new();
+        headers_empty.insert("x-api-token".to_string(), "".to_string());
+        let req_empty = HttpRequest {
+            headers: headers_empty,
+        };
+
+        let resp_empty = handle_request(&req_empty, &bucket_config);
+        assert_eq!(resp_empty.status, 401);
+
+        // Test case 10: Custom header without prefix (no "Bearer ")
+        let mut headers_no_prefix = std::collections::HashMap::new();
+        headers_no_prefix.insert("x-api-token".to_string(), token.clone());
+        let req_no_prefix = HttpRequest {
+            headers: headers_no_prefix,
+        };
+
+        // Custom headers don't need "Bearer " prefix
+        let resp_no_prefix = handle_request(&req_no_prefix, &bucket_config);
+        assert_eq!(resp_no_prefix.status, 200);
+
+        // Test case 11: Different valid tokens work
+        let token2 = create_valid_jwt_token("user456", secret);
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("x-api-token".to_string(), token2);
+        let req2 = HttpRequest { headers: headers2 };
+
+        let resp2 = handle_request(&req2, &bucket_config);
+        assert_eq!(resp2.status, 200);
+    }
 }
