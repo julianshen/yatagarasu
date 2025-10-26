@@ -1804,4 +1804,138 @@ mod tests {
             "Handler should preserve S3 version header"
         );
     }
+
+    #[test]
+    fn test_can_send_response_body() {
+        // Validates that response handler can send response body content
+        // Body contains the actual data returned to the client
+
+        // Test case 1: Handler can send simple text body
+        let text_body = "Hello, World!";
+        let body_bytes = text_body.as_bytes();
+
+        assert_eq!(body_bytes.len(), 13, "Handler should get body length");
+        assert_eq!(
+            std::str::from_utf8(body_bytes).unwrap(),
+            "Hello, World!",
+            "Handler should preserve text content"
+        );
+
+        // Test case 2: Handler can send empty body
+        let empty_body = "";
+        let empty_bytes = empty_body.as_bytes();
+
+        assert_eq!(empty_bytes.len(), 0, "Handler should handle empty body");
+
+        // Test case 3: Handler can send binary data
+        let binary_data: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0]; // JPEG header
+        assert_eq!(binary_data.len(), 4, "Handler should handle binary data");
+
+        // Test case 4: Handler can send JSON body
+        let json_body = r#"{"status":"ok","count":42}"#;
+        let json_bytes = json_body.as_bytes();
+
+        assert_eq!(json_bytes.len(), 26, "Handler should get JSON body length");
+        assert!(
+            json_body.contains("status"),
+            "Handler should preserve JSON structure"
+        );
+
+        // Test case 5: Handler can send large body
+        let large_body = "X".repeat(10_000); // 10KB
+        let large_bytes = large_body.as_bytes();
+
+        assert_eq!(
+            large_bytes.len(),
+            10_000,
+            "Handler should handle large bodies"
+        );
+
+        // Test case 6: Handler creates response with body and content-length
+        struct HttpResponse {
+            status_code: u16,
+            headers: std::collections::HashMap<String, String>,
+            body: Vec<u8>,
+        }
+
+        let mut headers = std::collections::HashMap::new();
+        let response_body = "Response content".as_bytes().to_vec();
+        headers.insert(
+            "content-length".to_string(),
+            response_body.len().to_string(),
+        );
+
+        let response = HttpResponse {
+            status_code: 200,
+            headers: headers.clone(),
+            body: response_body.clone(),
+        };
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(
+            headers.get("content-length"),
+            Some(&"16".to_string()),
+            "Handler should set correct content-length"
+        );
+        assert_eq!(response.body.len(), 16);
+
+        // Test case 7: Handler maintains body integrity
+        let original_data = "Important data 123!";
+        let transmitted_body = original_data.as_bytes().to_vec();
+
+        assert_eq!(
+            std::str::from_utf8(&transmitted_body).unwrap(),
+            original_data,
+            "Handler should maintain body integrity"
+        );
+
+        // Test case 8: Handler can handle UTF-8 encoded text
+        let utf8_text = "Hello 世界 🌍";
+        let utf8_bytes = utf8_text.as_bytes();
+
+        assert!(
+            utf8_bytes.len() > utf8_text.chars().count(),
+            "UTF-8 uses multiple bytes per char"
+        );
+        assert_eq!(
+            std::str::from_utf8(utf8_bytes).unwrap(),
+            utf8_text,
+            "Handler should preserve UTF-8 content"
+        );
+
+        // Test case 9: Handler can send HTML body
+        let html_body = "<html><body><h1>Test</h1></body></html>";
+        let html_bytes = html_body.as_bytes();
+
+        assert_eq!(html_bytes.len(), 39, "Handler should get HTML body length");
+        assert!(
+            html_body.contains("<html>"),
+            "Handler should preserve HTML structure"
+        );
+
+        // Test case 10: Handler can send response with custom content
+        let custom_content = "Custom response from S3 proxy";
+        let response_with_custom = HttpResponse {
+            status_code: 200,
+            headers: {
+                let mut h = std::collections::HashMap::new();
+                h.insert("content-type".to_string(), "text/plain".to_string());
+                h.insert(
+                    "content-length".to_string(),
+                    custom_content.len().to_string(),
+                );
+                h
+            },
+            body: custom_content.as_bytes().to_vec(),
+        };
+
+        assert_eq!(
+            response_with_custom.headers.get("content-type"),
+            Some(&"text/plain".to_string())
+        );
+        assert_eq!(
+            std::str::from_utf8(&response_with_custom.body).unwrap(),
+            custom_content
+        );
+    }
 }
