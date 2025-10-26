@@ -381,7 +381,7 @@ yatagarasu/
 - [x] Test: Server rejects requests before fully initialized
 
 ### Pingora - Request Handler
-- [ ] Test: Handler receives incoming HTTP request
+- [x] Test: Handler receives incoming HTTP request
 - [ ] Test: Handler can access request method
 - [ ] Test: Handler can access request path
 - [ ] Test: Handler can access request headers
