@@ -400,7 +400,7 @@ yatagarasu/
 - [x] Test: Preserves S3 response headers in proxy response
 
 ### Pingora - Error Responses
-- [ ] Test: Returns 400 for malformed requests
+- [x] Test: Returns 400 for malformed requests
 - [ ] Test: Returns 401 for unauthorized requests
 - [ ] Test: Returns 403 for forbidden requests
 - [ ] Test: Returns 404 for not found

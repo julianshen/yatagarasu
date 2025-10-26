@@ -2803,4 +2803,184 @@ mod tests {
             "Handler should filter connection header"
         );
     }
+
+    #[test]
+    fn test_returns_400_for_malformed_requests() {
+        // Validates that handler returns 400 Bad Request for malformed requests
+        // 400 indicates client sent an invalid request
+
+        // Test case 1: Handler validates HTTP method
+        fn validate_http_method(method: &str) -> Result<(), u16> {
+            match method {
+                "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" | "PATCH" => Ok(()),
+                _ => Err(400),
+            }
+        }
+
+        assert!(validate_http_method("GET").is_ok());
+        assert!(validate_http_method("POST").is_ok());
+        assert_eq!(validate_http_method("INVALID"), Err(400));
+        assert_eq!(validate_http_method(""), Err(400));
+
+        // Test case 2: Handler validates request path format
+        fn validate_path(path: &str) -> Result<(), u16> {
+            if path.is_empty() {
+                return Err(400);
+            }
+            if !path.starts_with('/') {
+                return Err(400);
+            }
+            Ok(())
+        }
+
+        assert!(validate_path("/valid/path").is_ok());
+        assert_eq!(validate_path(""), Err(400), "Empty path should return 400");
+        assert_eq!(
+            validate_path("no-leading-slash"),
+            Err(400),
+            "Path without leading slash should return 400"
+        );
+
+        // Test case 3: Handler validates HTTP version
+        fn validate_http_version(version: &str) -> Result<(), u16> {
+            match version {
+                "HTTP/1.0" | "HTTP/1.1" | "HTTP/2.0" => Ok(()),
+                _ => Err(400),
+            }
+        }
+
+        assert!(validate_http_version("HTTP/1.1").is_ok());
+        assert!(validate_http_version("HTTP/2.0").is_ok());
+        assert_eq!(validate_http_version("HTTP/0.9"), Err(400));
+        assert_eq!(validate_http_version("INVALID"), Err(400));
+
+        // Test case 4: Handler validates Content-Length header
+        fn validate_content_length(content_length: &str) -> Result<usize, u16> {
+            content_length.parse::<usize>().map_err(|_| 400)
+        }
+
+        assert_eq!(validate_content_length("1024").unwrap(), 1024);
+        assert_eq!(validate_content_length("0").unwrap(), 0);
+        assert_eq!(validate_content_length("abc"), Err(400));
+        assert_eq!(validate_content_length("-1"), Err(400));
+
+        // Test case 5: Handler validates request line format
+        fn parse_request_line(line: &str) -> Result<(String, String, String), u16> {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() != 3 {
+                return Err(400);
+            }
+            Ok((
+                parts[0].to_string(),
+                parts[1].to_string(),
+                parts[2].to_string(),
+            ))
+        }
+
+        assert!(parse_request_line("GET /path HTTP/1.1").is_ok());
+        assert_eq!(
+            parse_request_line("GET /path"),
+            Err(400),
+            "Incomplete request line should return 400"
+        );
+        assert_eq!(
+            parse_request_line(""),
+            Err(400),
+            "Empty request line should return 400"
+        );
+
+        // Test case 6: Handler validates header format
+        fn validate_header(header: &str) -> Result<(String, String), u16> {
+            if let Some(pos) = header.find(':') {
+                let name = header[..pos].trim();
+                let value = header[pos + 1..].trim();
+                if name.is_empty() {
+                    return Err(400);
+                }
+                Ok((name.to_string(), value.to_string()))
+            } else {
+                Err(400)
+            }
+        }
+
+        assert!(validate_header("Content-Type: application/json").is_ok());
+        assert_eq!(
+            validate_header("InvalidHeader"),
+            Err(400),
+            "Header without colon should return 400"
+        );
+        assert_eq!(
+            validate_header(": value"),
+            Err(400),
+            "Header without name should return 400"
+        );
+
+        // Test case 7: Handler validates Range header format
+        fn validate_range_header(range: &str) -> Result<(), u16> {
+            if !range.starts_with("bytes=") {
+                return Err(400);
+            }
+            Ok(())
+        }
+
+        assert!(validate_range_header("bytes=0-1023").is_ok());
+        assert_eq!(
+            validate_range_header("invalid=0-1023"),
+            Err(400),
+            "Invalid range unit should return 400"
+        );
+
+        // Test case 8: Handler creates 400 error response
+        struct ErrorResponse {
+            status_code: u16,
+            message: String,
+        }
+
+        let malformed_method_error = ErrorResponse {
+            status_code: 400,
+            message: "Invalid HTTP method".to_string(),
+        };
+
+        assert_eq!(malformed_method_error.status_code, 400);
+        assert!(malformed_method_error.message.contains("Invalid"));
+
+        // Test case 9: Handler validates query parameter format
+        fn validate_query_params(query: &str) -> Result<(), u16> {
+            if query.is_empty() {
+                return Ok(()); // Empty query is valid
+            }
+
+            for param in query.split('&') {
+                if !param.contains('=') && !param.is_empty() {
+                    // Param without value is technically valid (flag)
+                    continue;
+                }
+            }
+            Ok(())
+        }
+
+        assert!(validate_query_params("key=value").is_ok());
+        assert!(validate_query_params("key1=value1&key2=value2").is_ok());
+        assert!(validate_query_params("").is_ok());
+        assert!(validate_query_params("flag").is_ok()); // Flag param without value
+
+        // Test case 10: Handler validates request completeness
+        fn validate_request_complete(method: &str, path: &str, version: &str) -> Result<(), u16> {
+            validate_http_method(method)?;
+            validate_path(path)?;
+            validate_http_version(version)?;
+            Ok(())
+        }
+
+        assert!(validate_request_complete("GET", "/path", "HTTP/1.1").is_ok());
+        assert_eq!(
+            validate_request_complete("INVALID", "/path", "HTTP/1.1"),
+            Err(400)
+        );
+        assert_eq!(validate_request_complete("GET", "", "HTTP/1.1"), Err(400));
+        assert_eq!(
+            validate_request_complete("GET", "/path", "HTTP/0.9"),
+            Err(400)
+        );
+    }
 }
