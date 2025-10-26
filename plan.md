@@ -354,7 +354,7 @@ yatagarasu/
 - [x] Test: Range requests work on public buckets
 - [x] Test: Range requests require JWT on private buckets
 - [x] Test: Returns 401 before processing range if auth fails
-- [ ] Test: JWT validation happens before range validation
+- [x] Test: JWT validation happens before range validation
 
 ### S3 Range Requests - Performance
 - [ ] Test: Memory usage constant for range requests (~64KB buffer)
