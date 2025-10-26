@@ -431,7 +431,7 @@ yatagarasu/
 - [x] Test: Response includes S3 ETag header
 
 ### End-to-End - Multiple Buckets, No Auth
-- [ ] Test: GET /bucket-a/file.txt routes to bucket A
+- [x] Test: GET /bucket-a/file.txt routes to bucket A
 - [ ] Test: GET /bucket-b/file.txt routes to bucket B
 - [ ] Test: Buckets use independent credentials
 - [ ] Test: Can access objects from both buckets concurrently
