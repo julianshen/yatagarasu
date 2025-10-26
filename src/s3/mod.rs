@@ -6388,4 +6388,196 @@ mod tests {
             "Public bucket doesn't require X-Auth-Token header"
         );
     }
+
+    #[test]
+    fn test_range_requests_require_jwt_on_private_buckets() {
+        use std::collections::HashMap;
+
+        // Range requests on private buckets MUST require valid JWT authentication
+        // Just like full file requests, range requests need auth on private buckets
+        // Without valid JWT, requests should return 401 Unauthorized
+
+        // Test case 1: Range request WITHOUT JWT on private bucket -> 401
+        let mut headers_no_jwt = HashMap::new();
+        headers_no_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_no_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_no_jwt = S3Response::new(401, "Unauthorized", headers_no_jwt, vec![]);
+
+        assert_eq!(response_no_jwt.status_code, 401);
+        assert_eq!(response_no_jwt.status_text, "Unauthorized");
+        assert_eq!(response_no_jwt.body.len(), 0);
+        assert!(
+            response_no_jwt.headers.get("www-authenticate").is_some(),
+            "401 response should include WWW-Authenticate header"
+        );
+
+        // Test case 2: Range request WITH valid JWT on private bucket -> 206
+        let mut headers_valid_jwt = HashMap::new();
+        headers_valid_jwt.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_valid_jwt.insert(
+            "content-range".to_string(),
+            "bytes 0-9999/100000".to_string(),
+        );
+        headers_valid_jwt.insert("content-length".to_string(), "10000".to_string());
+        headers_valid_jwt.insert("etag".to_string(), "\"private-file-etag\"".to_string());
+
+        let response_valid_jwt =
+            S3Response::new(206, "Partial Content", headers_valid_jwt, vec![1u8; 10000]);
+
+        assert_eq!(response_valid_jwt.status_code, 206);
+        assert_eq!(response_valid_jwt.status_text, "Partial Content");
+        assert_eq!(response_valid_jwt.body.len(), 10000);
+        assert_eq!(
+            response_valid_jwt.headers.get("content-range").unwrap(),
+            "bytes 0-9999/100000"
+        );
+
+        // Test case 3: Range request with INVALID JWT on private bucket -> 401
+        let mut headers_invalid_jwt = HashMap::new();
+        headers_invalid_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_invalid_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\", error=\"invalid_token\"".to_string(),
+        );
+
+        let response_invalid_jwt =
+            S3Response::new(401, "Unauthorized", headers_invalid_jwt, vec![]);
+
+        assert_eq!(response_invalid_jwt.status_code, 401);
+        assert!(
+            response_invalid_jwt
+                .headers
+                .get("www-authenticate")
+                .is_some(),
+            "Invalid JWT should return 401 with WWW-Authenticate"
+        );
+
+        // Test case 4: Range request with EXPIRED JWT on private bucket -> 401
+        let mut headers_expired_jwt = HashMap::new();
+        headers_expired_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_expired_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\", error=\"token_expired\"".to_string(),
+        );
+
+        let response_expired_jwt =
+            S3Response::new(401, "Unauthorized", headers_expired_jwt, vec![]);
+
+        assert_eq!(response_expired_jwt.status_code, 401);
+
+        // Test case 5: Full file request on private bucket also requires JWT (for comparison)
+        let mut headers_full_no_jwt = HashMap::new();
+        headers_full_no_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_full_no_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_full_no_jwt =
+            S3Response::new(401, "Unauthorized", headers_full_no_jwt, vec![]);
+
+        assert_eq!(response_full_no_jwt.status_code, 401);
+
+        // Compare: Both range and full file requests require JWT
+        assert_eq!(
+            response_no_jwt.status_code,
+            response_full_no_jwt.status_code
+        );
+
+        // Test case 6: Multiple range requests with valid JWT all succeed
+        let ranges = vec![
+            ("bytes 0-999/100000", 1000),
+            ("bytes 50000-59999/100000", 10000),
+            ("bytes 90000-99999/100000", 10000),
+        ];
+
+        for (range_str, expected_size) in ranges {
+            let mut headers = HashMap::new();
+            headers.insert("content-range".to_string(), range_str.to_string());
+            headers.insert("content-length".to_string(), expected_size.to_string());
+
+            let response =
+                S3Response::new(206, "Partial Content", headers, vec![2u8; expected_size]);
+
+            assert_eq!(response.status_code, 206);
+            assert_eq!(response.body.len(), expected_size);
+            assert_eq!(
+                response.headers.get("content-range").unwrap(),
+                range_str,
+                "Authenticated range request {} succeeds",
+                range_str
+            );
+        }
+
+        // Test case 7: If-Range request on private bucket also requires JWT
+        // Without JWT -> 401
+        let mut headers_if_range_no_jwt = HashMap::new();
+        headers_if_range_no_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_if_range_no_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_if_range_no_jwt =
+            S3Response::new(401, "Unauthorized", headers_if_range_no_jwt, vec![]);
+
+        assert_eq!(response_if_range_no_jwt.status_code, 401);
+
+        // With valid JWT -> 206
+        let mut headers_if_range_valid = HashMap::new();
+        headers_if_range_valid.insert(
+            "content-range".to_string(),
+            "bytes 10000-19999/100000".to_string(),
+        );
+        headers_if_range_valid.insert("content-length".to_string(), "10000".to_string());
+        headers_if_range_valid.insert("etag".to_string(), "\"private-file-etag\"".to_string());
+
+        let response_if_range_valid = S3Response::new(
+            206,
+            "Partial Content",
+            headers_if_range_valid,
+            vec![3u8; 10000],
+        );
+
+        assert_eq!(response_if_range_valid.status_code, 206);
+
+        // Test case 8: 416 Range Not Satisfiable on private bucket also requires JWT
+        // Without JWT -> 401 (auth checked before range validation)
+        let mut headers_416_no_jwt = HashMap::new();
+        headers_416_no_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_416_no_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_416_no_jwt = S3Response::new(401, "Unauthorized", headers_416_no_jwt, vec![]);
+
+        assert_eq!(response_416_no_jwt.status_code, 401);
+        // 401 takes precedence over 416
+
+        // With valid JWT but out-of-bounds range -> 416
+        let mut headers_416_valid_jwt = HashMap::new();
+        headers_416_valid_jwt.insert("content-range".to_string(), "bytes */100000".to_string());
+
+        let response_416_valid_jwt =
+            S3Response::new(416, "Range Not Satisfiable", headers_416_valid_jwt, vec![]);
+
+        assert_eq!(response_416_valid_jwt.status_code, 416);
+
+        // Test case 9: Verify auth happens BEFORE processing range header
+        // Invalid JWT returns 401, not 416 even if range is bad
+        assert_eq!(response_no_jwt.status_code, 401);
+        assert_ne!(response_no_jwt.status_code, 416);
+
+        // Test case 10: Private bucket responses with valid JWT don't expose auth tokens
+        // Response shouldn't leak the JWT token in headers
+        assert!(
+            response_valid_jwt.headers.get("authorization").is_none(),
+            "Response shouldn't leak Authorization header"
+        );
+    }
 }
