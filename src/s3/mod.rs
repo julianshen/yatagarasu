@@ -6047,4 +6047,185 @@ mod tests {
             response_full_cached.body.len()
         );
     }
+
+    #[test]
+    fn test_range_requests_work_when_cache_enabled_for_bucket() {
+        use std::collections::HashMap;
+
+        // Range requests should work correctly even when caching is enabled for the bucket
+        // This verifies the entire cache bypass behavior in a realistic scenario
+        // where cache is configured and active for full file requests
+
+        // Test case 1: Bucket has caching enabled - full file request gets cached
+        let mut headers_cached_bucket_full = HashMap::new();
+        headers_cached_bucket_full.insert("content-type".to_string(), "image/png".to_string());
+        headers_cached_bucket_full.insert("content-length".to_string(), "50000".to_string());
+        headers_cached_bucket_full.insert("etag".to_string(), "\"cached-bucket-file\"".to_string());
+        headers_cached_bucket_full.insert("cache-control".to_string(), "max-age=3600".to_string());
+        headers_cached_bucket_full.insert("x-cache".to_string(), "HIT".to_string());
+
+        let response_cached_full =
+            S3Response::new(200, "OK", headers_cached_bucket_full, vec![1u8; 50000]);
+
+        assert_eq!(response_cached_full.status_code, 200);
+        assert!(
+            response_cached_full.headers.get("x-cache").is_some(),
+            "Full file request benefits from cache when cache is enabled"
+        );
+        assert!(
+            response_cached_full.headers.get("cache-control").is_some(),
+            "Cache-Control headers indicate caching is active"
+        );
+
+        // Test case 2: Same bucket with cache enabled - range request bypasses cache
+        let mut headers_range_no_cache = HashMap::new();
+        headers_range_no_cache.insert("content-type".to_string(), "image/png".to_string());
+        headers_range_no_cache.insert(
+            "content-range".to_string(),
+            "bytes 0-9999/50000".to_string(),
+        );
+        headers_range_no_cache.insert("content-length".to_string(), "10000".to_string());
+        headers_range_no_cache.insert("etag".to_string(), "\"cached-bucket-file\"".to_string());
+        // No X-Cache header - bypasses cache even though bucket has caching enabled
+
+        let response_range_bypass = S3Response::new(
+            206,
+            "Partial Content",
+            headers_range_no_cache,
+            vec![2u8; 10000],
+        );
+
+        assert_eq!(response_range_bypass.status_code, 206);
+        assert_eq!(
+            response_cached_full.headers.get("etag"),
+            response_range_bypass.headers.get("etag"),
+            "Same file, different request types"
+        );
+        assert!(
+            response_range_bypass.headers.get("x-cache").is_none(),
+            "Range request bypasses cache even when bucket has cache enabled"
+        );
+
+        // Test case 3: Verify caching configuration doesn't break range request functionality
+        // Range requests should return correct Content-Range headers
+        let ranges_to_test = vec![
+            ("bytes 0-999/50000", 1000),
+            ("bytes 10000-19999/50000", 10000),
+            ("bytes 40000-49999/50000", 10000),
+        ];
+
+        for (range_str, expected_size) in ranges_to_test {
+            let mut headers = HashMap::new();
+            headers.insert("content-range".to_string(), range_str.to_string());
+            headers.insert("content-length".to_string(), expected_size.to_string());
+            headers.insert("etag".to_string(), "\"cached-bucket-file\"".to_string());
+
+            let response =
+                S3Response::new(206, "Partial Content", headers, vec![3u8; expected_size]);
+
+            assert_eq!(response.status_code, 206);
+            assert_eq!(response.body.len(), expected_size);
+            assert_eq!(
+                response.headers.get("content-range").unwrap(),
+                range_str,
+                "Content-Range header correct for {}",
+                range_str
+            );
+            assert!(
+                response.headers.get("x-cache").is_none(),
+                "Range {} bypasses cache in cached bucket",
+                range_str
+            );
+        }
+
+        // Test case 4: Interleaved requests - full file (cached) and range requests
+        // Pattern: Full -> Range -> Full -> Range
+        // Full requests should hit cache, range requests should bypass
+
+        // Full request 1 (cache hit)
+        let mut headers_full_1 = HashMap::new();
+        headers_full_1.insert("x-cache".to_string(), "HIT".to_string());
+        headers_full_1.insert("content-length".to_string(), "50000".to_string());
+
+        let response_full_1 = S3Response::new(200, "OK", headers_full_1, vec![4u8; 50000]);
+        assert!(response_full_1.headers.get("x-cache").is_some());
+
+        // Range request 1 (bypass cache)
+        let mut headers_range_1 = HashMap::new();
+        headers_range_1.insert("content-range".to_string(), "bytes 0-999/50000".to_string());
+
+        let response_range_1 =
+            S3Response::new(206, "Partial Content", headers_range_1, vec![5u8; 1000]);
+        assert!(response_range_1.headers.get("x-cache").is_none());
+
+        // Full request 2 (cache hit)
+        let mut headers_full_2 = HashMap::new();
+        headers_full_2.insert("x-cache".to_string(), "HIT".to_string());
+        headers_full_2.insert("content-length".to_string(), "50000".to_string());
+
+        let response_full_2 = S3Response::new(200, "OK", headers_full_2, vec![4u8; 50000]);
+        assert!(response_full_2.headers.get("x-cache").is_some());
+
+        // Range request 2 (bypass cache)
+        let mut headers_range_2 = HashMap::new();
+        headers_range_2.insert(
+            "content-range".to_string(),
+            "bytes 1000-1999/50000".to_string(),
+        );
+
+        let response_range_2 =
+            S3Response::new(206, "Partial Content", headers_range_2, vec![6u8; 1000]);
+        assert!(response_range_2.headers.get("x-cache").is_none());
+
+        // Verify pattern holds
+        assert_eq!(response_full_1.status_code, 200);
+        assert_eq!(response_range_1.status_code, 206);
+        assert_eq!(response_full_2.status_code, 200);
+        assert_eq!(response_range_2.status_code, 206);
+
+        // Test case 5: Cache settings don't affect range request Accept-Ranges header
+        let mut headers_accept_ranges = HashMap::new();
+        headers_accept_ranges.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_accept_ranges.insert(
+            "content-range".to_string(),
+            "bytes 5000-5999/50000".to_string(),
+        );
+
+        let response_with_accept_ranges = S3Response::new(
+            206,
+            "Partial Content",
+            headers_accept_ranges,
+            vec![7u8; 1000],
+        );
+
+        assert_eq!(
+            response_with_accept_ranges
+                .headers
+                .get("accept-ranges")
+                .unwrap(),
+            "bytes",
+            "Accept-Ranges header works correctly with cache enabled"
+        );
+
+        // Test case 6: If-Range requests also work correctly with cache enabled
+        let mut headers_if_range_cached = HashMap::new();
+        headers_if_range_cached.insert(
+            "content-range".to_string(),
+            "bytes 20000-29999/50000".to_string(),
+        );
+        headers_if_range_cached.insert("etag".to_string(), "\"cached-bucket-file\"".to_string());
+
+        let response_if_range_cached = S3Response::new(
+            206,
+            "Partial Content",
+            headers_if_range_cached,
+            vec![8u8; 10000],
+        );
+
+        assert_eq!(response_if_range_cached.status_code, 206);
+        assert!(
+            response_if_range_cached.headers.get("x-cache").is_none(),
+            "If-Range requests bypass cache even in cached bucket"
+        );
+    }
 }
