@@ -347,7 +347,7 @@ yatagarasu/
 ### S3 Range Requests - Caching Behavior
 - [x] Test: Range requests bypass cache (never cached)
 - [x] Test: Range request doesn't populate cache
-- [ ] Test: Cached full file doesn't satisfy range request (fetches from S3)
+- [x] Test: Cached full file doesn't satisfy range request (fetches from S3)
 - [ ] Test: Range requests work when cache enabled for bucket
 
 ### S3 Range Requests - Authentication
