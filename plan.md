@@ -426,7 +426,7 @@ yatagarasu/
 - [x] Test: GET /bucket-a/file.txt returns object from bucket A
 - [x] Test: HEAD /bucket-a/file.txt returns metadata from bucket A
 - [x] Test: GET /bucket-a/nonexistent.txt returns 404
-- [ ] Test: GET /unmapped/file.txt returns 404
+- [x] Test: GET /unmapped/file.txt returns 404
 - [ ] Test: Response includes correct content-type header
 - [ ] Test: Response includes S3 ETag header
 

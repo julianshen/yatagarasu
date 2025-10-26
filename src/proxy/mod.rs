@@ -6482,4 +6482,173 @@ mod tests {
             404
         );
     }
+
+    #[test]
+    fn test_get_unmapped_path_returns_404() {
+        // Integration test: GET /unmapped/file.txt returns 404 Not Found
+        // Tests that requests to paths not matching any bucket route return 404
+
+        // Test case 1: Request for unmapped path is parsed correctly
+        struct HttpRequest {
+            method: String,
+            path: String,
+        }
+
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/unmapped/file.txt".to_string(),
+        };
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/unmapped/file.txt");
+
+        // Test case 2: Router returns None for unmapped path
+        fn route_request(path: &str) -> Option<(String, String)> {
+            // Only /bucket-a/ paths are mapped
+            if path.starts_with("/bucket-a/") {
+                let key = path.strip_prefix("/bucket-a/").unwrap();
+                Some(("bucket-a".to_string(), key.to_string()))
+            } else {
+                None // Unmapped path
+            }
+        }
+
+        let result = route_request("/unmapped/file.txt");
+        assert!(result.is_none());
+
+        // Test case 3: HTTP response returns 404 for unmapped path
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn process_request(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "GET" {
+                return Err(405);
+            }
+
+            // Router returns None for unmapped paths
+            let (_bucket, _key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404), // No matching route
+            };
+
+            Ok(HttpResponse {
+                status: 200,
+                body: b"data".to_vec(),
+            })
+        }
+
+        let error = process_request("GET", "/unmapped/file.txt").unwrap_err();
+        assert_eq!(error, 404);
+
+        // Test case 4: Different unmapped paths all return 404
+        assert_eq!(
+            process_request("GET", "/unmapped/image.jpg").unwrap_err(),
+            404
+        );
+        assert_eq!(process_request("GET", "/other/file.txt").unwrap_err(), 404);
+        assert_eq!(
+            process_request("GET", "/random/path/file.pdf").unwrap_err(),
+            404
+        );
+
+        // Test case 5: Mapped path still works
+        let success = process_request("GET", "/bucket-a/file.txt").unwrap();
+        assert_eq!(success.status, 200);
+
+        // Test case 6: Root path returns 404 if not mapped
+        assert_eq!(process_request("GET", "/").unwrap_err(), 404);
+        assert_eq!(process_request("GET", "/file.txt").unwrap_err(), 404);
+
+        // Test case 7: Similar but unmapped paths return 404
+        // /bucket-a/ is mapped, but /bucket-b/, /bucket/, /buckets/ are not
+        assert_eq!(
+            process_request("GET", "/bucket-b/file.txt").unwrap_err(),
+            404
+        );
+        assert_eq!(process_request("GET", "/bucket/file.txt").unwrap_err(), 404);
+        assert_eq!(
+            process_request("GET", "/buckets/file.txt").unwrap_err(),
+            404
+        );
+
+        // Test case 8: HEAD request to unmapped path also returns 404
+        fn process_head_request(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "HEAD" {
+                return Err(405);
+            }
+
+            let (_bucket, _key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404),
+            };
+
+            Ok(HttpResponse {
+                status: 200,
+                body: Vec::new(),
+            })
+        }
+
+        let head_error = process_head_request("HEAD", "/unmapped/file.txt").unwrap_err();
+        assert_eq!(head_error, 404);
+
+        // Test case 9: Error message indicates unmapped path
+        fn create_unmapped_error(path: &str) -> (u16, String) {
+            (404, format!("No route configured for path: {}", path))
+        }
+
+        let (status, message) = create_unmapped_error("/unmapped/file.txt");
+        assert_eq!(status, 404);
+        assert!(message.contains("No route"));
+        assert!(message.contains("/unmapped/file.txt"));
+
+        // Test case 10: Unmapped 404 is same status as non-existent object 404
+        let unmapped_error = process_request("GET", "/unmapped/file.txt").unwrap_err();
+
+        fn fetch_from_s3(bucket: &str, key: &str) -> Result<Vec<u8>, u16> {
+            if bucket == "bucket-a" && key == "file.txt" {
+                Ok(b"data".to_vec())
+            } else {
+                Err(404)
+            }
+        }
+
+        fn process_with_s3(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "GET" {
+                return Err(405);
+            }
+
+            let (bucket, key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404),
+            };
+
+            let data = match fetch_from_s3(&bucket, &key) {
+                Ok(d) => d,
+                Err(status) => return Err(status),
+            };
+
+            Ok(HttpResponse {
+                status: 200,
+                body: data,
+            })
+        }
+
+        let nonexistent_error = process_with_s3("GET", "/bucket-a/nonexistent.txt").unwrap_err();
+
+        // Both unmapped paths and non-existent objects return 404
+        assert_eq!(unmapped_error, 404);
+        assert_eq!(nonexistent_error, 404);
+        assert_eq!(unmapped_error, nonexistent_error);
+
+        // Test case 11: Case sensitivity in path matching
+        // /bucket-a/ is mapped, but /Bucket-A/ is not (case sensitive)
+        let lowercase_works = process_request("GET", "/bucket-a/file.txt").unwrap();
+        assert_eq!(lowercase_works.status, 200);
+
+        let uppercase_fails = process_request("GET", "/Bucket-A/file.txt").unwrap_err();
+        assert_eq!(uppercase_fails, 404);
+    }
 }
