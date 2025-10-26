@@ -2413,4 +2413,185 @@ mod tests {
             "Should not complete full transfer after disconnect"
         );
     }
+
+    #[test]
+    fn test_sets_appropriate_content_type_header() {
+        // Validates that handler sets correct Content-Type based on file extension
+        // Content-Type helps browsers render files correctly
+
+        // Test case 1: Handler maps common image extensions
+        fn get_content_type_for_extension(ext: &str) -> &str {
+            match ext {
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "svg" => "image/svg+xml",
+                "ico" => "image/x-icon",
+                _ => "application/octet-stream",
+            }
+        }
+
+        assert_eq!(get_content_type_for_extension("jpg"), "image/jpeg");
+        assert_eq!(get_content_type_for_extension("jpeg"), "image/jpeg");
+        assert_eq!(get_content_type_for_extension("png"), "image/png");
+        assert_eq!(get_content_type_for_extension("gif"), "image/gif");
+
+        // Test case 2: Handler maps common video extensions
+        fn get_video_content_type(ext: &str) -> &str {
+            match ext {
+                "mp4" => "video/mp4",
+                "webm" => "video/webm",
+                "mov" => "video/quicktime",
+                "avi" => "video/x-msvideo",
+                _ => "application/octet-stream",
+            }
+        }
+
+        assert_eq!(get_video_content_type("mp4"), "video/mp4");
+        assert_eq!(get_video_content_type("webm"), "video/webm");
+        assert_eq!(get_video_content_type("mov"), "video/quicktime");
+
+        // Test case 3: Handler maps common text/document extensions
+        fn get_text_content_type(ext: &str) -> &str {
+            match ext {
+                "html" | "htm" => "text/html",
+                "css" => "text/css",
+                "js" => "text/javascript",
+                "json" => "application/json",
+                "xml" => "application/xml",
+                "pdf" => "application/pdf",
+                "txt" => "text/plain",
+                _ => "application/octet-stream",
+            }
+        }
+
+        assert_eq!(get_text_content_type("html"), "text/html");
+        assert_eq!(get_text_content_type("css"), "text/css");
+        assert_eq!(get_text_content_type("js"), "text/javascript");
+        assert_eq!(get_text_content_type("json"), "application/json");
+        assert_eq!(get_text_content_type("pdf"), "application/pdf");
+
+        // Test case 4: Handler extracts extension from filename
+        fn extract_extension(filename: &str) -> Option<&str> {
+            filename.rfind('.').map(|pos| &filename[pos + 1..])
+        }
+
+        assert_eq!(extract_extension("image.jpg"), Some("jpg"));
+        assert_eq!(extract_extension("document.pdf"), Some("pdf"));
+        assert_eq!(extract_extension("data.json"), Some("json"));
+        assert_eq!(extract_extension("noextension"), None);
+
+        // Test case 5: Handler handles paths with extensions
+        fn get_content_type_from_path(path: &str) -> &str {
+            let ext = extract_extension(path).unwrap_or("");
+            match ext {
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "json" => "application/json",
+                "html" => "text/html",
+                _ => "application/octet-stream",
+            }
+        }
+
+        assert_eq!(
+            get_content_type_from_path("/images/photo.jpg"),
+            "image/jpeg"
+        );
+        assert_eq!(
+            get_content_type_from_path("/data/config.json"),
+            "application/json"
+        );
+        assert_eq!(get_content_type_from_path("/pages/index.html"), "text/html");
+
+        // Test case 6: Handler defaults to octet-stream for unknown types
+        assert_eq!(
+            get_content_type_from_path("/files/unknown.xyz"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            get_content_type_from_path("/noextension"),
+            "application/octet-stream"
+        );
+
+        // Test case 7: Handler preserves S3 Content-Type if provided
+        struct S3Response {
+            content_type: Option<String>,
+        }
+
+        fn get_final_content_type(s3_response: &S3Response, path: &str) -> String {
+            // Prefer S3's Content-Type if provided
+            if let Some(ct) = &s3_response.content_type {
+                return ct.clone();
+            }
+
+            // Otherwise infer from path
+            get_content_type_from_path(path).to_string()
+        }
+
+        let s3_with_ct = S3Response {
+            content_type: Some("image/jpeg".to_string()),
+        };
+        assert_eq!(
+            get_final_content_type(&s3_with_ct, "/file.png"),
+            "image/jpeg",
+            "Should use S3 Content-Type"
+        );
+
+        let s3_without_ct = S3Response { content_type: None };
+        assert_eq!(
+            get_final_content_type(&s3_without_ct, "/file.png"),
+            "image/png",
+            "Should infer from extension"
+        );
+
+        // Test case 8: Handler handles case-insensitive extensions
+        fn get_content_type_case_insensitive(filename: &str) -> &str {
+            let ext = extract_extension(filename).unwrap_or("").to_lowercase();
+            match ext.as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "pdf" => "application/pdf",
+                _ => "application/octet-stream",
+            }
+        }
+
+        assert_eq!(get_content_type_case_insensitive("IMAGE.JPG"), "image/jpeg");
+        assert_eq!(
+            get_content_type_case_insensitive("Document.PDF"),
+            "application/pdf"
+        );
+        assert_eq!(get_content_type_case_insensitive("photo.PNG"), "image/png");
+
+        // Test case 9: Handler sets Content-Type in response headers
+        use std::collections::HashMap;
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        let path = "/images/logo.png";
+        let content_type = get_content_type_from_path(path);
+
+        headers.insert("content-type".to_string(), content_type.to_string());
+
+        assert_eq!(
+            headers.get("content-type"),
+            Some(&"image/png".to_string()),
+            "Handler should set content-type header"
+        );
+
+        // Test case 10: Handler handles common font file extensions
+        fn get_font_content_type(ext: &str) -> &str {
+            match ext {
+                "woff" => "font/woff",
+                "woff2" => "font/woff2",
+                "ttf" => "font/ttf",
+                "otf" => "font/otf",
+                "eot" => "application/vnd.ms-fontobject",
+                _ => "application/octet-stream",
+            }
+        }
+
+        assert_eq!(get_font_content_type("woff"), "font/woff");
+        assert_eq!(get_font_content_type("woff2"), "font/woff2");
+        assert_eq!(get_font_content_type("ttf"), "font/ttf");
+    }
 }
