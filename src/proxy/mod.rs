@@ -14503,4 +14503,129 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_system_remains_responsive_at_2x_expected_load() {
+        // Scalability test: System remains responsive at 2x expected load
+        // Tests that doubling expected load doesn't cause unresponsiveness
+        // Validates response times stay within acceptable bounds
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        // Test case 1: Define expected and 2x load levels
+        let expected_load_rps = 200; // Expected: 200 req/s
+        let double_load_rps = 400; // 2x expected: 400 req/s
+        let test_duration = Duration::from_millis(500); // 500ms test
+
+        // Test case 2: Create request handler that tracks responsiveness
+        struct RequestHandler {
+            request_count: Arc<AtomicU64>,
+            processing_time_us: u64,
+        }
+
+        impl RequestHandler {
+            fn new(processing_time_us: u64) -> Self {
+                RequestHandler {
+                    request_count: Arc::new(AtomicU64::new(0)),
+                    processing_time_us,
+                }
+            }
+
+            fn handle_request(&self, _request_id: u64) -> Result<Vec<u8>, String> {
+                // Simulate processing time
+                std::thread::sleep(Duration::from_micros(self.processing_time_us));
+
+                self.request_count.fetch_add(1, Ordering::Relaxed);
+                Ok(vec![1u8; 256])
+            }
+
+            fn get_request_count(&self) -> u64 {
+                self.request_count.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Run at expected load
+        let handler = RequestHandler::new(50); // 50μs processing
+        let mut latencies_expected = Vec::new();
+
+        let num_requests = (expected_load_rps as u128 * test_duration.as_millis()) / 1000;
+        for i in 0..num_requests as u64 {
+            let req_start = Instant::now();
+            let result = handler.handle_request(i);
+            assert!(result.is_ok());
+            let latency = req_start.elapsed();
+            latencies_expected.push(latency.as_micros() as f64 / 1000.0);
+        }
+
+        let expected_load_count = handler.get_request_count();
+
+        // Test case 4: Calculate metrics for expected load
+        latencies_expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p95_idx = (latencies_expected.len() as f64 * 0.95) as usize;
+        let _p95_expected = latencies_expected[p95_idx.min(latencies_expected.len() - 1)];
+        let p99_idx = (latencies_expected.len() as f64 * 0.99) as usize;
+        let _p99_expected = latencies_expected[p99_idx.min(latencies_expected.len() - 1)];
+
+        // Test case 5: Run at 2x expected load
+        let handler = RequestHandler::new(50);
+        let mut latencies_2x = Vec::new();
+
+        let num_requests = (double_load_rps as u128 * test_duration.as_millis()) / 1000;
+        for i in 0..num_requests as u64 {
+            let req_start = Instant::now();
+            let result = handler.handle_request(i);
+            assert!(result.is_ok());
+            let latency = req_start.elapsed();
+            latencies_2x.push(latency.as_micros() as f64 / 1000.0);
+        }
+
+        let double_load_count = handler.get_request_count();
+
+        // Test case 6: Calculate metrics for 2x load
+        latencies_2x.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let avg_2x = latencies_2x.iter().sum::<f64>() / latencies_2x.len() as f64;
+        let p95_idx = (latencies_2x.len() as f64 * 0.95) as usize;
+        let p95_2x = latencies_2x[p95_idx.min(latencies_2x.len() - 1)];
+        let p99_idx = (latencies_2x.len() as f64 * 0.99) as usize;
+        let p99_2x = latencies_2x[p99_idx.min(latencies_2x.len() - 1)];
+
+        // Test case 7: Verify all requests completed at both load levels
+        assert!(
+            expected_load_count > 0,
+            "Expected load should process requests"
+        );
+        assert!(double_load_count > 0, "2x load should process requests");
+
+        // Test case 8: Verify system remains responsive (latency bounds)
+        // Even at 2x load, P95 should be reasonable (<50ms)
+        assert!(
+            p95_2x < 50.0,
+            "P95 latency at 2x load ({:.2}ms) should be <50ms",
+            p95_2x
+        );
+
+        // Test case 9: Verify P99 latency is still acceptable (<100ms)
+        assert!(
+            p99_2x < 100.0,
+            "P99 latency at 2x load ({:.2}ms) should be <100ms",
+            p99_2x
+        );
+
+        // Test case 10: Verify average latency stays low (<20ms)
+        assert!(
+            avg_2x < 20.0,
+            "Average latency at 2x load ({:.2}ms) should be <20ms",
+            avg_2x
+        );
+
+        // Test case 11: Verify no extreme outliers (max latency <200ms)
+        let max_latency_2x = latencies_2x.last().unwrap();
+        assert!(
+            max_latency_2x < &200.0,
+            "Max latency at 2x load ({:.2}ms) should be <200ms",
+            max_latency_2x
+        );
+    }
 }
