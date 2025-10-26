@@ -467,7 +467,7 @@ yatagarasu/
 
 ### End-to-End - Concurrent Requests
 - [x] Test: Can handle 100 concurrent requests
-- [ ] Test: Can handle 1000 concurrent requests
+- [x] Test: Can handle 1000 concurrent requests
 - [ ] Test: No race conditions with shared state
 - [ ] Test: Memory usage reasonable under concurrent load
 - [ ] Test: No credential leakage between concurrent requests
