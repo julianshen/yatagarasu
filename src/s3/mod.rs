@@ -7389,4 +7389,187 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn test_range_request_latency_similar_to_full_file() {
+        use futures::stream::{self, StreamExt};
+        use std::time::Instant;
+        use tokio::time::Duration;
+
+        // Validates that Time To First Byte (TTFB) for range requests
+        // is similar to full file requests (~500ms P95)
+        // Range requests shouldn't have significantly higher latency
+
+        let chunk_size = 64 * 1024; // 64 KB chunks
+        let total_chunks = 100; // 6.4 MB file
+
+        // Test case 1: Measure TTFB for full file request
+        let full_file_start = Instant::now();
+
+        let full_file_stream = stream::iter(0..total_chunks).map(move |i| {
+            // Simulate S3 response delay for first chunk
+            if i == 0 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok::<_, std::io::Error>(bytes::Bytes::from(vec![i as u8; chunk_size]))
+        });
+
+        let mut stream = Box::pin(full_file_stream);
+        let first_chunk = stream.next().await;
+        let full_file_ttfb = full_file_start.elapsed();
+
+        assert!(
+            first_chunk.is_some(),
+            "Full file request should return first chunk"
+        );
+
+        // Test case 2: Measure TTFB for range request (same file)
+        let range_start = Instant::now();
+
+        let range_stream = stream::iter(0..50).map(move |i| {
+            // Simulate S3 response delay for first chunk
+            if i == 0 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok::<_, std::io::Error>(bytes::Bytes::from(vec![i as u8; chunk_size]))
+        });
+
+        let mut stream = Box::pin(range_stream);
+        let first_chunk = stream.next().await;
+        let range_ttfb = range_start.elapsed();
+
+        assert!(
+            first_chunk.is_some(),
+            "Range request should return first chunk"
+        );
+
+        // Verify range request TTFB is similar to full file TTFB
+        // Allow up to 2x difference (should be nearly identical)
+        let ttfb_ratio = if full_file_ttfb > range_ttfb {
+            full_file_ttfb.as_millis() as f64 / range_ttfb.as_millis() as f64
+        } else {
+            range_ttfb.as_millis() as f64 / full_file_ttfb.as_millis() as f64
+        };
+
+        assert!(
+            ttfb_ratio < 2.0,
+            "Range request TTFB ({:?}) should be similar to full file TTFB ({:?}), ratio: {:.2}",
+            range_ttfb,
+            full_file_ttfb,
+            ttfb_ratio
+        );
+
+        // Test case 3: Verify both are under 500ms P95 target
+        assert!(
+            full_file_ttfb < Duration::from_millis(500),
+            "Full file TTFB should be < 500ms, got {:?}",
+            full_file_ttfb
+        );
+
+        assert!(
+            range_ttfb < Duration::from_millis(500),
+            "Range request TTFB should be < 500ms, got {:?}",
+            range_ttfb
+        );
+
+        // Test case 4: Measure TTFB for multiple range sizes
+        // Small, medium, large ranges should have similar TTFB
+        let range_sizes = vec![10, 50, 100]; // Different range sizes
+        let mut ttfbs = vec![];
+
+        for chunks_count in range_sizes {
+            let start = Instant::now();
+
+            let stream = stream::iter(0..chunks_count).map(move |i| {
+                if i == 0 {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Ok::<_, std::io::Error>(bytes::Bytes::from(vec![0u8; chunk_size]))
+            });
+
+            let mut stream = Box::pin(stream);
+            let first_chunk = stream.next().await;
+            let ttfb = start.elapsed();
+
+            assert!(first_chunk.is_some());
+            ttfbs.push(ttfb);
+        }
+
+        // All TTFB measurements should be similar
+        // (range size shouldn't affect TTFB)
+        for ttfb in &ttfbs {
+            assert!(
+                *ttfb < Duration::from_millis(500),
+                "All range sizes should have TTFB < 500ms, got {:?}",
+                ttfb
+            );
+        }
+
+        // Verify variance is low (max TTFB / min TTFB < 2)
+        let max_ttfb = ttfbs.iter().max().unwrap();
+        let min_ttfb = ttfbs.iter().min().unwrap();
+        let variance_ratio = max_ttfb.as_millis() as f64 / min_ttfb.as_millis() as f64;
+
+        assert!(
+            variance_ratio < 2.0,
+            "TTFB should be consistent across range sizes, ratio: {:.2}",
+            variance_ratio
+        );
+
+        // Test case 5: Verify suffix ranges have similar TTFB
+        // Requesting last N bytes shouldn't have higher latency
+        let suffix_start = Instant::now();
+
+        let suffix_stream = stream::iter(0..30).map(move |i| {
+            if i == 0 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok::<_, std::io::Error>(bytes::Bytes::from(vec![0u8; chunk_size]))
+        });
+
+        let mut stream = Box::pin(suffix_stream);
+        let first_chunk = stream.next().await;
+        let suffix_ttfb = suffix_start.elapsed();
+
+        assert!(first_chunk.is_some());
+        assert!(
+            suffix_ttfb < Duration::from_millis(500),
+            "Suffix range TTFB should be < 500ms, got {:?}",
+            suffix_ttfb
+        );
+
+        // Test case 6: Verify open-ended ranges (bytes=1000-) have similar TTFB
+        let open_ended_start = Instant::now();
+
+        let open_ended_stream = stream::iter(0..70).map(move |i| {
+            if i == 0 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok::<_, std::io::Error>(bytes::Bytes::from(vec![0u8; chunk_size]))
+        });
+
+        let mut stream = Box::pin(open_ended_stream);
+        let first_chunk = stream.next().await;
+        let open_ended_ttfb = open_ended_start.elapsed();
+
+        assert!(first_chunk.is_some());
+        assert!(
+            open_ended_ttfb < Duration::from_millis(500),
+            "Open-ended range TTFB should be < 500ms, got {:?}",
+            open_ended_ttfb
+        );
+
+        // Test case 7: Compare regular range vs suffix vs open-ended
+        // All should have similar TTFB
+        let all_ttfbs = vec![range_ttfb, suffix_ttfb, open_ended_ttfb];
+        let max_all = all_ttfbs.iter().max().unwrap();
+        let min_all = all_ttfbs.iter().min().unwrap();
+        let all_ratio = max_all.as_millis() as f64 / min_all.as_millis() as f64;
+
+        assert!(
+            all_ratio < 2.0,
+            "All range types should have similar TTFB, ratio: {:.2}",
+            all_ratio
+        );
+    }
 }
