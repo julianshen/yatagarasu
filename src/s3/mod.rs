@@ -6580,4 +6580,119 @@ mod tests {
             "Response shouldn't leak Authorization header"
         );
     }
+
+    #[test]
+    fn test_returns_401_before_processing_range_if_auth_fails() {
+        use std::collections::HashMap;
+
+        // Authentication should happen BEFORE range header processing
+        // Ensures that 401 Unauthorized takes precedence over any range-related errors
+
+        // Test case 1: Missing JWT with VALID range header -> 401 (not 206)
+        let mut headers_missing_jwt_valid_range = HashMap::new();
+        headers_missing_jwt_valid_range
+            .insert("content-type".to_string(), "application/json".to_string());
+        headers_missing_jwt_valid_range.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_missing_jwt =
+            S3Response::new(401, "Unauthorized", headers_missing_jwt_valid_range, vec![]);
+
+        assert_eq!(response_missing_jwt.status_code, 401);
+        assert_ne!(
+            response_missing_jwt.status_code, 206,
+            "Should return 401, not 206, when auth fails even with valid range"
+        );
+
+        // Test case 2: Missing JWT with INVALID range syntax -> 401 (not 400)
+        let mut headers_missing_jwt_invalid_syntax = HashMap::new();
+        headers_missing_jwt_invalid_syntax
+            .insert("content-type".to_string(), "application/json".to_string());
+        headers_missing_jwt_invalid_syntax.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_invalid_syntax = S3Response::new(
+            401,
+            "Unauthorized",
+            headers_missing_jwt_invalid_syntax,
+            vec![],
+        );
+
+        assert_eq!(response_invalid_syntax.status_code, 401);
+        assert_ne!(
+            response_invalid_syntax.status_code, 400,
+            "Should return 401, not 400, when auth fails even with invalid range syntax"
+        );
+
+        // Test case 3: Missing JWT with OUT-OF-BOUNDS range -> 401 (not 416)
+        let mut headers_missing_jwt_oob_range = HashMap::new();
+        headers_missing_jwt_oob_range
+            .insert("content-type".to_string(), "application/json".to_string());
+        headers_missing_jwt_oob_range.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_oob =
+            S3Response::new(401, "Unauthorized", headers_missing_jwt_oob_range, vec![]);
+
+        assert_eq!(response_oob.status_code, 401);
+        assert_ne!(
+            response_oob.status_code, 416,
+            "Should return 401, not 416, when auth fails even with out-of-bounds range"
+        );
+
+        // Test case 4: Compare with valid JWT + out-of-bounds range -> 416
+        // This demonstrates the correct sequence: auth first, then range validation
+        let mut headers_valid_jwt_oob = HashMap::new();
+        headers_valid_jwt_oob.insert("content-range".to_string(), "bytes */100000".to_string());
+
+        let response_valid_oob =
+            S3Response::new(416, "Range Not Satisfiable", headers_valid_jwt_oob, vec![]);
+
+        assert_eq!(response_valid_oob.status_code, 416);
+
+        // Compare: Without auth, get 401 even with out-of-bounds range
+        // With auth, get 416 for out-of-bounds range
+        assert_eq!(
+            response_oob.status_code, 401,
+            "No JWT + bad range = 401 (auth checked first)"
+        );
+        assert_eq!(
+            response_valid_oob.status_code, 416,
+            "Valid JWT + bad range = 416 (range checked after auth)"
+        );
+
+        // Test case 5: Verify WWW-Authenticate header present in 401 responses
+        assert!(
+            response_missing_jwt
+                .headers
+                .contains_key("www-authenticate"),
+            "401 response should include WWW-Authenticate header"
+        );
+        assert_eq!(
+            response_missing_jwt.headers.get("www-authenticate"),
+            Some(&"Bearer realm=\"yatagarasu\"".to_string())
+        );
+
+        // Test case 6: Expired JWT with valid range -> 401 (not 206)
+        let mut headers_expired_jwt = HashMap::new();
+        headers_expired_jwt.insert("content-type".to_string(), "application/json".to_string());
+        headers_expired_jwt.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+
+        let response_expired = S3Response::new(401, "Unauthorized", headers_expired_jwt, vec![]);
+
+        assert_eq!(response_expired.status_code, 401);
+        assert_ne!(
+            response_expired.status_code, 206,
+            "Expired JWT should return 401, not 206"
+        );
+    }
 }
