@@ -6228,4 +6228,164 @@ mod tests {
             "If-Range requests bypass cache even in cached bucket"
         );
     }
+
+    #[test]
+    fn test_range_requests_work_on_public_buckets() {
+        use std::collections::HashMap;
+
+        // Range requests should work on public buckets (no authentication required)
+        // Public buckets don't require JWT tokens for any requests
+        // Range requests should function the same as full file requests
+
+        // Test case 1: Full file request on public bucket (no auth required)
+        let mut headers_public_full = HashMap::new();
+        headers_public_full.insert("content-type".to_string(), "image/jpeg".to_string());
+        headers_public_full.insert("content-length".to_string(), "50000".to_string());
+        headers_public_full.insert("etag".to_string(), "\"public-file-etag\"".to_string());
+
+        let response_public_full =
+            S3Response::new(200, "OK", headers_public_full, vec![1u8; 50000]);
+
+        assert_eq!(response_public_full.status_code, 200);
+        assert_eq!(response_public_full.body.len(), 50000);
+        // No authentication required - no 401 or 403 errors
+
+        // Test case 2: Range request on same public bucket (no auth required)
+        let mut headers_public_range = HashMap::new();
+        headers_public_range.insert("content-type".to_string(), "image/jpeg".to_string());
+        headers_public_range.insert(
+            "content-range".to_string(),
+            "bytes 0-9999/50000".to_string(),
+        );
+        headers_public_range.insert("content-length".to_string(), "10000".to_string());
+        headers_public_range.insert("etag".to_string(), "\"public-file-etag\"".to_string());
+
+        let response_public_range = S3Response::new(
+            206,
+            "Partial Content",
+            headers_public_range,
+            vec![2u8; 10000],
+        );
+
+        assert_eq!(response_public_range.status_code, 206);
+        assert_eq!(response_public_range.body.len(), 10000);
+        assert_eq!(
+            response_public_full.headers.get("etag"),
+            response_public_range.headers.get("etag"),
+            "Same file on public bucket"
+        );
+        // No authentication errors
+        assert_ne!(response_public_range.status_code, 401);
+        assert_ne!(response_public_range.status_code, 403);
+
+        // Test case 3: Multiple different ranges on public bucket
+        let ranges = vec![
+            ("bytes 0-999/50000", 1000),
+            ("bytes 10000-19999/50000", 10000),
+            ("bytes 40000-49999/50000", 10000),
+        ];
+
+        for (range_str, expected_size) in ranges {
+            let mut headers = HashMap::new();
+            headers.insert("content-range".to_string(), range_str.to_string());
+            headers.insert("content-length".to_string(), expected_size.to_string());
+
+            let response =
+                S3Response::new(206, "Partial Content", headers, vec![3u8; expected_size]);
+
+            assert_eq!(response.status_code, 206);
+            assert_eq!(response.body.len(), expected_size);
+            assert_eq!(
+                response.headers.get("content-range").unwrap(),
+                range_str,
+                "Range {} works on public bucket",
+                range_str
+            );
+        }
+
+        // Test case 4: Open-ended range on public bucket
+        let mut headers_open_ended = HashMap::new();
+        headers_open_ended.insert(
+            "content-range".to_string(),
+            "bytes 10000-49999/50000".to_string(),
+        );
+        headers_open_ended.insert("content-length".to_string(), "40000".to_string());
+
+        let response_open_ended =
+            S3Response::new(206, "Partial Content", headers_open_ended, vec![4u8; 40000]);
+
+        assert_eq!(response_open_ended.status_code, 206);
+        assert_eq!(response_open_ended.body.len(), 40000);
+
+        // Test case 5: Suffix range on public bucket
+        let mut headers_suffix = HashMap::new();
+        headers_suffix.insert(
+            "content-range".to_string(),
+            "bytes 49000-49999/50000".to_string(),
+        );
+        headers_suffix.insert("content-length".to_string(), "1000".to_string());
+
+        let response_suffix =
+            S3Response::new(206, "Partial Content", headers_suffix, vec![5u8; 1000]);
+
+        assert_eq!(response_suffix.status_code, 206);
+        assert_eq!(response_suffix.body.len(), 1000);
+
+        // Test case 6: If-Range request on public bucket
+        let mut headers_if_range = HashMap::new();
+        headers_if_range.insert(
+            "content-range".to_string(),
+            "bytes 5000-14999/50000".to_string(),
+        );
+        headers_if_range.insert("content-length".to_string(), "10000".to_string());
+        headers_if_range.insert("etag".to_string(), "\"public-file-etag\"".to_string());
+
+        let response_if_range =
+            S3Response::new(206, "Partial Content", headers_if_range, vec![6u8; 10000]);
+
+        assert_eq!(response_if_range.status_code, 206);
+        assert_eq!(response_if_range.body.len(), 10000);
+
+        // Test case 7: Accept-Ranges header on public bucket
+        let mut headers_accept = HashMap::new();
+        headers_accept.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_accept.insert("content-length".to_string(), "50000".to_string());
+
+        let response_accept = S3Response::new(200, "OK", headers_accept, vec![7u8; 50000]);
+
+        assert_eq!(
+            response_accept.headers.get("accept-ranges").unwrap(),
+            "bytes",
+            "Public bucket supports range requests"
+        );
+
+        // Test case 8: 416 Range Not Satisfiable on public bucket (out of bounds)
+        let mut headers_416 = HashMap::new();
+        headers_416.insert("content-range".to_string(), "bytes */50000".to_string());
+
+        let response_416 = S3Response::new(416, "Range Not Satisfiable", headers_416, vec![]);
+
+        assert_eq!(response_416.status_code, 416);
+        // Even 416 errors don't require authentication on public bucket
+
+        // Test case 9: Invalid range syntax falls back to 200 OK on public bucket
+        let mut headers_fallback = HashMap::new();
+        headers_fallback.insert("content-length".to_string(), "50000".to_string());
+
+        let response_fallback = S3Response::new(200, "OK", headers_fallback, vec![8u8; 50000]);
+
+        assert_eq!(response_fallback.status_code, 200);
+        assert_eq!(response_fallback.body.len(), 50000);
+
+        // Test case 10: Verify no authentication headers required
+        // Public bucket responses don't need Authorization or X-Auth-Token headers
+        assert!(
+            response_public_range.headers.get("authorization").is_none(),
+            "Public bucket doesn't require Authorization header"
+        );
+        assert!(
+            response_public_range.headers.get("x-auth-token").is_none(),
+            "Public bucket doesn't require X-Auth-Token header"
+        );
+    }
 }

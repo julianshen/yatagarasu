@@ -351,7 +351,7 @@ yatagarasu/
 - [x] Test: Range requests work when cache enabled for bucket
 
 ### S3 Range Requests - Authentication
-- [ ] Test: Range requests work on public buckets
+- [x] Test: Range requests work on public buckets
 - [ ] Test: Range requests require JWT on private buckets
 - [ ] Test: Returns 401 before processing range if auth fails
 - [ ] Test: JWT validation happens before range validation
