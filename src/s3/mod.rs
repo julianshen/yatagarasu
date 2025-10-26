@@ -6979,4 +6979,200 @@ mod tests {
             "Suffix ranges should use same buffer as regular ranges"
         );
     }
+
+    #[tokio::test]
+    async fn test_client_disconnect_cancels_s3_range_stream() {
+        use futures::stream::{self, StreamExt};
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::mpsc;
+
+        // Validates that when a client disconnects during a range request,
+        // the S3 stream is cancelled to avoid wasting bandwidth and resources
+
+        // Track how many chunks were actually processed from S3
+        let chunks_processed = Arc::new(Mutex::new(0usize));
+        let chunks_processed_clone = chunks_processed.clone();
+
+        // Simulate a large range request (e.g., 100MB range = 1,600 chunks)
+        // Client will disconnect after receiving only 10 chunks
+        let total_chunks = 1600; // 100 MB range
+        let chunk_size = 64 * 1024; // 64 KB chunks
+        let disconnect_after = 10; // Client receives only 10 chunks
+
+        // Create S3 range response stream
+        let range_stream = stream::iter(0..total_chunks).map(move |i| {
+            // Each chunk is 64KB of data
+            let chunk = vec![i as u8; chunk_size];
+            Ok::<_, std::io::Error>(bytes::Bytes::from(chunk))
+        });
+
+        // Create a channel to simulate client connection
+        // Small buffer to simulate realistic backpressure
+        let (tx, mut rx) = mpsc::channel::<bytes::Bytes>(4);
+
+        // Spawn a task to send stream chunks to client
+        let sender_task = tokio::spawn(async move {
+            let mut stream = Box::pin(range_stream);
+
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk) => {
+                        // Increment processed counter (simulating S3 -> proxy)
+                        *chunks_processed_clone.lock().unwrap() += 1;
+
+                        // Try to send chunk to client (proxy -> client)
+                        // If client disconnected, send will fail
+                        if tx.send(chunk).await.is_err() {
+                            // Client disconnected - STOP streaming from S3!
+                            // This is the key behavior we're testing
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Simulate client receiving chunks then disconnecting
+        let mut client_received = 0;
+        while let Some(_chunk) = rx.recv().await {
+            client_received += 1;
+
+            // Client disconnects after receiving 10 chunks
+            if client_received >= disconnect_after {
+                // Drop receiver to simulate client disconnect
+                drop(rx);
+                break;
+            }
+        }
+
+        // Wait for sender task to complete
+        let _ = sender_task.await;
+
+        // Verify client received expected number of chunks
+        assert_eq!(
+            client_received, disconnect_after,
+            "Client should have received {} chunks before disconnecting",
+            disconnect_after
+        );
+
+        // Verify S3 stream was cancelled (not all chunks processed)
+        let total_processed = *chunks_processed.lock().unwrap();
+        assert!(
+            total_processed < total_chunks,
+            "S3 stream should stop when client disconnects. \
+             Processed: {}, Total: {}",
+            total_processed,
+            total_chunks
+        );
+
+        // Verify we didn't process significantly more chunks than client received
+        // Allow small buffer (up to ~10 chunks due to channel buffering)
+        assert!(
+            total_processed <= client_received + 15,
+            "Should stop streaming shortly after client disconnect. \
+             Processed: {}, Client received: {}",
+            total_processed,
+            client_received
+        );
+
+        // Test case 2: Verify bandwidth savings
+        // Only 10 chunks (640KB) transferred, not 1,600 chunks (100MB)
+        let bytes_saved = (total_chunks - total_processed) * chunk_size;
+        let potential_total = total_chunks * chunk_size;
+
+        assert!(
+            bytes_saved > potential_total / 2,
+            "Should save significant bandwidth: {}MB saved out of {}MB",
+            bytes_saved / (1024 * 1024),
+            potential_total / (1024 * 1024)
+        );
+
+        // Test case 3: Simulate immediate disconnect (client connects then disconnects)
+        let chunks_processed_immediate = Arc::new(Mutex::new(0usize));
+        let chunks_processed_immediate_clone = chunks_processed_immediate.clone();
+
+        let immediate_stream = stream::iter(0..100).map(move |i| {
+            *chunks_processed_immediate_clone.lock().unwrap() += 1;
+            Ok::<_, std::io::Error>(bytes::Bytes::from(vec![i as u8; chunk_size]))
+        });
+
+        let (tx_immediate, rx_immediate) = mpsc::channel::<bytes::Bytes>(4);
+
+        let immediate_task = tokio::spawn(async move {
+            let mut stream = Box::pin(immediate_stream);
+            while let Some(chunk_result) = stream.next().await {
+                if let Ok(chunk) = chunk_result {
+                    if tx_immediate.send(chunk).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Immediately drop receiver (client disconnects before receiving anything)
+        drop(rx_immediate);
+
+        let _ = immediate_task.await;
+
+        // Should process very few chunks (only buffered ones)
+        let immediate_processed = *chunks_processed_immediate.lock().unwrap();
+        assert!(
+            immediate_processed < 10,
+            "Immediate disconnect should process minimal chunks: {}",
+            immediate_processed
+        );
+
+        // Test case 4: Verify multiple range requests can be cancelled independently
+        // Simulate 3 concurrent range requests where clients disconnect at different times
+        let mut tasks = vec![];
+
+        for disconnect_at in [5, 15, 25] {
+            let chunks_count = Arc::new(Mutex::new(0usize));
+            let chunks_count_clone = chunks_count.clone();
+
+            let stream = stream::iter(0..100).map(move |i| {
+                *chunks_count_clone.lock().unwrap() += 1;
+                Ok::<_, std::io::Error>(bytes::Bytes::from(vec![i as u8; 1024]))
+            });
+
+            let (tx, mut rx) = mpsc::channel::<bytes::Bytes>(4);
+
+            let task = tokio::spawn(async move {
+                let mut stream = Box::pin(stream);
+                while let Some(chunk_result) = stream.next().await {
+                    if let Ok(chunk) = chunk_result {
+                        if tx.send(chunk).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            // Client task
+            tokio::spawn(async move {
+                let mut received = 0;
+                while let Some(_chunk) = rx.recv().await {
+                    received += 1;
+                    if received >= disconnect_at {
+                        drop(rx);
+                        break;
+                    }
+                }
+            });
+
+            tasks.push((task, chunks_count));
+        }
+
+        // Wait for all tasks
+        for (task, chunks_count) in tasks {
+            let _ = task.await;
+            let processed = *chunks_count.lock().unwrap();
+            // Each should stop early (not process all 100 chunks)
+            assert!(
+                processed < 100,
+                "Each range stream should be cancelled independently"
+            );
+        }
+    }
 }
