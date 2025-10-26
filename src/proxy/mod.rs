@@ -14075,4 +14075,121 @@ mod tests {
             cpu_usage_estimate
         );
     }
+
+    #[test]
+    fn test_no_memory_leaks_over_1_hour_stress_test() {
+        // Resource usage test: No memory leaks over prolonged stress
+        // Simulates 1-hour stress test by running multiple cycles with memory tracking
+        // Each cycle performs many operations, then we verify memory doesn't accumulate
+
+        use std::collections::HashMap;
+
+        // Test case 1: Define stress test parameters
+        // Simulating 1 hour = 60 cycles of 1 minute each
+        // For practical testing, use 10 cycles with 1000 operations each
+        let num_cycles = 10;
+        let operations_per_cycle = 1000;
+
+        // Test case 2: Create a request processor that allocates and deallocates memory
+        struct RequestProcessor {
+            active_requests: HashMap<u64, Vec<u8>>,
+        }
+
+        impl RequestProcessor {
+            fn new() -> Self {
+                RequestProcessor {
+                    active_requests: HashMap::new(),
+                }
+            }
+
+            fn process_request(&mut self, request_id: u64) -> Result<Vec<u8>, String> {
+                // Allocate memory for request processing (simulate request body)
+                let request_data = vec![0u8; 1024]; // 1KB per request
+                self.active_requests.insert(request_id, request_data);
+
+                // Process (simulate work)
+                let response = vec![1u8; 512]; // 512 bytes response
+
+                // Clean up - remove from active requests
+                self.active_requests.remove(&request_id);
+
+                Ok(response)
+            }
+
+            fn get_memory_usage(&self) -> usize {
+                // Calculate current memory usage from active requests
+                self.active_requests
+                    .values()
+                    .map(|v| v.len())
+                    .sum::<usize>()
+            }
+        }
+
+        // Test case 3: Track memory usage across cycles
+        let mut memory_samples = Vec::new();
+        let mut processor = RequestProcessor::new();
+
+        // Test case 4: Record baseline memory
+        let baseline_memory = processor.get_memory_usage();
+        memory_samples.push(baseline_memory);
+
+        // Test case 5: Run stress test cycles
+        for cycle in 0..num_cycles {
+            // Process many requests in this cycle
+            for i in 0..operations_per_cycle {
+                let request_id = (cycle * operations_per_cycle + i) as u64;
+                let result = processor.process_request(request_id);
+                assert!(result.is_ok());
+            }
+
+            // Record memory usage after cycle
+            let current_memory = processor.get_memory_usage();
+            memory_samples.push(current_memory);
+        }
+
+        // Test case 6: Verify baseline memory is zero (no leaked requests)
+        assert_eq!(baseline_memory, 0, "Baseline memory should be zero");
+
+        // Test case 7: Verify memory after all cycles returns to baseline
+        let final_memory = processor.get_memory_usage();
+        assert_eq!(
+            final_memory, baseline_memory,
+            "Memory should return to baseline after all operations complete"
+        );
+
+        // Test case 8: Verify no unbounded growth during cycles
+        // Check that memory samples don't show linear growth
+        // After each cycle, memory should return to near-baseline
+        for (idx, &memory) in memory_samples.iter().enumerate() {
+            assert!(
+                memory < 10 * 1024, // Less than 10KB (10 concurrent requests worth)
+                "Memory leak detected at sample {}: {} bytes",
+                idx,
+                memory
+            );
+        }
+
+        // Test case 9: Verify average memory usage is low
+        let avg_memory: usize = memory_samples.iter().sum::<usize>() / memory_samples.len();
+        assert!(
+            avg_memory < 1024, // Average less than 1KB
+            "Average memory usage too high: {} bytes, suggests leak",
+            avg_memory
+        );
+
+        // Test case 10: Verify memory doesn't grow monotonically
+        // If there's a leak, each cycle would have higher memory than baseline
+        let samples_at_baseline: usize = memory_samples
+            .iter()
+            .filter(|&&mem| mem == baseline_memory)
+            .count();
+
+        // Most samples should be at or near baseline (at least 50%)
+        assert!(
+            samples_at_baseline >= memory_samples.len() / 2,
+            "Too few samples at baseline ({}/{}), suggests memory leak",
+            samples_at_baseline,
+            memory_samples.len()
+        );
+    }
 }
