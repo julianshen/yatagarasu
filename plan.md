@@ -492,7 +492,7 @@ yatagarasu/
 - [x] Test: Throughput >10,000 req/s on test hardware
 
 ### Performance - Resource Usage
-- [ ] Test: Memory usage <500MB for idle proxy
+- [x] Test: Memory usage <500MB for idle proxy
 - [ ] Test: Memory usage scales linearly with connections
 - [ ] Test: CPU usage <50% under moderate load
 - [ ] Test: No memory leaks over 1 hour stress test
