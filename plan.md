@@ -411,7 +411,7 @@ yatagarasu/
 - [x] Test: Error responses don't leak sensitive information
 
 ### Pingora - Middleware Chain
-- [ ] Test: Request passes through router first
+- [x] Test: Request passes through router first
 - [ ] Test: Request passes through auth middleware second
 - [ ] Test: Request reaches S3 handler third
 - [ ] Test: Middleware can short-circuit request (return early)

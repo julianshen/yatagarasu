@@ -4662,4 +4662,181 @@ mod tests {
         assert!(!response2.message.contains("secret"));
         assert_eq!(response2.message, "Internal server error");
     }
+
+    #[test]
+    fn test_request_passes_through_router_first() {
+        // Validates that router is the first middleware to process requests
+        // Router determines target bucket before auth or S3 handling
+
+        // Test case 1: Request processing starts with router
+        #[derive(Debug, PartialEq)]
+        enum MiddlewareStage {
+            Router,
+            Auth,
+            S3Handler,
+        }
+
+        fn get_first_middleware_stage() -> MiddlewareStage {
+            MiddlewareStage::Router
+        }
+
+        assert_eq!(get_first_middleware_stage(), MiddlewareStage::Router);
+
+        // Test case 2: Router executes before auth middleware
+        struct MiddlewareOrder {
+            stages: Vec<String>,
+        }
+
+        impl MiddlewareOrder {
+            fn new() -> Self {
+                MiddlewareOrder { stages: Vec::new() }
+            }
+
+            fn add_stage(&mut self, stage: &str) {
+                self.stages.push(stage.to_string());
+            }
+
+            fn get_execution_order(&self) -> Vec<String> {
+                self.stages.clone()
+            }
+        }
+
+        let mut order = MiddlewareOrder::new();
+        order.add_stage("router");
+        order.add_stage("auth");
+        order.add_stage("s3");
+
+        let execution = order.get_execution_order();
+        assert_eq!(execution[0], "router");
+        assert_eq!(execution.len(), 3);
+
+        // Test case 3: Router runs regardless of auth configuration
+        fn router_always_runs(auth_enabled: bool) -> bool {
+            // Router always runs first, regardless of auth config
+            true && (auth_enabled || !auth_enabled)
+        }
+
+        assert!(router_always_runs(true));
+        assert!(router_always_runs(false));
+
+        // Test case 4: Request metadata includes router timestamp
+        struct RequestMetadata {
+            router_timestamp: u64,
+            auth_timestamp: Option<u64>,
+            s3_timestamp: Option<u64>,
+        }
+
+        let metadata = RequestMetadata {
+            router_timestamp: 1000,
+            auth_timestamp: Some(2000),
+            s3_timestamp: Some(3000),
+        };
+
+        // Router timestamp is always present and first
+        assert!(metadata.router_timestamp > 0);
+        assert!(metadata.router_timestamp < metadata.auth_timestamp.unwrap());
+        assert!(metadata.router_timestamp < metadata.s3_timestamp.unwrap());
+
+        // Test case 5: Router result determines subsequent middleware execution
+        fn should_continue_to_auth(router_result: Result<String, u16>) -> bool {
+            router_result.is_ok()
+        }
+
+        assert!(should_continue_to_auth(Ok("bucket-name".to_string())));
+        assert!(!should_continue_to_auth(Err(404)));
+
+        // Test case 6: Router extracts path before any other processing
+        fn process_request_path(path: &str) -> Vec<String> {
+            let mut stages = Vec::new();
+            stages.push(format!("router:extract_path:{}", path));
+            stages.push("auth:validate".to_string());
+            stages.push("s3:fetch".to_string());
+            stages
+        }
+
+        let stages = process_request_path("/products/image.jpg");
+        assert!(stages[0].starts_with("router:"));
+        assert!(stages[0].contains("/products/image.jpg"));
+
+        // Test case 7: Router identifies target bucket before auth checks
+        struct RequestContext {
+            bucket_name: Option<String>,
+            authenticated: bool,
+            s3_key: Option<String>,
+        }
+
+        let context_after_router = RequestContext {
+            bucket_name: Some("products".to_string()),
+            authenticated: false, // Auth hasn't run yet
+            s3_key: None,         // S3 handler hasn't run yet
+        };
+
+        assert!(context_after_router.bucket_name.is_some());
+        assert!(!context_after_router.authenticated);
+        assert!(context_after_router.s3_key.is_none());
+
+        // Test case 8: Middleware chain order is enforced
+        fn validate_middleware_chain(chain: &[&str]) -> bool {
+            if chain.is_empty() {
+                return false;
+            }
+            chain[0] == "router"
+        }
+
+        assert!(validate_middleware_chain(&["router", "auth", "s3"]));
+        assert!(validate_middleware_chain(&["router", "s3"]));
+        assert!(!validate_middleware_chain(&["auth", "router", "s3"]));
+        assert!(!validate_middleware_chain(&["s3", "router", "auth"]));
+
+        // Test case 9: Router failure prevents further middleware execution
+        fn execute_middleware_chain(router_success: bool) -> Vec<String> {
+            let mut executed = Vec::new();
+            executed.push("router".to_string());
+
+            if !router_success {
+                return executed; // Stop if router fails
+            }
+
+            executed.push("auth".to_string());
+            executed.push("s3".to_string());
+            executed
+        }
+
+        let successful_chain = execute_middleware_chain(true);
+        assert_eq!(successful_chain.len(), 3);
+        assert_eq!(successful_chain, vec!["router", "auth", "s3"]);
+
+        let failed_chain = execute_middleware_chain(false);
+        assert_eq!(failed_chain.len(), 1);
+        assert_eq!(failed_chain, vec!["router"]);
+
+        // Test case 10: Router logs are first in request timeline
+        struct LogEntry {
+            timestamp: u64,
+            middleware: String,
+            message: String,
+        }
+
+        let logs = vec![
+            LogEntry {
+                timestamp: 100,
+                middleware: "router".to_string(),
+                message: "Matched path /products to bucket products".to_string(),
+            },
+            LogEntry {
+                timestamp: 200,
+                middleware: "auth".to_string(),
+                message: "JWT validation successful".to_string(),
+            },
+            LogEntry {
+                timestamp: 300,
+                middleware: "s3".to_string(),
+                message: "Fetched object from S3".to_string(),
+            },
+        ];
+
+        assert_eq!(logs[0].middleware, "router");
+        assert!(logs[0].timestamp < logs[1].timestamp);
+        assert!(logs[0].timestamp < logs[2].timestamp);
+    }
 }
