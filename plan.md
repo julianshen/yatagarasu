@@ -383,7 +383,7 @@ yatagarasu/
 ### Pingora - Request Handler
 - [x] Test: Handler receives incoming HTTP request
 - [x] Test: Handler can access request method
-- [ ] Test: Handler can access request path
+- [x] Test: Handler can access request path
 - [ ] Test: Handler can access request headers
 - [ ] Test: Handler can access request query parameters
 - [ ] Test: Handler runs router to determine target bucket

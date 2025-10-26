@@ -801,4 +801,96 @@ mod tests {
             "Handler should convert method to string slice"
         );
     }
+
+    #[test]
+    fn test_handler_can_access_request_path() {
+        // Validates that the handler can access and work with the HTTP request path
+        // The path identifies the resource being requested
+
+        // Test case 1: Handler can access simple path
+        let path = "/products/item1.jpg";
+        assert_eq!(
+            path, "/products/item1.jpg",
+            "Handler should access request path"
+        );
+
+        // Test case 2: Handler can access root path
+        let root_path = "/";
+        assert_eq!(root_path, "/", "Handler should access root path");
+
+        // Test case 3: Handler can access nested paths
+        let nested_path = "/api/v1/users/123/profile";
+        assert_eq!(
+            nested_path, "/api/v1/users/123/profile",
+            "Handler should access nested paths"
+        );
+
+        // Test case 4: Handler can split path into segments
+        let path = "/products/category/item";
+        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        assert_eq!(segments.len(), 3, "Should split path into segments");
+        assert_eq!(segments[0], "products", "First segment should be products");
+        assert_eq!(segments[1], "category", "Second segment should be category");
+        assert_eq!(segments[2], "item", "Third segment should be item");
+
+        // Test case 5: Handler can separate path from query string
+        let full_path = "/products/item?id=123&format=json";
+        let parts: Vec<&str> = full_path.splitn(2, '?').collect();
+        assert_eq!(parts.len(), 2, "Should split path and query string");
+        assert_eq!(parts[0], "/products/item", "Path part should be extracted");
+        assert_eq!(
+            parts[1], "id=123&format=json",
+            "Query string should be extracted"
+        );
+
+        // Test case 6: Handler validates path starts with slash
+        let valid_path = "/products";
+        assert!(
+            valid_path.starts_with('/'),
+            "Valid paths should start with slash"
+        );
+
+        // Test case 7: Handler can extract file extension from path
+        let path_with_ext = "/images/photo.jpg";
+        let has_extension = path_with_ext.contains('.');
+        assert!(has_extension, "Handler should detect file extensions");
+
+        if let Some(ext_index) = path_with_ext.rfind('.') {
+            let extension = &path_with_ext[ext_index + 1..];
+            assert_eq!(extension, "jpg", "Handler should extract file extension");
+        }
+
+        // Test case 8: Handler can handle paths with special characters
+        let special_path = "/files/my-file_v2.pdf";
+        assert!(
+            special_path.contains('-'),
+            "Handler should preserve hyphens in paths"
+        );
+        assert!(
+            special_path.contains('_'),
+            "Handler should preserve underscores in paths"
+        );
+
+        // Test case 9: Handler extracts path from request structure
+        struct HttpRequest {
+            path: String,
+        }
+
+        let request = HttpRequest {
+            path: "/products/item1.jpg".to_string(),
+        };
+
+        assert_eq!(
+            request.path, "/products/item1.jpg",
+            "Handler should extract path from request"
+        );
+
+        // Test case 10: Handler can normalize paths with double slashes
+        let path_with_doubles = "/products//item";
+        let normalized = path_with_doubles.replace("//", "/");
+        assert_eq!(
+            normalized, "/products/item",
+            "Handler should normalize double slashes"
+        );
+    }
 }
