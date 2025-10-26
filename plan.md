@@ -499,7 +499,7 @@ yatagarasu/
 - [x] Test: No file descriptor leaks
 
 ### Performance - Scalability
-- [ ] Test: Performance degrades gracefully under overload
+- [x] Test: Performance degrades gracefully under overload
 - [ ] Test: System remains responsive at 2x expected load
 - [ ] Test: Can handle 10,000 concurrent connections
 - [ ] Test: Horizontal scaling works (multiple proxy instances)
