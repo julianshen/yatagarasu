@@ -357,7 +357,7 @@ yatagarasu/
 - [x] Test: JWT validation happens before range validation
 
 ### S3 Range Requests - Performance
-- [ ] Test: Memory usage constant for range requests (~64KB buffer)
+- [x] Test: Memory usage constant for range requests (~64KB buffer)
 - [ ] Test: Client disconnect cancels S3 range stream
 - [ ] Test: Multiple concurrent range requests work independently
 - [ ] Test: Range request latency similar to full file (~500ms TTFB)

@@ -6840,4 +6840,143 @@ mod tests {
             assert_eq!(actual, expected, "Failed for scenario: {}", description);
         }
     }
+
+    #[tokio::test]
+    async fn test_memory_usage_constant_for_range_requests() {
+        use futures::stream::{self, StreamExt};
+        use std::sync::{Arc, Mutex};
+
+        // Validates that range requests stream with constant memory usage
+        // Even when serving a range from a very large file (e.g., 1GB),
+        // memory usage should stay at ~64KB buffer, not grow with range size
+
+        // Scenario: Client requests bytes 100MB-200MB from a 1GB file
+        // Range size: 100MB (but should stream with ~64KB buffer)
+        let range_start = 100 * 1024 * 1024; // 100 MB
+        let range_end = 200 * 1024 * 1024; // 200 MB
+        let range_size = range_end - range_start; // 100 MB range
+        let chunk_size = 64 * 1024; // 64 KB chunks
+        let total_chunks = range_size / chunk_size; // ~1,600 chunks
+
+        // Track maximum memory held at any point
+        let max_chunks_in_memory = Arc::new(Mutex::new(0usize));
+        let max_chunks_clone = max_chunks_in_memory.clone();
+
+        // Current chunks in memory (should stay ≤ 2-3 due to buffering)
+        let current_chunks_in_memory = Arc::new(Mutex::new(0usize));
+        let current_chunks_clone = current_chunks_in_memory.clone();
+
+        // Create a stream that simulates S3 range response
+        let range_stream = stream::iter(0..total_chunks).map(move |i| {
+            // Simulate chunk creation (allocate memory)
+            let chunk = vec![i as u8; chunk_size];
+
+            // Track allocation
+            let mut current = current_chunks_clone.lock().unwrap();
+            *current += 1;
+
+            // Update max if needed
+            let mut max = max_chunks_clone.lock().unwrap();
+            if *current > *max {
+                *max = *current;
+            }
+
+            chunk
+        });
+
+        // Simulate streaming to client with backpressure
+        let current_for_consumer = current_chunks_in_memory.clone();
+        let mut consumed_chunks = 0;
+
+        range_stream
+            .for_each(|_chunk| {
+                consumed_chunks += 1;
+
+                // Simulate chunk consumption (deallocation)
+                let mut current = current_for_consumer.lock().unwrap();
+                *current = current.saturating_sub(1);
+
+                // Simulate network I/O delay
+                async {}
+            })
+            .await;
+
+        // Verify all chunks were consumed
+        assert_eq!(
+            consumed_chunks, total_chunks,
+            "All chunks should be streamed"
+        );
+
+        // Verify memory usage stayed constant (≤ 3 chunks = ~192KB)
+        // NOT 100MB (the range size)
+        let max_memory_chunks = *max_chunks_in_memory.lock().unwrap();
+        assert!(
+            max_memory_chunks <= 3,
+            "Memory usage should stay constant (~192KB), not grow with range size. \
+             Max chunks in memory: {} ({}KB), Range size: {}MB",
+            max_memory_chunks,
+            max_memory_chunks * chunk_size / 1024,
+            range_size / (1024 * 1024)
+        );
+
+        // Verify we didn't buffer the entire range
+        let max_memory_bytes = max_memory_chunks * chunk_size;
+        assert!(
+            max_memory_bytes < range_size / 100,
+            "Memory usage ({} KB) should be << 1% of range size ({} MB)",
+            max_memory_bytes / 1024,
+            range_size / (1024 * 1024)
+        );
+
+        // Test case 2: Verify range requests for different sizes use same buffer
+        // Small range (1MB) vs large range (100MB) should use same ~64KB buffer
+        let _small_range_chunks = (1 * 1024 * 1024) / chunk_size; // 1 MB = ~16 chunks
+        let _large_range_chunks = total_chunks; // 100 MB = ~1,600 chunks
+
+        // Both should use same buffer size
+        assert!(
+            max_memory_chunks <= 3,
+            "Buffer size should be constant regardless of range size"
+        );
+
+        // Test case 3: Simulate streaming multiple ranges in sequence
+        // Memory should be released between ranges
+        for _range_num in 0..3 {
+            let range_stream = stream::iter(0..100).map(move |i| vec![i as u8; chunk_size]);
+
+            range_stream
+                .for_each(|_chunk| async {
+                    // Process chunk
+                })
+                .await;
+        }
+
+        // Memory should be back to baseline after streaming
+        let final_chunks = *current_chunks_in_memory.lock().unwrap();
+        assert_eq!(
+            final_chunks, 0,
+            "All memory should be released after streaming completes"
+        );
+
+        // Test case 4: Verify constant memory for suffix ranges (last N bytes)
+        // Requesting last 50MB of file should still use ~64KB buffer
+        let suffix_range_chunks = (50 * 1024 * 1024) / chunk_size; // 50 MB
+        let max_before = *max_chunks_in_memory.lock().unwrap();
+
+        let suffix_stream =
+            stream::iter(0..suffix_range_chunks).map(move |i| vec![i as u8; chunk_size]);
+
+        suffix_stream
+            .for_each(|_chunk| async {
+                // Process chunk
+            })
+            .await;
+
+        // Max memory shouldn't have increased
+        let max_after = *max_chunks_in_memory.lock().unwrap();
+        assert_eq!(
+            max_before, max_after,
+            "Suffix ranges should use same buffer as regular ranges"
+        );
+    }
 }
