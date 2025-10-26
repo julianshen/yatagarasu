@@ -488,7 +488,7 @@ yatagarasu/
 - [x] Test: Path routing completes in <10μs
 - [x] Test: S3 signature generation completes in <100μs
 - [x] Test: Request handling end-to-end <100ms P95 (cached)
-- [ ] Test: Request handling end-to-end <500ms P95 (S3)
+- [x] Test: Request handling end-to-end <500ms P95 (S3)
 - [ ] Test: Throughput >10,000 req/s on test hardware
 
 ### Performance - Resource Usage
