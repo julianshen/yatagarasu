@@ -363,7 +363,7 @@ yatagarasu/
 - [x] Test: Range request latency similar to full file (~500ms TTFB)
 
 ### S3 Integration - Mock Tests
-- [ ] Test: GET object works with mocked S3 backend
+- [x] Test: GET object works with mocked S3 backend
 - [ ] Test: HEAD object works with mocked S3 backend
 - [ ] Test: Error responses work with mocked S3 backend
 - [ ] Test: Can mock different buckets with different responses

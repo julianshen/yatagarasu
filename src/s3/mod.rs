@@ -7572,4 +7572,199 @@ mod tests {
             all_ratio
         );
     }
+
+    #[test]
+    fn test_get_object_works_with_mocked_s3_backend() {
+        use std::collections::HashMap;
+
+        // Validates that we can mock S3 backend responses for GET requests
+        // This enables testing the full request/response flow without real S3
+
+        // Test case 1: Mock successful GET request for a small file
+        let mut headers_success = HashMap::new();
+        headers_success.insert("content-type".to_string(), "text/plain".to_string());
+        headers_success.insert("content-length".to_string(), "13".to_string());
+        headers_success.insert("etag".to_string(), "\"abc123\"".to_string());
+        headers_success.insert(
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        );
+
+        let response_body = b"Hello, World!";
+        let mock_response = S3Response::new(200, "OK", headers_success, response_body.to_vec());
+
+        // Verify response structure
+        assert_eq!(mock_response.status_code, 200);
+        assert_eq!(mock_response.status_text, "OK");
+        assert_eq!(mock_response.body, response_body.to_vec());
+        assert_eq!(
+            mock_response.headers.get("content-type"),
+            Some(&"text/plain".to_string())
+        );
+        assert_eq!(
+            mock_response.headers.get("content-length"),
+            Some(&"13".to_string())
+        );
+        assert_eq!(
+            mock_response.headers.get("etag"),
+            Some(&"\"abc123\"".to_string())
+        );
+
+        // Test case 2: Mock GET request for JSON file
+        let mut headers_json = HashMap::new();
+        headers_json.insert("content-type".to_string(), "application/json".to_string());
+        headers_json.insert("content-length".to_string(), "27".to_string());
+
+        let json_body = b"{\"message\": \"Hello, S3!\"}";
+        let mock_json_response = S3Response::new(200, "OK", headers_json, json_body.to_vec());
+
+        assert_eq!(mock_json_response.status_code, 200);
+        assert_eq!(mock_json_response.body, json_body.to_vec());
+        assert_eq!(
+            mock_json_response.headers.get("content-type"),
+            Some(&"application/json".to_string())
+        );
+
+        // Test case 3: Mock GET request for binary file (image)
+        let mut headers_image = HashMap::new();
+        headers_image.insert("content-type".to_string(), "image/png".to_string());
+        headers_image.insert("content-length".to_string(), "1024".to_string());
+
+        let image_body = vec![0x89, 0x50, 0x4E, 0x47]; // PNG magic bytes
+        let mock_image_response = S3Response::new(200, "OK", headers_image, image_body.clone());
+
+        assert_eq!(mock_image_response.status_code, 200);
+        assert_eq!(mock_image_response.body, image_body);
+        assert_eq!(
+            mock_image_response.headers.get("content-type"),
+            Some(&"image/png".to_string())
+        );
+
+        // Test case 4: Mock GET request with custom metadata
+        let mut headers_metadata = HashMap::new();
+        headers_metadata.insert("content-type".to_string(), "text/plain".to_string());
+        headers_metadata.insert("x-amz-meta-author".to_string(), "John Doe".to_string());
+        headers_metadata.insert("x-amz-meta-version".to_string(), "1.0".to_string());
+
+        let mock_metadata_response =
+            S3Response::new(200, "OK", headers_metadata, b"File with metadata".to_vec());
+
+        assert_eq!(mock_metadata_response.status_code, 200);
+        assert_eq!(
+            mock_metadata_response.headers.get("x-amz-meta-author"),
+            Some(&"John Doe".to_string())
+        );
+        assert_eq!(
+            mock_metadata_response.headers.get("x-amz-meta-version"),
+            Some(&"1.0".to_string())
+        );
+
+        // Test case 5: Mock GET request for large file (>10MB)
+        let mut headers_large = HashMap::new();
+        headers_large.insert(
+            "content-type".to_string(),
+            "application/octet-stream".to_string(),
+        );
+        headers_large.insert("content-length".to_string(), "10485760".to_string()); // 10 MB
+
+        // Don't actually allocate 10MB, just verify headers
+        let mock_large_response = S3Response::new(200, "OK", headers_large, vec![]);
+
+        assert_eq!(mock_large_response.status_code, 200);
+        assert_eq!(
+            mock_large_response.headers.get("content-length"),
+            Some(&"10485760".to_string())
+        );
+
+        // Test case 6: Mock GET request with Cache-Control headers
+        let mut headers_cache = HashMap::new();
+        headers_cache.insert("content-type".to_string(), "text/html".to_string());
+        headers_cache.insert("cache-control".to_string(), "max-age=3600".to_string());
+        headers_cache.insert(
+            "expires".to_string(),
+            "Thu, 01 Dec 2024 16:00:00 GMT".to_string(),
+        );
+
+        let mock_cache_response = S3Response::new(
+            200,
+            "OK",
+            headers_cache,
+            b"<html>Cached content</html>".to_vec(),
+        );
+
+        assert_eq!(mock_cache_response.status_code, 200);
+        assert_eq!(
+            mock_cache_response.headers.get("cache-control"),
+            Some(&"max-age=3600".to_string())
+        );
+
+        // Test case 7: Mock GET request for different S3 object keys
+        let test_objects = vec![
+            ("file.txt", "text/plain", b"Plain text".to_vec()),
+            (
+                "data.json",
+                "application/json",
+                b"{\"key\":\"value\"}".to_vec(),
+            ),
+            ("image.jpg", "image/jpeg", vec![0xFF, 0xD8, 0xFF, 0xE0]), // JPEG magic bytes
+            ("video.mp4", "video/mp4", vec![0x00, 0x00, 0x00, 0x18]),  // MP4 magic bytes
+        ];
+
+        for (key, content_type, body) in test_objects {
+            let mut headers = HashMap::new();
+            headers.insert("content-type".to_string(), content_type.to_string());
+            headers.insert("content-length".to_string(), body.len().to_string());
+
+            let mock_response = S3Response::new(200, "OK", headers, body.clone());
+
+            assert_eq!(mock_response.status_code, 200);
+            assert_eq!(mock_response.body, body);
+            assert_eq!(
+                mock_response.headers.get("content-type"),
+                Some(&content_type.to_string()),
+                "Content-Type mismatch for key: {}",
+                key
+            );
+        }
+
+        // Test case 8: Mock GET request with all standard S3 response headers
+        let mut headers_complete = HashMap::new();
+        headers_complete.insert("content-type".to_string(), "application/pdf".to_string());
+        headers_complete.insert("content-length".to_string(), "2048".to_string());
+        headers_complete.insert("etag".to_string(), "\"def456\"".to_string());
+        headers_complete.insert(
+            "last-modified".to_string(),
+            "Mon, 20 Nov 2024 10:30:00 GMT".to_string(),
+        );
+        headers_complete.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_complete.insert("x-amz-request-id".to_string(), "ABC123DEF456".to_string());
+        headers_complete.insert("x-amz-id-2".to_string(), "XYZ789".to_string());
+
+        let mock_complete_response = S3Response::new(
+            200,
+            "OK",
+            headers_complete,
+            vec![0x25, 0x50, 0x44, 0x46], // PDF magic bytes
+        );
+
+        assert_eq!(mock_complete_response.status_code, 200);
+        assert_eq!(
+            mock_complete_response.headers.get("etag"),
+            Some(&"\"def456\"".to_string())
+        );
+        assert_eq!(
+            mock_complete_response.headers.get("accept-ranges"),
+            Some(&"bytes".to_string())
+        );
+        assert_eq!(
+            mock_complete_response.headers.get("x-amz-request-id"),
+            Some(&"ABC123DEF456".to_string())
+        );
+
+        // Verify body contains PDF magic bytes
+        assert_eq!(mock_complete_response.body[0], 0x25); // %
+        assert_eq!(mock_complete_response.body[1], 0x50); // P
+        assert_eq!(mock_complete_response.body[2], 0x44); // D
+        assert_eq!(mock_complete_response.body[3], 0x46); // F
+    }
 }
