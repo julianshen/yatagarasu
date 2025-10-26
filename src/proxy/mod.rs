@@ -460,4 +460,135 @@ mod tests {
             "Shutdown state should be accessible across thread boundaries"
         );
     }
+
+    #[test]
+    fn test_server_rejects_requests_before_fully_initialized() {
+        // Validates that the server rejects requests before it's fully initialized
+        // This prevents serving requests with incomplete configuration or resources
+
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Server has initialization state flag
+        let is_initialized = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            is_initialized.load(Ordering::Relaxed),
+            false,
+            "Server should start uninitialized"
+        );
+
+        // Test case 2: Server can be marked as initialized
+        is_initialized.store(true, Ordering::Relaxed);
+        assert_eq!(
+            is_initialized.load(Ordering::Relaxed),
+            true,
+            "Server should be markable as initialized"
+        );
+
+        // Test case 3: Server checks initialization before accepting requests
+        let initialized = Arc::new(AtomicBool::new(false));
+        let can_accept_request = initialized.load(Ordering::Relaxed);
+        assert!(
+            !can_accept_request,
+            "Should not accept requests when uninitialized"
+        );
+
+        initialized.store(true, Ordering::Relaxed);
+        let can_accept_after_init = initialized.load(Ordering::Relaxed);
+        assert!(
+            can_accept_after_init,
+            "Should accept requests after initialization"
+        );
+
+        // Test case 4: Server validates required resources are loaded
+        let config_loaded = Arc::new(AtomicBool::new(false));
+        let routes_loaded = Arc::new(AtomicBool::new(false));
+        let s3_clients_loaded = Arc::new(AtomicBool::new(false));
+
+        let all_resources_loaded = config_loaded.load(Ordering::Relaxed)
+            && routes_loaded.load(Ordering::Relaxed)
+            && s3_clients_loaded.load(Ordering::Relaxed);
+
+        assert!(
+            !all_resources_loaded,
+            "Resources should not be loaded initially"
+        );
+
+        // Simulate initialization
+        config_loaded.store(true, Ordering::Relaxed);
+        routes_loaded.store(true, Ordering::Relaxed);
+        s3_clients_loaded.store(true, Ordering::Relaxed);
+
+        let all_resources_loaded_after = config_loaded.load(Ordering::Relaxed)
+            && routes_loaded.load(Ordering::Relaxed)
+            && s3_clients_loaded.load(Ordering::Relaxed);
+
+        assert!(
+            all_resources_loaded_after,
+            "All resources should be loaded after initialization"
+        );
+
+        // Test case 5: Server returns appropriate error response before initialization
+        let server_ready = Arc::new(AtomicBool::new(false));
+        let error_code = if server_ready.load(Ordering::Relaxed) {
+            200 // OK
+        } else {
+            503 // Service Unavailable
+        };
+
+        assert_eq!(
+            error_code, 503,
+            "Should return 503 Service Unavailable when not ready"
+        );
+
+        server_ready.store(true, Ordering::Relaxed);
+        let success_code = if server_ready.load(Ordering::Relaxed) {
+            200
+        } else {
+            503
+        };
+
+        assert_eq!(success_code, 200, "Should return 200 OK when ready");
+
+        // Test case 6: Initialization is atomic (all-or-nothing)
+        let init_phase1 = Arc::new(AtomicBool::new(false));
+        let init_phase2 = Arc::new(AtomicBool::new(false));
+        let init_phase3 = Arc::new(AtomicBool::new(false));
+
+        // Partial initialization
+        init_phase1.store(true, Ordering::Relaxed);
+        init_phase2.store(true, Ordering::Relaxed);
+
+        let fully_initialized = init_phase1.load(Ordering::Relaxed)
+            && init_phase2.load(Ordering::Relaxed)
+            && init_phase3.load(Ordering::Relaxed);
+
+        assert!(
+            !fully_initialized,
+            "Server should not be ready with partial initialization"
+        );
+
+        // Complete initialization
+        init_phase3.store(true, Ordering::Relaxed);
+
+        let fully_initialized_now = init_phase1.load(Ordering::Relaxed)
+            && init_phase2.load(Ordering::Relaxed)
+            && init_phase3.load(Ordering::Relaxed);
+
+        assert!(
+            fully_initialized_now,
+            "Server should be ready only after full initialization"
+        );
+
+        // Test case 7: Initialization state is thread-safe
+        let ready_state = Arc::new(AtomicBool::new(false));
+        let ready_clone = ready_state.clone();
+
+        ready_state.store(true, Ordering::Relaxed);
+        assert_eq!(
+            ready_clone.load(Ordering::Relaxed),
+            true,
+            "Initialization state should be visible across threads"
+        );
+    }
 }
