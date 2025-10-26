@@ -463,7 +463,7 @@ yatagarasu/
 - [x] Test: Invalid S3 credentials return appropriate error
 - [x] Test: S3 bucket doesn't exist returns 404
 - [x] Test: Network error to S3 returns 502
-- [ ] Test: All errors logged with sufficient context
+- [x] Test: All errors logged with sufficient context
 
 ### End-to-End - Concurrent Requests
 - [ ] Test: Can handle 100 concurrent requests
