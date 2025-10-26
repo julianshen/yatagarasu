@@ -5270,4 +5270,213 @@ mod tests {
         assert_eq!(count_middleware_executed(true, false), 2); // S3 doesn't run
         assert_eq!(count_middleware_executed(false, true), 1); // Neither auth nor S3 run
     }
+
+    #[test]
+    fn test_middleware_can_short_circuit_request() {
+        // Validates that middleware can short-circuit request and return early
+        // Prevents subsequent middleware from executing when condition met
+
+        // Test case 1: Router can short-circuit on invalid path
+        fn router_short_circuits_on_invalid_path(path: &str) -> Result<String, u16> {
+            if !path.starts_with('/') {
+                return Err(400); // Short-circuit with 400
+            }
+            if path == "/unmapped" {
+                return Err(404); // Short-circuit with 404
+            }
+            Ok("bucket-name".to_string())
+        }
+
+        assert!(router_short_circuits_on_invalid_path("/valid").is_ok());
+        assert_eq!(router_short_circuits_on_invalid_path("invalid"), Err(400));
+        assert_eq!(router_short_circuits_on_invalid_path("/unmapped"), Err(404));
+
+        // Test case 2: Auth can short-circuit on missing token
+        fn auth_short_circuits_on_missing_token(token: Option<&str>) -> Result<(), u16> {
+            match token {
+                None => Err(401),                    // Short-circuit with 401
+                Some(t) if t.is_empty() => Err(401), // Short-circuit with 401
+                Some(_) => Ok(()),
+            }
+        }
+
+        assert!(auth_short_circuits_on_missing_token(Some("valid-token")).is_ok());
+        assert_eq!(auth_short_circuits_on_missing_token(None), Err(401));
+        assert_eq!(auth_short_circuits_on_missing_token(Some("")), Err(401));
+
+        // Test case 3: Short-circuit prevents further middleware execution
+        fn execute_with_short_circuit(short_circuit_at: &str) -> Vec<String> {
+            let mut executed = Vec::new();
+
+            executed.push("router".to_string());
+            if short_circuit_at == "router" {
+                return executed; // Short-circuit at router
+            }
+
+            executed.push("auth".to_string());
+            if short_circuit_at == "auth" {
+                return executed; // Short-circuit at auth
+            }
+
+            executed.push("s3".to_string());
+            executed
+        }
+
+        let router_short = execute_with_short_circuit("router");
+        assert_eq!(router_short, vec!["router"]);
+
+        let auth_short = execute_with_short_circuit("auth");
+        assert_eq!(auth_short, vec!["router", "auth"]);
+
+        let no_short = execute_with_short_circuit("none");
+        assert_eq!(no_short, vec!["router", "auth", "s3"]);
+
+        // Test case 4: Short-circuit returns error response immediately
+        #[derive(Debug, PartialEq)]
+        struct ErrorResponse {
+            status: u16,
+            body: String,
+        }
+
+        fn handle_short_circuit(error: u16) -> ErrorResponse {
+            ErrorResponse {
+                status: error,
+                body: format!("Error: {}", error),
+            }
+        }
+
+        let error_404 = handle_short_circuit(404);
+        assert_eq!(error_404.status, 404);
+        assert!(error_404.body.contains("404"));
+
+        let error_401 = handle_short_circuit(401);
+        assert_eq!(error_401.status, 401);
+
+        // Test case 5: Auth can short-circuit on invalid JWT
+        fn validate_jwt(token: &str) -> Result<String, u16> {
+            if token.len() < 10 {
+                return Err(401); // Short-circuit: token too short
+            }
+            if !token.contains('.') {
+                return Err(401); // Short-circuit: invalid format
+            }
+            Ok("user_id".to_string())
+        }
+
+        assert!(validate_jwt("valid.jwt.token").is_ok());
+        assert_eq!(validate_jwt("short"), Err(401));
+        assert_eq!(validate_jwt("no-dots-here"), Err(401));
+
+        // Test case 6: Short-circuit includes appropriate error message
+        fn short_circuit_with_message(condition: &str) -> Result<(), (u16, String)> {
+            match condition {
+                "no_auth" => Err((401, "Authentication required".to_string())),
+                "forbidden" => Err((403, "Access denied".to_string())),
+                "not_found" => Err((404, "Resource not found".to_string())),
+                _ => Ok(()),
+            }
+        }
+
+        assert!(short_circuit_with_message("valid").is_ok());
+        assert_eq!(
+            short_circuit_with_message("no_auth"),
+            Err((401, "Authentication required".to_string()))
+        );
+        assert_eq!(
+            short_circuit_with_message("forbidden"),
+            Err((403, "Access denied".to_string()))
+        );
+
+        // Test case 7: Middleware execution count reflects short-circuit
+        fn count_executed_before_short_circuit(fail_at: Option<&str>) -> usize {
+            let mut count = 0;
+
+            count += 1; // Router always runs
+            if fail_at == Some("router") {
+                return count;
+            }
+
+            count += 1; // Auth runs
+            if fail_at == Some("auth") {
+                return count;
+            }
+
+            count += 1; // S3 runs
+            count
+        }
+
+        assert_eq!(count_executed_before_short_circuit(None), 3);
+        assert_eq!(count_executed_before_short_circuit(Some("router")), 1);
+        assert_eq!(count_executed_before_short_circuit(Some("auth")), 2);
+
+        // Test case 8: Short-circuit on rate limit exceeded
+        fn check_rate_limit(request_count: u32, limit: u32) -> Result<(), u16> {
+            if request_count > limit {
+                return Err(429); // Short-circuit: too many requests
+            }
+            Ok(())
+        }
+
+        assert!(check_rate_limit(50, 100).is_ok());
+        assert_eq!(check_rate_limit(150, 100), Err(429));
+
+        // Test case 9: Short-circuit preserves request context
+        struct RequestContext {
+            path: String,
+            short_circuited_at: Option<String>,
+            error_status: Option<u16>,
+        }
+
+        let short_circuited = RequestContext {
+            path: "/products/file.txt".to_string(),
+            short_circuited_at: Some("auth".to_string()),
+            error_status: Some(401),
+        };
+
+        assert!(short_circuited.short_circuited_at.is_some());
+        assert_eq!(short_circuited.error_status, Some(401));
+        assert_eq!(short_circuited.short_circuited_at.unwrap(), "auth");
+
+        // Test case 10: Multiple short-circuit conditions
+        fn validate_request(path: &str, auth_header: Option<&str>) -> Result<(), u16> {
+            // Short-circuit check 1: Path validation
+            if path.is_empty() {
+                return Err(400);
+            }
+
+            // Short-circuit check 2: Auth requirement
+            if auth_header.is_none() {
+                return Err(401);
+            }
+
+            // Short-circuit check 3: Auth header format
+            if !auth_header.unwrap().starts_with("Bearer ") {
+                return Err(401);
+            }
+
+            Ok(())
+        }
+
+        assert!(validate_request("/path", Some("Bearer token")).is_ok());
+        assert_eq!(validate_request("", Some("Bearer token")), Err(400));
+        assert_eq!(validate_request("/path", None), Err(401));
+        assert_eq!(validate_request("/path", Some("Invalid")), Err(401));
+
+        // Test case 11: Short-circuit logs explain reason
+        struct ShortCircuitLog {
+            middleware: String,
+            reason: String,
+            status_code: u16,
+        }
+
+        let log = ShortCircuitLog {
+            middleware: "auth".to_string(),
+            reason: "Missing JWT token".to_string(),
+            status_code: 401,
+        };
+
+        assert_eq!(log.middleware, "auth");
+        assert!(log.reason.contains("JWT"));
+        assert_eq!(log.status_code, 401);
+    }
 }

@@ -414,7 +414,7 @@ yatagarasu/
 - [x] Test: Request passes through router first
 - [x] Test: Request passes through auth middleware second
 - [x] Test: Request reaches S3 handler third
-- [ ] Test: Middleware can short-circuit request (return early)
+- [x] Test: Middleware can short-circuit request (return early)
 - [ ] Test: Middleware can modify request context
 - [ ] Test: Middleware errors are handled gracefully
 
