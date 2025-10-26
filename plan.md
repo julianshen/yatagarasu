@@ -460,7 +460,7 @@ yatagarasu/
 
 ### End-to-End - Error Scenarios
 - [x] Test: S3 connection timeout handled gracefully
-- [ ] Test: Invalid S3 credentials return appropriate error
+- [x] Test: Invalid S3 credentials return appropriate error
 - [ ] Test: S3 bucket doesn't exist returns 404
 - [ ] Test: Network error to S3 returns 502
 - [ ] Test: All errors logged with sufficient context

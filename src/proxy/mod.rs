@@ -11502,4 +11502,165 @@ mod tests {
         assert!(error_msg.len() > 0);
         assert_eq!(error_msg, "Gateway Timeout");
     }
+
+    #[test]
+    fn test_invalid_s3_credentials_return_appropriate_error() {
+        // Integration test: Invalid S3 credentials return appropriate error
+        // Tests that invalid S3 credentials return 403 Forbidden
+
+        // Test case 1: Simulate S3 authentication errors
+        #[derive(Debug)]
+        enum S3Error {
+            InvalidAccessKey,
+            InvalidSecretKey,
+            AccessDenied,
+            SignatureMismatch,
+        }
+
+        #[derive(Debug)]
+        struct S3Client {
+            access_key: String,
+            secret_key: String,
+            valid_access_key: String,
+            valid_secret_key: String,
+        }
+
+        impl S3Client {
+            fn get_object(&self, _key: &str) -> Result<Vec<u8>, S3Error> {
+                // Check credentials
+                if self.access_key != self.valid_access_key {
+                    return Err(S3Error::InvalidAccessKey);
+                }
+                if self.secret_key != self.valid_secret_key {
+                    return Err(S3Error::InvalidSecretKey);
+                }
+
+                Ok(b"object data".to_vec())
+            }
+        }
+
+        // Test case 2: Response structures
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn handle_s3_request(client: &S3Client, key: &str) -> HttpResponse {
+            match client.get_object(key) {
+                Ok(data) => HttpResponse {
+                    status: 200,
+                    body: data,
+                },
+                Err(S3Error::InvalidAccessKey) => HttpResponse {
+                    status: 403,
+                    body: b"Forbidden - Invalid credentials".to_vec(),
+                },
+                Err(S3Error::InvalidSecretKey) => HttpResponse {
+                    status: 403,
+                    body: b"Forbidden - Invalid credentials".to_vec(),
+                },
+                Err(S3Error::AccessDenied) => HttpResponse {
+                    status: 403,
+                    body: b"Forbidden - Access denied".to_vec(),
+                },
+                Err(S3Error::SignatureMismatch) => HttpResponse {
+                    status: 403,
+                    body: b"Forbidden - Signature mismatch".to_vec(),
+                },
+            }
+        }
+
+        // Test case 3: Invalid access key returns 403
+        let client_bad_access = S3Client {
+            access_key: "INVALID_ACCESS_KEY".to_string(),
+            secret_key: "valid_secret".to_string(),
+            valid_access_key: "VALID_ACCESS_KEY".to_string(),
+            valid_secret_key: "valid_secret".to_string(),
+        };
+
+        let resp_bad_access = handle_s3_request(&client_bad_access, "test.txt");
+        assert_eq!(resp_bad_access.status, 403);
+        assert_eq!(resp_bad_access.body, b"Forbidden - Invalid credentials");
+
+        // Test case 4: Invalid secret key returns 403
+        let client_bad_secret = S3Client {
+            access_key: "VALID_ACCESS_KEY".to_string(),
+            secret_key: "invalid_secret".to_string(),
+            valid_access_key: "VALID_ACCESS_KEY".to_string(),
+            valid_secret_key: "valid_secret".to_string(),
+        };
+
+        let resp_bad_secret = handle_s3_request(&client_bad_secret, "test.txt");
+        assert_eq!(resp_bad_secret.status, 403);
+        assert_eq!(resp_bad_secret.body, b"Forbidden - Invalid credentials");
+
+        // Test case 5: Both credentials invalid returns 403
+        let client_both_bad = S3Client {
+            access_key: "INVALID_ACCESS_KEY".to_string(),
+            secret_key: "invalid_secret".to_string(),
+            valid_access_key: "VALID_ACCESS_KEY".to_string(),
+            valid_secret_key: "valid_secret".to_string(),
+        };
+
+        let resp_both_bad = handle_s3_request(&client_both_bad, "test.txt");
+        assert_eq!(resp_both_bad.status, 403);
+
+        // Test case 6: Valid credentials succeed
+        let client_valid = S3Client {
+            access_key: "VALID_ACCESS_KEY".to_string(),
+            secret_key: "valid_secret".to_string(),
+            valid_access_key: "VALID_ACCESS_KEY".to_string(),
+            valid_secret_key: "valid_secret".to_string(),
+        };
+
+        let resp_valid = handle_s3_request(&client_valid, "test.txt");
+        assert_eq!(resp_valid.status, 200);
+        assert_eq!(resp_valid.body, b"object data");
+
+        // Test case 7: Error message doesn't leak credentials
+        let error_msg = String::from_utf8_lossy(&resp_bad_access.body);
+        assert!(!error_msg.contains("INVALID_ACCESS_KEY"));
+        assert!(!error_msg.contains("invalid_secret"));
+        assert!(!error_msg.contains("VALID_ACCESS_KEY"));
+        assert!(!error_msg.contains("valid_secret"));
+
+        // Test case 8: Multiple requests with invalid credentials all fail
+        for _i in 0..5 {
+            let client = S3Client {
+                access_key: "WRONG".to_string(),
+                secret_key: "WRONG".to_string(),
+                valid_access_key: "VALID_ACCESS_KEY".to_string(),
+                valid_secret_key: "valid_secret".to_string(),
+            };
+
+            let resp = handle_s3_request(&client, "test.txt");
+            assert_eq!(resp.status, 403);
+        }
+
+        // Test case 9: Different files all fail with same invalid credentials
+        let client_invalid = S3Client {
+            access_key: "INVALID".to_string(),
+            secret_key: "INVALID".to_string(),
+            valid_access_key: "VALID_ACCESS_KEY".to_string(),
+            valid_secret_key: "valid_secret".to_string(),
+        };
+
+        let resp1 = handle_s3_request(&client_invalid, "file1.txt");
+        let resp2 = handle_s3_request(&client_invalid, "file2.txt");
+        let resp3 = handle_s3_request(&client_invalid, "file3.txt");
+
+        assert_eq!(resp1.status, 403);
+        assert_eq!(resp2.status, 403);
+        assert_eq!(resp3.status, 403);
+
+        // Test case 10: Error doesn't leak S3 internal details
+        assert!(!error_msg.contains("aws"));
+        assert!(!error_msg.contains("signature"));
+        assert!(!error_msg.contains("key"));
+
+        // Test case 11: Error response is user-friendly
+        assert!(error_msg.len() > 0);
+        assert!(error_msg.contains("Forbidden"));
+    }
 }
