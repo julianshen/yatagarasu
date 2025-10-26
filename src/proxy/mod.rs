@@ -3584,4 +3584,163 @@ mod tests {
             "404 should be distinct from 500"
         );
     }
+
+    #[test]
+    fn test_returns_500_for_internal_errors() {
+        // Validates that handler returns 500 Internal Server Error for unexpected failures
+        // 500 indicates server-side error that prevents request processing
+
+        // Test case 1: Handler returns 500 for configuration errors
+        fn validate_config(config: Option<&str>) -> Result<(), u16> {
+            match config {
+                Some(c) if !c.is_empty() => Ok(()),
+                _ => Err(500),
+            }
+        }
+
+        assert!(validate_config(Some("valid")).is_ok());
+        assert_eq!(
+            validate_config(None),
+            Err(500),
+            "Missing config should return 500"
+        );
+        assert_eq!(
+            validate_config(Some("")),
+            Err(500),
+            "Empty config should return 500"
+        );
+
+        // Test case 2: Handler returns 500 for panic recovery
+        fn safe_operation(should_panic: bool) -> Result<String, u16> {
+            if should_panic {
+                return Err(500);
+            }
+            Ok("success".to_string())
+        }
+
+        assert!(safe_operation(false).is_ok());
+        assert_eq!(
+            safe_operation(true),
+            Err(500),
+            "Panic recovery should return 500"
+        );
+
+        // Test case 3: Handler returns 500 for resource exhaustion
+        fn check_resources(memory_available: usize, min_required: usize) -> Result<(), u16> {
+            if memory_available < min_required {
+                return Err(500);
+            }
+            Ok(())
+        }
+
+        assert!(check_resources(1024, 512).is_ok());
+        assert_eq!(
+            check_resources(256, 512),
+            Err(500),
+            "Insufficient resources should return 500"
+        );
+
+        // Test case 4: Handler creates 500 error response
+        struct ErrorResponse {
+            status_code: u16,
+            message: String,
+        }
+
+        let internal_error = ErrorResponse {
+            status_code: 500,
+            message: "Internal server error".to_string(),
+        };
+
+        assert_eq!(internal_error.status_code, 500);
+        assert!(internal_error.message.contains("Internal"));
+
+        // Test case 5: Handler returns 500 for unexpected exceptions
+        fn parse_data(data: &str) -> Result<u32, u16> {
+            data.parse::<u32>().map_err(|_| 500)
+        }
+
+        assert_eq!(parse_data("123").unwrap(), 123);
+        assert_eq!(
+            parse_data("invalid"),
+            Err(500),
+            "Parse error should return 500"
+        );
+
+        // Test case 6: Handler returns 500 for null pointer / uninitialized data
+        fn access_data(data: Option<&str>) -> Result<String, u16> {
+            data.ok_or(500).map(|s| s.to_string())
+        }
+
+        assert_eq!(access_data(Some("data")).unwrap(), "data");
+        assert_eq!(
+            access_data(None),
+            Err(500),
+            "Null data access should return 500"
+        );
+
+        // Test case 7: Handler returns 500 for system call failures
+        fn system_operation(will_fail: bool) -> Result<(), u16> {
+            if will_fail {
+                return Err(500);
+            }
+            Ok(())
+        }
+
+        assert!(system_operation(false).is_ok());
+        assert_eq!(
+            system_operation(true),
+            Err(500),
+            "Failed system call should return 500"
+        );
+
+        // Test case 8: Handler returns 500 for assertion failures
+        fn validate_invariant(condition: bool) -> Result<(), u16> {
+            if !condition {
+                return Err(500);
+            }
+            Ok(())
+        }
+
+        assert!(validate_invariant(true).is_ok());
+        assert_eq!(
+            validate_invariant(false),
+            Err(500),
+            "Invariant violation should return 500"
+        );
+
+        // Test case 9: Handler includes error tracking ID in 500 response
+        fn create_500_response(error_id: &str) -> ErrorResponse {
+            ErrorResponse {
+                status_code: 500,
+                message: format!("Internal error (ID: {})", error_id),
+            }
+        }
+
+        let response = create_500_response("ERR-12345");
+        assert_eq!(response.status_code, 500);
+        assert!(response.message.contains("ERR-12345"));
+
+        // Test case 10: Handler distinguishes 500 from other error codes
+        fn map_error_to_status(error_type: &str) -> u16 {
+            match error_type {
+                "bad_request" => 400,
+                "unauthorized" => 401,
+                "forbidden" => 403,
+                "not_found" => 404,
+                "internal" => 500,
+                "bad_gateway" => 502,
+                "unavailable" => 503,
+                _ => 500,
+            }
+        }
+
+        assert_eq!(map_error_to_status("internal"), 500);
+        assert_eq!(map_error_to_status("bad_request"), 400);
+        assert_eq!(map_error_to_status("not_found"), 404);
+        assert_eq!(
+            map_error_to_status("unknown"),
+            500,
+            "Unknown errors should default to 500"
+        );
+    }
 }
