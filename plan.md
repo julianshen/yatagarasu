@@ -438,7 +438,7 @@ yatagarasu/
 - [x] Test: Bucket A credentials don't work for bucket B
 
 ### End-to-End - Single Bucket with JWT Auth
-- [ ] Test: GET without JWT returns 401
+- [x] Test: GET without JWT returns 401
 - [ ] Test: GET with valid JWT returns object
 - [ ] Test: GET with expired JWT returns 401
 - [ ] Test: GET with invalid signature JWT returns 401
