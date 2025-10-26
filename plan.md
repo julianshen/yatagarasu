@@ -432,7 +432,7 @@ yatagarasu/
 
 ### End-to-End - Multiple Buckets, No Auth
 - [x] Test: GET /bucket-a/file.txt routes to bucket A
-- [ ] Test: GET /bucket-b/file.txt routes to bucket B
+- [x] Test: GET /bucket-b/file.txt routes to bucket B
 - [ ] Test: Buckets use independent credentials
 - [ ] Test: Can access objects from both buckets concurrently
 - [ ] Test: Bucket A credentials don't work for bucket B

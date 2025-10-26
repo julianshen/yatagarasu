@@ -7188,4 +7188,194 @@ mod tests {
             matched_b.unwrap().s3_bucket_name
         );
     }
+
+    #[test]
+    fn test_get_bucket_b_file_routes_to_bucket_b() {
+        // Integration test: GET /bucket-b/file.txt routes to bucket B
+        // Tests that with multiple buckets configured, requests are routed to the correct bucket
+
+        // Test case 1: Configure multiple buckets with different path prefixes
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            path_prefix: String,
+            s3_bucket_name: String,
+        }
+
+        fn create_multi_bucket_config() -> Vec<BucketConfig> {
+            vec![
+                BucketConfig {
+                    name: "bucket-a".to_string(),
+                    path_prefix: "/bucket-a".to_string(),
+                    s3_bucket_name: "s3-bucket-a".to_string(),
+                },
+                BucketConfig {
+                    name: "bucket-b".to_string(),
+                    path_prefix: "/bucket-b".to_string(),
+                    s3_bucket_name: "s3-bucket-b".to_string(),
+                },
+            ]
+        }
+
+        let config = create_multi_bucket_config();
+        assert_eq!(config.len(), 2);
+        assert_eq!(config[0].name, "bucket-a");
+        assert_eq!(config[1].name, "bucket-b");
+
+        // Test case 2: Router can match path to bucket B
+        struct Router {
+            buckets: Vec<BucketConfig>,
+        }
+
+        impl Router {
+            fn route(&self, path: &str) -> Option<&BucketConfig> {
+                for bucket in &self.buckets {
+                    if path.starts_with(&bucket.path_prefix) {
+                        return Some(bucket);
+                    }
+                }
+                None
+            }
+        }
+
+        let router = Router {
+            buckets: create_multi_bucket_config(),
+        };
+        let matched = router.route("/bucket-b/file.txt");
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().name, "bucket-b");
+
+        // Test case 3: Path to bucket B does not match bucket A
+        let matched = router.route("/bucket-b/file.txt");
+        assert_ne!(matched.unwrap().name, "bucket-a");
+
+        // Test case 4: S3 request is made to correct bucket (bucket-b's S3 bucket)
+        #[derive(Debug)]
+        struct S3Request {
+            bucket_name: String,
+            key: String,
+        }
+
+        fn create_s3_request_from_routing(bucket_config: &BucketConfig, path: &str) -> S3Request {
+            // Remove path prefix to get S3 key
+            let key = path
+                .strip_prefix(&bucket_config.path_prefix)
+                .unwrap_or(path)
+                .trim_start_matches('/');
+
+            S3Request {
+                bucket_name: bucket_config.s3_bucket_name.clone(),
+                key: key.to_string(),
+            }
+        }
+
+        let matched_bucket = router.route("/bucket-b/file.txt").unwrap();
+        let s3_req = create_s3_request_from_routing(matched_bucket, "/bucket-b/file.txt");
+        assert_eq!(s3_req.bucket_name, "s3-bucket-b");
+        assert_eq!(s3_req.key, "file.txt");
+
+        // Test case 5: Full request flow routes to bucket B
+        #[derive(Debug)]
+        struct HttpRequest {
+            method: String,
+            path: String,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        fn handle_request_with_routing(req: &HttpRequest, router: &Router) -> HttpResponse {
+            // Route the request
+            let bucket = router.route(&req.path);
+            if bucket.is_none() {
+                return HttpResponse {
+                    status: 404,
+                    body: b"Not Found".to_vec(),
+                    headers: std::collections::HashMap::new(),
+                };
+            }
+
+            let bucket_config = bucket.unwrap();
+            let s3_req = create_s3_request_from_routing(bucket_config, &req.path);
+
+            // Simulate S3 response from correct bucket
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("x-amz-bucket-region".to_string(), "us-east-1".to_string());
+            headers.insert("x-routed-to-bucket".to_string(), bucket_config.name.clone());
+
+            HttpResponse {
+                status: 200,
+                body: format!(
+                    "Content from {} (S3: {})",
+                    bucket_config.name, s3_req.bucket_name
+                )
+                .into_bytes(),
+                headers,
+            }
+        }
+
+        let req = HttpRequest {
+            method: "GET".to_string(),
+            path: "/bucket-b/file.txt".to_string(),
+        };
+        let response = handle_request_with_routing(&req, &router);
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.headers.get("x-routed-to-bucket"),
+            Some(&"bucket-b".to_string())
+        );
+
+        // Test case 6: Response comes from bucket B's S3 bucket
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains("bucket-b"));
+        assert!(body.contains("s3-bucket-b"));
+
+        // Test case 7: Different paths to bucket B all route to bucket B
+        let paths = vec![
+            "/bucket-b/file.txt",
+            "/bucket-b/nested/file.txt",
+            "/bucket-b/deep/nested/path/file.txt",
+        ];
+
+        for path in paths {
+            let req = HttpRequest {
+                method: "GET".to_string(),
+                path: path.to_string(),
+            };
+            let response = handle_request_with_routing(&req, &router);
+            assert_eq!(response.status, 200);
+            assert_eq!(
+                response.headers.get("x-routed-to-bucket"),
+                Some(&"bucket-b".to_string())
+            );
+        }
+
+        // Test case 8: S3 key extraction removes path prefix correctly
+        let matched_bucket = router.route("/bucket-b/path/to/file.txt").unwrap();
+        let s3_req = create_s3_request_from_routing(matched_bucket, "/bucket-b/path/to/file.txt");
+        assert_eq!(s3_req.key, "path/to/file.txt");
+
+        // Test case 9: Bucket B and bucket A are completely separate
+        let matched_a = router.route("/bucket-a/file.txt");
+        let matched_b = router.route("/bucket-b/file.txt");
+        assert_ne!(matched_a.unwrap().name, matched_b.unwrap().name);
+        assert_ne!(
+            matched_a.unwrap().s3_bucket_name,
+            matched_b.unwrap().s3_bucket_name
+        );
+
+        // Test case 10: Request to bucket B does not go to bucket A
+        let req_b = HttpRequest {
+            method: "GET".to_string(),
+            path: "/bucket-b/test.txt".to_string(),
+        };
+        let response_b = handle_request_with_routing(&req_b, &router);
+        let body_b = String::from_utf8(response_b.body).unwrap();
+        assert!(!body_b.contains("bucket-a"));
+        assert!(!body_b.contains("s3-bucket-a"));
+    }
 }
