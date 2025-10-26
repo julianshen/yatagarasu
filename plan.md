@@ -342,7 +342,7 @@ yatagarasu/
 - [x] Test: Streams only requested bytes (not full file)
 - [x] Test: Returns 416 Range Not Satisfiable for out-of-bounds range
 - [x] Test: Handles If-Range conditional requests correctly
-- [ ] Test: Graceful fallback to 200 OK for invalid range syntax
+- [x] Test: Graceful fallback to 200 OK for invalid range syntax
 
 ### S3 Range Requests - Caching Behavior
 - [ ] Test: Range requests bypass cache (never cached)

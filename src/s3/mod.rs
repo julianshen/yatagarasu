@@ -5439,4 +5439,134 @@ mod tests {
             "bytes 0-999/5000"
         );
     }
+
+    #[test]
+    fn test_graceful_fallback_to_200_ok_for_invalid_range_syntax() {
+        use std::collections::HashMap;
+
+        // Per RFC 7233, when a Range header has invalid syntax,
+        // the server SHOULD ignore it and return 200 OK with full content
+        // This is more user-friendly than returning 400 Bad Request
+
+        // Test case 1: Invalid range syntax with letters
+        // Request: Range: bytes=abc-def
+        // Expected: 200 OK with full content (ignore invalid range)
+        let mut headers_invalid_letters = HashMap::new();
+        headers_invalid_letters.insert("content-type".to_string(), "text/plain".to_string());
+        headers_invalid_letters.insert("content-length".to_string(), "5000".to_string());
+        headers_invalid_letters.insert("etag".to_string(), "\"abc123\"".to_string());
+        // No Content-Range header since we're serving full content
+
+        let full_body = vec![1u8; 5000];
+        let response_invalid_letters =
+            S3Response::new(200, "OK", headers_invalid_letters, full_body);
+
+        assert_eq!(response_invalid_letters.status_code, 200);
+        assert_eq!(response_invalid_letters.status_text, "OK");
+        assert_eq!(response_invalid_letters.body.len(), 5000);
+        assert_eq!(
+            response_invalid_letters
+                .headers
+                .get("content-length")
+                .unwrap(),
+            "5000"
+        );
+        assert!(
+            response_invalid_letters
+                .headers
+                .get("content-range")
+                .is_none(),
+            "Invalid range should fall back to 200 OK without Content-Range header"
+        );
+
+        // Test case 2: Completely malformed Range header
+        // Request: Range: invalid-header-value
+        // Expected: 200 OK with full content
+        let mut headers_malformed = HashMap::new();
+        headers_malformed.insert("content-type".to_string(), "application/json".to_string());
+        headers_malformed.insert("content-length".to_string(), "1024".to_string());
+
+        let response_malformed = S3Response::new(200, "OK", headers_malformed, vec![2u8; 1024]);
+
+        assert_eq!(response_malformed.status_code, 200);
+        assert_eq!(response_malformed.body.len(), 1024);
+        assert!(
+            response_malformed.headers.get("content-range").is_none(),
+            "Malformed range should fall back to 200 OK"
+        );
+
+        // Test case 3: Range header with no equals sign
+        // Request: Range: bytes
+        // Expected: 200 OK with full content
+        let mut headers_no_equals = HashMap::new();
+        headers_no_equals.insert("content-type".to_string(), "image/png".to_string());
+        headers_no_equals.insert("content-length".to_string(), "2048".to_string());
+
+        let response_no_equals = S3Response::new(200, "OK", headers_no_equals, vec![3u8; 2048]);
+
+        assert_eq!(response_no_equals.status_code, 200);
+        assert_eq!(response_no_equals.body.len(), 2048);
+        assert!(
+            response_no_equals.headers.get("content-range").is_none(),
+            "Range without equals should fall back to 200 OK"
+        );
+
+        // Test case 4: Verify this is DIFFERENT from 416 Range Not Satisfiable
+        // 416 is for VALID range syntax that's out of bounds
+        // 200 fallback is for INVALID range syntax
+        let mut headers_416 = HashMap::new();
+        headers_416.insert("content-range".to_string(), "bytes */5000".to_string());
+
+        let response_416 = S3Response::new(416, "Range Not Satisfiable", headers_416, vec![]);
+
+        // Invalid syntax → 200 OK with full body
+        // Valid but out of bounds → 416 with no body (or error body)
+        assert_ne!(
+            response_invalid_letters.status_code, response_416.status_code,
+            "Invalid syntax (200) is different from out-of-bounds (416)"
+        );
+        assert!(
+            response_invalid_letters.body.len() > response_416.body.len(),
+            "200 fallback includes full content, 416 has empty/error body"
+        );
+
+        // Test case 5: Verify Accept-Ranges header is still included
+        // Even when falling back to 200 OK, server should indicate it supports ranges
+        let mut headers_with_accept = HashMap::new();
+        headers_with_accept.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_with_accept.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_with_accept.insert("content-length".to_string(), "10000".to_string());
+
+        let response_with_accept =
+            S3Response::new(200, "OK", headers_with_accept, vec![4u8; 10000]);
+
+        assert_eq!(response_with_accept.status_code, 200);
+        assert_eq!(
+            response_with_accept.headers.get("accept-ranges").unwrap(),
+            "bytes"
+        );
+        assert!(
+            response_with_accept.headers.get("content-range").is_none(),
+            "200 OK doesn't include Content-Range even with Accept-Ranges"
+        );
+
+        // Test case 6: Multiple invalid ranges (e.g., "bytes=abc-def,xyz-123")
+        // Should also fall back to 200 OK
+        let mut headers_multiple_invalid = HashMap::new();
+        headers_multiple_invalid.insert("content-type".to_string(), "text/html".to_string());
+        headers_multiple_invalid.insert("content-length".to_string(), "3000".to_string());
+
+        let response_multiple_invalid =
+            S3Response::new(200, "OK", headers_multiple_invalid, vec![5u8; 3000]);
+
+        assert_eq!(response_multiple_invalid.status_code, 200);
+        assert_eq!(response_multiple_invalid.body.len(), 3000);
+        assert!(
+            response_multiple_invalid
+                .headers
+                .get("content-range")
+                .is_none(),
+            "Multiple invalid ranges should fall back to 200 OK"
+        );
+    }
 }
