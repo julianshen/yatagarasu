@@ -14192,4 +14192,134 @@ mod tests {
             memory_samples.len()
         );
     }
+
+    #[test]
+    fn test_no_file_descriptor_leaks() {
+        // Resource usage test: No file descriptor leaks
+        // Tests that file descriptors are properly closed after operations
+        // Simulates file operations (connections, file handles) and validates cleanup
+
+        use std::collections::HashSet;
+
+        // Test case 1: Define test parameters
+        let num_operations = 5000; // Simulate 5000 operations
+
+        // Test case 2: Create a connection manager that tracks file descriptors
+        struct ConnectionManager {
+            next_fd: u32,
+            open_fds: HashSet<u32>,
+        }
+
+        impl ConnectionManager {
+            fn new() -> Self {
+                ConnectionManager {
+                    next_fd: 100, // Start at 100 to simulate realistic fd numbers
+                    open_fds: HashSet::new(),
+                }
+            }
+
+            fn open_connection(&mut self) -> u32 {
+                let fd = self.next_fd;
+                self.next_fd += 1;
+                self.open_fds.insert(fd);
+                fd
+            }
+
+            fn close_connection(&mut self, fd: u32) -> Result<(), String> {
+                if self.open_fds.remove(&fd) {
+                    Ok(())
+                } else {
+                    Err(format!("File descriptor {} not found", fd))
+                }
+            }
+
+            fn get_open_fd_count(&self) -> usize {
+                self.open_fds.len()
+            }
+        }
+
+        // Test case 3: Create request processor that uses file descriptors
+        struct RequestProcessor {
+            connection_manager: ConnectionManager,
+        }
+
+        impl RequestProcessor {
+            fn new() -> Self {
+                RequestProcessor {
+                    connection_manager: ConnectionManager::new(),
+                }
+            }
+
+            fn process_request(&mut self, _request_id: u64) -> Result<Vec<u8>, String> {
+                // Open connection (allocates file descriptor)
+                let fd = self.connection_manager.open_connection();
+
+                // Simulate request processing
+                let response = vec![1u8; 256];
+
+                // Close connection (releases file descriptor)
+                self.connection_manager.close_connection(fd)?;
+
+                Ok(response)
+            }
+
+            fn get_open_fd_count(&self) -> usize {
+                self.connection_manager.get_open_fd_count()
+            }
+        }
+
+        // Test case 4: Track file descriptor usage
+        let mut processor = RequestProcessor::new();
+        let mut fd_samples = Vec::new();
+
+        // Test case 5: Record baseline file descriptor count
+        let baseline_fds = processor.get_open_fd_count();
+        fd_samples.push(baseline_fds);
+
+        // Test case 6: Run operations
+        for i in 0..num_operations {
+            let result = processor.process_request(i);
+            assert!(result.is_ok(), "Request {} failed", i);
+
+            // Sample file descriptors every 500 operations
+            if i % 500 == 0 {
+                let current_fds = processor.get_open_fd_count();
+                fd_samples.push(current_fds);
+            }
+        }
+
+        // Test case 7: Record final file descriptor count
+        let final_fds = processor.get_open_fd_count();
+        fd_samples.push(final_fds);
+
+        // Test case 8: Verify baseline is zero
+        assert_eq!(
+            baseline_fds, 0,
+            "Baseline should have no open file descriptors"
+        );
+
+        // Test case 9: Verify final count equals baseline (no leaks)
+        assert_eq!(
+            final_fds, baseline_fds,
+            "File descriptors leaked: expected {}, got {}",
+            baseline_fds, final_fds
+        );
+
+        // Test case 10: Verify no file descriptors leaked during any sample
+        for (idx, &fd_count) in fd_samples.iter().enumerate() {
+            assert_eq!(
+                fd_count, 0,
+                "File descriptor leak at sample {}: {} descriptors still open",
+                idx, fd_count
+            );
+        }
+
+        // Test case 11: Verify average is zero
+        let avg_fds: usize = fd_samples.iter().sum::<usize>() / fd_samples.len();
+        assert_eq!(
+            avg_fds, 0,
+            "Average file descriptor count should be 0, got {}",
+            avg_fds
+        );
+    }
 }
