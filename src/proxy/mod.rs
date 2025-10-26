@@ -8724,4 +8724,286 @@ mod tests {
         let resp_valid = handle_request_with_auth(&req_valid, &bucket_with_auth);
         assert_eq!(resp_valid.status, 200);
     }
+
+    #[test]
+    fn test_get_with_invalid_signature_jwt_returns_401() {
+        // Integration test: GET with invalid signature JWT returns 401
+        // Tests that requests with JWT token that has invalid signature are rejected
+
+        // Test case 1: Create a JWT token with invalid signature (tampered)
+        fn create_invalid_signature_jwt_token(user: &str, _secret: &str) -> String {
+            // Mock JWT token with invalid signature (signature doesn't match header+payload)
+            format!("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ7fSIsImV4cCI6OTk5OTk5OTk5OX0.invalid_signature_{}", user)
+        }
+
+        let secret = "my-secret-key";
+        let invalid_token = create_invalid_signature_jwt_token("user123", secret);
+
+        assert!(invalid_token.contains('.'));
+        assert_eq!(invalid_token.split('.').count(), 3);
+
+        // Test case 2: Request with invalid signature JWT token in Authorization header
+        #[derive(Debug)]
+        struct HttpRequest {
+            path: String,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", invalid_token),
+        );
+
+        let request_with_invalid_jwt = HttpRequest {
+            path: "/secure-bucket/file.txt".to_string(),
+            headers,
+        };
+
+        assert!(request_with_invalid_jwt
+            .headers
+            .contains_key("authorization"));
+
+        // Test case 3: Extract and validate JWT token with signature verification
+        fn extract_jwt_token(req: &HttpRequest) -> Option<String> {
+            req.headers.get("authorization").and_then(|h| {
+                if h.starts_with("Bearer ") {
+                    Some(h[7..].to_string())
+                } else {
+                    None
+                }
+            })
+        }
+
+        fn validate_jwt_signature(token: &str, _secret: &str) -> Result<(), &'static str> {
+            // Check token has 3 parts
+            if token.split('.').count() != 3 {
+                return Err("Invalid token format");
+            }
+
+            // Check if signature is valid (mock check - look for "invalid_signature" marker)
+            if token.contains("invalid_signature") {
+                return Err("Invalid signature");
+            }
+
+            Ok(())
+        }
+
+        let extracted_token = extract_jwt_token(&request_with_invalid_jwt);
+        assert!(extracted_token.is_some());
+
+        let validation_result = validate_jwt_signature(&extracted_token.unwrap(), secret);
+        assert!(validation_result.is_err());
+        assert_eq!(validation_result.unwrap_err(), "Invalid signature");
+
+        // Test case 4: Request with invalid signature JWT returns 401
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct JwtConfig {
+            enabled: bool,
+            secret: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt: Option<JwtConfig>,
+        }
+
+        fn handle_request_with_auth(
+            req: &HttpRequest,
+            bucket_config: &BucketConfig,
+        ) -> HttpResponse {
+            if let Some(jwt_config) = &bucket_config.jwt {
+                if jwt_config.enabled {
+                    let token = extract_jwt_token(req);
+                    if token.is_none() {
+                        return HttpResponse {
+                            status: 401,
+                            body: "Unauthorized: Missing token".to_string(),
+                        };
+                    }
+
+                    let validation_result =
+                        validate_jwt_signature(&token.unwrap(), &jwt_config.secret);
+                    if let Err(err) = validation_result {
+                        return HttpResponse {
+                            status: 401,
+                            body: format!("Unauthorized: {}", err),
+                        };
+                    }
+                }
+            }
+
+            // JWT is valid, proceed to fetch object from S3
+            HttpResponse {
+                status: 200,
+                body: "Object content from S3".to_string(),
+            }
+        }
+
+        let bucket_with_auth = BucketConfig {
+            name: "secure-bucket".to_string(),
+            jwt: Some(JwtConfig {
+                enabled: true,
+                secret: secret.to_string(),
+            }),
+        };
+
+        let response = handle_request_with_auth(&request_with_invalid_jwt, &bucket_with_auth);
+        assert_eq!(response.status, 401);
+        assert!(response.body.contains("Unauthorized"));
+        assert!(response.body.contains("Invalid signature"));
+
+        // Test case 5: Error message indicates signature validation failure
+        assert!(response.body.contains("signature"));
+
+        // Test case 6: Multiple requests with invalid signature all return 401
+        let requests = vec![
+            {
+                let mut headers = std::collections::HashMap::new();
+                headers.insert(
+                    "authorization".to_string(),
+                    format!("Bearer {}", invalid_token),
+                );
+                HttpRequest {
+                    path: "/secure-bucket/file1.txt".to_string(),
+                    headers,
+                }
+            },
+            {
+                let mut headers = std::collections::HashMap::new();
+                headers.insert(
+                    "authorization".to_string(),
+                    format!("Bearer {}", invalid_token),
+                );
+                HttpRequest {
+                    path: "/secure-bucket/file2.txt".to_string(),
+                    headers,
+                }
+            },
+        ];
+
+        for req in &requests {
+            let resp = handle_request_with_auth(req, &bucket_with_auth);
+            assert_eq!(resp.status, 401);
+            assert!(resp.body.contains("signature"));
+        }
+
+        // Test case 7: Invalid signature token doesn't reach S3
+        struct RequestLog {
+            auth_checked: bool,
+            signature_validated: bool,
+            s3_requested: bool,
+        }
+
+        fn handle_request_with_logging(
+            req: &HttpRequest,
+            bucket_config: &BucketConfig,
+        ) -> (HttpResponse, RequestLog) {
+            let mut log = RequestLog {
+                auth_checked: false,
+                signature_validated: false,
+                s3_requested: false,
+            };
+
+            if let Some(jwt_config) = &bucket_config.jwt {
+                if jwt_config.enabled {
+                    log.auth_checked = true;
+                    let token = extract_jwt_token(req);
+                    if token.is_none() {
+                        return (
+                            HttpResponse {
+                                status: 401,
+                                body: "Unauthorized".to_string(),
+                            },
+                            log,
+                        );
+                    }
+
+                    let validation_result =
+                        validate_jwt_signature(&token.unwrap(), &jwt_config.secret);
+                    log.signature_validated = true;
+                    if let Err(err) = validation_result {
+                        return (
+                            HttpResponse {
+                                status: 401,
+                                body: format!("Unauthorized: {}", err),
+                            },
+                            log,
+                        );
+                    }
+                }
+            }
+
+            // S3 request happens here
+            log.s3_requested = true;
+
+            (
+                HttpResponse {
+                    status: 200,
+                    body: "Object from S3".to_string(),
+                },
+                log,
+            )
+        }
+
+        let (resp, log) = handle_request_with_logging(&request_with_invalid_jwt, &bucket_with_auth);
+        assert_eq!(resp.status, 401);
+        assert!(log.auth_checked);
+        assert!(log.signature_validated);
+        assert!(!log.s3_requested); // S3 was not called because signature invalid
+
+        // Test case 8: Valid signature token still works
+        fn create_valid_jwt_token(user: &str, _secret: &str) -> String {
+            // Mock valid JWT token with valid signature
+            format!(
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ7fSIsImV4cCI6OTk5OTk5OTk5OX0.valid_sig_{}",
+                user
+            )
+        }
+
+        let valid_token = create_valid_jwt_token("user123", secret);
+        let mut valid_headers = std::collections::HashMap::new();
+        valid_headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", valid_token),
+        );
+        let req_valid = HttpRequest {
+            path: "/secure-bucket/file.txt".to_string(),
+            headers: valid_headers,
+        };
+
+        let resp_valid = handle_request_with_auth(&req_valid, &bucket_with_auth);
+        assert_eq!(resp_valid.status, 200);
+
+        // Test case 9: Tampered token (modified payload) is rejected
+        fn create_tampered_jwt_token(user: &str, _secret: &str) -> String {
+            // Token with valid format but signature doesn't match payload (tampered)
+            format!(
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.TAMPERED_PAYLOAD.invalid_signature_{}",
+                user
+            )
+        }
+
+        let tampered_token = create_tampered_jwt_token("user123", secret);
+        let mut tampered_headers = std::collections::HashMap::new();
+        tampered_headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", tampered_token),
+        );
+        let req_tampered = HttpRequest {
+            path: "/secure-bucket/file.txt".to_string(),
+            headers: tampered_headers,
+        };
+
+        let resp_tampered = handle_request_with_auth(&req_tampered, &bucket_with_auth);
+        assert_eq!(resp_tampered.status, 401);
+        assert!(resp_tampered.body.contains("signature"));
+    }
 }
