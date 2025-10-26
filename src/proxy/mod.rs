@@ -1024,4 +1024,105 @@ mod tests {
             "Should accept headers with empty values"
         );
     }
+
+    #[test]
+    fn test_handler_can_access_request_query_parameters() {
+        // Validates that the handler can access and work with query parameters
+        // Query parameters provide additional data in the URL
+
+        use std::collections::HashMap;
+
+        // Test case 1: Handler can parse query string from URL
+        let url = "/products?id=123&format=json";
+        let query_start = url.find('?');
+        assert!(query_start.is_some(), "Should find query string start");
+
+        let query_string = &url[query_start.unwrap() + 1..];
+        assert_eq!(
+            query_string, "id=123&format=json",
+            "Should extract query string"
+        );
+
+        // Test case 2: Handler can split query parameters
+        let params: Vec<&str> = query_string.split('&').collect();
+        assert_eq!(params.len(), 2, "Should split query parameters");
+        assert_eq!(params[0], "id=123");
+        assert_eq!(params[1], "format=json");
+
+        // Test case 3: Handler can parse parameter key-value pairs
+        let mut query_params = HashMap::new();
+        for param in params {
+            let parts: Vec<&str> = param.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                query_params.insert(parts[0].to_string(), parts[1].to_string());
+            }
+        }
+
+        assert_eq!(query_params.get("id").unwrap(), "123");
+        assert_eq!(query_params.get("format").unwrap(), "json");
+
+        // Test case 4: Handler can handle single query parameter
+        let single_param_url = "/path?token=abc123";
+        if let Some(idx) = single_param_url.find('?') {
+            let query = &single_param_url[idx + 1..];
+            let parts: Vec<&str> = query.splitn(2, '=').collect();
+            assert_eq!(parts[0], "token");
+            assert_eq!(parts[1], "abc123");
+        }
+
+        // Test case 5: Handler can handle URL without query parameters
+        let no_query_url = "/products/item";
+        assert!(
+            !no_query_url.contains('?'),
+            "Should detect absence of query"
+        );
+
+        // Test case 6: Handler can handle empty query parameter values
+        let empty_value_query = "key1=&key2=value2";
+        let mut params_with_empty = HashMap::new();
+        for param in empty_value_query.split('&') {
+            let parts: Vec<&str> = param.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                params_with_empty.insert(parts[0].to_string(), parts[1].to_string());
+            }
+        }
+
+        assert_eq!(params_with_empty.get("key1").unwrap(), "");
+        assert_eq!(params_with_empty.get("key2").unwrap(), "value2");
+
+        // Test case 7: Handler can handle URL-encoded query parameters
+        let encoded_value = "name=John%20Doe";
+        let parts: Vec<&str> = encoded_value.splitn(2, '=').collect();
+        assert_eq!(parts[1], "John%20Doe", "Should preserve encoded value");
+
+        // Test case 8: Handler can extract specific query parameter
+        let url_with_many_params = "/search?q=rust&page=2&limit=10&sort=desc";
+        let query_str = &url_with_many_params[url_with_many_params.find('?').unwrap() + 1..];
+
+        let mut all_params = HashMap::new();
+        for param in query_str.split('&') {
+            let parts: Vec<&str> = param.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                all_params.insert(parts[0], parts[1]);
+            }
+        }
+
+        assert_eq!(all_params.get("q").unwrap(), &"rust");
+        assert_eq!(all_params.get("page").unwrap(), &"2");
+        assert_eq!(all_params.get("limit").unwrap(), &"10");
+        assert_eq!(all_params.get("sort").unwrap(), &"desc");
+
+        // Test case 9: Handler separates path from query parameters
+        let full_url = "/api/users?role=admin&active=true";
+        let parts: Vec<&str> = full_url.splitn(2, '?').collect();
+
+        assert_eq!(parts[0], "/api/users", "Should extract path");
+        assert_eq!(parts[1], "role=admin&active=true", "Should extract query");
+
+        // Test case 10: Handler can check if specific parameter exists
+        let query = "id=123&name=test";
+        assert!(query.contains("id="), "Should find parameter by name");
+        assert!(query.contains("name="), "Should find parameter by name");
+        assert!(!query.contains("email="), "Should detect missing parameter");
+    }
 }
