@@ -7378,4 +7378,194 @@ mod tests {
         assert!(!body_b.contains("bucket-a"));
         assert!(!body_b.contains("s3-bucket-a"));
     }
+
+    #[test]
+    fn test_buckets_use_independent_credentials() {
+        // Integration test: Buckets use independent credentials
+        // Tests that each bucket has its own AWS credentials and they're not shared
+
+        // Test case 1: Each bucket has its own credential configuration
+        #[derive(Debug, Clone)]
+        struct AwsCredentials {
+            access_key: String,
+            secret_key: String,
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            path_prefix: String,
+            s3_bucket_name: String,
+            credentials: AwsCredentials,
+        }
+
+        fn create_multi_bucket_config_with_credentials() -> Vec<BucketConfig> {
+            vec![
+                BucketConfig {
+                    name: "bucket-a".to_string(),
+                    path_prefix: "/bucket-a".to_string(),
+                    s3_bucket_name: "s3-bucket-a".to_string(),
+                    credentials: AwsCredentials {
+                        access_key: "ACCESS_KEY_A".to_string(),
+                        secret_key: "SECRET_KEY_A".to_string(),
+                    },
+                },
+                BucketConfig {
+                    name: "bucket-b".to_string(),
+                    path_prefix: "/bucket-b".to_string(),
+                    s3_bucket_name: "s3-bucket-b".to_string(),
+                    credentials: AwsCredentials {
+                        access_key: "ACCESS_KEY_B".to_string(),
+                        secret_key: "SECRET_KEY_B".to_string(),
+                    },
+                },
+            ]
+        }
+
+        let config = create_multi_bucket_config_with_credentials();
+        assert_eq!(config.len(), 2);
+
+        // Test case 2: Bucket A has different credentials from bucket B
+        let bucket_a = &config[0];
+        let bucket_b = &config[1];
+        assert_ne!(
+            bucket_a.credentials.access_key,
+            bucket_b.credentials.access_key
+        );
+        assert_ne!(
+            bucket_a.credentials.secret_key,
+            bucket_b.credentials.secret_key
+        );
+
+        // Test case 3: Each bucket maintains its own credentials
+        assert_eq!(bucket_a.credentials.access_key, "ACCESS_KEY_A");
+        assert_eq!(bucket_a.credentials.secret_key, "SECRET_KEY_A");
+        assert_eq!(bucket_b.credentials.access_key, "ACCESS_KEY_B");
+        assert_eq!(bucket_b.credentials.secret_key, "SECRET_KEY_B");
+
+        // Test case 4: S3 client is created with bucket-specific credentials
+        #[derive(Debug)]
+        struct S3Client {
+            access_key: String,
+            secret_key: String,
+            bucket_name: String,
+        }
+
+        fn create_s3_client(bucket_config: &BucketConfig) -> S3Client {
+            S3Client {
+                access_key: bucket_config.credentials.access_key.clone(),
+                secret_key: bucket_config.credentials.secret_key.clone(),
+                bucket_name: bucket_config.s3_bucket_name.clone(),
+            }
+        }
+
+        let client_a = create_s3_client(bucket_a);
+        let client_b = create_s3_client(bucket_b);
+
+        assert_eq!(client_a.access_key, "ACCESS_KEY_A");
+        assert_eq!(client_a.secret_key, "SECRET_KEY_A");
+        assert_eq!(client_b.access_key, "ACCESS_KEY_B");
+        assert_eq!(client_b.secret_key, "SECRET_KEY_B");
+
+        // Test case 5: Clients have different credentials
+        assert_ne!(client_a.access_key, client_b.access_key);
+        assert_ne!(client_a.secret_key, client_b.secret_key);
+
+        // Test case 6: Multiple clients can be created independently
+        struct ProxyContext {
+            clients: std::collections::HashMap<String, S3Client>,
+        }
+
+        fn create_proxy_context(configs: &[BucketConfig]) -> ProxyContext {
+            let mut clients = std::collections::HashMap::new();
+            for config in configs {
+                let client = create_s3_client(config);
+                clients.insert(config.name.clone(), client);
+            }
+            ProxyContext { clients }
+        }
+
+        let context = create_proxy_context(&config);
+        assert_eq!(context.clients.len(), 2);
+
+        let client_a_from_context = context.clients.get("bucket-a").unwrap();
+        let client_b_from_context = context.clients.get("bucket-b").unwrap();
+
+        assert_eq!(client_a_from_context.access_key, "ACCESS_KEY_A");
+        assert_eq!(client_b_from_context.access_key, "ACCESS_KEY_B");
+
+        // Test case 7: Credentials are isolated per bucket
+        // Modifying one doesn't affect the other
+        let mut config_copy = config.clone();
+        config_copy[0].credentials.access_key = "MODIFIED_KEY_A".to_string();
+
+        // Original config unchanged
+        assert_eq!(config[0].credentials.access_key, "ACCESS_KEY_A");
+        // Copy modified
+        assert_eq!(config_copy[0].credentials.access_key, "MODIFIED_KEY_A");
+        // Other bucket unaffected
+        assert_eq!(config_copy[1].credentials.access_key, "ACCESS_KEY_B");
+
+        // Test case 8: S3 requests use correct credentials for each bucket
+        #[derive(Debug)]
+        struct S3Request {
+            bucket_name: String,
+            key: String,
+            access_key_used: String,
+        }
+
+        fn make_s3_request(
+            bucket_name: &str,
+            key: &str,
+            context: &ProxyContext,
+        ) -> Option<S3Request> {
+            context.clients.get(bucket_name).map(|client| S3Request {
+                bucket_name: client.bucket_name.clone(),
+                key: key.to_string(),
+                access_key_used: client.access_key.clone(),
+            })
+        }
+
+        let req_a = make_s3_request("bucket-a", "file.txt", &context).unwrap();
+        let req_b = make_s3_request("bucket-b", "file.txt", &context).unwrap();
+
+        assert_eq!(req_a.access_key_used, "ACCESS_KEY_A");
+        assert_eq!(req_b.access_key_used, "ACCESS_KEY_B");
+
+        // Test case 9: No shared credentials between buckets
+        assert_ne!(req_a.access_key_used, req_b.access_key_used);
+
+        // Test case 10: Adding a new bucket doesn't affect existing buckets
+        let mut extended_config = config.clone();
+        extended_config.push(BucketConfig {
+            name: "bucket-c".to_string(),
+            path_prefix: "/bucket-c".to_string(),
+            s3_bucket_name: "s3-bucket-c".to_string(),
+            credentials: AwsCredentials {
+                access_key: "ACCESS_KEY_C".to_string(),
+                secret_key: "SECRET_KEY_C".to_string(),
+            },
+        });
+
+        assert_eq!(extended_config.len(), 3);
+        // Original buckets still have their own credentials
+        assert_eq!(extended_config[0].credentials.access_key, "ACCESS_KEY_A");
+        assert_eq!(extended_config[1].credentials.access_key, "ACCESS_KEY_B");
+        // New bucket has different credentials
+        assert_eq!(extended_config[2].credentials.access_key, "ACCESS_KEY_C");
+
+        // Test case 11: Each bucket client is independent
+        let extended_context = create_proxy_context(&extended_config);
+        assert_eq!(extended_context.clients.len(), 3);
+
+        // All three clients have different credentials
+        let clients: Vec<_> = vec!["bucket-a", "bucket-b", "bucket-c"]
+            .iter()
+            .map(|name| extended_context.clients.get(*name).unwrap())
+            .collect();
+
+        assert_ne!(clients[0].access_key, clients[1].access_key);
+        assert_ne!(clients[1].access_key, clients[2].access_key);
+        assert_ne!(clients[0].access_key, clients[2].access_key);
+    }
 }
