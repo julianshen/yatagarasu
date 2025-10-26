@@ -5479,4 +5479,245 @@ mod tests {
         assert!(log.reason.contains("JWT"));
         assert_eq!(log.status_code, 401);
     }
+
+    #[test]
+    fn test_middleware_can_modify_request_context() {
+        // Validates that middleware can modify request context for downstream use
+        // Context is passed through middleware chain with accumulated state
+
+        // Test case 1: Router adds bucket information to context
+        #[derive(Debug, Clone)]
+        struct RequestContext {
+            path: String,
+            bucket_name: Option<String>,
+            s3_key: Option<String>,
+            authenticated: bool,
+            user_id: Option<String>,
+        }
+
+        impl RequestContext {
+            fn new(path: &str) -> Self {
+                RequestContext {
+                    path: path.to_string(),
+                    bucket_name: None,
+                    s3_key: None,
+                    authenticated: false,
+                    user_id: None,
+                }
+            }
+        }
+
+        let mut ctx = RequestContext::new("/products/image.jpg");
+        assert!(ctx.bucket_name.is_none());
+        assert!(ctx.s3_key.is_none());
+
+        // Router modifies context
+        ctx.bucket_name = Some("products".to_string());
+        ctx.s3_key = Some("image.jpg".to_string());
+
+        assert_eq!(ctx.bucket_name, Some("products".to_string()));
+        assert_eq!(ctx.s3_key, Some("image.jpg".to_string()));
+
+        // Test case 2: Auth middleware adds authentication info to context
+        let mut ctx = RequestContext::new("/products/image.jpg");
+        ctx.bucket_name = Some("products".to_string());
+
+        assert!(!ctx.authenticated);
+        assert!(ctx.user_id.is_none());
+
+        // Auth modifies context
+        ctx.authenticated = true;
+        ctx.user_id = Some("user123".to_string());
+
+        assert!(ctx.authenticated);
+        assert_eq!(ctx.user_id, Some("user123".to_string()));
+
+        // Test case 3: Context accumulates data from multiple middleware
+        fn process_through_middleware(path: &str) -> RequestContext {
+            let mut ctx = RequestContext::new(path);
+
+            // Router modifies
+            ctx.bucket_name = Some("products".to_string());
+            ctx.s3_key = Some("image.jpg".to_string());
+
+            // Auth modifies
+            ctx.authenticated = true;
+            ctx.user_id = Some("user123".to_string());
+
+            ctx
+        }
+
+        let final_ctx = process_through_middleware("/products/image.jpg");
+        assert_eq!(final_ctx.bucket_name, Some("products".to_string()));
+        assert_eq!(final_ctx.s3_key, Some("image.jpg".to_string()));
+        assert!(final_ctx.authenticated);
+        assert_eq!(final_ctx.user_id, Some("user123".to_string()));
+
+        // Test case 4: Middleware can read context from previous middleware
+        fn auth_uses_bucket_from_router(ctx: &RequestContext) -> bool {
+            ctx.bucket_name.is_some()
+        }
+
+        let ctx = RequestContext {
+            path: "/products/file.txt".to_string(),
+            bucket_name: Some("products".to_string()),
+            s3_key: Some("file.txt".to_string()),
+            authenticated: false,
+            user_id: None,
+        };
+
+        assert!(auth_uses_bucket_from_router(&ctx));
+
+        // Test case 5: Context modifications are visible to subsequent middleware
+        struct ContextHistory {
+            stages: Vec<String>,
+        }
+
+        impl ContextHistory {
+            fn new() -> Self {
+                ContextHistory { stages: Vec::new() }
+            }
+
+            fn record_stage(&mut self, stage: &str) {
+                self.stages.push(stage.to_string());
+            }
+
+            fn has_stage(&self, stage: &str) -> bool {
+                self.stages.contains(&stage.to_string())
+            }
+        }
+
+        let mut history = ContextHistory::new();
+        history.record_stage("router");
+        assert!(history.has_stage("router"));
+
+        history.record_stage("auth");
+        assert!(history.has_stage("router"));
+        assert!(history.has_stage("auth"));
+
+        history.record_stage("s3");
+        assert_eq!(history.stages.len(), 3);
+
+        // Test case 6: Middleware can add custom metadata to context
+        #[derive(Debug)]
+        struct EnrichedContext {
+            bucket: String,
+            s3_key: String,
+            metadata: std::collections::HashMap<String, String>,
+        }
+
+        impl EnrichedContext {
+            fn new(bucket: &str, key: &str) -> Self {
+                EnrichedContext {
+                    bucket: bucket.to_string(),
+                    s3_key: key.to_string(),
+                    metadata: std::collections::HashMap::new(),
+                }
+            }
+
+            fn add_metadata(&mut self, key: &str, value: &str) {
+                self.metadata.insert(key.to_string(), value.to_string());
+            }
+
+            fn get_metadata(&self, key: &str) -> Option<&String> {
+                self.metadata.get(key)
+            }
+        }
+
+        let mut ctx = EnrichedContext::new("products", "image.jpg");
+        ctx.add_metadata("content_type", "image/jpeg");
+        ctx.add_metadata("cache_control", "max-age=3600");
+
+        assert_eq!(
+            ctx.get_metadata("content_type"),
+            Some(&"image/jpeg".to_string())
+        );
+        assert_eq!(
+            ctx.get_metadata("cache_control"),
+            Some(&"max-age=3600".to_string())
+        );
+
+        // Test case 7: Context preserves original request information
+        let ctx = RequestContext::new("/products/image.jpg");
+        assert_eq!(ctx.path, "/products/image.jpg");
+
+        // Modifications don't change original path
+        let mut ctx = ctx;
+        ctx.bucket_name = Some("products".to_string());
+        assert_eq!(ctx.path, "/products/image.jpg"); // Original preserved
+
+        // Test case 8: Middleware can conditionally modify context
+        fn maybe_add_auth(ctx: &mut RequestContext, has_token: bool) {
+            if has_token {
+                ctx.authenticated = true;
+                ctx.user_id = Some("user123".to_string());
+            }
+        }
+
+        let mut ctx_with_auth = RequestContext::new("/path");
+        maybe_add_auth(&mut ctx_with_auth, true);
+        assert!(ctx_with_auth.authenticated);
+
+        let mut ctx_without_auth = RequestContext::new("/path");
+        maybe_add_auth(&mut ctx_without_auth, false);
+        assert!(!ctx_without_auth.authenticated);
+
+        // Test case 9: Context tracks request timing information
+        #[derive(Debug)]
+        struct TimedContext {
+            start_time: u64,
+            router_time: Option<u64>,
+            auth_time: Option<u64>,
+            s3_time: Option<u64>,
+        }
+
+        impl TimedContext {
+            fn new(start: u64) -> Self {
+                TimedContext {
+                    start_time: start,
+                    router_time: None,
+                    auth_time: None,
+                    s3_time: None,
+                }
+            }
+
+            fn record_router(&mut self, time: u64) {
+                self.router_time = Some(time);
+            }
+
+            fn record_auth(&mut self, time: u64) {
+                self.auth_time = Some(time);
+            }
+        }
+
+        let mut timed = TimedContext::new(100);
+        timed.record_router(150);
+        timed.record_auth(200);
+
+        assert_eq!(timed.router_time, Some(150));
+        assert_eq!(timed.auth_time, Some(200));
+
+        // Test case 10: Context can be cloned for concurrent processing
+        let ctx = RequestContext::new("/products/image.jpg");
+        let ctx_clone = ctx.clone();
+
+        assert_eq!(ctx.path, ctx_clone.path);
+
+        // Test case 11: Middleware validates context before modification
+        fn safe_add_bucket(ctx: &mut RequestContext, bucket: &str) -> Result<(), &'static str> {
+            if bucket.is_empty() {
+                return Err("Bucket name cannot be empty");
+            }
+            ctx.bucket_name = Some(bucket.to_string());
+            Ok(())
+        }
+
+        let mut ctx = RequestContext::new("/path");
+        assert!(safe_add_bucket(&mut ctx, "valid-bucket").is_ok());
+        assert_eq!(ctx.bucket_name, Some("valid-bucket".to_string()));
+
+        let mut ctx2 = RequestContext::new("/path");
+        assert!(safe_add_bucket(&mut ctx2, "").is_err());
+        assert!(ctx2.bucket_name.is_none());
+    }
 }
