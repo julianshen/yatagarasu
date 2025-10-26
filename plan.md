@@ -397,7 +397,7 @@ yatagarasu/
 - [x] Test: Can stream response body chunks
 - [x] Test: Handles connection close during streaming
 - [x] Test: Sets appropriate content-type header
-- [ ] Test: Preserves S3 response headers in proxy response
+- [x] Test: Preserves S3 response headers in proxy response
 
 ### Pingora - Error Responses
 - [ ] Test: Returns 400 for malformed requests

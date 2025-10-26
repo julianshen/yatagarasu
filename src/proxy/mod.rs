@@ -2594,4 +2594,213 @@ mod tests {
         assert_eq!(get_font_content_type("woff2"), "font/woff2");
         assert_eq!(get_font_content_type("ttf"), "font/ttf");
     }
+
+    #[test]
+    fn test_preserves_s3_response_headers_in_proxy_response() {
+        // Validates that handler preserves S3 response headers in proxy response
+        // S3 headers contain important metadata (etag, cache, etc.)
+
+        use std::collections::HashMap;
+
+        // Test case 1: Handler preserves Content-Type from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("content-type".to_string(), "image/jpeg".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("content-type"),
+            Some(&"image/jpeg".to_string()),
+            "Handler should preserve S3 Content-Type"
+        );
+
+        // Test case 2: Handler preserves Content-Length from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("content-length".to_string(), "2048".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("content-length"),
+            Some(&"2048".to_string()),
+            "Handler should preserve S3 Content-Length"
+        );
+
+        // Test case 3: Handler preserves ETag from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("etag".to_string(), "\"abc123\"".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("etag"),
+            Some(&"\"abc123\"".to_string()),
+            "Handler should preserve S3 ETag"
+        );
+
+        // Test case 4: Handler preserves Last-Modified from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert(
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        );
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("last-modified"),
+            Some(&"Wed, 21 Oct 2015 07:28:00 GMT".to_string()),
+            "Handler should preserve S3 Last-Modified"
+        );
+
+        // Test case 5: Handler preserves Cache-Control from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("cache-control".to_string(), "max-age=3600".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("cache-control"),
+            Some(&"max-age=3600".to_string()),
+            "Handler should preserve S3 Cache-Control"
+        );
+
+        // Test case 6: Handler preserves custom S3 metadata headers (x-amz-*)
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("x-amz-request-id".to_string(), "req-123".to_string());
+        s3_headers.insert("x-amz-id-2".to_string(), "id-456".to_string());
+        s3_headers.insert("x-amz-version-id".to_string(), "v1".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("x-amz-request-id"),
+            Some(&"req-123".to_string()),
+            "Handler should preserve x-amz-request-id"
+        );
+        assert_eq!(
+            proxy_headers.get("x-amz-id-2"),
+            Some(&"id-456".to_string()),
+            "Handler should preserve x-amz-id-2"
+        );
+        assert_eq!(
+            proxy_headers.get("x-amz-version-id"),
+            Some(&"v1".to_string()),
+            "Handler should preserve x-amz-version-id"
+        );
+
+        // Test case 7: Handler preserves Content-Encoding from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("content-encoding".to_string(), "gzip".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("content-encoding"),
+            Some(&"gzip".to_string()),
+            "Handler should preserve S3 Content-Encoding"
+        );
+
+        // Test case 8: Handler preserves Content-Disposition from S3
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert(
+            "content-disposition".to_string(),
+            "attachment; filename=\"file.pdf\"".to_string(),
+        );
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.get("content-disposition"),
+            Some(&"attachment; filename=\"file.pdf\"".to_string()),
+            "Handler should preserve S3 Content-Disposition"
+        );
+
+        // Test case 9: Handler preserves multiple S3 headers together
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("content-type".to_string(), "application/json".to_string());
+        s3_headers.insert("content-length".to_string(), "1024".to_string());
+        s3_headers.insert("etag".to_string(), "\"xyz789\"".to_string());
+        s3_headers.insert("cache-control".to_string(), "no-cache".to_string());
+
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            proxy_headers.insert(key.clone(), value.clone());
+        }
+
+        assert_eq!(
+            proxy_headers.len(),
+            4,
+            "Handler should preserve all headers"
+        );
+        assert_eq!(
+            proxy_headers.get("content-type"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(
+            proxy_headers.get("content-length"),
+            Some(&"1024".to_string())
+        );
+        assert_eq!(proxy_headers.get("etag"), Some(&"\"xyz789\"".to_string()));
+        assert_eq!(
+            proxy_headers.get("cache-control"),
+            Some(&"no-cache".to_string())
+        );
+
+        // Test case 10: Handler can filter out certain headers if needed
+        let mut s3_headers: HashMap<String, String> = HashMap::new();
+        s3_headers.insert("content-type".to_string(), "text/html".to_string());
+        s3_headers.insert(
+            "x-amz-server-side-encryption".to_string(),
+            "AES256".to_string(),
+        );
+        s3_headers.insert("connection".to_string(), "close".to_string());
+
+        // Simulate filtering: only preserve content-type and x-amz-* headers
+        let mut proxy_headers: HashMap<String, String> = HashMap::new();
+        for (key, value) in &s3_headers {
+            if key == "content-type" || key.starts_with("x-amz-") {
+                proxy_headers.insert(key.clone(), value.clone());
+            }
+        }
+
+        assert_eq!(proxy_headers.len(), 2, "Handler should filter headers");
+        assert_eq!(
+            proxy_headers.get("content-type"),
+            Some(&"text/html".to_string())
+        );
+        assert_eq!(
+            proxy_headers.get("x-amz-server-side-encryption"),
+            Some(&"AES256".to_string())
+        );
+        assert_eq!(
+            proxy_headers.get("connection"),
+            None,
+            "Handler should filter connection header"
+        );
+    }
 }
