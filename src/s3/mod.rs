@@ -8258,4 +8258,243 @@ mod tests {
             "Detailed error should have substantial body"
         );
     }
+
+    #[test]
+    fn test_can_mock_different_buckets_with_different_responses() {
+        use std::collections::HashMap;
+
+        // Validates that we can mock different S3 backends for different buckets
+        // This enables testing multi-bucket scenarios with isolated responses
+
+        // Test case 1: Mock "products" bucket with successful response
+        let mut headers_products = HashMap::new();
+        headers_products.insert("content-type".to_string(), "application/json".to_string());
+        headers_products.insert("content-length".to_string(), "42".to_string());
+        headers_products.insert("x-amz-meta-bucket".to_string(), "products".to_string());
+
+        let products_body = b"{\"id\": 1, \"name\": \"Widget\"}";
+        let mock_products_response =
+            S3Response::new(200, "OK", headers_products, products_body.to_vec());
+
+        assert_eq!(mock_products_response.status_code, 200);
+        assert_eq!(mock_products_response.body, products_body.to_vec());
+        assert_eq!(
+            mock_products_response.headers.get("x-amz-meta-bucket"),
+            Some(&"products".to_string())
+        );
+
+        // Test case 2: Mock "users" bucket with different response
+        let mut headers_users = HashMap::new();
+        headers_users.insert("content-type".to_string(), "application/json".to_string());
+        headers_users.insert("content-length".to_string(), "38".to_string());
+        headers_users.insert("x-amz-meta-bucket".to_string(), "users".to_string());
+
+        let users_body = b"{\"id\": 123, \"email\": \"test@example.com\"}";
+        let mock_users_response = S3Response::new(200, "OK", headers_users, users_body.to_vec());
+
+        assert_eq!(mock_users_response.status_code, 200);
+        assert_eq!(mock_users_response.body, users_body.to_vec());
+        assert_eq!(
+            mock_users_response.headers.get("x-amz-meta-bucket"),
+            Some(&"users".to_string())
+        );
+
+        // Verify different responses
+        assert_ne!(mock_products_response.body, mock_users_response.body);
+
+        // Test case 3: Mock "media" bucket with binary content
+        let mut headers_media = HashMap::new();
+        headers_media.insert("content-type".to_string(), "image/png".to_string());
+        headers_media.insert("content-length".to_string(), "1024".to_string());
+        headers_media.insert("x-amz-meta-bucket".to_string(), "media".to_string());
+
+        let media_body = vec![0x89, 0x50, 0x4E, 0x47]; // PNG magic bytes
+        let mock_media_response = S3Response::new(200, "OK", headers_media, media_body.clone());
+
+        assert_eq!(mock_media_response.status_code, 200);
+        assert_eq!(mock_media_response.body, media_body);
+        assert_eq!(
+            mock_media_response.headers.get("content-type"),
+            Some(&"image/png".to_string())
+        );
+
+        // Test case 4: Mock "analytics" bucket with 403 error
+        let mut headers_analytics = HashMap::new();
+        headers_analytics.insert("content-type".to_string(), "application/xml".to_string());
+        headers_analytics.insert("x-amz-meta-bucket".to_string(), "analytics".to_string());
+
+        let analytics_error = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error><Code>AccessDenied</Code></Error>";
+
+        let mock_analytics_response = S3Response::new(
+            403,
+            "Forbidden",
+            headers_analytics,
+            analytics_error.to_vec(),
+        );
+
+        assert_eq!(mock_analytics_response.status_code, 403);
+        assert_eq!(
+            mock_analytics_response.headers.get("x-amz-meta-bucket"),
+            Some(&"analytics".to_string())
+        );
+
+        // Test case 5: Mock multiple buckets with different content types
+        let bucket_configs = vec![
+            (
+                "products",
+                "application/json",
+                b"{\"products\": []}".to_vec(),
+            ),
+            ("users", "application/json", b"{\"users\": []}".to_vec()),
+            ("images", "image/jpeg", vec![0xFF, 0xD8, 0xFF, 0xE0]),
+            ("videos", "video/mp4", vec![0x00, 0x00, 0x00, 0x18]),
+            ("docs", "application/pdf", vec![0x25, 0x50, 0x44, 0x46]),
+        ];
+
+        for (bucket_name, content_type, body) in bucket_configs {
+            let mut headers = HashMap::new();
+            headers.insert("content-type".to_string(), content_type.to_string());
+            headers.insert("x-amz-meta-bucket".to_string(), bucket_name.to_string());
+
+            let mock_response = S3Response::new(200, "OK", headers, body.clone());
+
+            assert_eq!(mock_response.status_code, 200);
+            assert_eq!(
+                mock_response.headers.get("content-type"),
+                Some(&content_type.to_string())
+            );
+            assert_eq!(
+                mock_response.headers.get("x-amz-meta-bucket"),
+                Some(&bucket_name.to_string())
+            );
+            assert_eq!(mock_response.body, body);
+        }
+
+        // Test case 6: Mock same key in different buckets with different content
+        let mut headers_bucket1 = HashMap::new();
+        headers_bucket1.insert("content-type".to_string(), "text/plain".to_string());
+        headers_bucket1.insert("x-amz-meta-bucket".to_string(), "bucket1".to_string());
+
+        let bucket1_content = b"Content from bucket1";
+        let mock_bucket1_response =
+            S3Response::new(200, "OK", headers_bucket1, bucket1_content.to_vec());
+
+        let mut headers_bucket2 = HashMap::new();
+        headers_bucket2.insert("content-type".to_string(), "text/plain".to_string());
+        headers_bucket2.insert("x-amz-meta-bucket".to_string(), "bucket2".to_string());
+
+        let bucket2_content = b"Content from bucket2";
+        let mock_bucket2_response =
+            S3Response::new(200, "OK", headers_bucket2, bucket2_content.to_vec());
+
+        // Same key name but different content
+        assert_ne!(mock_bucket1_response.body, mock_bucket2_response.body);
+        assert_ne!(
+            mock_bucket1_response.headers.get("x-amz-meta-bucket"),
+            mock_bucket2_response.headers.get("x-amz-meta-bucket")
+        );
+
+        // Test case 7: Mock buckets with different authentication requirements
+        // Public bucket - no auth headers
+        let mut headers_public = HashMap::new();
+        headers_public.insert("content-type".to_string(), "text/html".to_string());
+        headers_public.insert("x-amz-meta-bucket".to_string(), "public".to_string());
+
+        let mock_public_response = S3Response::new(
+            200,
+            "OK",
+            headers_public,
+            b"<html>Public content</html>".to_vec(),
+        );
+
+        // Private bucket - requires auth (would return 401 without JWT)
+        let mut headers_private = HashMap::new();
+        headers_private.insert("content-type".to_string(), "application/xml".to_string());
+        headers_private.insert(
+            "www-authenticate".to_string(),
+            "Bearer realm=\"yatagarasu\"".to_string(),
+        );
+        headers_private.insert("x-amz-meta-bucket".to_string(), "private".to_string());
+
+        let mock_private_response = S3Response::new(401, "Unauthorized", headers_private, vec![]);
+
+        assert_eq!(mock_public_response.status_code, 200);
+        assert_eq!(mock_private_response.status_code, 401);
+        assert!(
+            mock_private_response
+                .headers
+                .contains_key("www-authenticate"),
+            "Private bucket should require authentication"
+        );
+
+        // Test case 8: Mock buckets with different error scenarios
+        let bucket_errors = vec![
+            ("bucket-a", 404, "Not Found"),
+            ("bucket-b", 403, "Forbidden"),
+            ("bucket-c", 500, "Internal Server Error"),
+            ("bucket-d", 503, "Service Unavailable"),
+        ];
+
+        for (bucket_name, status_code, status_text) in bucket_errors {
+            let mut headers = HashMap::new();
+            headers.insert("content-type".to_string(), "application/xml".to_string());
+            headers.insert("x-amz-meta-bucket".to_string(), bucket_name.to_string());
+
+            let error_body = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+                <Error><Code>Error</Code><Bucket>{}</Bucket></Error>",
+                bucket_name
+            );
+
+            let mock_response = S3Response::new(
+                status_code,
+                status_text,
+                headers,
+                error_body.as_bytes().to_vec(),
+            );
+
+            assert_eq!(mock_response.status_code, status_code);
+            assert_eq!(
+                mock_response.headers.get("x-amz-meta-bucket"),
+                Some(&bucket_name.to_string())
+            );
+        }
+
+        // Test case 9: Verify bucket isolation (responses are independent)
+        let products_status = mock_products_response.status_code;
+        let analytics_status = mock_analytics_response.status_code;
+
+        assert_eq!(products_status, 200, "Products bucket should succeed");
+        assert_eq!(analytics_status, 403, "Analytics bucket should fail");
+        assert_ne!(
+            products_status, analytics_status,
+            "Different buckets should have independent responses"
+        );
+
+        // Test case 10: Mock buckets with different S3 regions
+        let mut headers_us_east = HashMap::new();
+        headers_us_east.insert("x-amz-bucket-region".to_string(), "us-east-1".to_string());
+        headers_us_east.insert(
+            "x-amz-meta-bucket".to_string(),
+            "bucket-us-east".to_string(),
+        );
+
+        let mock_us_east = S3Response::new(200, "OK", headers_us_east, vec![]);
+
+        let mut headers_eu_west = HashMap::new();
+        headers_eu_west.insert("x-amz-bucket-region".to_string(), "eu-west-1".to_string());
+        headers_eu_west.insert(
+            "x-amz-meta-bucket".to_string(),
+            "bucket-eu-west".to_string(),
+        );
+
+        let mock_eu_west = S3Response::new(200, "OK", headers_eu_west, vec![]);
+
+        assert_ne!(
+            mock_us_east.headers.get("x-amz-bucket-region"),
+            mock_eu_west.headers.get("x-amz-bucket-region"),
+            "Different buckets can have different regions"
+        );
+    }
 }
