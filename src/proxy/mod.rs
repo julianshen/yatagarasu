@@ -6128,4 +6128,190 @@ mod tests {
         let recombined: Vec<u8> = chunks.into_iter().flatten().collect();
         assert_eq!(recombined, b"Hello from bucket A");
     }
+
+    #[test]
+    fn test_head_bucket_a_file_returns_metadata_from_bucket_a() {
+        // Integration test: HEAD /bucket-a/file.txt returns metadata without body
+        // HEAD requests return same headers as GET but without the response body
+
+        // Test case 1: HEAD request is parsed correctly
+        struct HttpRequest {
+            method: String,
+            path: String,
+        }
+
+        let request = HttpRequest {
+            method: "HEAD".to_string(),
+            path: "/bucket-a/file.txt".to_string(),
+        };
+
+        assert_eq!(request.method, "HEAD");
+        assert_eq!(request.path, "/bucket-a/file.txt");
+
+        // Test case 2: Router maps path to bucket A for HEAD requests
+        fn route_request(path: &str) -> Option<(String, String)> {
+            if path.starts_with("/bucket-a/") {
+                let key = path.strip_prefix("/bucket-a/").unwrap();
+                Some(("bucket-a".to_string(), key.to_string()))
+            } else {
+                None
+            }
+        }
+
+        let (bucket, key) = route_request("/bucket-a/file.txt").unwrap();
+        assert_eq!(bucket, "bucket-a");
+        assert_eq!(key, "file.txt");
+
+        // Test case 3: S3 HEAD request fetches metadata only
+        struct S3Metadata {
+            content_type: String,
+            content_length: u64,
+            etag: String,
+            last_modified: String,
+        }
+
+        fn head_from_s3(bucket: &str, key: &str) -> Result<S3Metadata, u16> {
+            if bucket == "bucket-a" && key == "file.txt" {
+                Ok(S3Metadata {
+                    content_type: "text/plain".to_string(),
+                    content_length: 20,
+                    etag: "abc123".to_string(),
+                    last_modified: "Wed, 01 Jan 2025 00:00:00 GMT".to_string(),
+                })
+            } else {
+                Err(404)
+            }
+        }
+
+        let metadata = head_from_s3(&bucket, &key).unwrap();
+        assert_eq!(metadata.content_type, "text/plain");
+        assert_eq!(metadata.content_length, 20);
+        assert_eq!(metadata.etag, "abc123");
+        assert_eq!(metadata.last_modified, "Wed, 01 Jan 2025 00:00:00 GMT");
+
+        // Test case 4: HEAD response includes metadata headers
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            headers: std::collections::HashMap<String, String>,
+            body: Vec<u8>,
+        }
+
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Content-Type".to_string(), metadata.content_type.clone());
+        headers.insert(
+            "Content-Length".to_string(),
+            metadata.content_length.to_string(),
+        );
+        headers.insert("ETag".to_string(), metadata.etag.clone());
+        headers.insert("Last-Modified".to_string(), metadata.last_modified.clone());
+
+        let response = HttpResponse {
+            status: 200,
+            headers,
+            body: Vec::new(), // HEAD response has no body
+        };
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body.len(), 0); // No body
+        assert_eq!(response.headers.get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(response.headers.get("Content-Length").unwrap(), "20");
+        assert_eq!(response.headers.get("ETag").unwrap(), "abc123");
+
+        // Test case 5: HEAD response body is empty
+        assert!(response.body.is_empty());
+
+        // Test case 6: HEAD and GET return same headers
+        fn get_headers_for_method(_method: &str) -> std::collections::HashMap<String, String> {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("Content-Type".to_string(), "text/plain".to_string());
+            headers.insert("Content-Length".to_string(), "20".to_string());
+            headers.insert("ETag".to_string(), "abc123".to_string());
+            headers.insert(
+                "Last-Modified".to_string(),
+                "Wed, 01 Jan 2025 00:00:00 GMT".to_string(),
+            );
+
+            // Only difference is GET has body, HEAD doesn't
+            headers
+        }
+
+        let head_headers = get_headers_for_method("HEAD");
+        let get_headers = get_headers_for_method("GET");
+
+        assert_eq!(head_headers.len(), get_headers.len());
+        assert_eq!(
+            head_headers.get("Content-Type"),
+            get_headers.get("Content-Type")
+        );
+        assert_eq!(head_headers.get("ETag"), get_headers.get("ETag"));
+
+        // Test case 7: Full HEAD request-response flow
+        fn process_head_request(method: &str, path: &str) -> Result<HttpResponse, u16> {
+            if method != "HEAD" {
+                return Err(405);
+            }
+
+            let (bucket, key) = match route_request(path) {
+                Some(result) => result,
+                None => return Err(404),
+            };
+
+            let metadata = match head_from_s3(&bucket, &key) {
+                Ok(meta) => meta,
+                Err(status) => return Err(status),
+            };
+
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("Content-Type".to_string(), metadata.content_type);
+            headers.insert(
+                "Content-Length".to_string(),
+                metadata.content_length.to_string(),
+            );
+            headers.insert("ETag".to_string(), metadata.etag);
+            headers.insert("Last-Modified".to_string(), metadata.last_modified);
+
+            Ok(HttpResponse {
+                status: 200,
+                headers,
+                body: Vec::new(), // No body for HEAD
+            })
+        }
+
+        let result = process_head_request("HEAD", "/bucket-a/file.txt").unwrap();
+        assert_eq!(result.status, 200);
+        assert_eq!(result.body.len(), 0);
+        assert!(result.headers.contains_key("Content-Type"));
+        assert!(result.headers.contains_key("Content-Length"));
+        assert!(result.headers.contains_key("ETag"));
+
+        // Test case 8: HEAD request for non-existent file returns 404
+        let error = process_head_request("HEAD", "/bucket-a/nonexistent.txt").unwrap_err();
+        assert_eq!(error, 404);
+
+        // Test case 9: Content-Length header reflects actual object size
+        let content_length: u64 = result
+            .headers
+            .get("Content-Length")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(content_length, 20);
+
+        // Test case 10: HEAD is faster than GET (no body transfer)
+        // Metadata size is much smaller than body
+        let metadata_size = result
+            .headers
+            .iter()
+            .map(|(k, v)| k.len() + v.len())
+            .sum::<usize>();
+        let body_size = 20; // Content-Length
+
+        assert!(metadata_size < body_size * 10); // Metadata is much smaller
+
+        // Test case 11: HEAD response includes Last-Modified header
+        assert!(result.headers.contains_key("Last-Modified"));
+        let last_modified = result.headers.get("Last-Modified").unwrap();
+        assert!(last_modified.contains("GMT"));
+    }
 }

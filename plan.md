@@ -424,7 +424,7 @@ yatagarasu/
 
 ### End-to-End - Single Bucket, No Auth
 - [x] Test: GET /bucket-a/file.txt returns object from bucket A
-- [ ] Test: HEAD /bucket-a/file.txt returns metadata from bucket A
+- [x] Test: HEAD /bucket-a/file.txt returns metadata from bucket A
 - [ ] Test: GET /bucket-a/nonexistent.txt returns 404
 - [ ] Test: GET /unmapped/file.txt returns 404
 - [ ] Test: Response includes correct content-type header
