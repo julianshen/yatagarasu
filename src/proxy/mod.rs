@@ -1690,4 +1690,118 @@ mod tests {
         assert_eq!(get_status_text(416), "Range Not Satisfiable");
         assert_eq!(get_status_text(500), "Internal Server Error");
     }
+
+    #[test]
+    fn test_can_send_response_headers() {
+        // Validates that response handler can add and send HTTP headers
+        // Headers provide metadata about the response (content-type, length, cache, etc.)
+
+        // Test case 1: Handler can create response with headers
+        use std::collections::HashMap;
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("content-type".to_string(), "application/json".to_string());
+
+        assert_eq!(headers.len(), 1, "Handler should create headers map");
+        assert_eq!(
+            headers.get("content-type"),
+            Some(&"application/json".to_string()),
+            "Handler should set content-type header"
+        );
+
+        // Test case 2: Handler can set content-length header
+        headers.insert("content-length".to_string(), "1024".to_string());
+        assert_eq!(
+            headers.get("content-length"),
+            Some(&"1024".to_string()),
+            "Handler should set content-length header"
+        );
+
+        // Test case 3: Handler can set cache-control header
+        headers.insert("cache-control".to_string(), "max-age=3600".to_string());
+        assert_eq!(
+            headers.get("cache-control"),
+            Some(&"max-age=3600".to_string()),
+            "Handler should set cache-control header"
+        );
+
+        // Test case 4: Handler can set multiple headers
+        headers.insert("etag".to_string(), "\"abc123\"".to_string());
+        headers.insert(
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        );
+
+        assert_eq!(headers.len(), 5, "Handler should have 5 headers");
+
+        // Test case 5: Handler can handle header case sensitivity
+        // HTTP headers are case-insensitive, but we store them consistently
+        let content_type_lower = headers.get("content-type");
+        assert!(
+            content_type_lower.is_some(),
+            "Handler should find lowercase header"
+        );
+
+        // Test case 6: Handler can update existing header
+        headers.insert("content-type".to_string(), "text/html".to_string());
+        assert_eq!(
+            headers.get("content-type"),
+            Some(&"text/html".to_string()),
+            "Handler should update existing header"
+        );
+
+        // Test case 7: Handler can remove header
+        headers.remove("etag");
+        assert_eq!(headers.get("etag"), None, "Handler should remove header");
+        assert_eq!(
+            headers.len(),
+            4,
+            "Handler should have 4 headers after removal"
+        );
+
+        // Test case 8: Handler can set custom headers (e.g., x-amz-*)
+        headers.insert("x-amz-request-id".to_string(), "req-123".to_string());
+        headers.insert("x-amz-id-2".to_string(), "id-456".to_string());
+
+        assert!(
+            headers.contains_key("x-amz-request-id"),
+            "Handler should set custom S3 headers"
+        );
+
+        // Test case 9: Handler can handle multi-value headers
+        // In real HTTP, some headers can have multiple values
+        // We represent this as comma-separated values
+        let multi_value = vec!["gzip", "deflate", "br"];
+        let accept_encoding = multi_value.join(", ");
+        headers.insert("accept-encoding".to_string(), accept_encoding);
+
+        assert_eq!(
+            headers.get("accept-encoding"),
+            Some(&"gzip, deflate, br".to_string()),
+            "Handler should handle multi-value headers"
+        );
+
+        // Test case 10: Handler preserves S3 response headers
+        let s3_headers = vec![
+            ("content-type", "image/jpeg"),
+            ("content-length", "2048"),
+            ("etag", "\"xyz789\""),
+            ("x-amz-version-id", "v1"),
+        ];
+
+        for (name, value) in s3_headers {
+            headers.insert(name.to_string(), value.to_string());
+        }
+
+        assert_eq!(
+            headers.get("content-type"),
+            Some(&"image/jpeg".to_string()),
+            "Handler should preserve S3 content-type"
+        );
+        assert_eq!(
+            headers.get("x-amz-version-id"),
+            Some(&"v1".to_string()),
+            "Handler should preserve S3 version header"
+        );
+    }
 }

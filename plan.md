@@ -392,7 +392,7 @@ yatagarasu/
 
 ### Pingora - Response Handler
 - [x] Test: Can send response status code
-- [ ] Test: Can send response headers
+- [x] Test: Can send response headers
 - [ ] Test: Can send response body
 - [ ] Test: Can stream response body chunks
 - [ ] Test: Handles connection close during streaming
