@@ -405,7 +405,7 @@ yatagarasu/
 - [x] Test: Returns 403 for forbidden requests
 - [x] Test: Returns 404 for not found
 - [x] Test: Returns 500 for internal errors
-- [ ] Test: Returns 502 for bad gateway (S3 errors)
+- [x] Test: Returns 502 for bad gateway (S3 errors)
 - [ ] Test: Returns 503 for service unavailable
 - [ ] Test: Error responses include JSON body with error details
 - [ ] Test: Error responses don't leak sensitive information

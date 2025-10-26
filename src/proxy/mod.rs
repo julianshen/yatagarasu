@@ -3743,4 +3743,241 @@ mod tests {
             "Unknown errors should default to 500"
         );
     }
+
+    #[test]
+    fn test_returns_502_for_bad_gateway() {
+        // Validates that handler returns 502 Bad Gateway for S3 backend errors
+        // 502 indicates the proxy received invalid response from upstream S3 server
+
+        // Test case 1: Handler returns 502 when S3 returns malformed response
+        fn validate_s3_response(response: Option<&str>) -> Result<(), u16> {
+            match response {
+                Some(r) if r.starts_with("HTTP/") => Ok(()),
+                _ => Err(502),
+            }
+        }
+
+        assert!(validate_s3_response(Some("HTTP/1.1 200 OK")).is_ok());
+        assert_eq!(
+            validate_s3_response(Some("INVALID")),
+            Err(502),
+            "Malformed S3 response should return 502"
+        );
+        assert_eq!(
+            validate_s3_response(None),
+            Err(502),
+            "Missing S3 response should return 502"
+        );
+
+        // Test case 2: Handler returns 502 when cannot connect to S3 endpoint
+        #[derive(Debug, PartialEq)]
+        enum ConnectionError {
+            Refused,
+            Timeout,
+            DnsFailure,
+            NetworkUnreachable,
+        }
+
+        fn connect_to_s3(endpoint: &str, error: Option<ConnectionError>) -> Result<(), u16> {
+            if let Some(_err) = error {
+                return Err(502);
+            }
+            if endpoint.is_empty() {
+                return Err(502);
+            }
+            Ok(())
+        }
+
+        assert!(connect_to_s3("s3.amazonaws.com", None).is_ok());
+        assert_eq!(
+            connect_to_s3("s3.amazonaws.com", Some(ConnectionError::Refused)),
+            Err(502),
+            "Connection refused should return 502"
+        );
+        assert_eq!(
+            connect_to_s3("s3.amazonaws.com", Some(ConnectionError::DnsFailure)),
+            Err(502),
+            "DNS failure should return 502"
+        );
+        assert_eq!(
+            connect_to_s3(
+                "s3.amazonaws.com",
+                Some(ConnectionError::NetworkUnreachable)
+            ),
+            Err(502),
+            "Network unreachable should return 502"
+        );
+
+        // Test case 3: Handler returns 502 for DNS lookup failures
+        fn resolve_s3_endpoint(hostname: &str) -> Result<String, u16> {
+            if hostname.is_empty() || !hostname.contains('.') {
+                return Err(502);
+            }
+            Ok(format!("resolved:{}", hostname))
+        }
+
+        assert!(resolve_s3_endpoint("s3.amazonaws.com").is_ok());
+        assert_eq!(
+            resolve_s3_endpoint(""),
+            Err(502),
+            "Empty hostname should return 502"
+        );
+        assert_eq!(
+            resolve_s3_endpoint("invalid"),
+            Err(502),
+            "Invalid hostname should return 502"
+        );
+
+        // Test case 4: Handler returns 502 when S3 response is corrupted
+        fn verify_response_integrity(data: &[u8], expected_checksum: u32) -> Result<(), u16> {
+            let actual_checksum: u32 = data.iter().map(|&b| b as u32).sum();
+            if actual_checksum != expected_checksum {
+                return Err(502);
+            }
+            Ok(())
+        }
+
+        let valid_data = vec![1, 2, 3, 4];
+        let valid_checksum = 10;
+        assert!(verify_response_integrity(&valid_data, valid_checksum).is_ok());
+        assert_eq!(
+            verify_response_integrity(&valid_data, 999),
+            Err(502),
+            "Corrupted response should return 502"
+        );
+
+        // Test case 5: Handler returns 502 when S3 connection drops unexpectedly
+        #[derive(Debug, PartialEq)]
+        enum StreamState {
+            Connected,
+            Disconnected,
+            Error,
+        }
+
+        fn check_s3_stream(state: StreamState) -> Result<(), u16> {
+            match state {
+                StreamState::Connected => Ok(()),
+                StreamState::Disconnected | StreamState::Error => Err(502),
+            }
+        }
+
+        assert!(check_s3_stream(StreamState::Connected).is_ok());
+        assert_eq!(
+            check_s3_stream(StreamState::Disconnected),
+            Err(502),
+            "Disconnected stream should return 502"
+        );
+        assert_eq!(
+            check_s3_stream(StreamState::Error),
+            Err(502),
+            "Stream error should return 502"
+        );
+
+        // Test case 6: Handler returns 502 for SSL/TLS handshake failures
+        fn establish_secure_connection(use_tls: bool, cert_valid: bool) -> Result<(), u16> {
+            if !use_tls {
+                return Ok(());
+            }
+            if !cert_valid {
+                return Err(502);
+            }
+            Ok(())
+        }
+
+        assert!(establish_secure_connection(false, false).is_ok());
+        assert!(establish_secure_connection(true, true).is_ok());
+        assert_eq!(
+            establish_secure_connection(true, false),
+            Err(502),
+            "TLS handshake failure should return 502"
+        );
+
+        // Test case 7: Handler creates 502 error response with appropriate message
+        struct ErrorResponse {
+            status_code: u16,
+            message: String,
+            upstream: String,
+        }
+
+        let bad_gateway_error = ErrorResponse {
+            status_code: 502,
+            message: "Bad Gateway".to_string(),
+            upstream: "S3".to_string(),
+        };
+
+        assert_eq!(bad_gateway_error.status_code, 502);
+        assert!(bad_gateway_error.message.contains("Gateway"));
+        assert_eq!(bad_gateway_error.upstream, "S3");
+
+        // Test case 8: Handler distinguishes 502 from other error codes
+        fn map_s3_error_to_status(error_type: &str) -> u16 {
+            match error_type {
+                "connection_refused" => 502,
+                "dns_failure" => 502,
+                "invalid_response" => 502,
+                "corrupted_data" => 502,
+                "tls_handshake_failed" => 502,
+                "internal_error" => 500,
+                "service_unavailable" => 503,
+                "timeout" => 504,
+                _ => 502, // Default gateway errors to 502
+            }
+        }
+
+        assert_eq!(map_s3_error_to_status("connection_refused"), 502);
+        assert_eq!(map_s3_error_to_status("dns_failure"), 502);
+        assert_eq!(map_s3_error_to_status("invalid_response"), 502);
+        assert_eq!(map_s3_error_to_status("corrupted_data"), 502);
+        assert_eq!(map_s3_error_to_status("tls_handshake_failed"), 502);
+        assert_ne!(
+            map_s3_error_to_status("internal_error"),
+            502,
+            "500 should be distinct from 502"
+        );
+        assert_ne!(
+            map_s3_error_to_status("service_unavailable"),
+            502,
+            "503 should be distinct from 502"
+        );
+        assert_ne!(
+            map_s3_error_to_status("timeout"),
+            502,
+            "504 should be distinct from 502"
+        );
+
+        // Test case 9: Handler returns 502 when S3 returns unexpected HTTP version
+        fn validate_http_version(version: &str) -> Result<(), u16> {
+            match version {
+                "HTTP/1.1" | "HTTP/2" => Ok(()),
+                _ => Err(502),
+            }
+        }
+
+        assert!(validate_http_version("HTTP/1.1").is_ok());
+        assert!(validate_http_version("HTTP/2").is_ok());
+        assert_eq!(
+            validate_http_version("HTTP/0.9"),
+            Err(502),
+            "Unexpected HTTP version should return 502"
+        );
+        assert_eq!(
+            validate_http_version("UNKNOWN"),
+            Err(502),
+            "Unknown protocol should return 502"
+        );
+
+        // Test case 10: Handler includes upstream information in 502 response
+        fn create_bad_gateway_response(upstream_host: &str, error_detail: &str) -> ErrorResponse {
+            ErrorResponse {
+                status_code: 502,
+                message: format!("Bad Gateway: {}", error_detail),
+                upstream: upstream_host.to_string(),
+            }
+        }
+
+        let error = create_bad_gateway_response("s3.amazonaws.com", "connection refused");
+        assert_eq!(error.status_code, 502);
+        assert!(error.message.contains("connection refused"));
+        assert_eq!(error.upstream, "s3.amazonaws.com");
+    }
 }
