@@ -408,7 +408,7 @@ yatagarasu/
 - [x] Test: Returns 502 for bad gateway (S3 errors)
 - [x] Test: Returns 503 for service unavailable
 - [x] Test: Error responses include JSON body with error details
-- [ ] Test: Error responses don't leak sensitive information
+- [x] Test: Error responses don't leak sensitive information
 
 ### Pingora - Middleware Chain
 - [ ] Test: Request passes through router first

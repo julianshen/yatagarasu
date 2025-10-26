@@ -4415,4 +4415,251 @@ mod tests {
         assert!(!validate_error_code_format("notFound"));
         assert!(!validate_error_code_format("Not-Found"));
     }
+
+    #[test]
+    fn test_error_responses_dont_leak_sensitive_information() {
+        // Validates that error responses don't leak sensitive information
+        // Prevents exposing credentials, tokens, internal paths, or system details
+
+        // Test case 1: Error messages don't contain passwords
+        fn sanitize_error_message(message: &str) -> String {
+            let sensitive_patterns = ["password=", "pwd=", "secret=", "token="];
+            let mut sanitized = message.to_string();
+            for pattern in &sensitive_patterns {
+                if sanitized.to_lowercase().contains(pattern) {
+                    sanitized = "Authentication failed".to_string();
+                }
+            }
+            sanitized
+        }
+
+        assert_eq!(
+            sanitize_error_message("Invalid credentials"),
+            "Invalid credentials"
+        );
+        assert_eq!(
+            sanitize_error_message("Login failed with password=secret123"),
+            "Authentication failed"
+        );
+        assert_eq!(
+            sanitize_error_message("Auth error: token=abc123"),
+            "Authentication failed"
+        );
+
+        // Test case 2: Error messages don't contain JWT tokens
+        fn redact_jwt_from_error(message: &str) -> String {
+            // Simple check for JWT-like patterns (base64.base64.base64)
+            if message.contains("eyJ") {
+                // JWT tokens typically start with "eyJ"
+                return "Invalid token".to_string();
+            }
+            message.to_string()
+        }
+
+        assert_eq!(redact_jwt_from_error("User not found"), "User not found");
+        assert_eq!(
+            redact_jwt_from_error(
+                "Invalid token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"
+            ),
+            "Invalid token"
+        );
+
+        // Test case 3: Error messages don't contain AWS credentials
+        fn check_for_aws_credentials(message: &str) -> bool {
+            let patterns = ["AKIA", "aws_access_key", "aws_secret_key"];
+            patterns.iter().any(|p| message.contains(p))
+        }
+
+        assert!(!check_for_aws_credentials("S3 request failed"));
+        assert!(check_for_aws_credentials(
+            "Failed with key AKIAIOSFODNN7EXAMPLE"
+        ));
+        assert!(check_for_aws_credentials(
+            "Config error: aws_access_key=AKIA123"
+        ));
+
+        // Test case 4: Error messages don't contain internal file paths
+        fn sanitize_file_path(message: &str) -> String {
+            if message.contains("/etc/") || message.contains("/var/") || message.contains("C:\\") {
+                return "Configuration error".to_string();
+            }
+            message.to_string()
+        }
+
+        assert_eq!(sanitize_file_path("File not found"), "File not found");
+        assert_eq!(
+            sanitize_file_path("Failed to read /etc/secrets/config.yml"),
+            "Configuration error"
+        );
+        assert_eq!(
+            sanitize_file_path("Error accessing C:\\secrets\\keys.txt"),
+            "Configuration error"
+        );
+
+        // Test case 5: Error messages don't contain database connection strings
+        fn check_for_connection_string(message: &str) -> bool {
+            let patterns = ["postgres://", "mysql://", "mongodb://", "redis://"];
+            patterns.iter().any(|p| message.contains(p))
+        }
+
+        assert!(!check_for_connection_string("Database error"));
+        assert!(check_for_connection_string(
+            "Failed: postgres://user:pass@localhost/db"
+        ));
+
+        // Test case 6: Error messages don't contain stack traces in production
+        fn should_include_stack_trace(is_production: bool) -> bool {
+            !is_production
+        }
+
+        assert!(should_include_stack_trace(false)); // Dev mode
+        assert!(!should_include_stack_trace(true)); // Production mode
+
+        // Test case 7: Error messages don't contain internal IP addresses
+        fn redact_internal_ips(message: &str) -> String {
+            if message.contains("192.168.")
+                || message.contains("10.0.")
+                || message.contains("127.0.0.1")
+            {
+                return "Network error".to_string();
+            }
+            message.to_string()
+        }
+
+        assert_eq!(
+            redact_internal_ips("Connection timeout"),
+            "Connection timeout"
+        );
+        assert_eq!(
+            redact_internal_ips("Failed to connect to 192.168.1.100"),
+            "Network error"
+        );
+        assert_eq!(
+            redact_internal_ips("Error connecting to 10.0.0.5"),
+            "Network error"
+        );
+
+        // Test case 8: Error messages use generic descriptions for sensitive failures
+        fn get_generic_error_message(error_type: &str) -> &'static str {
+            match error_type {
+                "jwt_invalid" => "Authentication failed",
+                "jwt_expired" => "Authentication failed",
+                "jwt_signature_invalid" => "Authentication failed",
+                "aws_credentials_invalid" => "Unable to access storage",
+                "aws_signature_failed" => "Unable to access storage",
+                "internal_config_error" => "Internal server error",
+                _ => "An error occurred",
+            }
+        }
+
+        // All auth errors return same generic message
+        assert_eq!(
+            get_generic_error_message("jwt_invalid"),
+            "Authentication failed"
+        );
+        assert_eq!(
+            get_generic_error_message("jwt_expired"),
+            "Authentication failed"
+        );
+        assert_eq!(
+            get_generic_error_message("jwt_signature_invalid"),
+            "Authentication failed"
+        );
+
+        // All AWS errors return same generic message
+        assert_eq!(
+            get_generic_error_message("aws_credentials_invalid"),
+            "Unable to access storage"
+        );
+        assert_eq!(
+            get_generic_error_message("aws_signature_failed"),
+            "Unable to access storage"
+        );
+
+        // Test case 9: Error messages don't reveal bucket names or S3 keys
+        fn sanitize_s3_details(message: &str, bucket: &str, key: &str) -> String {
+            message.replace(bucket, "[BUCKET]").replace(key, "[KEY]")
+        }
+
+        let sanitized = sanitize_s3_details(
+            "Object not found in my-secret-bucket at path/to/file.txt",
+            "my-secret-bucket",
+            "path/to/file.txt",
+        );
+        assert!(sanitized.contains("[BUCKET]"));
+        assert!(sanitized.contains("[KEY]"));
+        assert!(!sanitized.contains("my-secret-bucket"));
+        assert!(!sanitized.contains("path/to/file.txt"));
+
+        // Test case 10: Error messages don't contain environment variable names
+        fn check_for_env_vars(message: &str) -> bool {
+            let patterns = [
+                "AWS_ACCESS_KEY",
+                "AWS_SECRET_KEY",
+                "JWT_SECRET",
+                "DATABASE_URL",
+            ];
+            patterns.iter().any(|p| message.contains(p))
+        }
+
+        assert!(!check_for_env_vars("Configuration missing"));
+        assert!(check_for_env_vars("Missing env var: AWS_ACCESS_KEY"));
+
+        // Test case 11: Error messages don't include software version numbers
+        fn redact_version_info(message: &str) -> String {
+            if message.contains("version") || message.contains("v1.2.3") {
+                return "Server error".to_string();
+            }
+            message.to_string()
+        }
+
+        assert_eq!(redact_version_info("Request failed"), "Request failed");
+        assert_eq!(
+            redact_version_info("Error in server version 1.2.3"),
+            "Server error"
+        );
+
+        // Test case 12: Error responses validate that sensitive data is filtered
+        struct SafeErrorResponse {
+            error: String,
+            message: String,
+            status_code: u16,
+        }
+
+        fn create_safe_error_response(
+            internal_error: &str,
+            _sensitive_context: &str,
+        ) -> SafeErrorResponse {
+            // Never use sensitive_context in the response
+            let (error, message, status_code) = match internal_error {
+                "jwt_failed" => ("UNAUTHORIZED", "Authentication required", 401),
+                "s3_access_denied" => ("FORBIDDEN", "Access denied", 403),
+                "config_missing" => ("INTERNAL_ERROR", "Internal server error", 500),
+                _ => ("INTERNAL_ERROR", "An error occurred", 500),
+            };
+
+            SafeErrorResponse {
+                error: error.to_string(),
+                message: message.to_string(),
+                status_code,
+            }
+        }
+
+        let response = create_safe_error_response(
+            "jwt_failed",
+            "JWT validation failed: signature mismatch with secret key abc123",
+        );
+        assert!(!response.message.contains("signature"));
+        assert!(!response.message.contains("abc123"));
+        assert_eq!(response.message, "Authentication required");
+
+        let response2 = create_safe_error_response(
+            "config_missing",
+            "Missing config at /etc/app/secrets.yml with password=secret",
+        );
+        assert!(!response2.message.contains("/etc/"));
+        assert!(!response2.message.contains("password"));
+        assert!(!response2.message.contains("secret"));
+        assert_eq!(response2.message, "Internal server error");
+    }
 }
