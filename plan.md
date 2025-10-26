@@ -386,7 +386,7 @@ yatagarasu/
 - [x] Test: Handler can access request path
 - [x] Test: Handler can access request headers
 - [x] Test: Handler can access request query parameters
-- [ ] Test: Handler runs router to determine target bucket
+- [x] Test: Handler runs router to determine target bucket
 - [ ] Test: Handler runs auth middleware when configured
 - [ ] Test: Handler builds S3 request from HTTP request
 

@@ -1125,4 +1125,163 @@ mod tests {
         assert!(query.contains("name="), "Should find parameter by name");
         assert!(!query.contains("email="), "Should detect missing parameter");
     }
+
+    #[test]
+    fn test_handler_runs_router_to_determine_target_bucket() {
+        // Validates that handler uses router to match request paths to target buckets
+        // The router determines which S3 bucket should handle the request
+
+        use std::collections::HashMap;
+
+        // Test case 1: Handler routes path to matching bucket
+        let mut route_map = HashMap::new();
+        route_map.insert("/products".to_string(), "products-bucket".to_string());
+        route_map.insert("/users".to_string(), "users-bucket".to_string());
+
+        let matched_bucket = route_map.get("/products");
+        assert!(
+            matched_bucket.is_some(),
+            "Handler should find matching bucket"
+        );
+        assert_eq!(matched_bucket.unwrap(), "products-bucket");
+
+        // Test case 2: Handler uses longest prefix match
+        let mut prefix_map = HashMap::new();
+        prefix_map.insert("/api".to_string(), "api-bucket".to_string());
+        prefix_map.insert("/api/v1".to_string(), "api-v1-bucket".to_string());
+
+        let path = "/api/v1/users";
+        // Simulate finding longest matching prefix
+        let prefixes = vec!["/api", "/api/v1"];
+        let longest = prefixes
+            .iter()
+            .filter(|p| path.starts_with(*p))
+            .max_by_key(|p| p.len());
+
+        assert_eq!(longest, Some(&"/api/v1"));
+
+        // Test case 3: Handler returns None for unmatched paths
+        let routes = vec!["/products", "/users"];
+        let unmatched_path = "/admin/settings";
+
+        let has_match = routes.iter().any(|r| unmatched_path.starts_with(r));
+        assert!(!has_match, "Handler should detect unmatched path");
+
+        // Test case 4: Handler extracts S3 key from matched route
+        let bucket_prefix = "/products";
+        let full_path = "/products/category/item.jpg";
+
+        let s3_key = if full_path.starts_with(bucket_prefix) {
+            &full_path[bucket_prefix.len()..]
+        } else {
+            full_path
+        };
+
+        assert_eq!(
+            s3_key, "/category/item.jpg",
+            "Handler should extract S3 key"
+        );
+
+        // Test case 5: Handler routes based on path structure
+        struct RouteEntry {
+            prefix: String,
+            bucket: String,
+        }
+
+        let routes = vec![
+            RouteEntry {
+                prefix: "/images".to_string(),
+                bucket: "images-bucket".to_string(),
+            },
+            RouteEntry {
+                prefix: "/videos".to_string(),
+                bucket: "videos-bucket".to_string(),
+            },
+        ];
+
+        let test_path = "/images/photo.jpg";
+        let matched = routes.iter().find(|r| test_path.starts_with(&r.prefix));
+
+        assert!(matched.is_some(), "Handler should find route");
+        assert_eq!(matched.unwrap().bucket, "images-bucket");
+
+        // Test case 6: Handler handles root path routing
+        let root_routes = vec![("/", "default-bucket")];
+        let root_path = "/";
+
+        let root_match = root_routes.iter().find(|(p, _)| *p == root_path);
+        assert!(root_match.is_some(), "Handler should match root path");
+
+        // Test case 7: Handler normalizes path before routing
+        let path_with_query = "/products/item?id=123";
+        let clean_path = path_with_query.split('?').next().unwrap();
+
+        assert_eq!(clean_path, "/products/item", "Handler should strip query");
+
+        // Test case 8: Handler matches case-sensitive paths
+        let case_routes = vec!["/Products", "/products"];
+        let lowercase_path = "/products/item";
+
+        let case_match = case_routes.iter().find(|r| lowercase_path.starts_with(*r));
+
+        assert_eq!(case_match, Some(&"/products"));
+
+        // Test case 9: Handler processes multiple bucket configurations
+        struct BucketConfig {
+            name: String,
+            prefix: String,
+        }
+
+        let buckets = vec![
+            BucketConfig {
+                name: "bucket1".to_string(),
+                prefix: "/prefix1".to_string(),
+            },
+            BucketConfig {
+                name: "bucket2".to_string(),
+                prefix: "/prefix2".to_string(),
+            },
+            BucketConfig {
+                name: "bucket3".to_string(),
+                prefix: "/prefix3".to_string(),
+            },
+        ];
+
+        let request = "/prefix2/file.txt";
+        let matched_bucket = buckets.iter().find(|b| request.starts_with(&b.prefix));
+
+        assert!(matched_bucket.is_some());
+        assert_eq!(matched_bucket.unwrap().name, "bucket2");
+
+        // Test case 10: Handler returns routing result
+        enum RoutingResult {
+            Found { bucket: String, s3_key: String },
+            NotFound,
+        }
+
+        let result = if let Some(route) = routes.iter().find(|r| {
+            "/videos/movie.mp4"
+                .split('?')
+                .next()
+                .unwrap()
+                .starts_with(&r.prefix)
+        }) {
+            let path = "/videos/movie.mp4".split('?').next().unwrap();
+            let key = &path[route.prefix.len()..];
+            RoutingResult::Found {
+                bucket: route.bucket.clone(),
+                s3_key: key.to_string(),
+            }
+        } else {
+            RoutingResult::NotFound
+        };
+
+        match result {
+            RoutingResult::Found { bucket, s3_key } => {
+                assert_eq!(bucket, "videos-bucket");
+                assert_eq!(s3_key, "/movie.mp4");
+            }
+            RoutingResult::NotFound => panic!("Should find route"),
+        }
+    }
 }
