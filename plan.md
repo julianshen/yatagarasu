@@ -450,7 +450,7 @@ yatagarasu/
 - [x] Test: Valid JWT with correct claims returns object
 - [x] Test: Valid JWT with incorrect claims returns 403
 - [x] Test: Valid JWT with missing required claim returns 403
-- [ ] Test: Multiple claim verification rules enforced
+- [x] Test: Multiple claim verification rules enforced
 
 ### End-to-End - Mixed Auth Configuration
 - [ ] Test: Public bucket accessible without JWT

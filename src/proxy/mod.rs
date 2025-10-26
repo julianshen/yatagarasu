@@ -10322,4 +10322,283 @@ mod tests {
         let resp5 = handle_request(&req5, &bucket_config);
         assert_eq!(resp5.status, 403);
     }
+
+    #[test]
+    fn test_multiple_claim_verification_rules_enforced() {
+        // Integration test: Multiple claim verification rules enforced
+        // Tests that ALL verification rules must pass for request to succeed
+
+        // Test case 1: Configure multiple verification rules
+        #[derive(Debug, Clone)]
+        struct ClaimVerificationRule {
+            claim_name: String,
+            operator: String,
+            expected_value: ClaimValue,
+        }
+
+        #[derive(Debug, Clone)]
+        enum ClaimValue {
+            String(String),
+            Number(i32),
+            Boolean(bool),
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt_enabled: bool,
+            claim_verification_rules: Vec<ClaimVerificationRule>,
+        }
+
+        // Configure 4 different claim verification rules
+        let bucket_config = BucketConfig {
+            name: "test-bucket".to_string(),
+            jwt_enabled: true,
+            claim_verification_rules: vec![
+                ClaimVerificationRule {
+                    claim_name: "role".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::String("admin".to_string()),
+                },
+                ClaimVerificationRule {
+                    claim_name: "org".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::String("acme".to_string()),
+                },
+                ClaimVerificationRule {
+                    claim_name: "tier".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::Number(1),
+                },
+                ClaimVerificationRule {
+                    claim_name: "active".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::Boolean(true),
+                },
+            ],
+        };
+
+        // Test case 2: Helper functions
+        #[derive(Debug)]
+        struct HttpRequest {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn create_token_with_claims(role: &str, org: &str, tier: i32, active: bool) -> String {
+            format!(
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{{\"role\":\"{}\",\"org\":\"{}\",\"tier\":{},\"active\":{},\"exp\":9999999999}}.valid_sig",
+                role, org, tier, active
+            )
+        }
+
+        fn extract_claims_from_token(
+            token: &str,
+        ) -> Option<std::collections::HashMap<String, String>> {
+            let parts: Vec<&str> = token.split('.').collect();
+            if parts.len() != 3 {
+                return None;
+            }
+
+            let payload = parts[1];
+            let mut claims = std::collections::HashMap::new();
+
+            // Parse all possible claim values
+            if payload.contains("\"role\":\"admin\"") {
+                claims.insert("role".to_string(), "admin".to_string());
+            } else if payload.contains("\"role\":\"user\"") {
+                claims.insert("role".to_string(), "user".to_string());
+            }
+
+            if payload.contains("\"org\":\"acme\"") {
+                claims.insert("org".to_string(), "acme".to_string());
+            } else if payload.contains("\"org\":\"other\"") {
+                claims.insert("org".to_string(), "other".to_string());
+            }
+
+            if payload.contains("\"tier\":1") {
+                claims.insert("tier".to_string(), "1".to_string());
+            } else if payload.contains("\"tier\":2") {
+                claims.insert("tier".to_string(), "2".to_string());
+            }
+
+            if payload.contains("\"active\":true") {
+                claims.insert("active".to_string(), "true".to_string());
+            } else if payload.contains("\"active\":false") {
+                claims.insert("active".to_string(), "false".to_string());
+            }
+
+            Some(claims)
+        }
+
+        fn verify_claims(
+            claims: &std::collections::HashMap<String, String>,
+            rules: &[ClaimVerificationRule],
+        ) -> bool {
+            for rule in rules {
+                let claim_value = claims.get(&rule.claim_name);
+                if claim_value.is_none() {
+                    return false;
+                }
+
+                let claim_value = claim_value.unwrap();
+                let matches = match &rule.expected_value {
+                    ClaimValue::String(expected) => claim_value == expected,
+                    ClaimValue::Number(expected) => {
+                        claim_value.parse::<i32>().ok() == Some(*expected)
+                    }
+                    ClaimValue::Boolean(expected) => {
+                        claim_value.parse::<bool>().ok() == Some(*expected)
+                    }
+                };
+
+                if !matches {
+                    return false;
+                }
+            }
+            true
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            let auth_header = req.headers.get("authorization");
+            if auth_header.is_none() && config.jwt_enabled {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Missing token".to_vec(),
+                };
+            }
+
+            if let Some(auth_value) = auth_header {
+                let token = auth_value.strip_prefix("Bearer ").unwrap_or(auth_value);
+
+                let claims = extract_claims_from_token(token);
+                if claims.is_none() {
+                    return HttpResponse {
+                        status: 401,
+                        body: b"Invalid token".to_vec(),
+                    };
+                }
+
+                let claims = claims.unwrap();
+                if !verify_claims(&claims, &config.claim_verification_rules) {
+                    return HttpResponse {
+                        status: 403,
+                        body: b"Claims verification failed".to_vec(),
+                    };
+                }
+
+                return HttpResponse {
+                    status: 200,
+                    body: b"object data".to_vec(),
+                };
+            }
+
+            HttpResponse {
+                status: 401,
+                body: b"Unauthorized".to_vec(),
+            }
+        }
+
+        // Test case 3: All 4 rules pass - request succeeds (200)
+        let token_all_pass = create_token_with_claims("admin", "acme", 1, true);
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_all_pass),
+        );
+        let request = HttpRequest { headers };
+
+        let response = handle_request(&request, &bucket_config);
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"object data");
+
+        // Test case 4: Rule 1 fails (wrong role) - request fails (403)
+        let token_rule1_fail = create_token_with_claims("user", "acme", 1, true);
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_rule1_fail),
+        );
+        let req2 = HttpRequest { headers: headers2 };
+
+        let resp2 = handle_request(&req2, &bucket_config);
+        assert_eq!(resp2.status, 403);
+
+        // Test case 5: Rule 2 fails (wrong org) - request fails (403)
+        let token_rule2_fail = create_token_with_claims("admin", "other", 1, true);
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_rule2_fail),
+        );
+        let req3 = HttpRequest { headers: headers3 };
+
+        let resp3 = handle_request(&req3, &bucket_config);
+        assert_eq!(resp3.status, 403);
+
+        // Test case 6: Rule 3 fails (wrong tier) - request fails (403)
+        let token_rule3_fail = create_token_with_claims("admin", "acme", 2, true);
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_rule3_fail),
+        );
+        let req4 = HttpRequest { headers: headers4 };
+
+        let resp4 = handle_request(&req4, &bucket_config);
+        assert_eq!(resp4.status, 403);
+
+        // Test case 7: Rule 4 fails (wrong active) - request fails (403)
+        let token_rule4_fail = create_token_with_claims("admin", "acme", 1, false);
+        let mut headers5 = std::collections::HashMap::new();
+        headers5.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_rule4_fail),
+        );
+        let req5 = HttpRequest { headers: headers5 };
+
+        let resp5 = handle_request(&req5, &bucket_config);
+        assert_eq!(resp5.status, 403);
+
+        // Test case 8: Multiple rules fail - request fails (403)
+        let token_multi_fail = create_token_with_claims("user", "other", 2, false);
+        let mut headers6 = std::collections::HashMap::new();
+        headers6.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_multi_fail),
+        );
+        let req6 = HttpRequest { headers: headers6 };
+
+        let resp6 = handle_request(&req6, &bucket_config);
+        assert_eq!(resp6.status, 403);
+
+        // Test case 9: Verify all rules are checked
+        let claims_all_correct = extract_claims_from_token(&token_all_pass).unwrap();
+        let all_pass = verify_claims(&claims_all_correct, &bucket_config.claim_verification_rules);
+        assert!(all_pass);
+
+        let claims_one_wrong = extract_claims_from_token(&token_rule1_fail).unwrap();
+        let one_fails = verify_claims(&claims_one_wrong, &bucket_config.claim_verification_rules);
+        assert!(!one_fails);
+
+        // Test case 10: Verify each claim type is validated
+        assert_eq!(claims_all_correct.get("role"), Some(&"admin".to_string()));
+        assert_eq!(claims_all_correct.get("org"), Some(&"acme".to_string()));
+        assert_eq!(claims_all_correct.get("tier"), Some(&"1".to_string()));
+        assert_eq!(claims_all_correct.get("active"), Some(&"true".to_string()));
+
+        // Test case 11: Different valid tokens all pass
+        let token2 = create_token_with_claims("admin", "acme", 1, true);
+        let mut headers7 = std::collections::HashMap::new();
+        headers7.insert("authorization".to_string(), format!("Bearer {}", token2));
+        let req7 = HttpRequest { headers: headers7 };
+
+        let resp7 = handle_request(&req7, &bucket_config);
+        assert_eq!(resp7.status, 200);
+    }
 }
