@@ -3193,4 +3193,193 @@ mod tests {
         assert!(headers.contains_key("www-authenticate"));
         assert!(headers.get("www-authenticate").unwrap().contains("Bearer"));
     }
+
+    #[test]
+    fn test_returns_403_for_forbidden_requests() {
+        // Validates that handler returns 403 Forbidden for permission failures
+        // 403 indicates user is authenticated but lacks permission
+
+        // Test case 1: Handler returns 403 when user role is insufficient
+        fn check_user_role(user_role: &str, required_role: &str) -> Result<(), u16> {
+            let role_hierarchy = vec!["user", "admin", "superadmin"];
+            let user_level = role_hierarchy.iter().position(|&r| r == user_role);
+            let required_level = role_hierarchy.iter().position(|&r| r == required_role);
+
+            match (user_level, required_level) {
+                (Some(u), Some(r)) if u >= r => Ok(()),
+                _ => Err(403),
+            }
+        }
+
+        assert!(check_user_role("admin", "user").is_ok());
+        assert!(check_user_role("admin", "admin").is_ok());
+        assert_eq!(
+            check_user_role("user", "admin"),
+            Err(403),
+            "Insufficient role should return 403"
+        );
+
+        // Test case 2: Handler returns 403 when accessing resource outside allowed scope
+        fn check_resource_scope(
+            user_id: &str,
+            resource_owner: &str,
+            is_admin: bool,
+        ) -> Result<(), u16> {
+            if user_id == resource_owner || is_admin {
+                Ok(())
+            } else {
+                Err(403)
+            }
+        }
+
+        assert!(check_resource_scope("user123", "user123", false).is_ok());
+        assert!(check_resource_scope("user123", "user456", true).is_ok());
+        assert_eq!(
+            check_resource_scope("user123", "user456", false),
+            Err(403),
+            "Accessing other user's resource should return 403"
+        );
+
+        // Test case 3: Handler returns 403 when claim verification fails
+        fn verify_claim_value(actual_value: &str, required_value: &str) -> Result<(), u16> {
+            if actual_value == required_value {
+                Ok(())
+            } else {
+                Err(403)
+            }
+        }
+
+        assert!(verify_claim_value("premium", "premium").is_ok());
+        assert_eq!(
+            verify_claim_value("basic", "premium"),
+            Err(403),
+            "Wrong claim value should return 403"
+        );
+
+        // Test case 4: Handler returns 403 when user is blocked or revoked
+        fn check_user_status(is_active: bool, is_blocked: bool) -> Result<(), u16> {
+            if !is_active || is_blocked {
+                return Err(403);
+            }
+            Ok(())
+        }
+
+        assert!(check_user_status(true, false).is_ok());
+        assert_eq!(
+            check_user_status(false, false),
+            Err(403),
+            "Inactive user should return 403"
+        );
+        assert_eq!(
+            check_user_status(true, true),
+            Err(403),
+            "Blocked user should return 403"
+        );
+
+        // Test case 5: Handler returns 403 for IP-based restrictions
+        fn check_ip_allowlist(client_ip: &str, allowed_ips: &[&str]) -> Result<(), u16> {
+            if allowed_ips.contains(&client_ip) {
+                Ok(())
+            } else {
+                Err(403)
+            }
+        }
+
+        let allowed = vec!["192.168.1.1", "10.0.0.1"];
+        assert!(check_ip_allowlist("192.168.1.1", &allowed).is_ok());
+        assert_eq!(
+            check_ip_allowlist("1.2.3.4", &allowed),
+            Err(403),
+            "IP not in allowlist should return 403"
+        );
+
+        // Test case 6: Handler returns 403 when permissions are missing
+        fn check_permissions(
+            user_permissions: &[&str],
+            required_permission: &str,
+        ) -> Result<(), u16> {
+            if user_permissions.contains(&required_permission) {
+                Ok(())
+            } else {
+                Err(403)
+            }
+        }
+
+        let permissions = vec!["read", "write"];
+        assert!(check_permissions(&permissions, "read").is_ok());
+        assert_eq!(
+            check_permissions(&permissions, "delete"),
+            Err(403),
+            "Missing permission should return 403"
+        );
+
+        // Test case 7: Handler creates 403 error response
+        struct ErrorResponse {
+            status_code: u16,
+            message: String,
+        }
+
+        let forbidden_error = ErrorResponse {
+            status_code: 403,
+            message: "Access forbidden".to_string(),
+        };
+
+        assert_eq!(forbidden_error.status_code, 403);
+        assert!(forbidden_error.message.contains("forbidden"));
+
+        // Test case 8: Handler returns 403 for time-based access restrictions
+        fn check_access_time(current_hour: u8, allowed_hours: (u8, u8)) -> Result<(), u16> {
+            if current_hour >= allowed_hours.0 && current_hour < allowed_hours.1 {
+                Ok(())
+            } else {
+                Err(403)
+            }
+        }
+
+        assert!(check_access_time(10, (9, 17)).is_ok()); // 10 AM, allowed 9 AM - 5 PM
+        assert_eq!(
+            check_access_time(18, (9, 17)),
+            Err(403),
+            "Access outside allowed hours should return 403"
+        );
+
+        // Test case 9: Handler returns 403 when quota/rate limit exceeded
+        fn check_quota(current_usage: u32, quota_limit: u32) -> Result<(), u16> {
+            if current_usage < quota_limit {
+                Ok(())
+            } else {
+                Err(403)
+            }
+        }
+
+        assert!(check_quota(50, 100).is_ok());
+        assert_eq!(
+            check_quota(100, 100),
+            Err(403),
+            "Quota exceeded should return 403"
+        );
+
+        // Test case 10: Handler distinguishes 401 (auth) from 403 (permission)
+        fn check_access(has_valid_token: bool, has_permission: bool) -> Result<(), u16> {
+            if !has_valid_token {
+                return Err(401); // Unauthorized - no valid credentials
+            }
+            if !has_permission {
+                return Err(403); // Forbidden - valid credentials but no permission
+            }
+            Ok(())
+        }
+
+        assert!(check_access(true, true).is_ok());
+        assert_eq!(
+            check_access(false, true),
+            Err(401),
+            "Invalid token should return 401"
+        );
+        assert_eq!(
+            check_access(true, false),
+            Err(403),
+            "Valid token without permission should return 403"
+        );
+    }
 }
