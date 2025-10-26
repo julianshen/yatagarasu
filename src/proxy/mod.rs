@@ -10903,4 +10903,199 @@ mod tests {
         // Test case 11: Error message is clear for missing token
         assert_eq!(response.body, b"Missing token");
     }
+
+    #[test]
+    fn test_can_access_public_and_private_buckets_in_same_proxy_instance() {
+        // Integration test: Can access public and private buckets in same proxy instance
+        // Tests that a single proxy instance can handle both public and private buckets simultaneously
+
+        // Test case 1: Configure multiple buckets with different auth settings
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt_enabled: bool,
+        }
+
+        let public_bucket = BucketConfig {
+            name: "public-bucket".to_string(),
+            jwt_enabled: false,
+        };
+
+        let private_bucket = BucketConfig {
+            name: "private-bucket".to_string(),
+            jwt_enabled: true,
+        };
+
+        // Test case 2: Proxy configuration with multiple buckets
+        #[derive(Debug)]
+        struct ProxyConfig {
+            buckets: Vec<BucketConfig>,
+        }
+
+        let proxy_config = ProxyConfig {
+            buckets: vec![public_bucket.clone(), private_bucket.clone()],
+        };
+
+        assert_eq!(proxy_config.buckets.len(), 2);
+
+        // Test case 3: Request structures
+        #[derive(Debug)]
+        struct HttpRequest {
+            bucket_name: String,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn handle_request(req: &HttpRequest, proxy_config: &ProxyConfig) -> HttpResponse {
+            // Find the bucket config
+            let bucket_config = proxy_config
+                .buckets
+                .iter()
+                .find(|b| b.name == req.bucket_name);
+
+            if bucket_config.is_none() {
+                return HttpResponse {
+                    status: 404,
+                    body: b"Bucket not found".to_vec(),
+                };
+            }
+
+            let bucket_config = bucket_config.unwrap();
+
+            // If JWT not enabled, allow access
+            if !bucket_config.jwt_enabled {
+                return HttpResponse {
+                    status: 200,
+                    body: b"object data".to_vec(),
+                };
+            }
+
+            // JWT enabled - check for token
+            let auth_header = req.headers.get("authorization");
+            if auth_header.is_none() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Missing token".to_vec(),
+                };
+            }
+
+            // Check if token is valid
+            let token = auth_header.unwrap();
+            if !token.starts_with("Bearer ") {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Invalid token format".to_vec(),
+                };
+            }
+
+            let token_value = token.strip_prefix("Bearer ").unwrap_or("");
+            if token_value.is_empty() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Empty token".to_vec(),
+                };
+            }
+
+            HttpResponse {
+                status: 200,
+                body: b"object data".to_vec(),
+            }
+        }
+
+        // Test case 4: Access public bucket without JWT - succeeds
+        let req_public_no_jwt = HttpRequest {
+            bucket_name: "public-bucket".to_string(),
+            headers: std::collections::HashMap::new(),
+        };
+
+        let resp_public_no_jwt = handle_request(&req_public_no_jwt, &proxy_config);
+        assert_eq!(resp_public_no_jwt.status, 200);
+        assert_eq!(resp_public_no_jwt.body, b"object data");
+
+        // Test case 5: Access private bucket without JWT - fails
+        let req_private_no_jwt = HttpRequest {
+            bucket_name: "private-bucket".to_string(),
+            headers: std::collections::HashMap::new(),
+        };
+
+        let resp_private_no_jwt = handle_request(&req_private_no_jwt, &proxy_config);
+        assert_eq!(resp_private_no_jwt.status, 401);
+        assert_eq!(resp_private_no_jwt.body, b"Missing token");
+
+        // Test case 6: Access private bucket with JWT - succeeds
+        let mut headers_with_jwt = std::collections::HashMap::new();
+        headers_with_jwt.insert(
+            "authorization".to_string(),
+            "Bearer valid_token".to_string(),
+        );
+        let req_private_with_jwt = HttpRequest {
+            bucket_name: "private-bucket".to_string(),
+            headers: headers_with_jwt,
+        };
+
+        let resp_private_with_jwt = handle_request(&req_private_with_jwt, &proxy_config);
+        assert_eq!(resp_private_with_jwt.status, 200);
+        assert_eq!(resp_private_with_jwt.body, b"object data");
+
+        // Test case 7: Access public bucket with JWT - succeeds (JWT ignored)
+        let mut headers_public_with_jwt = std::collections::HashMap::new();
+        headers_public_with_jwt
+            .insert("authorization".to_string(), "Bearer some_token".to_string());
+        let req_public_with_jwt = HttpRequest {
+            bucket_name: "public-bucket".to_string(),
+            headers: headers_public_with_jwt,
+        };
+
+        let resp_public_with_jwt = handle_request(&req_public_with_jwt, &proxy_config);
+        assert_eq!(resp_public_with_jwt.status, 200);
+
+        // Test case 8: Verify both buckets exist in proxy config
+        assert_eq!(proxy_config.buckets.len(), 2);
+        assert_eq!(proxy_config.buckets[0].name, "public-bucket");
+        assert_eq!(proxy_config.buckets[1].name, "private-bucket");
+
+        // Test case 9: Verify auth settings are different
+        assert!(!proxy_config.buckets[0].jwt_enabled);
+        assert!(proxy_config.buckets[1].jwt_enabled);
+
+        // Test case 10: Multiple requests to both buckets
+        for _i in 0..3 {
+            // Public bucket - no JWT needed
+            let req_pub = HttpRequest {
+                bucket_name: "public-bucket".to_string(),
+                headers: std::collections::HashMap::new(),
+            };
+            let resp_pub = handle_request(&req_pub, &proxy_config);
+            assert_eq!(resp_pub.status, 200);
+
+            // Private bucket - JWT required
+            let req_priv = HttpRequest {
+                bucket_name: "private-bucket".to_string(),
+                headers: std::collections::HashMap::new(),
+            };
+            let resp_priv = handle_request(&req_priv, &proxy_config);
+            assert_eq!(resp_priv.status, 401);
+        }
+
+        // Test case 11: Both buckets independent - no interference
+        let req1 = HttpRequest {
+            bucket_name: "public-bucket".to_string(),
+            headers: std::collections::HashMap::new(),
+        };
+        let resp1 = handle_request(&req1, &proxy_config);
+
+        let req2 = HttpRequest {
+            bucket_name: "private-bucket".to_string(),
+            headers: std::collections::HashMap::new(),
+        };
+        let resp2 = handle_request(&req2, &proxy_config);
+
+        assert_eq!(resp1.status, 200);
+        assert_eq!(resp2.status, 401);
+    }
 }

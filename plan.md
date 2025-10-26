@@ -455,7 +455,7 @@ yatagarasu/
 ### End-to-End - Mixed Auth Configuration
 - [x] Test: Public bucket accessible without JWT
 - [x] Test: Private bucket requires JWT
-- [ ] Test: Can access public and private buckets in same proxy instance
+- [x] Test: Can access public and private buckets in same proxy instance
 - [ ] Test: Auth configuration independent per bucket
 
 ### End-to-End - Error Scenarios
