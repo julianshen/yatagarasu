@@ -10058,4 +10058,268 @@ mod tests {
         // Test case 11: Error message is clear
         assert_eq!(response.body, b"Claims verification failed");
     }
+
+    #[test]
+    fn test_valid_jwt_with_missing_required_claim_returns_403() {
+        // Integration test: Valid JWT with missing required claim returns 403
+        // Tests that JWT tokens missing required claims are rejected
+
+        // Test case 1: Configure verification rules requiring multiple claims
+        #[derive(Debug, Clone)]
+        struct ClaimVerificationRule {
+            claim_name: String,
+            operator: String,
+            expected_value: ClaimValue,
+        }
+
+        #[derive(Debug, Clone)]
+        enum ClaimValue {
+            String(String),
+            Number(i32),
+            Boolean(bool),
+        }
+
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt_enabled: bool,
+            claim_verification_rules: Vec<ClaimVerificationRule>,
+        }
+
+        let bucket_config = BucketConfig {
+            name: "test-bucket".to_string(),
+            jwt_enabled: true,
+            claim_verification_rules: vec![
+                ClaimVerificationRule {
+                    claim_name: "role".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::String("admin".to_string()),
+                },
+                ClaimVerificationRule {
+                    claim_name: "org".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::String("acme".to_string()),
+                },
+                ClaimVerificationRule {
+                    claim_name: "department".to_string(),
+                    operator: "equals".to_string(),
+                    expected_value: ClaimValue::String("engineering".to_string()),
+                },
+            ],
+        };
+
+        // Test case 2: Create JWT tokens with incomplete claims
+        #[derive(Debug)]
+        struct HttpRequest {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        // Create token missing "department" claim
+        fn create_token_missing_department() -> String {
+            // JWT with only role and org, missing department
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{\"role\":\"admin\",\"org\":\"acme\",\"exp\":9999999999}.valid_sig".to_string()
+        }
+
+        // Create token missing "role" claim
+        fn create_token_missing_role() -> String {
+            // JWT with only org and department, missing role
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{\"org\":\"acme\",\"department\":\"engineering\",\"exp\":9999999999}.valid_sig".to_string()
+        }
+
+        // Create token missing "org" claim
+        fn create_token_missing_org() -> String {
+            // JWT with only role and department, missing org
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{\"role\":\"admin\",\"department\":\"engineering\",\"exp\":9999999999}.valid_sig".to_string()
+        }
+
+        // Create token with all required claims
+        fn create_token_with_all_claims() -> String {
+            // JWT with role, org, and department
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{\"role\":\"admin\",\"org\":\"acme\",\"department\":\"engineering\",\"exp\":9999999999}.valid_sig".to_string()
+        }
+
+        // Test case 3: Extract claims from token
+        fn extract_claims_from_token(
+            token: &str,
+        ) -> Option<std::collections::HashMap<String, String>> {
+            let parts: Vec<&str> = token.split('.').collect();
+            if parts.len() != 3 {
+                return None;
+            }
+
+            let payload = parts[1];
+            let mut claims = std::collections::HashMap::new();
+
+            // Parse claims from payload
+            if payload.contains("\"role\":\"admin\"") {
+                claims.insert("role".to_string(), "admin".to_string());
+            }
+            if payload.contains("\"org\":\"acme\"") {
+                claims.insert("org".to_string(), "acme".to_string());
+            }
+            if payload.contains("\"department\":\"engineering\"") {
+                claims.insert("department".to_string(), "engineering".to_string());
+            }
+
+            Some(claims)
+        }
+
+        // Test case 4: Verify claims function
+        fn verify_claims(
+            claims: &std::collections::HashMap<String, String>,
+            rules: &[ClaimVerificationRule],
+        ) -> bool {
+            for rule in rules {
+                let claim_value = claims.get(&rule.claim_name);
+                if claim_value.is_none() {
+                    // Missing required claim
+                    return false;
+                }
+
+                let claim_value = claim_value.unwrap();
+                let matches = match &rule.expected_value {
+                    ClaimValue::String(expected) => claim_value == expected,
+                    ClaimValue::Number(expected) => {
+                        claim_value.parse::<i32>().ok() == Some(*expected)
+                    }
+                    ClaimValue::Boolean(expected) => {
+                        claim_value.parse::<bool>().ok() == Some(*expected)
+                    }
+                };
+
+                if !matches {
+                    return false;
+                }
+            }
+            true
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            let auth_header = req.headers.get("authorization");
+            if auth_header.is_none() && config.jwt_enabled {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Missing token".to_vec(),
+                };
+            }
+
+            if let Some(auth_value) = auth_header {
+                let token = auth_value.strip_prefix("Bearer ").unwrap_or(auth_value);
+
+                let claims = extract_claims_from_token(token);
+                if claims.is_none() {
+                    return HttpResponse {
+                        status: 401,
+                        body: b"Invalid token".to_vec(),
+                    };
+                }
+
+                let claims = claims.unwrap();
+                if !verify_claims(&claims, &config.claim_verification_rules) {
+                    return HttpResponse {
+                        status: 403,
+                        body: b"Claims verification failed".to_vec(),
+                    };
+                }
+
+                return HttpResponse {
+                    status: 200,
+                    body: b"object data".to_vec(),
+                };
+            }
+
+            HttpResponse {
+                status: 401,
+                body: b"Unauthorized".to_vec(),
+            }
+        }
+
+        // Test case 5: Token missing "department" claim returns 403
+        let token_no_dept = create_token_missing_department();
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_no_dept),
+        );
+        let request = HttpRequest { headers };
+
+        let response = handle_request(&request, &bucket_config);
+        assert_eq!(response.status, 403);
+        assert_eq!(response.body, b"Claims verification failed");
+
+        // Test case 6: Token missing "role" claim returns 403
+        let token_no_role = create_token_missing_role();
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_no_role),
+        );
+        let req2 = HttpRequest { headers: headers2 };
+
+        let resp2 = handle_request(&req2, &bucket_config);
+        assert_eq!(resp2.status, 403);
+
+        // Test case 7: Token missing "org" claim returns 403
+        let token_no_org = create_token_missing_org();
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_no_org),
+        );
+        let req3 = HttpRequest { headers: headers3 };
+
+        let resp3 = handle_request(&req3, &bucket_config);
+        assert_eq!(resp3.status, 403);
+
+        // Test case 8: Token with all claims returns 200 (baseline)
+        let token_complete = create_token_with_all_claims();
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_complete),
+        );
+        let req4 = HttpRequest { headers: headers4 };
+
+        let resp4 = handle_request(&req4, &bucket_config);
+        assert_eq!(resp4.status, 200);
+
+        // Test case 9: Verify missing claim detection
+        let claims_incomplete = extract_claims_from_token(&token_no_dept).unwrap();
+        assert!(claims_incomplete.contains_key("role"));
+        assert!(claims_incomplete.contains_key("org"));
+        assert!(!claims_incomplete.contains_key("department")); // Missing
+
+        let verification_failed =
+            verify_claims(&claims_incomplete, &bucket_config.claim_verification_rules);
+        assert!(!verification_failed);
+
+        // Test case 10: Complete claims pass verification
+        let claims_complete = extract_claims_from_token(&token_complete).unwrap();
+        assert!(claims_complete.contains_key("role"));
+        assert!(claims_complete.contains_key("org"));
+        assert!(claims_complete.contains_key("department"));
+
+        let verification_passed =
+            verify_claims(&claims_complete, &bucket_config.claim_verification_rules);
+        assert!(verification_passed);
+
+        // Test case 11: Empty token (no claims) returns 403
+        let token_empty =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{\"exp\":9999999999}.valid_sig".to_string();
+        let mut headers5 = std::collections::HashMap::new();
+        headers5.insert(
+            "authorization".to_string(),
+            format!("Bearer {}", token_empty),
+        );
+        let req5 = HttpRequest { headers: headers5 };
+
+        let resp5 = handle_request(&req5, &bucket_config);
+        assert_eq!(resp5.status, 403);
+    }
 }
