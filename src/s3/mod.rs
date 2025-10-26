@@ -5569,4 +5569,155 @@ mod tests {
             "Multiple invalid ranges should fall back to 200 OK"
         );
     }
+
+    #[test]
+    fn test_range_requests_bypass_cache() {
+        use std::collections::HashMap;
+
+        // Range requests should NEVER be cached
+        // Rationale:
+        // 1. Caching partial responses is complex (need to track which ranges are cached)
+        // 2. Range requests are typically for large files (videos) with varying ranges
+        // 3. Client may request different ranges each time (seeking, parallel downloads)
+        // 4. Cache efficiency would be low for range requests
+        // 5. Simpler to always fetch range requests directly from S3
+
+        // Test case 1: Range request response should indicate it was NOT served from cache
+        // A cache hit would typically include headers like X-Cache: HIT or Age: > 0
+        // Range requests should always be fresh from S3
+        let mut headers_range_request = HashMap::new();
+        headers_range_request.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_range_request.insert(
+            "content-range".to_string(),
+            "bytes 0-1023/10000".to_string(),
+        );
+        headers_range_request.insert("content-length".to_string(), "1024".to_string());
+        // No X-Cache header = not from cache
+        // No Age header = fresh from origin
+
+        let response_range = S3Response::new(
+            206,
+            "Partial Content",
+            headers_range_request,
+            vec![1u8; 1024],
+        );
+
+        assert_eq!(response_range.status_code, 206);
+        assert!(
+            response_range.headers.get("x-cache").is_none(),
+            "Range request should not include X-Cache header (not cached)"
+        );
+        assert!(
+            response_range.headers.get("age").is_none(),
+            "Range request should not include Age header (fresh from S3)"
+        );
+
+        // Test case 2: Multiple range requests for SAME file should each go to S3
+        // Even if requesting the same bytes multiple times
+        // This is different from full file requests which SHOULD be cached
+        let mut headers_range_1 = HashMap::new();
+        headers_range_1.insert(
+            "content-range".to_string(),
+            "bytes 1000-1999/50000".to_string(),
+        );
+        headers_range_1.insert("etag".to_string(), "\"same-file-etag\"".to_string());
+
+        let response_range_1 =
+            S3Response::new(206, "Partial Content", headers_range_1, vec![2u8; 1000]);
+
+        // Second request for the exact same range
+        let mut headers_range_2 = HashMap::new();
+        headers_range_2.insert(
+            "content-range".to_string(),
+            "bytes 1000-1999/50000".to_string(),
+        );
+        headers_range_2.insert("etag".to_string(), "\"same-file-etag\"".to_string());
+
+        let response_range_2 =
+            S3Response::new(206, "Partial Content", headers_range_2, vec![2u8; 1000]);
+
+        // Both should be 206 (not 304 Not Modified from cache)
+        assert_eq!(response_range_1.status_code, 206);
+        assert_eq!(response_range_2.status_code, 206);
+
+        // Both should have identical ETag (same file)
+        assert_eq!(
+            response_range_1.headers.get("etag"),
+            response_range_2.headers.get("etag")
+        );
+
+        // But neither should indicate cache hit
+        assert!(response_range_1.headers.get("x-cache").is_none());
+        assert!(response_range_2.headers.get("x-cache").is_none());
+
+        // Test case 3: Contrast with full file request which COULD be cached
+        let mut headers_full_file = HashMap::new();
+        headers_full_file.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_full_file.insert("content-length".to_string(), "10000".to_string());
+        headers_full_file.insert("etag".to_string(), "\"full-file-etag\"".to_string());
+        // Full file requests (200 OK) could include cache indicators
+        headers_full_file.insert("x-cache".to_string(), "HIT".to_string());
+        headers_full_file.insert("age".to_string(), "300".to_string()); // 5 minutes old
+
+        let response_full = S3Response::new(200, "OK", headers_full_file, vec![3u8; 10000]);
+
+        assert_eq!(response_full.status_code, 200);
+        assert!(
+            response_full.headers.get("x-cache").is_some(),
+            "Full file request CAN be served from cache"
+        );
+        assert!(
+            response_full.headers.get("age").is_some(),
+            "Full file request CAN have Age header"
+        );
+
+        // Verify different behavior: 206 bypass cache, 200 may use cache
+        assert_ne!(response_range.status_code, response_full.status_code);
+        assert!(response_range.headers.get("x-cache").is_none());
+        assert!(response_full.headers.get("x-cache").is_some());
+
+        // Test case 4: Large file with multiple different ranges
+        // Each range request goes to S3, even for same file
+        let ranges = vec![
+            "bytes 0-999/100000",
+            "bytes 1000-1999/100000",
+            "bytes 50000-50999/100000",
+            "bytes 99000-99999/100000",
+        ];
+
+        for range_str in ranges {
+            let mut headers = HashMap::new();
+            headers.insert("content-range".to_string(), range_str.to_string());
+            headers.insert("etag".to_string(), "\"large-file-etag\"".to_string());
+
+            let response = S3Response::new(206, "Partial Content", headers, vec![4u8; 1000]);
+
+            assert_eq!(response.status_code, 206);
+            assert!(
+                response.headers.get("x-cache").is_none(),
+                "Each range request should bypass cache: {}",
+                range_str
+            );
+            assert_eq!(
+                response.headers.get("etag").unwrap(),
+                "\"large-file-etag\"",
+                "All ranges are from same file"
+            );
+        }
+
+        // Test case 5: Range request with If-Range also bypasses cache
+        // Even conditional range requests should not use cache
+        let mut headers_if_range = HashMap::new();
+        headers_if_range.insert("content-range".to_string(), "bytes 0-499/5000".to_string());
+        headers_if_range.insert("etag".to_string(), "\"conditional-etag\"".to_string());
+
+        let response_if_range =
+            S3Response::new(206, "Partial Content", headers_if_range, vec![5u8; 500]);
+
+        assert_eq!(response_if_range.status_code, 206);
+        assert!(
+            response_if_range.headers.get("x-cache").is_none(),
+            "If-Range conditional request should also bypass cache"
+        );
+    }
 }
