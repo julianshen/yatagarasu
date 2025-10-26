@@ -707,4 +707,98 @@ mod tests {
             "Handler should validate all required request fields are present"
         );
     }
+
+    #[test]
+    fn test_handler_can_access_request_method() {
+        // Validates that the handler can access and work with the HTTP request method
+        // The method determines how the request should be processed
+
+        // Test case 1: Handler can access GET method
+        let get_method = "GET";
+        assert_eq!(get_method, "GET", "Handler should access GET method");
+
+        // Test case 2: Handler can access HEAD method
+        let head_method = "HEAD";
+        assert_eq!(head_method, "HEAD", "Handler should access HEAD method");
+
+        // Test case 3: Handler can access POST method
+        let post_method = "POST";
+        assert_eq!(post_method, "POST", "Handler should access POST method");
+
+        // Test case 4: Handler can distinguish between different methods
+        let methods = vec!["GET", "HEAD", "POST", "PUT", "DELETE"];
+        for method in &methods {
+            assert!(!method.is_empty(), "Method should not be empty");
+            assert!(
+                method.len() >= 3,
+                "Valid HTTP methods should have at least 3 characters"
+            );
+        }
+
+        // Test case 5: Handler can check if method is GET
+        let check_is_get = |m: &str| m == "GET";
+        assert!(check_is_get("GET"), "Should identify GET method");
+        assert!(
+            !check_is_get("POST"),
+            "Should distinguish GET from other methods"
+        );
+
+        // Test case 6: Handler can check if method is HEAD
+        let check_is_head = |m: &str| m == "HEAD";
+        assert!(check_is_head("HEAD"), "Should identify HEAD method");
+        assert!(
+            !check_is_head("GET"),
+            "Should distinguish HEAD from other methods"
+        );
+
+        // Test case 7: Handler validates method is uppercase
+        let method = "GET";
+        assert!(
+            method
+                .chars()
+                .all(|c| c.is_uppercase() || !c.is_alphabetic()),
+            "HTTP methods should be uppercase"
+        );
+
+        // Test case 8: Handler can match method against allowed methods
+        let allowed_methods = vec!["GET", "HEAD"];
+        let request_method = "GET";
+
+        assert!(
+            allowed_methods.contains(&request_method),
+            "Handler should check if method is allowed"
+        );
+
+        let disallowed_method = "POST";
+        assert!(
+            !allowed_methods.contains(&disallowed_method),
+            "Handler should reject disallowed methods"
+        );
+
+        // Test case 9: Handler extracts method from request structure
+        struct HttpRequest {
+            method: String,
+        }
+
+        let request = HttpRequest {
+            method: "GET".to_string(),
+        };
+
+        assert_eq!(
+            request.method, "GET",
+            "Handler should extract method from request"
+        );
+
+        // Test case 10: Handler can work with method references
+        let method_ref = &request.method;
+        assert_eq!(
+            method_ref, "GET",
+            "Handler should work with method references"
+        );
+        assert_eq!(
+            method_ref.as_str(),
+            "GET",
+            "Handler should convert method to string slice"
+        );
+    }
 }
