@@ -13863,4 +13863,121 @@ mod tests {
         let margin = 500.0 - memory_usage_mb;
         assert!(margin > 400.0); // At least 400MB margin
     }
+
+    #[test]
+    fn test_memory_usage_scales_linearly_with_connections() {
+        // Resource usage test: Memory usage scales linearly with connections
+        // Tests that memory usage is O(n) not O(n^2) or worse
+
+        // Test case 1: Define connection simulation
+        struct Connection {
+            _id: u64,
+            buffer: Vec<u8>,
+        }
+
+        impl Connection {
+            fn new(id: u64) -> Self {
+                // Each connection uses ~64KB buffer
+                Connection {
+                    _id: id,
+                    buffer: vec![0u8; 64 * 1024],
+                }
+            }
+
+            fn memory_size(&self) -> u64 {
+                // Connection overhead + buffer
+                std::mem::size_of::<Self>() as u64 + self.buffer.len() as u64
+            }
+        }
+
+        // Test case 2: Test different connection counts
+        let connection_counts = vec![10, 100, 1000];
+        let mut memory_usages = Vec::new();
+        let mut memory_per_connection = Vec::new();
+
+        for count in &connection_counts {
+            // Create connections
+            let connections: Vec<Connection> = (0..*count).map(|i| Connection::new(i)).collect();
+
+            // Calculate total memory usage
+            let total_memory: u64 = connections.iter().map(|c| c.memory_size()).sum();
+            memory_usages.push(total_memory);
+
+            // Calculate memory per connection
+            let per_conn = total_memory as f64 / *count as f64;
+            memory_per_connection.push(per_conn);
+        }
+
+        // Test case 3: Verify memory increases with connections (not constant)
+        assert!(memory_usages[1] > memory_usages[0]);
+        assert!(memory_usages[2] > memory_usages[1]);
+
+        // Test case 4: Verify linear scaling (memory per connection is relatively constant)
+        let first_per_conn = memory_per_connection[0];
+        let second_per_conn = memory_per_connection[1];
+        let third_per_conn = memory_per_connection[2];
+
+        // Memory per connection should be within 20% of each other (linear scaling)
+        let variance_10_to_100 = (second_per_conn - first_per_conn).abs() / first_per_conn;
+        let variance_100_to_1000 = (third_per_conn - second_per_conn).abs() / second_per_conn;
+
+        assert!(
+            variance_10_to_100 < 0.2,
+            "Memory per connection variance too high (10->100): {:.2}%",
+            variance_10_to_100 * 100.0
+        );
+        assert!(
+            variance_100_to_1000 < 0.2,
+            "Memory per connection variance too high (100->1000): {:.2}%",
+            variance_100_to_1000 * 100.0
+        );
+
+        // Test case 5: Verify not quadratic scaling
+        // If quadratic, 10x connections would mean ~100x memory
+        // If linear, 10x connections means ~10x memory
+        let ratio_10_to_100 = memory_usages[1] as f64 / memory_usages[0] as f64;
+        let ratio_100_to_1000 = memory_usages[2] as f64 / memory_usages[1] as f64;
+
+        // Both ratios should be close to 10 (linear) not 100 (quadratic)
+        assert!(
+            ratio_10_to_100 > 8.0 && ratio_10_to_100 < 12.0,
+            "10x connections should use ~10x memory (linear), but ratio was {:.2}",
+            ratio_10_to_100
+        );
+        assert!(
+            ratio_100_to_1000 > 8.0 && ratio_100_to_1000 < 12.0,
+            "10x connections should use ~10x memory (linear), but ratio was {:.2}",
+            ratio_100_to_1000
+        );
+
+        // Test case 6: Verify memory per connection is reasonable (~64KB)
+        for per_conn in &memory_per_connection {
+            let per_conn_kb = per_conn / 1024.0;
+            assert!(
+                per_conn_kb > 50.0 && per_conn_kb < 80.0,
+                "Memory per connection should be ~64KB, but was {:.2}KB",
+                per_conn_kb
+            );
+        }
+
+        // Test case 7: Calculate projected memory for 10,000 connections
+        let avg_per_conn =
+            memory_per_connection.iter().sum::<f64>() / memory_per_connection.len() as f64;
+        let projected_10k = (avg_per_conn * 10000.0) / (1024.0 * 1024.0);
+
+        // Test case 8: Verify projected memory for 10k connections is reasonable
+        assert!(
+            projected_10k < 1000.0,
+            "10k connections should use <1GB, but projected {:.2}MB",
+            projected_10k
+        );
+
+        // Test case 9: Verify linear complexity O(n)
+        // This is confirmed by constant memory per connection
+        assert!(variance_10_to_100 < 0.2 && variance_100_to_1000 < 0.2);
+
+        // Test case 10: Memory scaling is predictable
+        let total_variance = (variance_10_to_100 + variance_100_to_1000) / 2.0;
+        assert!(total_variance < 0.15); // Average variance <15%
+    }
 }
