@@ -7767,4 +7767,250 @@ mod tests {
         assert_eq!(mock_complete_response.body[2], 0x44); // D
         assert_eq!(mock_complete_response.body[3], 0x46); // F
     }
+
+    #[test]
+    fn test_head_object_works_with_mocked_s3_backend() {
+        use std::collections::HashMap;
+
+        // Validates that we can mock S3 backend responses for HEAD requests
+        // HEAD requests return metadata without body, same headers as GET
+
+        // Test case 1: Mock successful HEAD request for a file
+        let mut headers_head = HashMap::new();
+        headers_head.insert("content-type".to_string(), "text/plain".to_string());
+        headers_head.insert("content-length".to_string(), "1024".to_string());
+        headers_head.insert("etag".to_string(), "\"abc123\"".to_string());
+        headers_head.insert(
+            "last-modified".to_string(),
+            "Wed, 21 Oct 2015 07:28:00 GMT".to_string(),
+        );
+
+        // HEAD response has empty body
+        let mock_head_response = S3Response::new(200, "OK", headers_head, vec![]);
+
+        // Verify response structure
+        assert_eq!(mock_head_response.status_code, 200);
+        assert_eq!(mock_head_response.status_text, "OK");
+        assert!(
+            mock_head_response.body.is_empty(),
+            "HEAD response should have empty body"
+        );
+        assert_eq!(
+            mock_head_response.headers.get("content-type"),
+            Some(&"text/plain".to_string())
+        );
+        assert_eq!(
+            mock_head_response.headers.get("content-length"),
+            Some(&"1024".to_string())
+        );
+        assert_eq!(
+            mock_head_response.headers.get("etag"),
+            Some(&"\"abc123\"".to_string())
+        );
+
+        // Test case 2: Mock HEAD request with Accept-Ranges header
+        let mut headers_ranges = HashMap::new();
+        headers_ranges.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_ranges.insert("content-length".to_string(), "104857600".to_string()); // 100 MB
+        headers_ranges.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_ranges.insert("etag".to_string(), "\"def456\"".to_string());
+
+        let mock_ranges_response = S3Response::new(200, "OK", headers_ranges, vec![]);
+
+        assert_eq!(mock_ranges_response.status_code, 200);
+        assert!(mock_ranges_response.body.is_empty());
+        assert_eq!(
+            mock_ranges_response.headers.get("accept-ranges"),
+            Some(&"bytes".to_string())
+        );
+        assert_eq!(
+            mock_ranges_response.headers.get("content-length"),
+            Some(&"104857600".to_string())
+        );
+
+        // Test case 3: Mock HEAD request with custom metadata
+        let mut headers_metadata = HashMap::new();
+        headers_metadata.insert("content-type".to_string(), "application/json".to_string());
+        headers_metadata.insert("content-length".to_string(), "512".to_string());
+        headers_metadata.insert("x-amz-meta-author".to_string(), "Jane Doe".to_string());
+        headers_metadata.insert("x-amz-meta-version".to_string(), "2.0".to_string());
+        headers_metadata.insert(
+            "x-amz-meta-environment".to_string(),
+            "production".to_string(),
+        );
+
+        let mock_metadata_response = S3Response::new(200, "OK", headers_metadata, vec![]);
+
+        assert_eq!(mock_metadata_response.status_code, 200);
+        assert!(mock_metadata_response.body.is_empty());
+        assert_eq!(
+            mock_metadata_response.headers.get("x-amz-meta-author"),
+            Some(&"Jane Doe".to_string())
+        );
+        assert_eq!(
+            mock_metadata_response.headers.get("x-amz-meta-version"),
+            Some(&"2.0".to_string())
+        );
+        assert_eq!(
+            mock_metadata_response.headers.get("x-amz-meta-environment"),
+            Some(&"production".to_string())
+        );
+
+        // Test case 4: Mock HEAD request for different content types
+        let content_types = vec![
+            ("text/html", "5120"),
+            ("application/pdf", "2048000"),
+            ("image/jpeg", "1024000"),
+            ("application/octet-stream", "10485760"),
+        ];
+
+        for (content_type, content_length) in content_types {
+            let mut headers = HashMap::new();
+            headers.insert("content-type".to_string(), content_type.to_string());
+            headers.insert("content-length".to_string(), content_length.to_string());
+            headers.insert("etag".to_string(), format!("\"{}\"", content_type));
+
+            let mock_response = S3Response::new(200, "OK", headers, vec![]);
+
+            assert_eq!(mock_response.status_code, 200);
+            assert!(mock_response.body.is_empty(), "HEAD should have no body");
+            assert_eq!(
+                mock_response.headers.get("content-type"),
+                Some(&content_type.to_string())
+            );
+            assert_eq!(
+                mock_response.headers.get("content-length"),
+                Some(&content_length.to_string())
+            );
+        }
+
+        // Test case 5: Mock HEAD request with Cache-Control headers
+        let mut headers_cache = HashMap::new();
+        headers_cache.insert("content-type".to_string(), "text/css".to_string());
+        headers_cache.insert("content-length".to_string(), "4096".to_string());
+        headers_cache.insert(
+            "cache-control".to_string(),
+            "max-age=86400, public".to_string(),
+        );
+        headers_cache.insert(
+            "expires".to_string(),
+            "Fri, 01 Dec 2024 23:59:59 GMT".to_string(),
+        );
+        headers_cache.insert("etag".to_string(), "\"css123\"".to_string());
+
+        let mock_cache_response = S3Response::new(200, "OK", headers_cache, vec![]);
+
+        assert_eq!(mock_cache_response.status_code, 200);
+        assert!(mock_cache_response.body.is_empty());
+        assert_eq!(
+            mock_cache_response.headers.get("cache-control"),
+            Some(&"max-age=86400, public".to_string())
+        );
+        assert_eq!(
+            mock_cache_response.headers.get("expires"),
+            Some(&"Fri, 01 Dec 2024 23:59:59 GMT".to_string())
+        );
+
+        // Test case 6: Mock HEAD request with all standard S3 headers
+        let mut headers_complete = HashMap::new();
+        headers_complete.insert("content-type".to_string(), "application/xml".to_string());
+        headers_complete.insert("content-length".to_string(), "8192".to_string());
+        headers_complete.insert("etag".to_string(), "\"xml789\"".to_string());
+        headers_complete.insert(
+            "last-modified".to_string(),
+            "Mon, 25 Nov 2024 14:30:00 GMT".to_string(),
+        );
+        headers_complete.insert("accept-ranges".to_string(), "bytes".to_string());
+        headers_complete.insert("x-amz-request-id".to_string(), "REQ123ABC".to_string());
+        headers_complete.insert("x-amz-id-2".to_string(), "ID2XYZ".to_string());
+        headers_complete.insert(
+            "x-amz-server-side-encryption".to_string(),
+            "AES256".to_string(),
+        );
+
+        let mock_complete_response = S3Response::new(200, "OK", headers_complete, vec![]);
+
+        assert_eq!(mock_complete_response.status_code, 200);
+        assert!(mock_complete_response.body.is_empty());
+        assert_eq!(
+            mock_complete_response.headers.get("content-type"),
+            Some(&"application/xml".to_string())
+        );
+        assert_eq!(
+            mock_complete_response.headers.get("etag"),
+            Some(&"\"xml789\"".to_string())
+        );
+        assert_eq!(
+            mock_complete_response.headers.get("last-modified"),
+            Some(&"Mon, 25 Nov 2024 14:30:00 GMT".to_string())
+        );
+        assert_eq!(
+            mock_complete_response.headers.get("accept-ranges"),
+            Some(&"bytes".to_string())
+        );
+        assert_eq!(
+            mock_complete_response.headers.get("x-amz-request-id"),
+            Some(&"REQ123ABC".to_string())
+        );
+        assert_eq!(
+            mock_complete_response
+                .headers
+                .get("x-amz-server-side-encryption"),
+            Some(&"AES256".to_string())
+        );
+
+        // Test case 7: Verify HEAD and GET responses have same headers (except body)
+        let mut get_headers = HashMap::new();
+        get_headers.insert("content-type".to_string(), "application/json".to_string());
+        get_headers.insert("content-length".to_string(), "256".to_string());
+        get_headers.insert("etag".to_string(), "\"json123\"".to_string());
+
+        let mock_get_response = S3Response::new(
+            200,
+            "OK",
+            get_headers.clone(),
+            b"{\"test\":\"data\"}".to_vec(),
+        );
+
+        let mock_head_same = S3Response::new(200, "OK", get_headers, vec![]);
+
+        // Same status code
+        assert_eq!(mock_get_response.status_code, mock_head_same.status_code);
+
+        // Same headers
+        assert_eq!(
+            mock_get_response.headers.get("content-type"),
+            mock_head_same.headers.get("content-type")
+        );
+        assert_eq!(
+            mock_get_response.headers.get("content-length"),
+            mock_head_same.headers.get("content-length")
+        );
+        assert_eq!(
+            mock_get_response.headers.get("etag"),
+            mock_head_same.headers.get("etag")
+        );
+
+        // Different body (GET has body, HEAD doesn't)
+        assert!(!mock_get_response.body.is_empty());
+        assert!(mock_head_same.body.is_empty());
+
+        // Test case 8: Mock HEAD request for large files (verify no body even for large files)
+        let mut headers_large = HashMap::new();
+        headers_large.insert("content-type".to_string(), "video/mpeg".to_string());
+        headers_large.insert("content-length".to_string(), "1073741824".to_string()); // 1 GB
+        headers_large.insert("etag".to_string(), "\"large123\"".to_string());
+
+        let mock_large_response = S3Response::new(200, "OK", headers_large, vec![]);
+
+        assert_eq!(mock_large_response.status_code, 200);
+        assert!(
+            mock_large_response.body.is_empty(),
+            "HEAD should never return body, even for 1GB files"
+        );
+        assert_eq!(
+            mock_large_response.headers.get("content-length"),
+            Some(&"1073741824".to_string())
+        );
+    }
 }

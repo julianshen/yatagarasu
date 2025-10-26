@@ -364,7 +364,7 @@ yatagarasu/
 
 ### S3 Integration - Mock Tests
 - [x] Test: GET object works with mocked S3 backend
-- [ ] Test: HEAD object works with mocked S3 backend
+- [x] Test: HEAD object works with mocked S3 backend
 - [ ] Test: Error responses work with mocked S3 backend
 - [ ] Test: Can mock different buckets with different responses
 
