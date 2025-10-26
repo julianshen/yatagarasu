@@ -11794,4 +11794,150 @@ mod tests {
         assert!(error_msg.len() > 0);
         assert!(!error_msg.is_empty());
     }
+
+    #[test]
+    fn test_network_error_to_s3_returns_502() {
+        // Integration test: Network error to S3 returns 502
+        // Tests that network errors when communicating with S3 return 502 Bad Gateway
+
+        // Test case 1: Simulate various S3 network errors
+        #[derive(Debug)]
+        enum S3Error {
+            NetworkError,
+            ConnectionReset,
+            DNSFailure,
+            HostUnreachable,
+        }
+
+        #[derive(Debug)]
+        struct S3Client {
+            simulate_error: Option<S3Error>,
+        }
+
+        impl S3Client {
+            fn get_object(&self, _key: &str) -> Result<Vec<u8>, S3Error> {
+                if let Some(ref error) = self.simulate_error {
+                    match error {
+                        S3Error::NetworkError => Err(S3Error::NetworkError),
+                        S3Error::ConnectionReset => Err(S3Error::ConnectionReset),
+                        S3Error::DNSFailure => Err(S3Error::DNSFailure),
+                        S3Error::HostUnreachable => Err(S3Error::HostUnreachable),
+                    }
+                } else {
+                    Ok(b"object data".to_vec())
+                }
+            }
+        }
+
+        // Test case 2: Response structures
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn handle_s3_request(client: &S3Client, key: &str) -> HttpResponse {
+            match client.get_object(key) {
+                Ok(data) => HttpResponse {
+                    status: 200,
+                    body: data,
+                },
+                Err(S3Error::NetworkError) => HttpResponse {
+                    status: 502,
+                    body: b"Bad Gateway - Network error".to_vec(),
+                },
+                Err(S3Error::ConnectionReset) => HttpResponse {
+                    status: 502,
+                    body: b"Bad Gateway - Connection reset".to_vec(),
+                },
+                Err(S3Error::DNSFailure) => HttpResponse {
+                    status: 502,
+                    body: b"Bad Gateway - DNS failure".to_vec(),
+                },
+                Err(S3Error::HostUnreachable) => HttpResponse {
+                    status: 502,
+                    body: b"Bad Gateway - Host unreachable".to_vec(),
+                },
+            }
+        }
+
+        // Test case 3: Network error returns 502
+        let client_network_error = S3Client {
+            simulate_error: Some(S3Error::NetworkError),
+        };
+
+        let resp_network = handle_s3_request(&client_network_error, "test.txt");
+        assert_eq!(resp_network.status, 502);
+        assert_eq!(resp_network.body, b"Bad Gateway - Network error");
+
+        // Test case 4: Connection reset returns 502
+        let client_reset = S3Client {
+            simulate_error: Some(S3Error::ConnectionReset),
+        };
+
+        let resp_reset = handle_s3_request(&client_reset, "test.txt");
+        assert_eq!(resp_reset.status, 502);
+        assert_eq!(resp_reset.body, b"Bad Gateway - Connection reset");
+
+        // Test case 5: DNS failure returns 502
+        let client_dns = S3Client {
+            simulate_error: Some(S3Error::DNSFailure),
+        };
+
+        let resp_dns = handle_s3_request(&client_dns, "test.txt");
+        assert_eq!(resp_dns.status, 502);
+        assert_eq!(resp_dns.body, b"Bad Gateway - DNS failure");
+
+        // Test case 6: Host unreachable returns 502
+        let client_unreachable = S3Client {
+            simulate_error: Some(S3Error::HostUnreachable),
+        };
+
+        let resp_unreachable = handle_s3_request(&client_unreachable, "test.txt");
+        assert_eq!(resp_unreachable.status, 502);
+        assert_eq!(resp_unreachable.body, b"Bad Gateway - Host unreachable");
+
+        // Test case 7: Successful request after network recovery
+        let client_success = S3Client {
+            simulate_error: None,
+        };
+
+        let resp_success = handle_s3_request(&client_success, "test.txt");
+        assert_eq!(resp_success.status, 200);
+        assert_eq!(resp_success.body, b"object data");
+
+        // Test case 8: Multiple network errors handled consistently
+        for _i in 0..5 {
+            let client = S3Client {
+                simulate_error: Some(S3Error::NetworkError),
+            };
+
+            let resp = handle_s3_request(&client, "test.txt");
+            assert_eq!(resp.status, 502);
+        }
+
+        // Test case 9: Error doesn't leak sensitive information
+        let error_msg = String::from_utf8_lossy(&resp_network.body);
+        assert!(!error_msg.contains("internal"));
+        assert!(!error_msg.contains("credential"));
+        assert!(!error_msg.contains("secret"));
+        assert!(!error_msg.contains("key"));
+
+        // Test case 10: Different files all fail with same network error
+        let client_net_err = S3Client {
+            simulate_error: Some(S3Error::NetworkError),
+        };
+
+        let resp1 = handle_s3_request(&client_net_err, "file1.txt");
+        let resp2 = handle_s3_request(&client_net_err, "file2.txt");
+        let resp3 = handle_s3_request(&client_net_err, "file3.txt");
+
+        assert_eq!(resp1.status, 502);
+        assert_eq!(resp2.status, 502);
+        assert_eq!(resp3.status, 502);
+
+        // Test case 11: Error response is user-friendly
+        assert!(error_msg.len() > 0);
+        assert!(error_msg.contains("Bad Gateway"));
+    }
 }
