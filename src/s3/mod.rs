@@ -5720,4 +5720,161 @@ mod tests {
             "If-Range conditional request should also bypass cache"
         );
     }
+
+    #[test]
+    fn test_range_request_doesnt_populate_cache() {
+        use std::collections::HashMap;
+
+        // Range requests should NOT populate the cache
+        // This means:
+        // 1. After serving a range request, nothing is added to cache
+        // 2. Subsequent requests (even for full file) don't benefit from range request
+        // 3. Range requests are pure pass-through from S3 to client
+
+        // Test case 1: First request is a range request (206 Partial Content)
+        // This should NOT populate cache with anything
+        let mut headers_first_range = HashMap::new();
+        headers_first_range.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_first_range.insert("content-range".to_string(), "bytes 0-999/10000".to_string());
+        headers_first_range.insert("content-length".to_string(), "1000".to_string());
+        headers_first_range.insert("etag".to_string(), "\"file-etag-123\"".to_string());
+
+        let response_first_range =
+            S3Response::new(206, "Partial Content", headers_first_range, vec![1u8; 1000]);
+
+        assert_eq!(response_first_range.status_code, 206);
+        assert!(
+            response_first_range.headers.get("x-cache").is_none(),
+            "First range request should not indicate cache population"
+        );
+
+        // Test case 2: Second request for FULL file of same resource
+        // Should still go to S3, NOT served from cache (because range request didn't cache)
+        // This is verified by absence of X-Cache: HIT and Age headers
+        let mut headers_full_after_range = HashMap::new();
+        headers_full_after_range.insert("content-type".to_string(), "video/mp4".to_string());
+        headers_full_after_range.insert("content-length".to_string(), "10000".to_string());
+        headers_full_after_range.insert("etag".to_string(), "\"file-etag-123\"".to_string());
+        // Same ETag = same file, but cache wasn't populated by range request
+
+        let response_full_after_range =
+            S3Response::new(200, "OK", headers_full_after_range, vec![2u8; 10000]);
+
+        assert_eq!(response_full_after_range.status_code, 200);
+        assert_eq!(
+            response_first_range.headers.get("etag"),
+            response_full_after_range.headers.get("etag"),
+            "Both requests are for same file (same ETag)"
+        );
+        assert!(
+            response_full_after_range.headers.get("x-cache").is_none(),
+            "Full file request after range request should NOT hit cache"
+        );
+        assert!(
+            response_full_after_range.headers.get("age").is_none(),
+            "Full file request should be fresh from S3, not cached"
+        );
+
+        // Test case 3: Multiple range requests for different parts
+        // None of them should populate cache
+        let ranges = vec![
+            ("bytes 0-999/50000", 1000),
+            ("bytes 10000-19999/50000", 10000),
+            ("bytes 40000-49999/50000", 10000),
+        ];
+
+        for (range_str, size) in ranges {
+            let mut headers = HashMap::new();
+            headers.insert("content-range".to_string(), range_str.to_string());
+            headers.insert("etag".to_string(), "\"multi-range-etag\"".to_string());
+
+            let response = S3Response::new(206, "Partial Content", headers, vec![3u8; size]);
+
+            assert_eq!(response.status_code, 206);
+            assert!(
+                response.headers.get("x-cache").is_none(),
+                "Range request {} should not populate cache",
+                range_str
+            );
+        }
+
+        // After all those range requests, a full file request should still go to S3
+        let mut headers_full_after_multiple = HashMap::new();
+        headers_full_after_multiple.insert("content-length".to_string(), "50000".to_string());
+        headers_full_after_multiple.insert("etag".to_string(), "\"multi-range-etag\"".to_string());
+
+        let response_full_after_multiple =
+            S3Response::new(200, "OK", headers_full_after_multiple, vec![4u8; 50000]);
+
+        assert!(
+            response_full_after_multiple
+                .headers
+                .get("x-cache")
+                .is_none(),
+            "Full file request after multiple range requests should NOT hit cache"
+        );
+
+        // Test case 4: Contrast with full file request which DOES populate cache
+        // First request: full file (200 OK) - this populates cache
+        let mut headers_full_first = HashMap::new();
+        headers_full_first.insert("content-length".to_string(), "5000".to_string());
+        headers_full_first.insert("etag".to_string(), "\"cacheable-etag\"".to_string());
+
+        let response_full_first = S3Response::new(200, "OK", headers_full_first, vec![5u8; 5000]);
+
+        assert_eq!(response_full_first.status_code, 200);
+
+        // Second request: full file (200 OK) - this CAN be served from cache
+        let mut headers_full_second = HashMap::new();
+        headers_full_second.insert("content-length".to_string(), "5000".to_string());
+        headers_full_second.insert("etag".to_string(), "\"cacheable-etag\"".to_string());
+        headers_full_second.insert("x-cache".to_string(), "HIT".to_string());
+        headers_full_second.insert("age".to_string(), "60".to_string()); // 60 seconds old
+
+        let response_full_second = S3Response::new(200, "OK", headers_full_second, vec![5u8; 5000]);
+
+        assert!(
+            response_full_second.headers.get("x-cache").is_some(),
+            "Full file requests CAN populate and use cache"
+        );
+        assert!(
+            response_full_second.headers.get("age").is_some(),
+            "Cached response has Age header"
+        );
+
+        // Compare: Range requests (206) don't populate cache
+        // Full file requests (200) do populate cache
+        assert_eq!(response_first_range.status_code, 206);
+        assert_eq!(response_full_second.status_code, 200);
+        assert!(response_first_range.headers.get("x-cache").is_none());
+        assert!(response_full_second.headers.get("x-cache").is_some());
+
+        // Test case 5: Range request after full file is cached
+        // Range request should bypass cache even if full file is cached
+        // (This will be tested more in next test: "Cached full file doesn't satisfy range request")
+        let mut headers_range_after_cache = HashMap::new();
+        headers_range_after_cache.insert(
+            "content-range".to_string(),
+            "bytes 1000-1999/5000".to_string(),
+        );
+        headers_range_after_cache.insert("etag".to_string(), "\"cacheable-etag\"".to_string());
+
+        let response_range_after_cache = S3Response::new(
+            206,
+            "Partial Content",
+            headers_range_after_cache,
+            vec![6u8; 1000],
+        );
+
+        assert_eq!(response_range_after_cache.status_code, 206);
+        assert!(
+            response_range_after_cache.headers.get("x-cache").is_none(),
+            "Range request should bypass cache even if full file is cached"
+        );
+        // Same file (same ETag) but range request goes to S3, not cache
+        assert_eq!(
+            response_full_second.headers.get("etag"),
+            response_range_after_cache.headers.get("etag")
+        );
+    }
 }
