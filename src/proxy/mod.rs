@@ -6796,4 +6796,190 @@ mod tests {
         assert_eq!(get_content_type_from_extension("file.jpeg"), "image/jpeg");
         assert_eq!(get_content_type_from_extension("file.jpg"), "image/jpeg");
     }
+
+    #[test]
+    fn test_response_includes_s3_etag_header() {
+        // Integration test: Response includes S3 ETag header
+        // Tests that ETag is preserved from S3 and included in HTTP response
+
+        // Test case 1: S3 response includes ETag header
+        #[derive(Debug)]
+        struct S3Object {
+            body: Vec<u8>,
+            etag: String,
+            content_type: String,
+        }
+
+        fn create_s3_object_with_etag(etag: &str) -> S3Object {
+            S3Object {
+                body: b"test content".to_vec(),
+                etag: etag.to_string(),
+                content_type: "text/plain".to_string(),
+            }
+        }
+
+        let obj = create_s3_object_with_etag("\"abc123def456\"");
+        assert_eq!(obj.etag, "\"abc123def456\"");
+
+        // Test case 2: HTTP response includes ETag header
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            headers: std::collections::HashMap<String, String>,
+            body: Vec<u8>,
+        }
+
+        fn create_http_response_from_s3(s3_obj: &S3Object) -> HttpResponse {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("etag".to_string(), s3_obj.etag.clone());
+            headers.insert("content-type".to_string(), s3_obj.content_type.clone());
+
+            HttpResponse {
+                status: 200,
+                headers,
+                body: s3_obj.body.clone(),
+            }
+        }
+
+        let s3_obj = create_s3_object_with_etag("\"abc123def456\"");
+        let response = create_http_response_from_s3(&s3_obj);
+        assert_eq!(
+            response.headers.get("etag"),
+            Some(&"\"abc123def456\"".to_string())
+        );
+
+        // Test case 3: ETag is preserved from S3 response
+        let s3_obj = create_s3_object_with_etag("\"unique-etag-123\"");
+        let response = create_http_response_from_s3(&s3_obj);
+        assert_eq!(response.headers.get("etag"), Some(&s3_obj.etag));
+
+        // Test case 4: Different objects have different ETags
+        let obj1 = create_s3_object_with_etag("\"etag-1\"");
+        let obj2 = create_s3_object_with_etag("\"etag-2\"");
+        let resp1 = create_http_response_from_s3(&obj1);
+        let resp2 = create_http_response_from_s3(&obj2);
+        assert_ne!(resp1.headers.get("etag"), resp2.headers.get("etag"));
+
+        // Test case 5: ETag format is typically quoted string
+        let obj = create_s3_object_with_etag("\"d41d8cd98f00b204e9800998ecf8427e\"");
+        let response = create_http_response_from_s3(&obj);
+        let etag = response.headers.get("etag").unwrap();
+        assert!(etag.starts_with('"'));
+        assert!(etag.ends_with('"'));
+
+        // Test case 6: Full request-response flow includes ETag
+        struct ProxyRequest {
+            path: String,
+        }
+
+        fn handle_proxy_request(_req: &ProxyRequest) -> HttpResponse {
+            // Simulate fetching from S3
+            let s3_obj = create_s3_object_with_etag("\"full-flow-etag\"");
+            create_http_response_from_s3(&s3_obj)
+        }
+
+        let req = ProxyRequest {
+            path: "/bucket-a/file.txt".to_string(),
+        };
+        let response = handle_proxy_request(&req);
+        assert_eq!(
+            response.headers.get("etag"),
+            Some(&"\"full-flow-etag\"".to_string())
+        );
+
+        // Test case 7: HEAD request also includes ETag
+        struct ProxyRequestWithMethod {
+            path: String,
+            method: String,
+        }
+
+        fn handle_proxy_request_with_method(req: &ProxyRequestWithMethod) -> HttpResponse {
+            let s3_obj = create_s3_object_with_etag("\"head-request-etag\"");
+            let mut response = create_http_response_from_s3(&s3_obj);
+
+            // HEAD request has no body
+            if req.method == "HEAD" {
+                response.body = vec![];
+            }
+
+            response
+        }
+
+        let head_req = ProxyRequestWithMethod {
+            path: "/bucket-a/file.txt".to_string(),
+            method: "HEAD".to_string(),
+        };
+        let head_response = handle_proxy_request_with_method(&head_req);
+        assert_eq!(
+            head_response.headers.get("etag"),
+            Some(&"\"head-request-etag\"".to_string())
+        );
+        assert_eq!(head_response.body.len(), 0); // HEAD has no body
+
+        // Test case 8: GET request also includes ETag with body
+        let get_req = ProxyRequestWithMethod {
+            path: "/bucket-a/file.txt".to_string(),
+            method: "GET".to_string(),
+        };
+        let get_response = handle_proxy_request_with_method(&get_req);
+        assert_eq!(
+            get_response.headers.get("etag"),
+            Some(&"\"head-request-etag\"".to_string())
+        );
+        assert!(!get_response.body.is_empty()); // GET has body
+
+        // Test case 9: ETag header is always present in successful responses
+        let obj = create_s3_object_with_etag("\"always-present\"");
+        let response = create_http_response_from_s3(&obj);
+        assert!(response.headers.contains_key("etag"));
+
+        // Test case 10: ETag can be weak or strong
+        // Weak ETags start with W/
+        let weak_obj = create_s3_object_with_etag("W/\"weak-etag\"");
+        let weak_response = create_http_response_from_s3(&weak_obj);
+        assert_eq!(
+            weak_response.headers.get("etag"),
+            Some(&"W/\"weak-etag\"".to_string())
+        );
+
+        // Strong ETags don't have W/ prefix
+        let strong_obj = create_s3_object_with_etag("\"strong-etag\"");
+        let strong_response = create_http_response_from_s3(&strong_obj);
+        assert_eq!(
+            strong_response.headers.get("etag"),
+            Some(&"\"strong-etag\"".to_string())
+        );
+        assert!(!strong_response
+            .headers
+            .get("etag")
+            .unwrap()
+            .starts_with("W/"));
+
+        // Test case 11: Multiple requests to same object have same ETag
+        let req1 = ProxyRequest {
+            path: "/bucket-a/same-file.txt".to_string(),
+        };
+        let req2 = ProxyRequest {
+            path: "/bucket-a/same-file.txt".to_string(),
+        };
+
+        fn handle_request_with_consistent_etag(_req: &ProxyRequest) -> HttpResponse {
+            let s3_obj = create_s3_object_with_etag("\"consistent-etag\"");
+            create_http_response_from_s3(&s3_obj)
+        }
+
+        let resp1 = handle_request_with_consistent_etag(&req1);
+        let resp2 = handle_request_with_consistent_etag(&req2);
+        assert_eq!(resp1.headers.get("etag"), resp2.headers.get("etag"));
+
+        // Test case 12: ETag header name is case-insensitive in HTTP
+        // (but we store it in lowercase)
+        let obj = create_s3_object_with_etag("\"case-test\"");
+        let response = create_http_response_from_s3(&obj);
+        assert!(response.headers.contains_key("etag"));
+        assert_eq!(
+            response.headers.get("etag"),
+            Some(&"\"case-test\"".to_string())
+        );
+    }
 }

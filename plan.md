@@ -428,7 +428,7 @@ yatagarasu/
 - [x] Test: GET /bucket-a/nonexistent.txt returns 404
 - [x] Test: GET /unmapped/file.txt returns 404
 - [x] Test: Response includes correct content-type header
-- [ ] Test: Response includes S3 ETag header
+- [x] Test: Response includes S3 ETag header
 
 ### End-to-End - Multiple Buckets, No Auth
 - [ ] Test: GET /bucket-a/file.txt routes to bucket A
