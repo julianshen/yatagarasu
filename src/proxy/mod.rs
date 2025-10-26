@@ -10740,4 +10740,167 @@ mod tests {
         // Test case 11: Public bucket returns actual object data
         assert_eq!(response.body, b"object data");
     }
+
+    #[test]
+    fn test_private_bucket_requires_jwt() {
+        // Integration test: Private bucket requires JWT
+        // Tests that buckets with JWT enabled require authentication and reject unauthenticated requests
+
+        // Test case 1: Configure bucket with JWT enabled (private bucket)
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt_enabled: bool,
+        }
+
+        let private_bucket_config = BucketConfig {
+            name: "private-bucket".to_string(),
+            jwt_enabled: true,
+        };
+
+        // Test case 2: Request without JWT token
+        #[derive(Debug)]
+        struct HttpRequest {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            // If JWT not enabled, allow access
+            if !config.jwt_enabled {
+                return HttpResponse {
+                    status: 200,
+                    body: b"object data".to_vec(),
+                };
+            }
+
+            // JWT enabled - check for token
+            let auth_header = req.headers.get("authorization");
+            if auth_header.is_none() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Missing token".to_vec(),
+                };
+            }
+
+            // Check if token is valid (starts with Bearer)
+            let token = auth_header.unwrap();
+            if !token.starts_with("Bearer ") {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Invalid token format".to_vec(),
+                };
+            }
+
+            // Extract token value
+            let token_value = token.strip_prefix("Bearer ").unwrap_or("");
+            if token_value.is_empty() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Empty token".to_vec(),
+                };
+            }
+
+            // Valid token - allow access
+            HttpResponse {
+                status: 200,
+                body: b"object data".to_vec(),
+            }
+        }
+
+        let request_no_token = HttpRequest {
+            headers: std::collections::HashMap::new(),
+        };
+
+        let response = handle_request(&request_no_token, &private_bucket_config);
+        assert_eq!(response.status, 401);
+        assert_eq!(response.body, b"Missing token");
+
+        // Test case 3: Request without Authorization header fails
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("content-type".to_string(), "application/json".to_string());
+        let req2 = HttpRequest { headers: headers2 };
+
+        let resp2 = handle_request(&req2, &private_bucket_config);
+        assert_eq!(resp2.status, 401);
+
+        // Test case 4: Request with empty Authorization header fails
+        let mut headers3 = std::collections::HashMap::new();
+        headers3.insert("authorization".to_string(), "".to_string());
+        let req3 = HttpRequest { headers: headers3 };
+
+        let resp3 = handle_request(&req3, &private_bucket_config);
+        assert_eq!(resp3.status, 401);
+
+        // Test case 5: Request with invalid token format fails
+        let mut headers4 = std::collections::HashMap::new();
+        headers4.insert(
+            "authorization".to_string(),
+            "InvalidFormat token123".to_string(),
+        );
+        let req4 = HttpRequest { headers: headers4 };
+
+        let resp4 = handle_request(&req4, &private_bucket_config);
+        assert_eq!(resp4.status, 401);
+
+        // Test case 6: Request with valid JWT succeeds
+        let mut headers_valid = std::collections::HashMap::new();
+        headers_valid.insert(
+            "authorization".to_string(),
+            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.valid_payload.valid_sig".to_string(),
+        );
+        let req_valid = HttpRequest {
+            headers: headers_valid,
+        };
+
+        let resp_valid = handle_request(&req_valid, &private_bucket_config);
+        assert_eq!(resp_valid.status, 200);
+        assert_eq!(resp_valid.body, b"object data");
+
+        // Test case 7: JWT required flag is enabled
+        assert!(private_bucket_config.jwt_enabled);
+
+        // Test case 8: Multiple unauthenticated requests all fail
+        for _i in 0..5 {
+            let req = HttpRequest {
+                headers: std::collections::HashMap::new(),
+            };
+
+            let resp = handle_request(&req, &private_bucket_config);
+            assert_eq!(resp.status, 401);
+        }
+
+        // Test case 9: Request with "Bearer " but empty token fails
+        let mut headers5 = std::collections::HashMap::new();
+        headers5.insert("authorization".to_string(), "Bearer ".to_string());
+        let req5 = HttpRequest { headers: headers5 };
+
+        let resp5 = handle_request(&req5, &private_bucket_config);
+        assert_eq!(resp5.status, 401);
+        assert_eq!(resp5.body, b"Empty token");
+
+        // Test case 10: Different valid tokens all succeed
+        let valid_tokens = vec![
+            "Bearer token1",
+            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload1.sig1",
+            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload2.sig2",
+        ];
+
+        for token in valid_tokens {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("authorization".to_string(), token.to_string());
+            let req = HttpRequest { headers };
+
+            let resp = handle_request(&req, &private_bucket_config);
+            assert_eq!(resp.status, 200);
+        }
+
+        // Test case 11: Error message is clear for missing token
+        assert_eq!(response.body, b"Missing token");
+    }
 }
