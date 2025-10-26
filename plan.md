@@ -394,7 +394,7 @@ yatagarasu/
 - [x] Test: Can send response status code
 - [x] Test: Can send response headers
 - [x] Test: Can send response body
-- [ ] Test: Can stream response body chunks
+- [x] Test: Can stream response body chunks
 - [ ] Test: Handles connection close during streaming
 - [ ] Test: Sets appropriate content-type header
 - [ ] Test: Preserves S3 response headers in proxy response
