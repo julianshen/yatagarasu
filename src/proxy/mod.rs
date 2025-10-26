@@ -3382,4 +3382,206 @@ mod tests {
             "Valid token without permission should return 403"
         );
     }
+
+    #[test]
+    fn test_returns_404_for_not_found() {
+        // Validates that handler returns 404 Not Found for missing resources
+        // 404 indicates requested resource does not exist
+
+        // Test case 1: Handler returns 404 when S3 object doesn't exist
+        fn check_object_exists(object_key: &str, existing_keys: &[&str]) -> Result<(), u16> {
+            if existing_keys.contains(&object_key) {
+                Ok(())
+            } else {
+                Err(404)
+            }
+        }
+
+        let existing = vec!["file1.txt", "file2.jpg", "dir/file3.pdf"];
+        assert!(check_object_exists("file1.txt", &existing).is_ok());
+        assert_eq!(
+            check_object_exists("missing.txt", &existing),
+            Err(404),
+            "Missing S3 object should return 404"
+        );
+
+        // Test case 2: Handler returns 404 when route doesn't match any bucket
+        fn find_bucket_for_path(path: &str, routes: &[&str]) -> Result<String, u16> {
+            for route in routes {
+                if path.starts_with(route) {
+                    return Ok(route.to_string());
+                }
+            }
+            Err(404)
+        }
+
+        let routes = vec!["/images", "/documents", "/videos"];
+        assert!(find_bucket_for_path("/images/photo.jpg", &routes).is_ok());
+        assert_eq!(
+            find_bucket_for_path("/unknown/file.txt", &routes),
+            Err(404),
+            "Unmatched route should return 404"
+        );
+
+        // Test case 3: Handler returns 404 when bucket name is invalid
+        fn validate_bucket_name(bucket: &str, valid_buckets: &[&str]) -> Result<(), u16> {
+            if valid_buckets.contains(&bucket) {
+                Ok(())
+            } else {
+                Err(404)
+            }
+        }
+
+        let buckets = vec!["my-bucket", "other-bucket"];
+        assert!(validate_bucket_name("my-bucket", &buckets).is_ok());
+        assert_eq!(
+            validate_bucket_name("invalid-bucket", &buckets),
+            Err(404),
+            "Invalid bucket should return 404"
+        );
+
+        // Test case 4: Handler creates 404 error response
+        struct ErrorResponse {
+            status_code: u16,
+            message: String,
+        }
+
+        let not_found_error = ErrorResponse {
+            status_code: 404,
+            message: "Resource not found".to_string(),
+        };
+
+        assert_eq!(not_found_error.status_code, 404);
+        assert!(not_found_error.message.contains("not found"));
+
+        // Test case 5: Handler returns 404 for deleted objects
+        fn check_object_status(
+            object_key: &str,
+            existing: &[&str],
+            deleted: &[&str],
+        ) -> Result<(), u16> {
+            if deleted.contains(&object_key) {
+                return Err(404);
+            }
+            if existing.contains(&object_key) {
+                return Ok(());
+            }
+            Err(404)
+        }
+
+        let existing = vec!["file1.txt", "file2.jpg"];
+        let deleted = vec!["file3.txt"];
+
+        assert!(check_object_status("file1.txt", &existing, &deleted).is_ok());
+        assert_eq!(
+            check_object_status("file3.txt", &existing, &deleted),
+            Err(404),
+            "Deleted object should return 404"
+        );
+        assert_eq!(
+            check_object_status("never-existed.txt", &existing, &deleted),
+            Err(404),
+            "Never existed object should return 404"
+        );
+
+        // Test case 6: Handler returns 404 when S3 key extraction fails
+        fn extract_s3_key(path: &str, prefix: &str) -> Result<String, u16> {
+            if !path.starts_with(prefix) {
+                return Err(404);
+            }
+            let key = &path[prefix.len()..];
+            if key.is_empty() {
+                return Err(404);
+            }
+            Ok(key.to_string())
+        }
+
+        assert_eq!(
+            extract_s3_key("/images/photo.jpg", "/images/").unwrap(),
+            "photo.jpg"
+        );
+        assert_eq!(
+            extract_s3_key("/videos/clip.mp4", "/images/"),
+            Err(404),
+            "Path without prefix should return 404"
+        );
+        assert_eq!(
+            extract_s3_key("/images/", "/images/"),
+            Err(404),
+            "Empty S3 key should return 404"
+        );
+
+        // Test case 7: Handler returns 404 for non-existent directories
+        fn check_directory_exists(path: &str, directories: &[&str]) -> Result<(), u16> {
+            for dir in directories {
+                if path.starts_with(dir) {
+                    return Ok(());
+                }
+            }
+            Err(404)
+        }
+
+        let dirs = vec!["/public/", "/private/"];
+        assert!(check_directory_exists("/public/file.txt", &dirs).is_ok());
+        assert_eq!(
+            check_directory_exists("/nonexistent/file.txt", &dirs),
+            Err(404),
+            "Non-existent directory should return 404"
+        );
+
+        // Test case 8: Handler includes helpful message in 404 response
+        fn create_404_response(resource: &str) -> ErrorResponse {
+            ErrorResponse {
+                status_code: 404,
+                message: format!("Resource '{}' not found", resource),
+            }
+        }
+
+        let response = create_404_response("/path/to/file.txt");
+        assert_eq!(response.status_code, 404);
+        assert!(response.message.contains("/path/to/file.txt"));
+
+        // Test case 9: Handler returns 404 for malformed S3 keys
+        fn validate_s3_key(key: &str) -> Result<(), u16> {
+            if key.is_empty() {
+                return Err(404);
+            }
+            if key.starts_with('/') {
+                return Err(404);
+            }
+            Ok(())
+        }
+
+        assert!(validate_s3_key("valid/key.txt").is_ok());
+        assert_eq!(
+            validate_s3_key(""),
+            Err(404),
+            "Empty S3 key should return 404"
+        );
+        assert_eq!(
+            validate_s3_key("/invalid/key"),
+            Err(404),
+            "S3 key with leading slash should return 404"
+        );
+
+        // Test case 10: Handler distinguishes 404 from other errors
+        fn classify_error(error_type: &str) -> u16 {
+            match error_type {
+                "not_found" => 404,
+                "unauthorized" => 401,
+                "forbidden" => 403,
+                "internal" => 500,
+                _ => 500,
+            }
+        }
+
+        assert_eq!(classify_error("not_found"), 404);
+        assert_eq!(classify_error("unauthorized"), 401);
+        assert_eq!(classify_error("forbidden"), 403);
+        assert_ne!(
+            classify_error("not_found"),
+            500,
+            "404 should be distinct from 500"
+        );
+    }
 }

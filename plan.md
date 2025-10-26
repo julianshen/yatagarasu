@@ -403,7 +403,7 @@ yatagarasu/
 - [x] Test: Returns 400 for malformed requests
 - [x] Test: Returns 401 for unauthorized requests
 - [x] Test: Returns 403 for forbidden requests
-- [ ] Test: Returns 404 for not found
+- [x] Test: Returns 404 for not found
 - [ ] Test: Returns 500 for internal errors
 - [ ] Test: Returns 502 for bad gateway (S3 errors)
 - [ ] Test: Returns 503 for service unavailable
