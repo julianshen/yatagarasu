@@ -8013,4 +8013,249 @@ mod tests {
             Some(&"1073741824".to_string())
         );
     }
+
+    #[test]
+    fn test_error_responses_work_with_mocked_s3_backend() {
+        use std::collections::HashMap;
+
+        // Validates that we can mock S3 backend error responses
+        // This enables testing error handling without real S3
+
+        // Test case 1: Mock 404 Not Found error
+        let mut headers_404 = HashMap::new();
+        headers_404.insert("content-type".to_string(), "application/xml".to_string());
+        headers_404.insert("x-amz-request-id".to_string(), "REQ404".to_string());
+
+        let error_body_404 = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>NoSuchKey</Code>\
+            <Message>The specified key does not exist.</Message>\
+            <Key>nonexistent.txt</Key>\
+            </Error>";
+
+        let mock_404_response =
+            S3Response::new(404, "Not Found", headers_404, error_body_404.to_vec());
+
+        assert_eq!(mock_404_response.status_code, 404);
+        assert_eq!(mock_404_response.status_text, "Not Found");
+        assert!(!mock_404_response.body.is_empty());
+        assert_eq!(
+            mock_404_response.headers.get("content-type"),
+            Some(&"application/xml".to_string())
+        );
+
+        // Test case 2: Mock 403 Forbidden error
+        let mut headers_403 = HashMap::new();
+        headers_403.insert("content-type".to_string(), "application/xml".to_string());
+        headers_403.insert("x-amz-request-id".to_string(), "REQ403".to_string());
+
+        let error_body_403 = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>AccessDenied</Code>\
+            <Message>Access Denied</Message>\
+            </Error>";
+
+        let mock_403_response =
+            S3Response::new(403, "Forbidden", headers_403, error_body_403.to_vec());
+
+        assert_eq!(mock_403_response.status_code, 403);
+        assert_eq!(mock_403_response.status_text, "Forbidden");
+        assert!(!mock_403_response.body.is_empty());
+
+        // Test case 3: Mock 500 Internal Server Error
+        let mut headers_500 = HashMap::new();
+        headers_500.insert("content-type".to_string(), "application/xml".to_string());
+        headers_500.insert("x-amz-request-id".to_string(), "REQ500".to_string());
+
+        let error_body_500 = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>InternalError</Code>\
+            <Message>We encountered an internal error. Please try again.</Message>\
+            </Error>";
+
+        let mock_500_response = S3Response::new(
+            500,
+            "Internal Server Error",
+            headers_500,
+            error_body_500.to_vec(),
+        );
+
+        assert_eq!(mock_500_response.status_code, 500);
+        assert_eq!(mock_500_response.status_text, "Internal Server Error");
+        assert!(!mock_500_response.body.is_empty());
+
+        // Test case 4: Mock 503 Service Unavailable
+        let mut headers_503 = HashMap::new();
+        headers_503.insert("content-type".to_string(), "application/xml".to_string());
+        headers_503.insert("retry-after".to_string(), "60".to_string());
+
+        let error_body_503 = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>ServiceUnavailable</Code>\
+            <Message>Please reduce your request rate.</Message>\
+            </Error>";
+
+        let mock_503_response = S3Response::new(
+            503,
+            "Service Unavailable",
+            headers_503,
+            error_body_503.to_vec(),
+        );
+
+        assert_eq!(mock_503_response.status_code, 503);
+        assert_eq!(mock_503_response.status_text, "Service Unavailable");
+        assert_eq!(
+            mock_503_response.headers.get("retry-after"),
+            Some(&"60".to_string())
+        );
+
+        // Test case 5: Mock 400 Bad Request
+        let mut headers_400 = HashMap::new();
+        headers_400.insert("content-type".to_string(), "application/xml".to_string());
+
+        let error_body_400 = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>InvalidRequest</Code>\
+            <Message>Invalid request parameters.</Message>\
+            </Error>";
+
+        let mock_400_response =
+            S3Response::new(400, "Bad Request", headers_400, error_body_400.to_vec());
+
+        assert_eq!(mock_400_response.status_code, 400);
+        assert_eq!(mock_400_response.status_text, "Bad Request");
+
+        // Test case 6: Mock multiple error codes
+        let error_scenarios = vec![
+            (404, "Not Found", "NoSuchKey"),
+            (403, "Forbidden", "AccessDenied"),
+            (500, "Internal Server Error", "InternalError"),
+            (503, "Service Unavailable", "ServiceUnavailable"),
+            (400, "Bad Request", "InvalidRequest"),
+        ];
+
+        for (status_code, status_text, error_code) in error_scenarios {
+            let mut headers = HashMap::new();
+            headers.insert("content-type".to_string(), "application/xml".to_string());
+
+            let error_body = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+                <Error>\
+                <Code>{}</Code>\
+                <Message>Error message</Message>\
+                </Error>",
+                error_code
+            );
+
+            let mock_response = S3Response::new(
+                status_code,
+                status_text,
+                headers,
+                error_body.as_bytes().to_vec(),
+            );
+
+            assert_eq!(mock_response.status_code, status_code);
+            assert_eq!(mock_response.status_text, status_text);
+            assert!(!mock_response.body.is_empty());
+        }
+
+        // Test case 7: Mock error with request ID for tracking
+        let mut headers_with_id = HashMap::new();
+        headers_with_id.insert("content-type".to_string(), "application/xml".to_string());
+        headers_with_id.insert("x-amz-request-id".to_string(), "ABC123XYZ".to_string());
+        headers_with_id.insert("x-amz-id-2".to_string(), "DEF456UVW".to_string());
+
+        let mock_error_with_id = S3Response::new(
+            500,
+            "Internal Server Error",
+            headers_with_id,
+            b"Error body".to_vec(),
+        );
+
+        assert_eq!(
+            mock_error_with_id.headers.get("x-amz-request-id"),
+            Some(&"ABC123XYZ".to_string())
+        );
+        assert_eq!(
+            mock_error_with_id.headers.get("x-amz-id-2"),
+            Some(&"DEF456UVW".to_string())
+        );
+
+        // Test case 8: Mock 416 Range Not Satisfiable with Content-Range
+        let mut headers_416 = HashMap::new();
+        headers_416.insert("content-type".to_string(), "application/xml".to_string());
+        headers_416.insert("content-range".to_string(), "bytes */100000".to_string());
+
+        let error_body_416 = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>InvalidRange</Code>\
+            <Message>The requested range is not satisfiable</Message>\
+            </Error>";
+
+        let mock_416_response = S3Response::new(
+            416,
+            "Range Not Satisfiable",
+            headers_416,
+            error_body_416.to_vec(),
+        );
+
+        assert_eq!(mock_416_response.status_code, 416);
+        assert_eq!(
+            mock_416_response.headers.get("content-range"),
+            Some(&"bytes */100000".to_string())
+        );
+
+        // Test case 9: Verify all HTTP error codes >= 400 have non-empty body
+        assert!(
+            !mock_400_response.body.is_empty(),
+            "400 should have error body"
+        );
+        assert!(
+            !mock_403_response.body.is_empty(),
+            "403 should have error body"
+        );
+        assert!(
+            !mock_404_response.body.is_empty(),
+            "404 should have error body"
+        );
+        assert!(
+            !mock_416_response.body.is_empty(),
+            "416 should have error body"
+        );
+        assert!(
+            !mock_500_response.body.is_empty(),
+            "500 should have error body"
+        );
+        assert!(
+            !mock_503_response.body.is_empty(),
+            "503 should have error body"
+        );
+
+        // Test case 10: Mock error with detailed XML structure
+        let detailed_error_body = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Error>\
+            <Code>NoSuchBucket</Code>\
+            <Message>The specified bucket does not exist</Message>\
+            <BucketName>nonexistent-bucket</BucketName>\
+            <RequestId>REQ123ABC</RequestId>\
+            <HostId>HOST456DEF</HostId>\
+            </Error>";
+
+        let mut headers_detailed = HashMap::new();
+        headers_detailed.insert("content-type".to_string(), "application/xml".to_string());
+
+        let mock_detailed_error = S3Response::new(
+            404,
+            "Not Found",
+            headers_detailed,
+            detailed_error_body.to_vec(),
+        );
+
+        assert_eq!(mock_detailed_error.status_code, 404);
+        assert_eq!(mock_detailed_error.body, detailed_error_body.to_vec());
+        assert!(
+            mock_detailed_error.body.len() > 100,
+            "Detailed error should have substantial body"
+        );
+    }
 }
