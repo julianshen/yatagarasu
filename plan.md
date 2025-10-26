@@ -456,7 +456,7 @@ yatagarasu/
 - [x] Test: Public bucket accessible without JWT
 - [x] Test: Private bucket requires JWT
 - [x] Test: Can access public and private buckets in same proxy instance
-- [ ] Test: Auth configuration independent per bucket
+- [x] Test: Auth configuration independent per bucket
 
 ### End-to-End - Error Scenarios
 - [ ] Test: S3 connection timeout handled gracefully

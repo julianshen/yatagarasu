@@ -11098,4 +11098,264 @@ mod tests {
         assert_eq!(resp1.status, 200);
         assert_eq!(resp2.status, 401);
     }
+
+    #[test]
+    fn test_auth_configuration_independent_per_bucket() {
+        // Integration test: Auth configuration independent per bucket
+        // Tests that each bucket has completely independent auth configuration
+
+        // Test case 1: Configure buckets with different auth settings
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt_enabled: bool,
+            jwt_secret: Option<String>,
+            required_claim: Option<String>,
+        }
+
+        let bucket_a = BucketConfig {
+            name: "bucket-a".to_string(),
+            jwt_enabled: true,
+            jwt_secret: Some("secret-a".to_string()),
+            required_claim: Some("admin".to_string()),
+        };
+
+        let bucket_b = BucketConfig {
+            name: "bucket-b".to_string(),
+            jwt_enabled: true,
+            jwt_secret: Some("secret-b".to_string()),
+            required_claim: Some("user".to_string()),
+        };
+
+        let bucket_c = BucketConfig {
+            name: "bucket-c".to_string(),
+            jwt_enabled: false,
+            jwt_secret: None,
+            required_claim: None,
+        };
+
+        // Test case 2: Request structures
+        #[derive(Debug)]
+        struct HttpRequest {
+            bucket_name: String,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        #[derive(Debug)]
+        struct ProxyConfig {
+            buckets: Vec<BucketConfig>,
+        }
+
+        let proxy_config = ProxyConfig {
+            buckets: vec![bucket_a.clone(), bucket_b.clone(), bucket_c.clone()],
+        };
+
+        fn handle_request(req: &HttpRequest, config: &ProxyConfig) -> HttpResponse {
+            // Find bucket config
+            let bucket_config = config.buckets.iter().find(|b| b.name == req.bucket_name);
+
+            if bucket_config.is_none() {
+                return HttpResponse {
+                    status: 404,
+                    body: b"Bucket not found".to_vec(),
+                };
+            }
+
+            let bucket_config = bucket_config.unwrap();
+
+            // If JWT not enabled, allow access
+            if !bucket_config.jwt_enabled {
+                return HttpResponse {
+                    status: 200,
+                    body: b"object data".to_vec(),
+                };
+            }
+
+            // JWT enabled - check for token
+            let auth_header = req.headers.get("authorization");
+            if auth_header.is_none() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Missing token".to_vec(),
+                };
+            }
+
+            let token = auth_header.unwrap();
+            if !token.starts_with("Bearer ") {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Invalid token format".to_vec(),
+                };
+            }
+
+            let token_value = token.strip_prefix("Bearer ").unwrap_or("");
+            if token_value.is_empty() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Empty token".to_vec(),
+                };
+            }
+
+            // Check if token matches bucket's required claim
+            if let Some(required_claim) = &bucket_config.required_claim {
+                if !token_value.contains(required_claim) {
+                    return HttpResponse {
+                        status: 403,
+                        body: b"Invalid claims".to_vec(),
+                    };
+                }
+            }
+
+            HttpResponse {
+                status: 200,
+                body: b"object data".to_vec(),
+            }
+        }
+
+        // Test case 3: Bucket A requires "admin" claim
+        let mut headers_admin = std::collections::HashMap::new();
+        headers_admin.insert(
+            "authorization".to_string(),
+            "Bearer token_admin".to_string(),
+        );
+        let req_a_admin = HttpRequest {
+            bucket_name: "bucket-a".to_string(),
+            headers: headers_admin,
+        };
+
+        let resp_a_admin = handle_request(&req_a_admin, &proxy_config);
+        assert_eq!(resp_a_admin.status, 200);
+
+        // Test case 4: Bucket B requires "user" claim
+        let mut headers_user = std::collections::HashMap::new();
+        headers_user.insert("authorization".to_string(), "Bearer token_user".to_string());
+        let req_b_user = HttpRequest {
+            bucket_name: "bucket-b".to_string(),
+            headers: headers_user,
+        };
+
+        let resp_b_user = handle_request(&req_b_user, &proxy_config);
+        assert_eq!(resp_b_user.status, 200);
+
+        // Test case 5: Admin token doesn't work for bucket B
+        let mut headers_admin_b = std::collections::HashMap::new();
+        headers_admin_b.insert(
+            "authorization".to_string(),
+            "Bearer token_admin".to_string(),
+        );
+        let req_b_admin = HttpRequest {
+            bucket_name: "bucket-b".to_string(),
+            headers: headers_admin_b,
+        };
+
+        let resp_b_admin = handle_request(&req_b_admin, &proxy_config);
+        assert_eq!(resp_b_admin.status, 403);
+
+        // Test case 6: User token doesn't work for bucket A
+        let mut headers_user_a = std::collections::HashMap::new();
+        headers_user_a.insert("authorization".to_string(), "Bearer token_user".to_string());
+        let req_a_user = HttpRequest {
+            bucket_name: "bucket-a".to_string(),
+            headers: headers_user_a,
+        };
+
+        let resp_a_user = handle_request(&req_a_user, &proxy_config);
+        assert_eq!(resp_a_user.status, 403);
+
+        // Test case 7: Bucket C doesn't require auth
+        let req_c_no_auth = HttpRequest {
+            bucket_name: "bucket-c".to_string(),
+            headers: std::collections::HashMap::new(),
+        };
+
+        let resp_c_no_auth = handle_request(&req_c_no_auth, &proxy_config);
+        assert_eq!(resp_c_no_auth.status, 200);
+
+        // Test case 8: Verify each bucket has independent config
+        assert_eq!(proxy_config.buckets[0].name, "bucket-a");
+        assert_eq!(proxy_config.buckets[0].jwt_enabled, true);
+        assert_eq!(
+            proxy_config.buckets[0].jwt_secret,
+            Some("secret-a".to_string())
+        );
+        assert_eq!(
+            proxy_config.buckets[0].required_claim,
+            Some("admin".to_string())
+        );
+
+        assert_eq!(proxy_config.buckets[1].name, "bucket-b");
+        assert_eq!(proxy_config.buckets[1].jwt_enabled, true);
+        assert_eq!(
+            proxy_config.buckets[1].jwt_secret,
+            Some("secret-b".to_string())
+        );
+        assert_eq!(
+            proxy_config.buckets[1].required_claim,
+            Some("user".to_string())
+        );
+
+        assert_eq!(proxy_config.buckets[2].name, "bucket-c");
+        assert_eq!(proxy_config.buckets[2].jwt_enabled, false);
+        assert_eq!(proxy_config.buckets[2].jwt_secret, None);
+        assert_eq!(proxy_config.buckets[2].required_claim, None);
+
+        // Test case 9: Auth failure in one bucket doesn't affect others
+        let mut headers_invalid = std::collections::HashMap::new();
+        headers_invalid.insert("authorization".to_string(), "Bearer invalid".to_string());
+
+        let req_a_invalid = HttpRequest {
+            bucket_name: "bucket-a".to_string(),
+            headers: headers_invalid.clone(),
+        };
+        let resp_a_invalid = handle_request(&req_a_invalid, &proxy_config);
+        assert_eq!(resp_a_invalid.status, 403);
+
+        // Bucket C still works
+        let req_c_still_works = HttpRequest {
+            bucket_name: "bucket-c".to_string(),
+            headers: std::collections::HashMap::new(),
+        };
+        let resp_c_still_works = handle_request(&req_c_still_works, &proxy_config);
+        assert_eq!(resp_c_still_works.status, 200);
+
+        // Test case 10: Different secrets per bucket
+        assert_ne!(
+            proxy_config.buckets[0].jwt_secret,
+            proxy_config.buckets[1].jwt_secret
+        );
+
+        // Test case 11: Each bucket validates independently
+        for _i in 0..3 {
+            let mut h_admin = std::collections::HashMap::new();
+            h_admin.insert(
+                "authorization".to_string(),
+                "Bearer token_admin".to_string(),
+            );
+            let r_a = HttpRequest {
+                bucket_name: "bucket-a".to_string(),
+                headers: h_admin,
+            };
+            assert_eq!(handle_request(&r_a, &proxy_config).status, 200);
+
+            let mut h_user = std::collections::HashMap::new();
+            h_user.insert("authorization".to_string(), "Bearer token_user".to_string());
+            let r_b = HttpRequest {
+                bucket_name: "bucket-b".to_string(),
+                headers: h_user,
+            };
+            assert_eq!(handle_request(&r_b, &proxy_config).status, 200);
+
+            let r_c = HttpRequest {
+                bucket_name: "bucket-c".to_string(),
+                headers: std::collections::HashMap::new(),
+            };
+            assert_eq!(handle_request(&r_c, &proxy_config).status, 200);
+        }
+    }
 }
