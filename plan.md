@@ -475,7 +475,7 @@ yatagarasu/
 ### End-to-End - Large File Streaming
 - [x] Test: Can stream 100MB file
 - [x] Test: Can stream 1GB file (if system allows)
-- [ ] Test: Memory usage stays constant during large file stream
+- [x] Test: Memory usage stays constant during large file stream
 - [ ] Test: Client disconnect stops streaming immediately
 - [ ] Test: Multiple concurrent large file streams work correctly
 
