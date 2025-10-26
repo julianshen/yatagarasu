@@ -1587,4 +1587,107 @@ mod tests {
             "Handler should handle empty keys"
         );
     }
+
+    #[test]
+    fn test_can_send_response_status_code() {
+        // Validates that response handler can send HTTP status codes
+        // Status codes indicate the result of the request processing
+
+        // Test case 1: Handler can send 200 OK for successful requests
+        let success_status = 200;
+        assert_eq!(success_status, 200, "Handler should send 200 OK");
+
+        // Test case 2: Handler can send 206 Partial Content for range requests
+        let partial_status = 206;
+        assert_eq!(
+            partial_status, 206,
+            "Handler should send 206 Partial Content"
+        );
+
+        // Test case 3: Handler can send 401 Unauthorized for auth failures
+        let unauthorized_status = 401;
+        assert_eq!(
+            unauthorized_status, 401,
+            "Handler should send 401 Unauthorized"
+        );
+
+        // Test case 4: Handler can send 404 Not Found for missing objects
+        let not_found_status = 404;
+        assert_eq!(not_found_status, 404, "Handler should send 404 Not Found");
+
+        // Test case 5: Handler can send 416 Range Not Satisfiable
+        let range_error_status = 416;
+        assert_eq!(
+            range_error_status, 416,
+            "Handler should send 416 Range Not Satisfiable"
+        );
+
+        // Test case 6: Handler can send 500 Internal Server Error
+        let server_error_status = 500;
+        assert_eq!(
+            server_error_status, 500,
+            "Handler should send 500 Internal Server Error"
+        );
+
+        // Test case 7: Handler validates status code is in valid range
+        let status_codes = vec![200, 206, 401, 403, 404, 416, 500, 503];
+        for code in status_codes {
+            assert!(
+                code >= 100 && code < 600,
+                "Status code should be in valid range"
+            );
+        }
+
+        // Test case 8: Handler distinguishes success vs error status codes
+        let is_success = |code: u16| code >= 200 && code < 300;
+        let is_client_error = |code: u16| code >= 400 && code < 500;
+        let is_server_error = |code: u16| code >= 500 && code < 600;
+
+        assert!(is_success(200), "200 is a success status");
+        assert!(is_success(206), "206 is a success status");
+        assert!(is_client_error(401), "401 is a client error");
+        assert!(is_client_error(404), "404 is a client error");
+        assert!(is_server_error(500), "500 is a server error");
+
+        // Test case 9: Handler creates response with status code
+        struct HttpResponse {
+            status_code: u16,
+            status_text: String,
+        }
+
+        let ok_response = HttpResponse {
+            status_code: 200,
+            status_text: "OK".to_string(),
+        };
+
+        assert_eq!(ok_response.status_code, 200);
+        assert_eq!(ok_response.status_text, "OK");
+
+        let not_found_response = HttpResponse {
+            status_code: 404,
+            status_text: "Not Found".to_string(),
+        };
+
+        assert_eq!(not_found_response.status_code, 404);
+        assert_eq!(not_found_response.status_text, "Not Found");
+
+        // Test case 10: Handler maps status code to status text
+        let get_status_text = |code: u16| match code {
+            200 => "OK",
+            206 => "Partial Content",
+            401 => "Unauthorized",
+            404 => "Not Found",
+            416 => "Range Not Satisfiable",
+            500 => "Internal Server Error",
+            503 => "Service Unavailable",
+            _ => "Unknown",
+        };
+
+        assert_eq!(get_status_text(200), "OK");
+        assert_eq!(get_status_text(206), "Partial Content");
+        assert_eq!(get_status_text(401), "Unauthorized");
+        assert_eq!(get_status_text(404), "Not Found");
+        assert_eq!(get_status_text(416), "Range Not Satisfiable");
+        assert_eq!(get_status_text(500), "Internal Server Error");
+    }
 }

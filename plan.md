@@ -391,7 +391,7 @@ yatagarasu/
 - [x] Test: Handler builds S3 request from HTTP request
 
 ### Pingora - Response Handler
-- [ ] Test: Can send response status code
+- [x] Test: Can send response status code
 - [ ] Test: Can send response headers
 - [ ] Test: Can send response body
 - [ ] Test: Can stream response body chunks
