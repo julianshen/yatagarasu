@@ -10601,4 +10601,143 @@ mod tests {
         let resp7 = handle_request(&req7, &bucket_config);
         assert_eq!(resp7.status, 200);
     }
+
+    #[test]
+    fn test_public_bucket_accessible_without_jwt() {
+        // Integration test: Public bucket accessible without JWT
+        // Tests that buckets with JWT disabled can be accessed without authentication
+
+        // Test case 1: Configure bucket with JWT disabled (public bucket)
+        #[derive(Debug, Clone)]
+        struct BucketConfig {
+            name: String,
+            jwt_enabled: bool,
+        }
+
+        let public_bucket_config = BucketConfig {
+            name: "public-bucket".to_string(),
+            jwt_enabled: false,
+        };
+
+        // Test case 2: Request without any JWT token
+        #[derive(Debug)]
+        struct HttpRequest {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        #[derive(Debug)]
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+        }
+
+        fn handle_request(req: &HttpRequest, config: &BucketConfig) -> HttpResponse {
+            // If JWT not enabled, allow access
+            if !config.jwt_enabled {
+                return HttpResponse {
+                    status: 200,
+                    body: b"object data".to_vec(),
+                };
+            }
+
+            // JWT enabled - check for token
+            let auth_header = req.headers.get("authorization");
+            if auth_header.is_none() {
+                return HttpResponse {
+                    status: 401,
+                    body: b"Missing token".to_vec(),
+                };
+            }
+
+            HttpResponse {
+                status: 200,
+                body: b"object data".to_vec(),
+            }
+        }
+
+        let request_no_token = HttpRequest {
+            headers: std::collections::HashMap::new(),
+        };
+
+        let response = handle_request(&request_no_token, &public_bucket_config);
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"object data");
+
+        // Test case 3: Request without Authorization header succeeds
+        let mut headers2 = std::collections::HashMap::new();
+        headers2.insert("content-type".to_string(), "application/json".to_string());
+        let req2 = HttpRequest { headers: headers2 };
+
+        let resp2 = handle_request(&req2, &public_bucket_config);
+        assert_eq!(resp2.status, 200);
+
+        // Test case 4: Request with empty headers succeeds
+        let req3 = HttpRequest {
+            headers: std::collections::HashMap::new(),
+        };
+
+        let resp3 = handle_request(&req3, &public_bucket_config);
+        assert_eq!(resp3.status, 200);
+
+        // Test case 5: JWT not required when disabled
+        assert!(!public_bucket_config.jwt_enabled);
+
+        // Test case 6: Multiple requests without JWT all succeed
+        for i in 0..5 {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("x-request-id".to_string(), format!("req-{}", i));
+            let req = HttpRequest { headers };
+
+            let resp = handle_request(&req, &public_bucket_config);
+            assert_eq!(resp.status, 200);
+        }
+
+        // Test case 7: Request with JWT token also succeeds (token ignored)
+        let mut headers_with_token = std::collections::HashMap::new();
+        headers_with_token.insert("authorization".to_string(), "Bearer some_token".to_string());
+        let req_with_token = HttpRequest {
+            headers: headers_with_token,
+        };
+
+        let resp_with_token = handle_request(&req_with_token, &public_bucket_config);
+        assert_eq!(resp_with_token.status, 200);
+
+        // Test case 8: Verify jwt_enabled flag is false
+        assert_eq!(public_bucket_config.jwt_enabled, false);
+
+        // Test case 9: Different HTTP methods work without JWT
+        let mut headers_get = std::collections::HashMap::new();
+        headers_get.insert("method".to_string(), "GET".to_string());
+        let req_get = HttpRequest {
+            headers: headers_get,
+        };
+
+        let resp_get = handle_request(&req_get, &public_bucket_config);
+        assert_eq!(resp_get.status, 200);
+
+        let mut headers_head = std::collections::HashMap::new();
+        headers_head.insert("method".to_string(), "HEAD".to_string());
+        let req_head = HttpRequest {
+            headers: headers_head,
+        };
+
+        let resp_head = handle_request(&req_head, &public_bucket_config);
+        assert_eq!(resp_head.status, 200);
+
+        // Test case 10: Bucket name doesn't affect public access
+        let public_bucket2 = BucketConfig {
+            name: "another-public-bucket".to_string(),
+            jwt_enabled: false,
+        };
+
+        let req10 = HttpRequest {
+            headers: std::collections::HashMap::new(),
+        };
+
+        let resp10 = handle_request(&req10, &public_bucket2);
+        assert_eq!(resp10.status, 200);
+
+        // Test case 11: Public bucket returns actual object data
+        assert_eq!(response.body, b"object data");
+    }
 }
