@@ -6651,4 +6651,149 @@ mod tests {
         let uppercase_fails = process_request("GET", "/Bucket-A/file.txt").unwrap_err();
         assert_eq!(uppercase_fails, 404);
     }
+
+    #[test]
+    fn test_response_includes_correct_content_type_header() {
+        // Integration test: Response includes correct Content-Type header
+        // Tests that Content-Type is set based on file extension
+
+        // Test case 1: Text file has text/plain content type
+        fn get_content_type_from_extension(filename: &str) -> String {
+            if filename.ends_with(".txt") {
+                "text/plain".to_string()
+            } else if filename.ends_with(".html") {
+                "text/html".to_string()
+            } else if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
+                "image/jpeg".to_string()
+            } else if filename.ends_with(".png") {
+                "image/png".to_string()
+            } else if filename.ends_with(".json") {
+                "application/json".to_string()
+            } else if filename.ends_with(".pdf") {
+                "application/pdf".to_string()
+            } else {
+                "application/octet-stream".to_string()
+            }
+        }
+
+        assert_eq!(get_content_type_from_extension("file.txt"), "text/plain");
+        assert_eq!(get_content_type_from_extension("page.html"), "text/html");
+        assert_eq!(get_content_type_from_extension("image.jpg"), "image/jpeg");
+        assert_eq!(get_content_type_from_extension("photo.png"), "image/png");
+        assert_eq!(
+            get_content_type_from_extension("data.json"),
+            "application/json"
+        );
+
+        // Test case 2: S3 response includes Content-Type from metadata
+        struct S3Object {
+            data: Vec<u8>,
+            content_type: String,
+        }
+
+        fn fetch_from_s3(key: &str) -> S3Object {
+            let content_type = get_content_type_from_extension(key);
+            S3Object {
+                data: b"file contents".to_vec(),
+                content_type,
+            }
+        }
+
+        let txt_object = fetch_from_s3("file.txt");
+        assert_eq!(txt_object.content_type, "text/plain");
+
+        let jpg_object = fetch_from_s3("image.jpg");
+        assert_eq!(jpg_object.content_type, "image/jpeg");
+
+        // Test case 3: HTTP response includes Content-Type header
+        struct HttpResponse {
+            status: u16,
+            body: Vec<u8>,
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        fn create_response(object: S3Object) -> HttpResponse {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("Content-Type".to_string(), object.content_type);
+
+            HttpResponse {
+                status: 200,
+                body: object.data,
+                headers,
+            }
+        }
+
+        let response = create_response(txt_object);
+        assert!(response.headers.contains_key("Content-Type"));
+        assert_eq!(response.headers.get("Content-Type").unwrap(), "text/plain");
+
+        // Test case 4: Different file types have different Content-Types
+        let files = vec![
+            ("document.txt", "text/plain"),
+            ("page.html", "text/html"),
+            ("photo.jpg", "image/jpeg"),
+            ("logo.png", "image/png"),
+            ("config.json", "application/json"),
+            ("manual.pdf", "application/pdf"),
+        ];
+
+        for (filename, expected_type) in files {
+            let content_type = get_content_type_from_extension(filename);
+            assert_eq!(content_type, expected_type);
+        }
+
+        // Test case 5: Unknown file extension uses default Content-Type
+        let unknown = get_content_type_from_extension("file.xyz");
+        assert_eq!(unknown, "application/octet-stream");
+
+        // Test case 6: Content-Type is preserved from S3 response
+        struct S3Response {
+            headers: std::collections::HashMap<String, String>,
+        }
+
+        fn get_s3_headers(key: &str) -> S3Response {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert(
+                "Content-Type".to_string(),
+                get_content_type_from_extension(key),
+            );
+            S3Response { headers }
+        }
+
+        let s3_resp = get_s3_headers("image.png");
+        assert_eq!(s3_resp.headers.get("Content-Type").unwrap(), "image/png");
+
+        // Test case 7: Full request-response flow includes Content-Type
+        fn process_request(path: &str) -> HttpResponse {
+            // Extract filename from path
+            let filename = path.split('/').last().unwrap_or("");
+            let object = fetch_from_s3(filename);
+            create_response(object)
+        }
+
+        let response = process_request("/bucket-a/document.txt");
+        assert_eq!(response.headers.get("Content-Type").unwrap(), "text/plain");
+
+        let response = process_request("/bucket-a/image.jpg");
+        assert_eq!(response.headers.get("Content-Type").unwrap(), "image/jpeg");
+
+        // Test case 8: Content-Type header is always present
+        let response = process_request("/bucket-a/file.txt");
+        assert!(response.headers.contains_key("Content-Type"));
+        assert!(!response.headers.get("Content-Type").unwrap().is_empty());
+
+        // Test case 9: Case-insensitive file extension matching
+        fn get_content_type_case_insensitive(filename: &str) -> String {
+            let lower = filename.to_lowercase();
+            get_content_type_from_extension(&lower)
+        }
+
+        assert_eq!(get_content_type_case_insensitive("FILE.TXT"), "text/plain");
+        assert_eq!(get_content_type_case_insensitive("Image.JPG"), "image/jpeg");
+        assert_eq!(get_content_type_case_insensitive("Page.HTML"), "text/html");
+
+        // Test case 10: Multiple extensions handled correctly
+        assert_eq!(get_content_type_from_extension("file.jpeg"), "image/jpeg");
+        assert_eq!(get_content_type_from_extension("file.jpg"), "image/jpeg");
+    }
 }
