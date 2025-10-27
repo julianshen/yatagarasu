@@ -15877,4 +15877,254 @@ mod tests {
         );
         assert_eq!(api.get_config_version(), 4, "Config version should be 4");
     }
+
+    #[test]
+    fn test_validates_new_configuration_before_applying() {
+        // Hot reload test: Validates new configuration before applying
+        // Tests that configuration validation runs before reload
+        // Validates invalid configs are rejected without affecting running config
+
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define configuration structure
+        #[derive(Clone, Debug)]
+        struct Config {
+            server_address: String,
+            max_connections: u32,
+            timeout_seconds: u32,
+        }
+
+        // Test case 2: Define validation errors
+        #[derive(Debug, PartialEq)]
+        enum ValidationError {
+            EmptyServerAddress,
+            InvalidMaxConnections,
+            InvalidTimeout,
+        }
+
+        // Test case 3: Configuration validator
+        struct ConfigValidator;
+
+        impl ConfigValidator {
+            fn validate(config: &Config) -> Result<(), Vec<ValidationError>> {
+                let mut errors = Vec::new();
+
+                // Validate server address is not empty
+                if config.server_address.is_empty() {
+                    errors.push(ValidationError::EmptyServerAddress);
+                }
+
+                // Validate max_connections is reasonable (1-100000)
+                if config.max_connections == 0 || config.max_connections > 100000 {
+                    errors.push(ValidationError::InvalidMaxConnections);
+                }
+
+                // Validate timeout is reasonable (1-3600 seconds)
+                if config.timeout_seconds == 0 || config.timeout_seconds > 3600 {
+                    errors.push(ValidationError::InvalidTimeout);
+                }
+
+                if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors)
+                }
+            }
+        }
+
+        // Test case 4: Config reloader with validation
+        struct ConfigReloader {
+            current_config: Arc<std::sync::Mutex<Config>>,
+            validation_failed: Arc<AtomicBool>,
+            reload_count: Arc<AtomicU64>,
+            rejected_count: Arc<AtomicU64>,
+        }
+
+        impl ConfigReloader {
+            fn new(initial_config: Config) -> Self {
+                ConfigReloader {
+                    current_config: Arc::new(std::sync::Mutex::new(initial_config)),
+                    validation_failed: Arc::new(AtomicBool::new(false)),
+                    reload_count: Arc::new(AtomicU64::new(0)),
+                    rejected_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn reload(&self, new_config: Config) -> Result<(), Vec<ValidationError>> {
+                // Validate BEFORE applying
+                let validation_result = ConfigValidator::validate(&new_config);
+
+                match validation_result {
+                    Ok(()) => {
+                        // Validation passed - apply new config
+                        let mut current = self.current_config.lock().unwrap();
+                        *current = new_config;
+                        self.reload_count.fetch_add(1, Ordering::Relaxed);
+                        self.validation_failed.store(false, Ordering::Relaxed);
+                        Ok(())
+                    }
+                    Err(errors) => {
+                        // Validation failed - reject config
+                        self.rejected_count.fetch_add(1, Ordering::Relaxed);
+                        self.validation_failed.store(true, Ordering::Relaxed);
+                        Err(errors)
+                    }
+                }
+            }
+
+            fn get_current_config(&self) -> Config {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn get_reload_count(&self) -> u64 {
+                self.reload_count.load(Ordering::Relaxed)
+            }
+
+            fn get_rejected_count(&self) -> u64 {
+                self.rejected_count.load(Ordering::Relaxed)
+            }
+
+            fn validation_failed(&self) -> bool {
+                self.validation_failed.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 5: Valid initial configuration
+        let initial_config = Config {
+            server_address: "127.0.0.1:8080".to_string(),
+            max_connections: 1000,
+            timeout_seconds: 30,
+        };
+
+        let reloader = ConfigReloader::new(initial_config.clone());
+        assert_eq!(reloader.get_reload_count(), 0);
+        assert_eq!(reloader.get_rejected_count(), 0);
+
+        // Test case 6: Reload with valid configuration - should succeed
+        let valid_config = Config {
+            server_address: "0.0.0.0:9090".to_string(),
+            max_connections: 5000,
+            timeout_seconds: 60,
+        };
+
+        let result = reloader.reload(valid_config.clone());
+        assert!(result.is_ok(), "Valid config should be accepted");
+        assert_eq!(reloader.get_reload_count(), 1, "Reload count should be 1");
+        assert_eq!(
+            reloader.get_rejected_count(),
+            0,
+            "No configs should be rejected"
+        );
+        assert!(!reloader.validation_failed(), "Validation should succeed");
+
+        let current = reloader.get_current_config();
+        assert_eq!(current.server_address, "0.0.0.0:9090");
+        assert_eq!(current.max_connections, 5000);
+
+        // Test case 7: Reload with empty server address - should fail
+        let invalid_config = Config {
+            server_address: "".to_string(),
+            max_connections: 1000,
+            timeout_seconds: 30,
+        };
+
+        let result = reloader.reload(invalid_config);
+        assert!(result.is_err(), "Empty server address should be rejected");
+        assert_eq!(
+            result.unwrap_err(),
+            vec![ValidationError::EmptyServerAddress]
+        );
+        assert_eq!(
+            reloader.get_reload_count(),
+            1,
+            "Reload count should not increase"
+        );
+        assert_eq!(
+            reloader.get_rejected_count(),
+            1,
+            "One config should be rejected"
+        );
+        assert!(
+            reloader.validation_failed(),
+            "Validation should have failed"
+        );
+
+        // Old config should still be active
+        let current = reloader.get_current_config();
+        assert_eq!(
+            current.server_address, "0.0.0.0:9090",
+            "Old config should still be active"
+        );
+
+        // Test case 8: Reload with invalid max_connections - should fail
+        let invalid_config = Config {
+            server_address: "127.0.0.1:8080".to_string(),
+            max_connections: 0,
+            timeout_seconds: 30,
+        };
+
+        let result = reloader.reload(invalid_config);
+        assert!(
+            result.is_err(),
+            "Invalid max_connections should be rejected"
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            vec![ValidationError::InvalidMaxConnections]
+        );
+        assert_eq!(reloader.get_reload_count(), 1);
+        assert_eq!(reloader.get_rejected_count(), 2);
+
+        // Test case 9: Reload with invalid timeout - should fail
+        let invalid_config = Config {
+            server_address: "127.0.0.1:8080".to_string(),
+            max_connections: 1000,
+            timeout_seconds: 5000,
+        };
+
+        let result = reloader.reload(invalid_config);
+        assert!(result.is_err(), "Invalid timeout should be rejected");
+        assert_eq!(result.unwrap_err(), vec![ValidationError::InvalidTimeout]);
+        assert_eq!(reloader.get_reload_count(), 1);
+        assert_eq!(reloader.get_rejected_count(), 3);
+
+        // Test case 10: Multiple validation errors at once
+        let invalid_config = Config {
+            server_address: "".to_string(),
+            max_connections: 0,
+            timeout_seconds: 5000,
+        };
+
+        let result = reloader.reload(invalid_config);
+        assert!(result.is_err(), "Multiple errors should be rejected");
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 3, "Should have 3 validation errors");
+        assert!(errors.contains(&ValidationError::EmptyServerAddress));
+        assert!(errors.contains(&ValidationError::InvalidMaxConnections));
+        assert!(errors.contains(&ValidationError::InvalidTimeout));
+        assert_eq!(reloader.get_reload_count(), 1);
+        assert_eq!(reloader.get_rejected_count(), 4);
+
+        // Test case 11: Another valid reload should still work
+        let valid_config = Config {
+            server_address: "127.0.0.1:7070".to_string(),
+            max_connections: 2000,
+            timeout_seconds: 45,
+        };
+
+        let result = reloader.reload(valid_config.clone());
+        assert!(result.is_ok(), "Valid config should be accepted");
+        assert_eq!(
+            reloader.get_reload_count(),
+            2,
+            "Reload count should be 2 now"
+        );
+        assert_eq!(reloader.get_rejected_count(), 4);
+
+        let current = reloader.get_current_config();
+        assert_eq!(current.server_address, "127.0.0.1:7070");
+        assert_eq!(current.max_connections, 2000);
+        assert_eq!(current.timeout_seconds, 45);
+    }
 }
