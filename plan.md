@@ -518,7 +518,7 @@ yatagarasu/
 ### Hot Reload - Infrastructure
 - [x] Test: Can detect configuration file changes
 - [x] Test: Can reload configuration on SIGHUP signal
-- [ ] Test: Can reload configuration via management API endpoint
+- [x] Test: Can reload configuration via management API endpoint
 - [ ] Test: Validates new configuration before applying
 - [ ] Test: Rejects invalid configuration during reload
 

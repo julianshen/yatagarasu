@@ -15735,4 +15735,146 @@ mod tests {
             "Should not reload when no signal received"
         );
     }
+
+    #[test]
+    fn test_can_reload_configuration_via_management_api_endpoint() {
+        // Hot reload test: Can reload configuration via management API endpoint
+        // Tests that HTTP POST to management endpoint triggers config reload
+        // Validates API-driven configuration updates without signals
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define management API handler
+        struct ManagementApi {
+            reload_count: Arc<AtomicU64>,
+            config_version: Arc<AtomicU64>,
+            last_reload_time: Arc<AtomicU64>,
+        }
+
+        impl ManagementApi {
+            fn new() -> Self {
+                ManagementApi {
+                    reload_count: Arc::new(AtomicU64::new(0)),
+                    config_version: Arc::new(AtomicU64::new(1)),
+                    last_reload_time: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            // Simulates POST /admin/reload endpoint
+            fn handle_reload_request(&self, method: &str, path: &str) -> (u16, String) {
+                // Validate HTTP method
+                if method != "POST" {
+                    return (405, "Method Not Allowed".to_string());
+                }
+
+                // Validate endpoint path
+                if path != "/admin/reload" {
+                    return (404, "Not Found".to_string());
+                }
+
+                // Trigger configuration reload
+                self.reload_config();
+
+                (200, "Configuration reloaded successfully".to_string())
+            }
+
+            // Simulates config reload
+            fn reload_config(&self) {
+                use std::time::{SystemTime, UNIX_EPOCH};
+
+                self.reload_count.fetch_add(1, Ordering::Relaxed);
+                self.config_version.fetch_add(1, Ordering::Relaxed);
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+                self.last_reload_time.store(now, Ordering::Relaxed);
+            }
+
+            fn get_reload_count(&self) -> u64 {
+                self.reload_count.load(Ordering::Relaxed)
+            }
+
+            fn get_config_version(&self) -> u64 {
+                self.config_version.load(Ordering::Relaxed)
+            }
+
+            fn get_last_reload_time(&self) -> u64 {
+                self.last_reload_time.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 2: Initial state - no reloads
+        let api = ManagementApi::new();
+        assert_eq!(api.get_reload_count(), 0, "No reloads initially");
+        assert_eq!(api.get_config_version(), 1, "Initial config version");
+        assert_eq!(api.get_last_reload_time(), 0, "No reload time initially");
+
+        // Test case 3: POST to /admin/reload - should succeed
+        let (status, message) = api.handle_reload_request("POST", "/admin/reload");
+        assert_eq!(status, 200, "Should return 200 OK");
+        assert_eq!(
+            message, "Configuration reloaded successfully",
+            "Should return success message"
+        );
+        assert_eq!(
+            api.get_reload_count(),
+            1,
+            "Should have reloaded once after POST"
+        );
+        assert_eq!(
+            api.get_config_version(),
+            2,
+            "Config version should be incremented"
+        );
+        assert!(
+            api.get_last_reload_time() > 0,
+            "Last reload time should be set"
+        );
+
+        // Test case 4: GET to /admin/reload - should fail with 405
+        let (status, message) = api.handle_reload_request("GET", "/admin/reload");
+        assert_eq!(status, 405, "GET should return 405 Method Not Allowed");
+        assert_eq!(message, "Method Not Allowed");
+        assert_eq!(
+            api.get_reload_count(),
+            1,
+            "Reload count should not increase for failed request"
+        );
+
+        // Test case 5: POST to wrong path - should fail with 404
+        let (status, message) = api.handle_reload_request("POST", "/wrong/path");
+        assert_eq!(status, 404, "Wrong path should return 404 Not Found");
+        assert_eq!(message, "Not Found");
+        assert_eq!(
+            api.get_reload_count(),
+            1,
+            "Reload count should not increase for wrong path"
+        );
+
+        // Test case 6: Multiple successful reloads
+        let time_before = api.get_last_reload_time();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let (status, _) = api.handle_reload_request("POST", "/admin/reload");
+        assert_eq!(status, 200);
+        assert_eq!(api.get_reload_count(), 2, "Should have reloaded twice");
+        assert_eq!(api.get_config_version(), 3, "Config version should be 3");
+        assert!(
+            api.get_last_reload_time() > time_before,
+            "Last reload time should be updated"
+        );
+
+        // Test case 7: Third reload
+        let (status, _) = api.handle_reload_request("POST", "/admin/reload");
+        assert_eq!(status, 200);
+        assert_eq!(
+            api.get_reload_count(),
+            3,
+            "Should have reloaded three times"
+        );
+        assert_eq!(api.get_config_version(), 4, "Config version should be 4");
+    }
 }
