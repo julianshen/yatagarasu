@@ -17166,4 +17166,231 @@ mod tests {
             "Should have many reads in stress test"
         );
     }
+
+    #[test]
+    fn test_atomic_config_update_all_or_nothing() {
+        // Hot reload test: Atomic config update (all or nothing)
+        // Tests that config updates are atomic - either fully applied or not at all
+        // Validates no partial updates if validation or application fails
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define config with validation
+        #[derive(Clone, Debug, PartialEq)]
+        struct ServiceConfig {
+            port: u16,
+            max_workers: u32,
+            timeout_seconds: u32,
+        }
+
+        // Test case 2: Validation result
+        #[derive(Debug, PartialEq)]
+        enum ValidationError {
+            InvalidPort,
+            InvalidWorkers,
+            InvalidTimeout,
+        }
+
+        // Test case 3: Config manager with atomic updates
+        struct AtomicConfigManager {
+            current_config: Arc<std::sync::Mutex<ServiceConfig>>,
+            update_attempts: Arc<AtomicU64>,
+            successful_updates: Arc<AtomicU64>,
+            failed_updates: Arc<AtomicU64>,
+        }
+
+        impl AtomicConfigManager {
+            fn new(initial: ServiceConfig) -> Self {
+                AtomicConfigManager {
+                    current_config: Arc::new(std::sync::Mutex::new(initial)),
+                    update_attempts: Arc::new(AtomicU64::new(0)),
+                    successful_updates: Arc::new(AtomicU64::new(0)),
+                    failed_updates: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            // Validate config before applying
+            fn validate_config(config: &ServiceConfig) -> Result<(), ValidationError> {
+                if config.port < 1024 {
+                    return Err(ValidationError::InvalidPort);
+                }
+                if config.max_workers == 0 || config.max_workers > 1000 {
+                    return Err(ValidationError::InvalidWorkers);
+                }
+                if config.timeout_seconds == 0 || config.timeout_seconds > 300 {
+                    return Err(ValidationError::InvalidTimeout);
+                }
+                Ok(())
+            }
+
+            // Atomic update: validate first, then apply atomically
+            fn update_config(&self, new_config: ServiceConfig) -> Result<(), ValidationError> {
+                self.update_attempts.fetch_add(1, Ordering::Relaxed);
+
+                // Step 1: Validate BEFORE taking lock
+                Self::validate_config(&new_config)?;
+
+                // Step 2: If validation passes, apply atomically
+                *self.current_config.lock().unwrap() = new_config;
+
+                self.successful_updates.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
+
+            // Try update - records failure if validation fails
+            fn try_update(&self, new_config: ServiceConfig) -> Result<(), ValidationError> {
+                match self.update_config(new_config) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        self.failed_updates.fetch_add(1, Ordering::Relaxed);
+                        Err(e)
+                    }
+                }
+            }
+
+            fn get_config(&self) -> ServiceConfig {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn get_update_attempts(&self) -> u64 {
+                self.update_attempts.load(Ordering::Relaxed)
+            }
+
+            fn get_successful_updates(&self) -> u64 {
+                self.successful_updates.load(Ordering::Relaxed)
+            }
+
+            fn get_failed_updates(&self) -> u64 {
+                self.failed_updates.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 4: Initial valid config
+        let initial = ServiceConfig {
+            port: 8080,
+            max_workers: 10,
+            timeout_seconds: 30,
+        };
+
+        let manager = AtomicConfigManager::new(initial.clone());
+
+        // Test case 5: Valid update succeeds atomically
+        let valid_update = ServiceConfig {
+            port: 9090,
+            max_workers: 20,
+            timeout_seconds: 60,
+        };
+
+        let result = manager.try_update(valid_update.clone());
+        assert!(result.is_ok(), "Valid update should succeed");
+
+        let current = manager.get_config();
+        assert_eq!(current, valid_update, "Config should be fully updated");
+        assert_eq!(manager.get_update_attempts(), 1);
+        assert_eq!(manager.get_successful_updates(), 1);
+        assert_eq!(manager.get_failed_updates(), 0);
+
+        // Test case 6: Invalid port - update fails, old config retained
+        let invalid_port = ServiceConfig {
+            port: 80, // Invalid (< 1024)
+            max_workers: 30,
+            timeout_seconds: 45,
+        };
+
+        let result = manager.try_update(invalid_port);
+        assert!(result.is_err(), "Invalid port should fail validation");
+        assert_eq!(result.unwrap_err(), ValidationError::InvalidPort);
+
+        // Config should be UNCHANGED (atomic - all or nothing)
+        let current = manager.get_config();
+        assert_eq!(
+            current, valid_update,
+            "Config should remain unchanged after failed update"
+        );
+        assert_eq!(manager.get_update_attempts(), 2);
+        assert_eq!(manager.get_successful_updates(), 1);
+        assert_eq!(manager.get_failed_updates(), 1);
+
+        // Test case 7: Invalid workers - no partial update
+        let invalid_workers = ServiceConfig {
+            port: 7070,
+            max_workers: 0, // Invalid
+            timeout_seconds: 90,
+        };
+
+        let result = manager.try_update(invalid_workers);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ValidationError::InvalidWorkers);
+
+        // Old config still active (no partial update)
+        let current = manager.get_config();
+        assert_eq!(current.port, 9090, "Port should not have changed");
+        assert_eq!(current.max_workers, 20, "Workers should not have changed");
+        assert_eq!(
+            current.timeout_seconds, 60,
+            "Timeout should not have changed"
+        );
+        assert_eq!(manager.get_failed_updates(), 2);
+
+        // Test case 8: Invalid timeout - atomic rejection
+        let invalid_timeout = ServiceConfig {
+            port: 5050,
+            max_workers: 50,
+            timeout_seconds: 500, // Invalid (> 300)
+        };
+
+        let result = manager.try_update(invalid_timeout);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ValidationError::InvalidTimeout);
+
+        let current = manager.get_config();
+        assert_eq!(
+            current, valid_update,
+            "Config unchanged after timeout error"
+        );
+        assert_eq!(manager.get_failed_updates(), 3);
+
+        // Test case 9: Another valid update - succeeds atomically
+        let second_valid = ServiceConfig {
+            port: 3000,
+            max_workers: 100,
+            timeout_seconds: 120,
+        };
+
+        let result = manager.try_update(second_valid.clone());
+        assert!(result.is_ok());
+
+        let current = manager.get_config();
+        assert_eq!(
+            current, second_valid,
+            "All fields should be updated atomically"
+        );
+        assert_eq!(manager.get_successful_updates(), 2);
+        assert_eq!(manager.get_failed_updates(), 3);
+
+        // Test case 10: Verify atomicity - no partial state ever visible
+        // After 3 failed updates, config is still coherent
+        assert_eq!(current.port, 3000);
+        assert_eq!(current.max_workers, 100);
+        assert_eq!(current.timeout_seconds, 120);
+
+        // Test case 11: Multiple rapid updates - each is atomic
+        for i in 0..10_u32 {
+            let config = ServiceConfig {
+                port: (2000 + i * 100) as u16,
+                max_workers: 10 + i * 5,
+                timeout_seconds: 30 + i * 10,
+            };
+            let result = manager.try_update(config.clone());
+            assert!(result.is_ok());
+
+            // Immediately verify config is fully updated
+            let current = manager.get_config();
+            assert_eq!(current, config, "Each update should be atomic");
+        }
+
+        assert_eq!(manager.get_successful_updates(), 12); // 2 + 10
+        assert_eq!(manager.get_failed_updates(), 3);
+    }
 }

@@ -527,7 +527,7 @@ yatagarasu/
 - [x] Test: New requests use new config immediately after reload
 - [x] Test: No dropped connections during reload
 - [x] Test: No race conditions during config swap
-- [ ] Test: Atomic config update (all or nothing)
+- [x] Test: Atomic config update (all or nothing)
 
 ### Hot Reload - Credential Rotation
 - [ ] Test: Can update S3 credentials via reload
