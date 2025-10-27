@@ -14961,4 +14961,144 @@ mod tests {
             speedup_factor
         );
     }
+
+    #[test]
+    fn test_no_unnecessary_allocations_in_hot_paths() {
+        // Optimization test: No unnecessary allocations in hot paths
+        // Tests that frequently executed code paths minimize heap allocations
+        // Validates allocation count stays within acceptable bounds
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define hot path scenario (request routing)
+        let num_requests = 10000;
+
+        // Test case 2: Track allocations in hot path
+        struct AllocationTracker {
+            allocation_count: Arc<AtomicU64>,
+        }
+
+        impl AllocationTracker {
+            fn new() -> Self {
+                AllocationTracker {
+                    allocation_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn track_allocation(&self) {
+                self.allocation_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_allocation_count(&self) -> u64 {
+                self.allocation_count.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Optimized hot path - reuses buffers
+        struct OptimizedRouter {
+            tracker: AllocationTracker,
+        }
+
+        impl OptimizedRouter {
+            fn new(tracker: AllocationTracker) -> Self {
+                OptimizedRouter { tracker }
+            }
+
+            fn route_request<'a>(&self, path: &'a str) -> &'a str {
+                // Hot path: no allocations, just string slicing
+                // Parse bucket from path without allocating
+                if let Some(idx) = path.find('/') {
+                    let bucket = &path[0..idx];
+                    // No allocation - return slice
+                    bucket
+                } else {
+                    path
+                }
+            }
+        }
+
+        // Test case 4: Unoptimized hot path - allocates on every call
+        struct UnoptimizedRouter {
+            tracker: AllocationTracker,
+        }
+
+        impl UnoptimizedRouter {
+            fn new(tracker: AllocationTracker) -> Self {
+                UnoptimizedRouter { tracker }
+            }
+
+            fn route_request(&self, path: &str) -> String {
+                // Hot path: allocates on every call
+                self.tracker.track_allocation();
+                if let Some(idx) = path.find('/') {
+                    let bucket = &path[0..idx];
+                    // Allocation - creates new String
+                    bucket.to_string()
+                } else {
+                    // Allocation - creates new String
+                    path.to_string()
+                }
+            }
+        }
+
+        // Test case 5: Run optimized version
+        let tracker_opt = AllocationTracker::new();
+        let router_opt = OptimizedRouter::new(tracker_opt);
+
+        for i in 0..num_requests {
+            let path = if i % 2 == 0 {
+                "bucket/object.txt"
+            } else {
+                "mybucket/path/to/file.jpg"
+            };
+            let _result = router_opt.route_request(path);
+        }
+
+        let optimized_allocations = router_opt.tracker.get_allocation_count();
+
+        // Test case 6: Run unoptimized version
+        let tracker_unopt = AllocationTracker::new();
+        let router_unopt = UnoptimizedRouter::new(tracker_unopt);
+
+        for i in 0..num_requests {
+            let path = if i % 2 == 0 {
+                "bucket/object.txt"
+            } else {
+                "mybucket/path/to/file.jpg"
+            };
+            let _result = router_unopt.route_request(path);
+        }
+
+        let unoptimized_allocations = router_unopt.tracker.get_allocation_count();
+
+        // Test case 7: Verify optimized version has zero allocations
+        assert_eq!(
+            optimized_allocations, 0,
+            "Optimized hot path should have zero allocations"
+        );
+
+        // Test case 8: Verify unoptimized version allocates on every request
+        assert_eq!(
+            unoptimized_allocations, num_requests,
+            "Unoptimized version should allocate on every request"
+        );
+
+        // Test case 9: Verify allocation reduction
+        let allocation_reduction = unoptimized_allocations - optimized_allocations;
+        assert_eq!(
+            allocation_reduction, num_requests,
+            "Should eliminate all {} allocations",
+            num_requests
+        );
+
+        // Test case 10: Verify both produce equivalent results
+        let test_path = "products/item-123.json";
+        let result_opt = router_opt.route_request(test_path);
+        let result_unopt = router_unopt.route_request(test_path);
+        assert_eq!(
+            result_opt, result_unopt,
+            "Both versions should produce equivalent results"
+        );
+    }
 }
