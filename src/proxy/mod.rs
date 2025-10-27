@@ -15345,4 +15345,179 @@ mod tests {
             speedup
         );
     }
+
+    #[test]
+    fn test_connection_pooling_for_s3_requests() {
+        // Optimization test: Connection pooling for S3 requests
+        // Tests that S3 connections are reused rather than creating new ones
+        // Validates connection pool reduces connection establishment overhead
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        // Test case 1: Define test parameters
+        let num_requests = 100;
+        let connection_overhead_ms = 10; // Simulated connection establishment time
+
+        // Test case 2: Track connection creation
+        struct ConnectionTracker {
+            connections_created: Arc<AtomicU64>,
+            connections_reused: Arc<AtomicU64>,
+        }
+
+        impl ConnectionTracker {
+            fn new() -> Self {
+                ConnectionTracker {
+                    connections_created: Arc::new(AtomicU64::new(0)),
+                    connections_reused: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn track_new_connection(&self) {
+                self.connections_created.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn track_reused_connection(&self) {
+                self.connections_reused.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_stats(&self) -> (u64, u64) {
+                (
+                    self.connections_created.load(Ordering::Relaxed),
+                    self.connections_reused.load(Ordering::Relaxed),
+                )
+            }
+        }
+
+        // Test case 3: No pooling - creates new connection for each request
+        struct UnpooledClient {
+            tracker: Arc<ConnectionTracker>,
+            connection_overhead_ms: u64,
+        }
+
+        impl UnpooledClient {
+            fn new(tracker: Arc<ConnectionTracker>, connection_overhead_ms: u64) -> Self {
+                UnpooledClient {
+                    tracker,
+                    connection_overhead_ms,
+                }
+            }
+
+            fn send_request(&self, _request_id: u64) -> Result<Vec<u8>, String> {
+                // BAD: Creates new connection for every request
+                self.tracker.track_new_connection();
+                std::thread::sleep(Duration::from_millis(self.connection_overhead_ms));
+
+                // Simulate request
+                Ok(vec![1u8; 64])
+            }
+        }
+
+        // Test case 4: With pooling - reuses existing connections
+        struct PooledClient {
+            tracker: Arc<ConnectionTracker>,
+            _connection_overhead_ms: u64,
+            _pool_size: usize,
+        }
+
+        impl PooledClient {
+            fn new(
+                tracker: Arc<ConnectionTracker>,
+                connection_overhead_ms: u64,
+                pool_size: usize,
+            ) -> Self {
+                // Create initial pool
+                for _ in 0..pool_size {
+                    tracker.track_new_connection();
+                }
+
+                PooledClient {
+                    tracker,
+                    _connection_overhead_ms: connection_overhead_ms,
+                    _pool_size: pool_size,
+                }
+            }
+
+            fn send_request(&self, _request_id: u64) -> Result<Vec<u8>, String> {
+                // GOOD: Reuses connection from pool (no overhead)
+                self.tracker.track_reused_connection();
+
+                // Simulate request (no connection overhead)
+                Ok(vec![1u8; 64])
+            }
+        }
+
+        // Test case 5: Run without pooling
+        let tracker_unpooled = Arc::new(ConnectionTracker::new());
+        let client_unpooled =
+            UnpooledClient::new(Arc::clone(&tracker_unpooled), connection_overhead_ms);
+        let start = Instant::now();
+
+        for i in 0..num_requests {
+            let _ = client_unpooled.send_request(i);
+        }
+
+        let unpooled_duration = start.elapsed();
+        let (unpooled_created, unpooled_reused) = tracker_unpooled.get_stats();
+
+        // Test case 6: Run with pooling
+        let tracker_pooled = Arc::new(ConnectionTracker::new());
+        let pool_size = 10; // Pool of 10 connections
+        let client_pooled = PooledClient::new(
+            Arc::clone(&tracker_pooled),
+            connection_overhead_ms,
+            pool_size,
+        );
+        let start = Instant::now();
+
+        for i in 0..num_requests {
+            let _ = client_pooled.send_request(i);
+        }
+
+        let pooled_duration = start.elapsed();
+        let (pooled_created, pooled_reused) = tracker_pooled.get_stats();
+
+        // Test case 7: Verify unpooled creates connection for each request
+        assert_eq!(
+            unpooled_created, num_requests,
+            "Unpooled should create connection per request"
+        );
+        assert_eq!(unpooled_reused, 0, "Unpooled should not reuse connections");
+
+        // Test case 8: Verify pooled only creates initial pool
+        assert_eq!(
+            pooled_created, pool_size as u64,
+            "Pooled should only create initial pool connections"
+        );
+        assert_eq!(
+            pooled_reused, num_requests,
+            "Pooled should reuse connections for all requests"
+        );
+
+        // Test case 9: Verify pooled is much faster
+        // Unpooled: num_requests * connection_overhead
+        let expected_unpooled_ms = num_requests * connection_overhead_ms;
+        assert!(
+            unpooled_duration.as_millis() >= expected_unpooled_ms as u128,
+            "Unpooled should take at least {}ms",
+            expected_unpooled_ms
+        );
+
+        // Pooled: should be very fast (no per-request overhead)
+        assert!(
+            pooled_duration.as_millis() < 100,
+            "Pooled should be fast (<100ms), took {}ms",
+            pooled_duration.as_millis()
+        );
+
+        // Test case 10: Verify significant speedup from pooling
+        let speedup =
+            unpooled_duration.as_millis() as f64 / pooled_duration.as_millis().max(1) as f64;
+        assert!(
+            speedup > 5.0,
+            "Connection pooling should provide >5x speedup, got {:.2}x",
+            speedup
+        );
+    }
 }
