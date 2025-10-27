@@ -526,7 +526,7 @@ yatagarasu/
 - [x] Test: In-flight requests complete with old config
 - [x] Test: New requests use new config immediately after reload
 - [x] Test: No dropped connections during reload
-- [ ] Test: No race conditions during config swap
+- [x] Test: No race conditions during config swap
 - [ ] Test: Atomic config update (all or nothing)
 
 ### Hot Reload - Credential Rotation

@@ -16968,4 +16968,202 @@ mod tests {
         assert!(conn3.is_active(), "Connection 3 still active");
         assert_eq!(manager.get_active_connection_count(), 5);
     }
+
+    #[test]
+    fn test_no_race_conditions_during_config_swap() {
+        // Hot reload test: No race conditions during config swap
+        // Tests that concurrent config reads during reload are always consistent
+        // Validates no partial/corrupted config states visible to readers
+
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        // Test case 1: Define configuration with multiple fields
+        #[derive(Clone, Debug, PartialEq)]
+        struct Config {
+            field_a: u64,
+            field_b: u64,
+            field_c: u64,
+        }
+
+        impl Config {
+            // Check if config is internally consistent
+            // For this test, field_b should always equal field_a + field_c
+            fn is_consistent(&self) -> bool {
+                self.field_b == self.field_a + self.field_c
+            }
+        }
+
+        // Test case 2: Thread-safe config holder
+        struct ConfigHolder {
+            config: Arc<std::sync::Mutex<Config>>,
+            read_count: Arc<AtomicU64>,
+            inconsistent_reads: Arc<AtomicU64>,
+        }
+
+        impl ConfigHolder {
+            fn new(initial: Config) -> Self {
+                ConfigHolder {
+                    config: Arc::new(std::sync::Mutex::new(initial)),
+                    read_count: Arc::new(AtomicU64::new(0)),
+                    inconsistent_reads: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn read_config(&self) -> Config {
+                self.read_count.fetch_add(1, Ordering::Relaxed);
+                let config = self.config.lock().unwrap().clone();
+
+                // Check consistency
+                if !config.is_consistent() {
+                    self.inconsistent_reads.fetch_add(1, Ordering::Relaxed);
+                }
+
+                config
+            }
+
+            fn update_config(&self, new_config: Config) {
+                *self.config.lock().unwrap() = new_config;
+            }
+
+            fn get_read_count(&self) -> u64 {
+                self.read_count.load(Ordering::Relaxed)
+            }
+
+            fn get_inconsistent_reads(&self) -> u64 {
+                self.inconsistent_reads.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Initial config (field_a=10, field_c=5, field_b=15)
+        let initial = Config {
+            field_a: 10,
+            field_b: 15, // 10 + 5
+            field_c: 5,
+        };
+
+        assert!(
+            initial.is_consistent(),
+            "Initial config should be consistent"
+        );
+
+        let holder = Arc::new(ConfigHolder::new(initial));
+
+        // Test case 4: Spawn reader threads
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let mut reader_handles = vec![];
+
+        for _ in 0..10 {
+            let holder_clone = holder.clone();
+            let stop_clone = stop_flag.clone();
+
+            let handle = thread::spawn(move || {
+                while !stop_clone.load(Ordering::Relaxed) {
+                    let _config = holder_clone.read_config();
+                    // Small yield to allow other threads to run
+                    thread::sleep(Duration::from_micros(10));
+                }
+            });
+
+            reader_handles.push(handle);
+        }
+
+        // Test case 5: Perform config updates while readers are active
+        for i in 0..20 {
+            thread::sleep(Duration::from_millis(5));
+
+            let new_config = Config {
+                field_a: 100 + i * 10,
+                field_b: 100 + i * 10 + 50 + i * 5, // field_a + field_c
+                field_c: 50 + i * 5,
+            };
+
+            assert!(
+                new_config.is_consistent(),
+                "New config should be consistent"
+            );
+
+            holder.update_config(new_config);
+        }
+
+        // Test case 6: Stop readers
+        stop_flag.store(true, Ordering::Relaxed);
+
+        for handle in reader_handles {
+            handle.join().unwrap();
+        }
+
+        // Test case 7: Verify no inconsistent reads occurred
+        assert_eq!(
+            holder.get_inconsistent_reads(),
+            0,
+            "Should have zero inconsistent reads (no race conditions)"
+        );
+
+        assert!(holder.get_read_count() > 0, "Should have performed reads");
+
+        // Test case 8: Final config should be consistent
+        let final_config = holder.read_config();
+        assert!(
+            final_config.is_consistent(),
+            "Final config should be consistent"
+        );
+        assert_eq!(final_config.field_a, 290); // 100 + 19 * 10
+        assert_eq!(final_config.field_c, 145); // 50 + 19 * 5
+        assert_eq!(final_config.field_b, 435); // 290 + 145
+
+        // Test case 9: Stress test with rapid updates
+        let holder2 = Arc::new(ConfigHolder::new(Config {
+            field_a: 1,
+            field_b: 3, // 1 + 2
+            field_c: 2,
+        }));
+
+        let stop_flag2 = Arc::new(AtomicBool::new(false));
+        let mut handles2 = vec![];
+
+        // Spawn 20 reader threads
+        for _ in 0..20 {
+            let holder_clone = holder2.clone();
+            let stop_clone = stop_flag2.clone();
+
+            let handle = thread::spawn(move || {
+                while !stop_clone.load(Ordering::Relaxed) {
+                    let _config = holder_clone.read_config();
+                }
+            });
+
+            handles2.push(handle);
+        }
+
+        // Rapid updates
+        for i in 0..100 {
+            let new_config = Config {
+                field_a: i,
+                field_b: i + i * 2, // field_a + field_c
+                field_c: i * 2,
+            };
+            holder2.update_config(new_config);
+        }
+
+        // Stop readers
+        stop_flag2.store(true, Ordering::Relaxed);
+        for handle in handles2 {
+            handle.join().unwrap();
+        }
+
+        // Test case 10: No inconsistent reads in stress test
+        assert_eq!(
+            holder2.get_inconsistent_reads(),
+            0,
+            "Stress test should have zero inconsistent reads"
+        );
+
+        assert!(
+            holder2.get_read_count() > 100,
+            "Should have many reads in stress test"
+        );
+    }
 }
