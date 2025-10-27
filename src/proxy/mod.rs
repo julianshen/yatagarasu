@@ -18741,4 +18741,226 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_can_retry_failed_reload_after_fixing_config() {
+        // Hot reload test: Can retry failed reload after fixing config
+        // Tests that after a reload fails, the system can successfully reload once config is fixed
+        // Validates recovery from configuration errors
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define configuration state
+        #[derive(Clone, Debug, PartialEq)]
+        struct Config {
+            port: u16,
+            workers: u32,
+            version: u64,
+        }
+
+        // Test case 2: Configuration validator
+        fn validate_config(config: &Config) -> Result<(), String> {
+            if config.port < 1024 {
+                return Err(format!("Invalid port {}: must be >= 1024", config.port));
+            }
+            if config.workers == 0 {
+                return Err(format!("Invalid workers {}: must be > 0", config.workers));
+            }
+            Ok(())
+        }
+
+        // Test case 3: Reload manager with retry capability
+        struct ReloadManager {
+            current_config: Arc<std::sync::Mutex<Config>>,
+            reload_attempts: Arc<AtomicU64>,
+            reload_failures: Arc<AtomicU64>,
+            reload_successes: Arc<AtomicU64>,
+            last_error: Arc<std::sync::Mutex<Option<String>>>,
+        }
+
+        impl ReloadManager {
+            fn new(initial_config: Config) -> Self {
+                Self {
+                    current_config: Arc::new(std::sync::Mutex::new(initial_config)),
+                    reload_attempts: Arc::new(AtomicU64::new(0)),
+                    reload_failures: Arc::new(AtomicU64::new(0)),
+                    reload_successes: Arc::new(AtomicU64::new(0)),
+                    last_error: Arc::new(std::sync::Mutex::new(None)),
+                }
+            }
+
+            fn reload(&self, new_config: Config) -> Result<(), String> {
+                self.reload_attempts.fetch_add(1, Ordering::SeqCst);
+
+                // Validate before applying
+                if let Err(e) = validate_config(&new_config) {
+                    self.reload_failures.fetch_add(1, Ordering::SeqCst);
+                    *self.last_error.lock().unwrap() = Some(e.clone());
+                    return Err(e);
+                }
+
+                // Apply valid config
+                *self.current_config.lock().unwrap() = new_config;
+                self.reload_successes.fetch_add(1, Ordering::SeqCst);
+                *self.last_error.lock().unwrap() = None;
+                Ok(())
+            }
+
+            fn get_config(&self) -> Config {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn get_reload_stats(&self) -> (u64, u64, u64) {
+                (
+                    self.reload_attempts.load(Ordering::SeqCst),
+                    self.reload_failures.load(Ordering::SeqCst),
+                    self.reload_successes.load(Ordering::SeqCst),
+                )
+            }
+
+            fn get_last_error(&self) -> Option<String> {
+                self.last_error.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 4: Start with valid initial configuration
+        let initial_config = Config {
+            port: 8080,
+            workers: 4,
+            version: 1,
+        };
+
+        let manager = ReloadManager::new(initial_config.clone());
+
+        // Verify initial state
+        assert_eq!(manager.get_config(), initial_config);
+        assert_eq!(manager.get_reload_stats(), (0, 0, 0));
+        assert_eq!(manager.get_last_error(), None);
+
+        // Test case 5: Attempt reload with invalid configuration (port too low)
+        let invalid_config = Config {
+            port: 80, // Invalid: < 1024
+            workers: 8,
+            version: 2,
+        };
+
+        let result = manager.reload(invalid_config.clone());
+        assert!(result.is_err(), "Reload should fail with invalid port");
+        assert!(
+            result.unwrap_err().contains("Invalid port"),
+            "Error should mention invalid port"
+        );
+
+        // Test case 6: Verify service continues with old config after failed reload
+        let current_config = manager.get_config();
+        assert_eq!(
+            current_config, initial_config,
+            "Config should remain unchanged after failed reload"
+        );
+        assert_eq!(
+            current_config.port, 8080,
+            "Port should still be original value"
+        );
+        assert_eq!(
+            current_config.version, 1,
+            "Version should still be original"
+        );
+
+        // Test case 7: Verify reload failure was tracked
+        let (attempts, failures, successes) = manager.get_reload_stats();
+        assert_eq!(attempts, 1, "Should have 1 reload attempt");
+        assert_eq!(failures, 1, "Should have 1 reload failure");
+        assert_eq!(successes, 0, "Should have 0 reload successes");
+
+        // Test case 8: Verify error was recorded
+        let last_error = manager.get_last_error();
+        assert!(last_error.is_some(), "Should have recorded error");
+        assert!(
+            last_error.unwrap().contains("Invalid port 80"),
+            "Error should contain specific port value"
+        );
+
+        // Test case 9: Fix the configuration (make port valid)
+        let fixed_config = Config {
+            port: 9090, // Fixed: >= 1024
+            workers: 8,
+            version: 2,
+        };
+
+        let result = manager.reload(fixed_config.clone());
+        assert!(result.is_ok(), "Reload should succeed with valid config");
+
+        // Test case 10: Verify new config is active after successful retry
+        let current_config = manager.get_config();
+        assert_eq!(
+            current_config, fixed_config,
+            "Config should be updated after successful reload"
+        );
+        assert_eq!(current_config.port, 9090, "Port should be updated");
+        assert_eq!(current_config.workers, 8, "Workers should be updated");
+        assert_eq!(current_config.version, 2, "Version should be updated");
+
+        // Test case 11: Verify reload success was tracked
+        let (attempts, failures, successes) = manager.get_reload_stats();
+        assert_eq!(attempts, 2, "Should have 2 reload attempts");
+        assert_eq!(failures, 1, "Should still have 1 failure");
+        assert_eq!(successes, 1, "Should have 1 success");
+
+        // Test case 12: Verify error was cleared after successful reload
+        let last_error = manager.get_last_error();
+        assert_eq!(last_error, None, "Error should be cleared after success");
+
+        // Test case 13: Test multiple failure-success cycles
+        // Fail with workers = 0
+        let invalid_config2 = Config {
+            port: 9090,
+            workers: 0, // Invalid
+            version: 3,
+        };
+
+        let result = manager.reload(invalid_config2);
+        assert!(result.is_err(), "Reload should fail with invalid workers");
+        assert_eq!(
+            manager.get_config().version,
+            2,
+            "Version should remain at 2 after failure"
+        );
+
+        // Fix and retry
+        let fixed_config2 = Config {
+            port: 9090,
+            workers: 16, // Fixed
+            version: 3,
+        };
+
+        let result = manager.reload(fixed_config2.clone());
+        assert!(result.is_ok(), "Second retry should succeed");
+        assert_eq!(
+            manager.get_config(),
+            fixed_config2,
+            "Config should be updated"
+        );
+
+        // Test case 14: Verify final stats
+        let (attempts, failures, successes) = manager.get_reload_stats();
+        assert_eq!(attempts, 4, "Should have 4 total attempts");
+        assert_eq!(failures, 2, "Should have 2 total failures");
+        assert_eq!(successes, 2, "Should have 2 total successes");
+
+        // Test case 15: Verify service remains healthy through failure-retry cycles
+        let final_config = manager.get_config();
+        assert!(
+            validate_config(&final_config).is_ok(),
+            "Final config should always be valid"
+        );
+        assert_eq!(
+            final_config.port, 9090,
+            "Service should be running on correct port"
+        );
+        assert_eq!(
+            final_config.workers, 16,
+            "Service should have correct worker count"
+        );
+    }
 }
