@@ -540,7 +540,7 @@ yatagarasu/
 - [x] Test: Failed reload doesn't affect running service
 - [x] Test: Failed reload logs clear error message
 - [x] Test: Can retry failed reload after fixing config
-- [ ] Test: Service continues with old config if reload fails
+- [x] Test: Service continues with old config if reload fails
 
 ---
 

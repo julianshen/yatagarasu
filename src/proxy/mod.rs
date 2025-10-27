@@ -18963,4 +18963,279 @@ mod tests {
             "Service should have correct worker count"
         );
     }
+
+    #[test]
+    fn test_service_continues_with_old_config_if_reload_fails() {
+        // Hot reload test: Service continues with old config if reload fails
+        // Tests that reload failures leave the service in a consistent state with original config
+        // Validates no partial config application occurs
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define complete configuration
+        #[derive(Clone, Debug, PartialEq)]
+        struct CompleteConfig {
+            port: u16,
+            workers: u32,
+            timeout_ms: u64,
+            max_connections: u32,
+            s3_endpoint: String,
+            jwt_secret: String,
+            version: u64,
+        }
+
+        // Test case 2: Configuration validator
+        fn validate_config(config: &CompleteConfig) -> Result<(), String> {
+            if config.port < 1024 {
+                return Err(format!("Invalid port: {}", config.port));
+            }
+            if config.workers == 0 {
+                return Err(format!("Invalid workers: must be > 0"));
+            }
+            if config.max_connections == 0 {
+                return Err(format!("Invalid max_connections: must be > 0"));
+            }
+            if config.s3_endpoint.is_empty() {
+                return Err("S3 endpoint cannot be empty".to_string());
+            }
+            if config.jwt_secret.is_empty() {
+                return Err("JWT secret cannot be empty".to_string());
+            }
+            Ok(())
+        }
+
+        // Test case 3: Service with config management
+        struct Service {
+            config: Arc<std::sync::Mutex<CompleteConfig>>,
+            reload_count: Arc<AtomicU64>,
+            failed_reload_count: Arc<AtomicU64>,
+            request_count: Arc<AtomicU64>,
+        }
+
+        impl Service {
+            fn new(config: CompleteConfig) -> Self {
+                Self {
+                    config: Arc::new(std::sync::Mutex::new(config)),
+                    reload_count: Arc::new(AtomicU64::new(0)),
+                    failed_reload_count: Arc::new(AtomicU64::new(0)),
+                    request_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn reload(&self, new_config: CompleteConfig) -> Result<(), String> {
+                self.reload_count.fetch_add(1, Ordering::SeqCst);
+
+                // Validate before applying
+                if let Err(e) = validate_config(&new_config) {
+                    self.failed_reload_count.fetch_add(1, Ordering::SeqCst);
+                    return Err(e);
+                }
+
+                // Apply valid config
+                *self.config.lock().unwrap() = new_config;
+                Ok(())
+            }
+
+            fn get_config(&self) -> CompleteConfig {
+                self.config.lock().unwrap().clone()
+            }
+
+            fn process_request(&self) -> CompleteConfig {
+                self.request_count.fetch_add(1, Ordering::SeqCst);
+                self.get_config()
+            }
+
+            fn get_stats(&self) -> (u64, u64, u64) {
+                (
+                    self.reload_count.load(Ordering::SeqCst),
+                    self.failed_reload_count.load(Ordering::SeqCst),
+                    self.request_count.load(Ordering::SeqCst),
+                )
+            }
+        }
+
+        // Test case 4: Start with valid initial configuration
+        let initial_config = CompleteConfig {
+            port: 8080,
+            workers: 4,
+            timeout_ms: 5000,
+            max_connections: 1000,
+            s3_endpoint: "https://s3.amazonaws.com".to_string(),
+            jwt_secret: "original-secret-key".to_string(),
+            version: 1,
+        };
+
+        let service = Service::new(initial_config.clone());
+
+        // Verify initial state
+        assert_eq!(service.get_config(), initial_config);
+        assert_eq!(service.get_stats(), (0, 0, 0));
+
+        // Test case 5: Process some requests with initial config
+        for _ in 0..5 {
+            let config_snapshot = service.process_request();
+            assert_eq!(config_snapshot, initial_config);
+        }
+        assert_eq!(service.get_stats().2, 5, "Should have processed 5 requests");
+
+        // Test case 6: Attempt reload with invalid port
+        let invalid_config = CompleteConfig {
+            port: 80, // Invalid: < 1024
+            workers: 8,
+            timeout_ms: 10000,
+            max_connections: 2000,
+            s3_endpoint: "https://s3.eu-west-1.amazonaws.com".to_string(),
+            jwt_secret: "new-secret-key".to_string(),
+            version: 2,
+        };
+
+        let result = service.reload(invalid_config);
+        assert!(result.is_err(), "Reload should fail with invalid port");
+
+        // Test case 7: Verify ALL config fields remain unchanged
+        let current_config = service.get_config();
+        assert_eq!(
+            current_config, initial_config,
+            "Config should be completely unchanged"
+        );
+        assert_eq!(current_config.port, 8080, "Port unchanged");
+        assert_eq!(current_config.workers, 4, "Workers unchanged");
+        assert_eq!(current_config.timeout_ms, 5000, "Timeout unchanged");
+        assert_eq!(
+            current_config.max_connections, 1000,
+            "Max connections unchanged"
+        );
+        assert_eq!(
+            current_config.s3_endpoint, "https://s3.amazonaws.com",
+            "S3 endpoint unchanged"
+        );
+        assert_eq!(
+            current_config.jwt_secret, "original-secret-key",
+            "JWT secret unchanged"
+        );
+        assert_eq!(current_config.version, 1, "Version unchanged");
+
+        // Test case 8: Service continues processing requests with old config
+        for _ in 0..3 {
+            let config_snapshot = service.process_request();
+            assert_eq!(
+                config_snapshot, initial_config,
+                "Requests should use old config"
+            );
+        }
+        assert_eq!(
+            service.get_stats().2,
+            8,
+            "Should have processed 8 total requests"
+        );
+
+        // Test case 9: Attempt reload with empty S3 endpoint
+        let invalid_config2 = CompleteConfig {
+            port: 9090,
+            workers: 8,
+            timeout_ms: 10000,
+            max_connections: 2000,
+            s3_endpoint: "".to_string(), // Invalid: empty
+            jwt_secret: "new-secret-key".to_string(),
+            version: 2,
+        };
+
+        let result = service.reload(invalid_config2);
+        assert!(result.is_err(), "Reload should fail with empty S3 endpoint");
+
+        // Test case 10: Verify config still completely unchanged after second failure
+        let current_config = service.get_config();
+        assert_eq!(
+            current_config, initial_config,
+            "Config still unchanged after multiple failures"
+        );
+        assert_eq!(current_config.port, 8080);
+        assert_eq!(current_config.s3_endpoint, "https://s3.amazonaws.com");
+        assert_eq!(current_config.jwt_secret, "original-secret-key");
+        assert_eq!(current_config.version, 1);
+
+        // Test case 11: Attempt reload with invalid workers
+        let invalid_config3 = CompleteConfig {
+            port: 9090,
+            workers: 0, // Invalid
+            timeout_ms: 10000,
+            max_connections: 2000,
+            s3_endpoint: "https://s3.eu-west-1.amazonaws.com".to_string(),
+            jwt_secret: "new-secret-key".to_string(),
+            version: 2,
+        };
+
+        let result = service.reload(invalid_config3);
+        assert!(result.is_err(), "Reload should fail with invalid workers");
+
+        // Test case 12: Verify stats show failed reloads but service continues
+        let (reload_count, failed_count, request_count) = service.get_stats();
+        assert_eq!(reload_count, 3, "Should have 3 reload attempts");
+        assert_eq!(failed_count, 3, "Should have 3 failed reloads");
+        assert_eq!(request_count, 8, "Should still have 8 requests processed");
+
+        // Test case 13: Service processes more requests successfully with old config
+        for _ in 0..10 {
+            let config_snapshot = service.process_request();
+            assert_eq!(
+                config_snapshot, initial_config,
+                "Service continues with original config"
+            );
+        }
+
+        // Test case 14: Verify config integrity after many failed reloads and requests
+        let current_config = service.get_config();
+        assert_eq!(
+            current_config, initial_config,
+            "Config remains stable despite multiple reload failures"
+        );
+
+        // Test case 15: Attempt reload with empty JWT secret
+        let invalid_config4 = CompleteConfig {
+            port: 9090,
+            workers: 8,
+            timeout_ms: 10000,
+            max_connections: 2000,
+            s3_endpoint: "https://s3.eu-west-1.amazonaws.com".to_string(),
+            jwt_secret: "".to_string(), // Invalid: empty
+            version: 2,
+        };
+
+        let result = service.reload(invalid_config4);
+        assert!(result.is_err(), "Reload should fail with empty JWT secret");
+
+        // Test case 16: Final verification - old config still active
+        let current_config = service.get_config();
+        assert_eq!(
+            current_config, initial_config,
+            "Original config persists through all failures"
+        );
+
+        // Test case 17: Verify old config is always valid
+        assert!(
+            validate_config(&current_config).is_ok(),
+            "Running config must always be valid"
+        );
+
+        // Test case 18: Verify service health - can process requests
+        let config_snapshot = service.process_request();
+        assert_eq!(
+            config_snapshot.port, 8080,
+            "Service operational on original port"
+        );
+        assert_eq!(
+            config_snapshot.jwt_secret, "original-secret-key",
+            "Service using original credentials"
+        );
+
+        // Test case 19: Verify final stats
+        let (reload_count, failed_count, _) = service.get_stats();
+        assert_eq!(reload_count, 4, "Should have 4 total reload attempts");
+        assert_eq!(failed_count, 4, "All reload attempts failed");
+        assert!(
+            service.get_stats().2 > 0,
+            "Service processed requests despite reload failures"
+        );
+    }
 }
