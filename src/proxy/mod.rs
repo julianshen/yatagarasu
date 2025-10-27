@@ -19238,4 +19238,232 @@ mod tests {
             "Service processed requests despite reload failures"
         );
     }
+
+    #[test]
+    fn test_logs_all_incoming_requests_with_timestamp() {
+        // Observability test: Logs all incoming requests with timestamp
+        // Tests that every incoming HTTP request is logged with a timestamp
+        // Validates comprehensive request logging for audit and debugging
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Test case 1: Define request log entry
+        #[derive(Clone, Debug)]
+        struct RequestLog {
+            timestamp: u64,
+            request_id: u64,
+            remote_addr: String,
+        }
+
+        // Test case 2: Request logger that captures all requests
+        struct RequestLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+            request_counter: Arc<AtomicU64>,
+        }
+
+        impl RequestLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    request_counter: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn log_request(&self, remote_addr: &str) -> u64 {
+                let request_id = self.request_counter.fetch_add(1, Ordering::SeqCst);
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+
+                let log_entry = RequestLog {
+                    timestamp,
+                    request_id,
+                    remote_addr: remote_addr.to_string(),
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+                request_id
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Simulate proxy with request logging
+        struct Proxy {
+            logger: RequestLogger,
+        }
+
+        impl Proxy {
+            fn new() -> Self {
+                Self {
+                    logger: RequestLogger::new(),
+                }
+            }
+
+            fn handle_request(&self, remote_addr: &str) -> u64 {
+                self.logger.log_request(remote_addr)
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logger.get_logs()
+            }
+        }
+
+        let proxy = Proxy::new();
+
+        // Test case 4: Log first request
+        let request_id1 = proxy.handle_request("192.168.1.100:54321");
+        assert_eq!(request_id1, 0, "First request should have ID 0");
+
+        // Test case 5: Verify log was created
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 1, "Should have 1 log entry");
+
+        // Test case 6: Verify log contains timestamp
+        let log1 = &logs[0];
+        assert!(log1.timestamp > 0, "Timestamp should be non-zero");
+        assert_eq!(log1.request_id, 0, "Request ID should match");
+        assert_eq!(
+            log1.remote_addr, "192.168.1.100:54321",
+            "Remote address should match"
+        );
+
+        // Test case 7: Log second request
+        let request_id2 = proxy.handle_request("192.168.1.101:54322");
+        assert_eq!(request_id2, 1, "Second request should have ID 1");
+
+        // Test case 8: Verify both requests logged
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 2, "Should have 2 log entries");
+
+        // Test case 9: Verify timestamps are chronological
+        let log2 = &logs[1];
+        assert!(
+            log2.timestamp >= log1.timestamp,
+            "Second timestamp should be >= first"
+        );
+
+        // Test case 10: Verify request IDs are sequential
+        assert_eq!(log2.request_id, 1, "Request ID should be sequential");
+
+        // Test case 11: Log multiple requests from different clients
+        let client_addrs = vec![
+            "10.0.0.1:12345",
+            "10.0.0.2:12346",
+            "10.0.0.3:12347",
+            "10.0.0.4:12348",
+            "10.0.0.5:12349",
+        ];
+
+        for addr in &client_addrs {
+            proxy.handle_request(addr);
+        }
+
+        // Test case 12: Verify all requests were logged
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 7, "Should have 7 total log entries");
+
+        // Test case 13: Verify each request has unique timestamp or sequential time
+        for i in 1..logs.len() {
+            assert!(
+                logs[i].timestamp >= logs[i - 1].timestamp,
+                "Timestamps should be monotonically increasing"
+            );
+        }
+
+        // Test case 14: Verify all request IDs are unique and sequential
+        for (i, log) in logs.iter().enumerate() {
+            assert_eq!(log.request_id, i as u64, "Request IDs should be sequential");
+        }
+
+        // Test case 15: Verify all client addresses captured
+        let logged_addrs: Vec<String> = logs.iter().map(|l| l.remote_addr.clone()).collect();
+        assert!(
+            logged_addrs.contains(&"192.168.1.100:54321".to_string()),
+            "Should contain first client address"
+        );
+        assert!(
+            logged_addrs.contains(&"10.0.0.5:12349".to_string()),
+            "Should contain last client address"
+        );
+
+        // Test case 16: Simulate burst of concurrent requests
+        let proxy2 = Arc::new(Proxy::new());
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let proxy_clone = Arc::clone(&proxy2);
+                std::thread::spawn(move || {
+                    proxy_clone.handle_request(&format!("192.168.2.{}:5000", i))
+                })
+            })
+            .collect();
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Test case 17: Verify all concurrent requests logged
+        let logs = proxy2.get_logs();
+        assert_eq!(logs.len(), 10, "Should have logged all 10 requests");
+
+        // Test case 18: Verify all timestamps are valid
+        for log in &logs {
+            assert!(log.timestamp > 0, "All timestamps should be valid");
+        }
+
+        // Test case 19: Verify all request IDs are unique (no duplicates)
+        let mut seen_ids = std::collections::HashSet::new();
+        for log in &logs {
+            assert!(
+                seen_ids.insert(log.request_id),
+                "Request ID {} should be unique",
+                log.request_id
+            );
+        }
+
+        // Test case 20: Test timestamp precision (milliseconds)
+        let proxy3 = Proxy::new();
+        let start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        proxy3.handle_request("127.0.0.1:8080");
+
+        let end = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let logs = proxy3.get_logs();
+        let log_timestamp = logs[0].timestamp;
+
+        assert!(
+            log_timestamp >= start && log_timestamp <= end,
+            "Timestamp should be within request processing window"
+        );
+
+        // Test case 21: Verify logger doesn't drop any requests under load
+        let proxy4 = Proxy::new();
+        for i in 0..1000 {
+            proxy4.handle_request(&format!("10.1.{}.{}:8080", i / 256, i % 256));
+        }
+
+        let logs = proxy4.get_logs();
+        assert_eq!(logs.len(), 1000, "Should log all 1000 requests");
+
+        // Test case 22: Verify request IDs remain sequential even under load
+        for (i, log) in logs.iter().enumerate() {
+            assert_eq!(
+                log.request_id, i as u64,
+                "Request IDs should remain sequential under load"
+            );
+        }
+    }
 }

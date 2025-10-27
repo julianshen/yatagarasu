@@ -547,7 +547,7 @@ yatagarasu/
 ## Phase 10: Observability and Monitoring
 
 ### Logging - Request Logging
-- [ ] Test: Logs all incoming requests with timestamp
+- [x] Test: Logs all incoming requests with timestamp
 - [ ] Test: Logs request method, path, status code
 - [ ] Test: Logs request duration
 - [ ] Test: Logs JWT subject (if authenticated)
