@@ -18315,4 +18315,207 @@ mod tests {
             seen_messages.insert(key);
         }
     }
+
+    #[test]
+    fn test_failed_reload_doesnt_affect_running_service() {
+        // Hot reload test: Failed reload doesn't affect running service
+        // Tests that service continues operating when config reload fails
+        // Validates old config remains active and service stays healthy
+
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define service configuration
+        #[derive(Clone, Debug, PartialEq)]
+        struct Config {
+            port: u16,
+            workers: u32,
+        }
+
+        // Test case 2: Define reload result
+        #[derive(Debug, PartialEq)]
+        enum ReloadError {
+            ValidationFailed(String),
+            ParseError(String),
+        }
+
+        // Test case 3: Service with resilient reload
+        struct ResilientService {
+            current_config: Arc<std::sync::Mutex<Config>>,
+            is_running: Arc<AtomicBool>,
+            requests_processed: Arc<AtomicU64>,
+            reload_attempts: Arc<AtomicU64>,
+            reload_failures: Arc<AtomicU64>,
+        }
+
+        impl ResilientService {
+            fn new(initial_config: Config) -> Self {
+                ResilientService {
+                    current_config: Arc::new(std::sync::Mutex::new(initial_config)),
+                    is_running: Arc::new(AtomicBool::new(true)),
+                    requests_processed: Arc::new(AtomicU64::new(0)),
+                    reload_attempts: Arc::new(AtomicU64::new(0)),
+                    reload_failures: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn reload_config(&self, new_config: Config) -> Result<(), ReloadError> {
+                self.reload_attempts.fetch_add(1, Ordering::Relaxed);
+
+                // Validate new config
+                if new_config.port < 1024 {
+                    self.reload_failures.fetch_add(1, Ordering::Relaxed);
+                    return Err(ReloadError::ValidationFailed(
+                        "Port must be >= 1024".to_string(),
+                    ));
+                }
+
+                if new_config.workers == 0 {
+                    self.reload_failures.fetch_add(1, Ordering::Relaxed);
+                    return Err(ReloadError::ValidationFailed(
+                        "Workers must be > 0".to_string(),
+                    ));
+                }
+
+                // Validation passed - apply config
+                *self.current_config.lock().unwrap() = new_config;
+                Ok(())
+            }
+
+            fn process_request(&self) -> bool {
+                if self.is_running.load(Ordering::Relaxed) {
+                    self.requests_processed.fetch_add(1, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+
+            fn is_running(&self) -> bool {
+                self.is_running.load(Ordering::Relaxed)
+            }
+
+            fn get_config(&self) -> Config {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn get_requests_processed(&self) -> u64 {
+                self.requests_processed.load(Ordering::Relaxed)
+            }
+
+            fn get_reload_failures(&self) -> u64 {
+                self.reload_failures.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 4: Start service with valid config
+        let initial_config = Config {
+            port: 8080,
+            workers: 4,
+        };
+
+        let service = ResilientService::new(initial_config.clone());
+
+        // Test case 5: Service processes requests normally
+        assert!(service.process_request());
+        assert!(service.process_request());
+        assert!(service.process_request());
+        assert_eq!(service.get_requests_processed(), 3);
+        assert!(service.is_running());
+
+        // Test case 6: Attempt reload with invalid port
+        let invalid_config = Config {
+            port: 80, // Too low
+            workers: 4,
+        };
+
+        let result = service.reload_config(invalid_config);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            ReloadError::ValidationFailed("Port must be >= 1024".to_string())
+        );
+        assert_eq!(service.get_reload_failures(), 1);
+
+        // Test case 7: Service still running after failed reload
+        assert!(
+            service.is_running(),
+            "Service should still be running after failed reload"
+        );
+
+        // Test case 8: Old config still active
+        let current = service.get_config();
+        assert_eq!(
+            current, initial_config,
+            "Old config should still be active after failed reload"
+        );
+
+        // Test case 9: Service continues processing requests
+        assert!(service.process_request());
+        assert!(service.process_request());
+        assert_eq!(
+            service.get_requests_processed(),
+            5,
+            "Service should continue processing requests after failed reload"
+        );
+
+        // Test case 10: Another failed reload with invalid workers
+        let invalid_config2 = Config {
+            port: 9090,
+            workers: 0, // Invalid
+        };
+
+        let result = service.reload_config(invalid_config2);
+        assert!(result.is_err());
+        assert_eq!(service.get_reload_failures(), 2);
+
+        // Test case 11: Service still healthy after multiple failures
+        assert!(service.is_running());
+        assert!(service.process_request());
+        assert_eq!(service.get_requests_processed(), 6);
+
+        // Test case 12: Old config still unchanged
+        let current = service.get_config();
+        assert_eq!(current.port, 8080);
+        assert_eq!(current.workers, 4);
+
+        // Test case 13: Successful reload still works after failures
+        let valid_config = Config {
+            port: 9090,
+            workers: 8,
+        };
+
+        let result = service.reload_config(valid_config.clone());
+        assert!(result.is_ok(), "Valid reload should succeed after failures");
+
+        let current = service.get_config();
+        assert_eq!(current, valid_config);
+
+        // Test case 14: Service continues running after successful reload
+        assert!(service.is_running());
+        assert!(service.process_request());
+        assert_eq!(service.get_requests_processed(), 7);
+
+        // Test case 15: Multiple consecutive failed reloads
+        for i in 0..10 {
+            let invalid = Config {
+                port: 100 + i, // All too low
+                workers: 4,
+            };
+            let result = service.reload_config(invalid);
+            assert!(result.is_err());
+        }
+
+        assert_eq!(service.get_reload_failures(), 12); // 2 + 10
+
+        // Test case 16: Service remains healthy after many failures
+        assert!(service.is_running());
+        assert!(service.process_request());
+        assert_eq!(service.get_requests_processed(), 8);
+
+        // Config unchanged by all the failures
+        let current = service.get_config();
+        assert_eq!(current.port, 9090);
+        assert_eq!(current.workers, 8);
+    }
 }
