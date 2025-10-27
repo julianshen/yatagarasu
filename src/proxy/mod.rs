@@ -14875,4 +14875,90 @@ mod tests {
             total_requests
         );
     }
+
+    #[test]
+    fn test_benchmark_compare_before_after_optimization() {
+        // Optimization benchmark: Compare before/after optimization changes
+        // Tests performance improvement from unoptimized to optimized code
+        // Validates optimization achieves measurable improvement
+
+        use std::time::Instant;
+
+        // Test case 1: Define benchmark parameters
+        let num_iterations = 10000;
+
+        // Test case 2: Unoptimized version - allocates on every call
+        fn unoptimized_string_concat(a: &str, b: &str, c: &str) -> String {
+            // Inefficient: creates multiple intermediate allocations
+            let mut result = String::new();
+            result.push_str(a);
+            result.push_str(b);
+            result.push_str(c);
+            result
+        }
+
+        // Test case 3: Optimized version - pre-allocates capacity
+        fn optimized_string_concat(a: &str, b: &str, c: &str) -> String {
+            // Efficient: pre-allocates exact capacity needed
+            let mut result = String::with_capacity(a.len() + b.len() + c.len());
+            result.push_str(a);
+            result.push_str(b);
+            result.push_str(c);
+            result
+        }
+
+        // Test case 4: Benchmark unoptimized version
+        let test_a = "bucket";
+        let test_b = "/path/";
+        let test_c = "object.txt";
+
+        let start = Instant::now();
+        for _ in 0..num_iterations {
+            let _result = unoptimized_string_concat(test_a, test_b, test_c);
+        }
+        let unoptimized_duration = start.elapsed();
+
+        // Test case 5: Benchmark optimized version
+        let start = Instant::now();
+        for _ in 0..num_iterations {
+            let _result = optimized_string_concat(test_a, test_b, test_c);
+        }
+        let optimized_duration = start.elapsed();
+
+        // Test case 6: Calculate speedup factor
+        let unoptimized_us = unoptimized_duration.as_micros();
+        let optimized_us = optimized_duration.as_micros();
+        let speedup_factor = unoptimized_us as f64 / optimized_us as f64;
+
+        // Test case 7: Verify both produce same result
+        let result_unopt = unoptimized_string_concat(test_a, test_b, test_c);
+        let result_opt = optimized_string_concat(test_a, test_b, test_c);
+        assert_eq!(
+            result_unopt, result_opt,
+            "Both versions should produce identical results"
+        );
+
+        // Test case 8: Verify optimized version is faster
+        assert!(
+            optimized_us < unoptimized_us,
+            "Optimized version should be faster: unopt={}μs, opt={}μs",
+            unoptimized_us,
+            optimized_us
+        );
+
+        // Test case 9: Verify measurable speedup (at least 10% faster)
+        assert!(
+            speedup_factor > 1.1,
+            "Optimization should provide at least 10% speedup, got {:.2}x",
+            speedup_factor
+        );
+
+        // Test case 10: Verify optimization provides reasonable improvement
+        // For this optimization, we expect at least 20% improvement
+        assert!(
+            speedup_factor > 1.2,
+            "String pre-allocation should provide >20% speedup, got {:.2}x",
+            speedup_factor
+        );
+    }
 }
