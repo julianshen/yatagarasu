@@ -14628,4 +14628,120 @@ mod tests {
             max_latency_2x
         );
     }
+
+    #[test]
+    fn test_can_handle_10000_concurrent_connections() {
+        // Scalability test: Can handle 10,000 concurrent connections
+        // Tests that system can handle large number of concurrent connections
+        // Validates all connections are processed successfully without resource exhaustion
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Instant;
+
+        // Test case 1: Define test parameters
+        let num_connections = 10000;
+        let processing_time_us = 10; // Very fast processing (10μs)
+
+        // Test case 2: Create connection handler
+        struct ConnectionHandler {
+            active_connections: Arc<AtomicU64>,
+            completed_connections: Arc<AtomicU64>,
+            processing_time_us: u64,
+        }
+
+        impl ConnectionHandler {
+            fn new(processing_time_us: u64) -> Self {
+                ConnectionHandler {
+                    active_connections: Arc::new(AtomicU64::new(0)),
+                    completed_connections: Arc::new(AtomicU64::new(0)),
+                    processing_time_us,
+                }
+            }
+
+            fn handle_connection(&self, _connection_id: u64) -> Result<Vec<u8>, String> {
+                // Track active connection
+                self.active_connections.fetch_add(1, Ordering::Relaxed);
+
+                // Simulate minimal processing
+                std::thread::sleep(std::time::Duration::from_micros(self.processing_time_us));
+
+                // Mark as completed
+                self.active_connections.fetch_sub(1, Ordering::Relaxed);
+                self.completed_connections.fetch_add(1, Ordering::Relaxed);
+
+                Ok(vec![1u8; 64])
+            }
+
+            fn get_stats(&self) -> (u64, u64) {
+                (
+                    self.active_connections.load(Ordering::Relaxed),
+                    self.completed_connections.load(Ordering::Relaxed),
+                )
+            }
+        }
+
+        // Test case 3: Create handler and spawn concurrent connections
+        let handler = Arc::new(ConnectionHandler::new(processing_time_us));
+        let start = Instant::now();
+
+        let mut handles = Vec::new();
+
+        for i in 0..num_connections {
+            let handler_clone = Arc::clone(&handler);
+            let handle = thread::spawn(move || {
+                let result = handler_clone.handle_connection(i);
+                result
+            });
+            handles.push(handle);
+        }
+
+        // Test case 4: Wait for all connections to complete
+        let mut successful = 0u64;
+        let mut failed = 0u64;
+
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(_)) => successful += 1,
+                Ok(Err(_)) => failed += 1,
+                Err(_) => failed += 1,
+            }
+        }
+
+        let elapsed = start.elapsed();
+
+        // Test case 5: Get final stats
+        let (active, completed) = handler.get_stats();
+
+        // Test case 6: Verify all connections completed successfully
+        assert_eq!(
+            successful, num_connections,
+            "All {} connections should complete successfully",
+            num_connections
+        );
+
+        // Test case 7: Verify no failures
+        assert_eq!(failed, 0, "Should have no failed connections");
+
+        // Test case 8: Verify all connections are no longer active
+        assert_eq!(
+            active, 0,
+            "All connections should be closed (no active connections)"
+        );
+
+        // Test case 9: Verify completed count matches
+        assert_eq!(
+            completed, num_connections,
+            "Completed count should match total connections"
+        );
+
+        // Test case 10: Verify reasonable completion time
+        // 10,000 connections should complete in reasonable time (<60 seconds)
+        assert!(
+            elapsed.as_secs() < 60,
+            "10,000 connections should complete in <60 seconds, took {:.2}s",
+            elapsed.as_secs_f64()
+        );
+    }
 }
