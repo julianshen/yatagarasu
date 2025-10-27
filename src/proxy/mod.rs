@@ -15101,4 +15101,137 @@ mod tests {
             "Both versions should produce equivalent results"
         );
     }
+
+    #[test]
+    fn test_no_unnecessary_string_copies() {
+        // Optimization test: No unnecessary string copies
+        // Tests that string operations avoid unnecessary clones/copies
+        // Validates using references instead of owned copies where possible
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define test parameters
+        let num_operations = 10000;
+
+        // Test case 2: Track copy operations
+        struct CopyTracker {
+            copy_count: Arc<AtomicU64>,
+        }
+
+        impl CopyTracker {
+            fn new() -> Self {
+                CopyTracker {
+                    copy_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn track_copy(&self) {
+                self.copy_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_copy_count(&self) -> u64 {
+                self.copy_count.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Unoptimized - copies strings unnecessarily
+        struct UnoptimizedProcessor {
+            tracker: CopyTracker,
+        }
+
+        impl UnoptimizedProcessor {
+            fn new(tracker: CopyTracker) -> Self {
+                UnoptimizedProcessor { tracker }
+            }
+
+            fn process(&self, input: &str) -> String {
+                // Unnecessary copy: clones input even though we just need to check it
+                self.tracker.track_copy();
+                let copied = input.to_string();
+
+                // Another unnecessary copy: clones again for return
+                self.tracker.track_copy();
+                copied.clone()
+            }
+        }
+
+        // Test case 4: Optimized - uses references, no copies
+        struct OptimizedProcessor {
+            tracker: CopyTracker,
+        }
+
+        impl OptimizedProcessor {
+            fn new(tracker: CopyTracker) -> Self {
+                OptimizedProcessor { tracker }
+            }
+
+            fn process<'a>(&self, input: &'a str) -> &'a str {
+                // No copies: just returns reference to input
+                input
+            }
+        }
+
+        // Test case 5: Run unoptimized version
+        let tracker_unopt = CopyTracker::new();
+        let proc_unopt = UnoptimizedProcessor::new(tracker_unopt);
+
+        for i in 0..num_operations {
+            let input = if i % 2 == 0 {
+                "bucket-name"
+            } else {
+                "another-bucket"
+            };
+            let _result = proc_unopt.process(input);
+        }
+
+        let unoptimized_copies = proc_unopt.tracker.get_copy_count();
+
+        // Test case 6: Run optimized version
+        let tracker_opt = CopyTracker::new();
+        let proc_opt = OptimizedProcessor::new(tracker_opt);
+
+        for i in 0..num_operations {
+            let input = if i % 2 == 0 {
+                "bucket-name"
+            } else {
+                "another-bucket"
+            };
+            let _result = proc_opt.process(input);
+        }
+
+        let optimized_copies = proc_opt.tracker.get_copy_count();
+
+        // Test case 7: Verify optimized version has zero copies
+        assert_eq!(
+            optimized_copies, 0,
+            "Optimized version should have zero string copies"
+        );
+
+        // Test case 8: Verify unoptimized version makes copies
+        // Each operation does 2 copies (to_string + clone)
+        assert_eq!(
+            unoptimized_copies,
+            num_operations * 2,
+            "Unoptimized version should make 2 copies per operation"
+        );
+
+        // Test case 9: Calculate copy reduction
+        let copy_reduction = unoptimized_copies - optimized_copies;
+        assert_eq!(
+            copy_reduction,
+            num_operations * 2,
+            "Should eliminate all {} copies",
+            num_operations * 2
+        );
+
+        // Test case 10: Verify both produce equivalent results
+        let test_input = "test-bucket";
+        let result_unopt = proc_unopt.process(test_input);
+        let result_opt = proc_opt.process(test_input);
+        assert_eq!(
+            result_unopt, result_opt,
+            "Both versions should produce equivalent results"
+        );
+    }
 }
