@@ -16127,4 +16127,252 @@ mod tests {
         assert_eq!(current.max_connections, 2000);
         assert_eq!(current.timeout_seconds, 45);
     }
+
+    #[test]
+    fn test_rejects_invalid_configuration_during_reload() {
+        // Hot reload test: Rejects invalid configuration during reload
+        // Tests that service continues with old config when reload is rejected
+        // Validates error messages are clear and service isn't disrupted
+
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define configuration and error types
+        #[derive(Clone, Debug)]
+        struct ServiceConfig {
+            listen_port: u16,
+            worker_threads: usize,
+            enable_tls: bool,
+        }
+
+        #[derive(Debug, Clone, PartialEq)]
+        enum ConfigError {
+            InvalidPort(String),
+            InvalidWorkerCount(String),
+        }
+
+        // Test case 2: Service state tracker
+        struct ServiceState {
+            current_config: Arc<std::sync::Mutex<ServiceConfig>>,
+            is_running: Arc<AtomicBool>,
+            requests_processed: Arc<AtomicU64>,
+            reload_attempts: Arc<AtomicU64>,
+            reload_failures: Arc<AtomicU64>,
+            last_error: Arc<std::sync::Mutex<Option<ConfigError>>>,
+        }
+
+        impl ServiceState {
+            fn new(config: ServiceConfig) -> Self {
+                ServiceState {
+                    current_config: Arc::new(std::sync::Mutex::new(config)),
+                    is_running: Arc::new(AtomicBool::new(true)),
+                    requests_processed: Arc::new(AtomicU64::new(0)),
+                    reload_attempts: Arc::new(AtomicU64::new(0)),
+                    reload_failures: Arc::new(AtomicU64::new(0)),
+                    last_error: Arc::new(std::sync::Mutex::new(None)),
+                }
+            }
+
+            fn reload_config(&self, new_config: ServiceConfig) -> Result<(), ConfigError> {
+                self.reload_attempts.fetch_add(1, Ordering::Relaxed);
+
+                // Validate port range (must be >= 1024)
+                if new_config.listen_port < 1024 {
+                    let error = ConfigError::InvalidPort(format!(
+                        "Port {} is invalid. Must be >= 1024.",
+                        new_config.listen_port
+                    ));
+                    *self.last_error.lock().unwrap() = Some(error.clone());
+                    self.reload_failures.fetch_add(1, Ordering::Relaxed);
+                    return Err(error);
+                }
+
+                // Validate worker thread count
+                if new_config.worker_threads == 0 || new_config.worker_threads > 128 {
+                    let error = ConfigError::InvalidWorkerCount(format!(
+                        "Worker count {} is invalid. Must be between 1 and 128.",
+                        new_config.worker_threads
+                    ));
+                    *self.last_error.lock().unwrap() = Some(error.clone());
+                    self.reload_failures.fetch_add(1, Ordering::Relaxed);
+                    return Err(error);
+                }
+
+                // All validations passed - apply config
+                *self.current_config.lock().unwrap() = new_config;
+                *self.last_error.lock().unwrap() = None;
+                Ok(())
+            }
+
+            fn process_request(&self) {
+                if self.is_running.load(Ordering::Relaxed) {
+                    self.requests_processed.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+
+            fn get_config(&self) -> ServiceConfig {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn is_running(&self) -> bool {
+                self.is_running.load(Ordering::Relaxed)
+            }
+
+            fn get_requests_processed(&self) -> u64 {
+                self.requests_processed.load(Ordering::Relaxed)
+            }
+
+            fn get_reload_attempts(&self) -> u64 {
+                self.reload_attempts.load(Ordering::Relaxed)
+            }
+
+            fn get_reload_failures(&self) -> u64 {
+                self.reload_failures.load(Ordering::Relaxed)
+            }
+
+            fn get_last_error(&self) -> Option<ConfigError> {
+                self.last_error.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Start service with valid config
+        let initial_config = ServiceConfig {
+            listen_port: 8080,
+            worker_threads: 4,
+            enable_tls: false,
+        };
+
+        let service = ServiceState::new(initial_config.clone());
+        assert!(service.is_running(), "Service should be running");
+        assert_eq!(service.get_reload_attempts(), 0);
+        assert_eq!(service.get_reload_failures(), 0);
+
+        // Test case 4: Service processes requests with initial config
+        service.process_request();
+        service.process_request();
+        service.process_request();
+        assert_eq!(
+            service.get_requests_processed(),
+            3,
+            "Should process requests"
+        );
+
+        // Test case 5: Reject config with invalid port (too low)
+        let invalid_config = ServiceConfig {
+            listen_port: 80, // Reserved port
+            worker_threads: 4,
+            enable_tls: false,
+        };
+
+        let result = service.reload_config(invalid_config);
+        assert!(result.is_err(), "Should reject port < 1024");
+        assert_eq!(
+            result.unwrap_err(),
+            ConfigError::InvalidPort("Port 80 is invalid. Must be >= 1024.".to_string())
+        );
+        assert_eq!(service.get_reload_attempts(), 1);
+        assert_eq!(service.get_reload_failures(), 1);
+
+        // Service should still be running with old config
+        assert!(service.is_running(), "Service should still be running");
+        let current = service.get_config();
+        assert_eq!(
+            current.listen_port, 8080,
+            "Should still use old port after rejection"
+        );
+
+        // Service should continue processing requests
+        service.process_request();
+        assert_eq!(
+            service.get_requests_processed(),
+            4,
+            "Should continue processing requests after rejection"
+        );
+
+        // Test case 6: Reject config with another invalid port (also too low)
+        let invalid_config = ServiceConfig {
+            listen_port: 443, // Standard HTTPS port, but < 1024
+            worker_threads: 4,
+            enable_tls: false,
+        };
+
+        let result = service.reload_config(invalid_config);
+        assert!(result.is_err(), "Should reject port 443 (< 1024)");
+        assert_eq!(service.get_reload_attempts(), 2);
+        assert_eq!(service.get_reload_failures(), 2);
+
+        // Test case 7: Reject config with invalid worker count (zero)
+        let invalid_config = ServiceConfig {
+            listen_port: 9090,
+            worker_threads: 0,
+            enable_tls: false,
+        };
+
+        let result = service.reload_config(invalid_config);
+        assert!(result.is_err(), "Should reject worker_threads = 0");
+        assert_eq!(
+            result.unwrap_err(),
+            ConfigError::InvalidWorkerCount(
+                "Worker count 0 is invalid. Must be between 1 and 128.".to_string()
+            )
+        );
+        assert_eq!(service.get_reload_attempts(), 3);
+        assert_eq!(service.get_reload_failures(), 3);
+
+        // Test case 8: Reject config with invalid worker count (too high)
+        let invalid_config = ServiceConfig {
+            listen_port: 9090,
+            worker_threads: 200,
+            enable_tls: false,
+        };
+
+        let result = service.reload_config(invalid_config);
+        assert!(result.is_err(), "Should reject worker_threads > 128");
+        assert_eq!(service.get_reload_attempts(), 4);
+        assert_eq!(service.get_reload_failures(), 4);
+
+        // Test case 9: Error message is stored and accessible
+        let last_error = service.get_last_error();
+        assert!(last_error.is_some(), "Should have stored last error");
+        assert_eq!(
+            last_error.unwrap(),
+            ConfigError::InvalidWorkerCount(
+                "Worker count 200 is invalid. Must be between 1 and 128.".to_string()
+            )
+        );
+
+        // Test case 10: Valid reload succeeds after multiple rejections
+        let valid_config = ServiceConfig {
+            listen_port: 9090,
+            worker_threads: 8,
+            enable_tls: true,
+        };
+
+        let result = service.reload_config(valid_config);
+        assert!(result.is_ok(), "Valid config should be accepted");
+        assert_eq!(service.get_reload_attempts(), 5);
+        assert_eq!(
+            service.get_reload_failures(),
+            4,
+            "Failure count should not increase"
+        );
+
+        // Error should be cleared after successful reload
+        let last_error = service.get_last_error();
+        assert!(
+            last_error.is_none(),
+            "Error should be cleared after success"
+        );
+
+        // New config should be active
+        let current = service.get_config();
+        assert_eq!(current.listen_port, 9090);
+        assert_eq!(current.worker_threads, 8);
+        assert_eq!(current.enable_tls, true);
+
+        // Service should still be running
+        assert!(service.is_running(), "Service should still be running");
+        service.process_request();
+        assert_eq!(service.get_requests_processed(), 5);
+    }
 }

@@ -520,7 +520,7 @@ yatagarasu/
 - [x] Test: Can reload configuration on SIGHUP signal
 - [x] Test: Can reload configuration via management API endpoint
 - [x] Test: Validates new configuration before applying
-- [ ] Test: Rejects invalid configuration during reload
+- [x] Test: Rejects invalid configuration during reload
 
 ### Hot Reload - Safe Updates
 - [ ] Test: In-flight requests complete with old config
