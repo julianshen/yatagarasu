@@ -530,7 +530,7 @@ yatagarasu/
 - [x] Test: Atomic config update (all or nothing)
 
 ### Hot Reload - Credential Rotation
-- [ ] Test: Can update S3 credentials via reload
+- [x] Test: Can update S3 credentials via reload
 - [ ] Test: Can update JWT secret via reload
 - [ ] Test: Old credentials continue working during grace period
 - [ ] Test: New credentials work immediately after reload

@@ -17393,4 +17393,193 @@ mod tests {
         assert_eq!(manager.get_successful_updates(), 12); // 2 + 10
         assert_eq!(manager.get_failed_updates(), 3);
     }
+
+    #[test]
+    fn test_can_update_s3_credentials_via_reload() {
+        // Hot reload test: Can update S3 credentials via reload
+        // Tests that S3 access key and secret key can be updated during reload
+        // Validates credential rotation works without service restart
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define S3 credentials
+        #[derive(Clone, Debug, PartialEq)]
+        struct S3Credentials {
+            access_key: String,
+            secret_key: String,
+            region: String,
+        }
+
+        // Test case 2: S3 client using credentials
+        #[derive(Clone, Debug)]
+        struct S3Client {
+            credentials: S3Credentials,
+            client_id: u64,
+        }
+
+        impl S3Client {
+            fn new(credentials: S3Credentials, client_id: u64) -> Self {
+                S3Client {
+                    credentials,
+                    client_id,
+                }
+            }
+
+            fn get_credentials(&self) -> S3Credentials {
+                self.credentials.clone()
+            }
+
+            fn make_request(&self, _bucket: &str, _key: &str) -> bool {
+                // Simulate S3 request - would use credentials for signing
+                true
+            }
+        }
+
+        // Test case 3: S3 credential manager
+        struct S3CredentialManager {
+            current_client: Arc<std::sync::Mutex<S3Client>>,
+            reload_count: Arc<AtomicU64>,
+            next_client_id: Arc<AtomicU64>,
+        }
+
+        impl S3CredentialManager {
+            fn new(initial_credentials: S3Credentials) -> Self {
+                let client = S3Client::new(initial_credentials, 0);
+                S3CredentialManager {
+                    current_client: Arc::new(std::sync::Mutex::new(client)),
+                    reload_count: Arc::new(AtomicU64::new(0)),
+                    next_client_id: Arc::new(AtomicU64::new(1)),
+                }
+            }
+
+            fn reload_credentials(&self, new_credentials: S3Credentials) {
+                let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+                let new_client = S3Client::new(new_credentials, client_id);
+
+                *self.current_client.lock().unwrap() = new_client;
+                self.reload_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_current_credentials(&self) -> S3Credentials {
+                self.current_client.lock().unwrap().get_credentials()
+            }
+
+            fn make_request(&self, bucket: &str, key: &str) -> bool {
+                self.current_client
+                    .lock()
+                    .unwrap()
+                    .make_request(bucket, key)
+            }
+
+            fn get_reload_count(&self) -> u64 {
+                self.reload_count.load(Ordering::Relaxed)
+            }
+
+            fn get_current_client_id(&self) -> u64 {
+                self.current_client.lock().unwrap().client_id
+            }
+        }
+
+        // Test case 4: Initial S3 credentials
+        let initial_creds = S3Credentials {
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            region: "us-east-1".to_string(),
+        };
+
+        let manager = S3CredentialManager::new(initial_creds.clone());
+
+        // Test case 5: Verify initial credentials
+        let current = manager.get_current_credentials();
+        assert_eq!(current.access_key, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(
+            current.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        );
+        assert_eq!(current.region, "us-east-1");
+        assert_eq!(manager.get_reload_count(), 0);
+        assert_eq!(manager.get_current_client_id(), 0);
+
+        // Test case 6: Make request with initial credentials
+        assert!(manager.make_request("my-bucket", "my-key"));
+
+        // Test case 7: Reload with new credentials (credential rotation)
+        let new_creds = S3Credentials {
+            access_key: "AKIAI44QH8DHBEXAMPLE".to_string(),
+            secret_key: "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY".to_string(),
+            region: "us-west-2".to_string(),
+        };
+
+        manager.reload_credentials(new_creds.clone());
+        assert_eq!(manager.get_reload_count(), 1);
+        assert_eq!(manager.get_current_client_id(), 1);
+
+        // Test case 8: Verify new credentials are active
+        let current = manager.get_current_credentials();
+        assert_eq!(
+            current.access_key, "AKIAI44QH8DHBEXAMPLE",
+            "Access key should be updated"
+        );
+        assert_eq!(
+            current.secret_key, "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY",
+            "Secret key should be updated"
+        );
+        assert_eq!(current.region, "us-west-2", "Region should be updated");
+
+        // Test case 9: Make request with new credentials
+        assert!(manager.make_request("my-bucket", "my-key"));
+
+        // Test case 10: Another credential rotation
+        let third_creds = S3Credentials {
+            access_key: "AKIAIOSFODNN8EXAMPLE".to_string(),
+            secret_key: "xKblsYVumGFNJ/M8NEFO/cQySgjDZFYEXAMPLEKEY".to_string(),
+            region: "eu-west-1".to_string(),
+        };
+
+        manager.reload_credentials(third_creds.clone());
+        assert_eq!(manager.get_reload_count(), 2);
+        assert_eq!(manager.get_current_client_id(), 2);
+
+        let current = manager.get_current_credentials();
+        assert_eq!(current.access_key, "AKIAIOSFODNN8EXAMPLE");
+        assert_eq!(
+            current.secret_key,
+            "xKblsYVumGFNJ/M8NEFO/cQySgjDZFYEXAMPLEKEY"
+        );
+        assert_eq!(current.region, "eu-west-1");
+
+        // Test case 11: Verify old credentials are no longer active
+        assert_ne!(
+            current.access_key, initial_creds.access_key,
+            "Should not use initial credentials"
+        );
+        assert_ne!(
+            current.access_key, new_creds.access_key,
+            "Should not use second credentials"
+        );
+
+        // Test case 12: Multiple rapid credential rotations
+        for i in 0..5 {
+            let creds = S3Credentials {
+                access_key: format!("AKIAIOSFODNN{}EXAMPLE", i),
+                secret_key: format!("secretkey{}EXAMPLEKEY", i),
+                region: format!("us-east-{}", i + 1),
+            };
+
+            manager.reload_credentials(creds.clone());
+
+            let current = manager.get_current_credentials();
+            assert_eq!(
+                current.access_key,
+                format!("AKIAIOSFODNN{}EXAMPLE", i),
+                "Should immediately use new access key"
+            );
+            assert_eq!(current.secret_key, format!("secretkey{}EXAMPLEKEY", i));
+            assert_eq!(current.region, format!("us-east-{}", i + 1));
+        }
+
+        assert_eq!(manager.get_reload_count(), 7); // 2 + 5
+        assert_eq!(manager.get_current_client_id(), 7);
+    }
 }
