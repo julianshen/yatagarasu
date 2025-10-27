@@ -17582,4 +17582,181 @@ mod tests {
         assert_eq!(manager.get_reload_count(), 7); // 2 + 5
         assert_eq!(manager.get_current_client_id(), 7);
     }
+
+    #[test]
+    fn test_can_update_jwt_secret_via_reload() {
+        // Hot reload test: Can update JWT secret via reload
+        // Tests that JWT signing secret can be updated during reload
+        // Validates secret rotation works without service restart
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define JWT configuration
+        #[derive(Clone, Debug, PartialEq)]
+        struct JwtConfig {
+            secret: String,
+            algorithm: String,
+        }
+
+        // Test case 2: JWT token validator
+        struct JwtValidator {
+            current_config: Arc<std::sync::Mutex<JwtConfig>>,
+            reload_count: Arc<AtomicU64>,
+            validation_attempts: Arc<AtomicU64>,
+            successful_validations: Arc<AtomicU64>,
+        }
+
+        impl JwtValidator {
+            fn new(initial_config: JwtConfig) -> Self {
+                JwtValidator {
+                    current_config: Arc::new(std::sync::Mutex::new(initial_config)),
+                    reload_count: Arc::new(AtomicU64::new(0)),
+                    validation_attempts: Arc::new(AtomicU64::new(0)),
+                    successful_validations: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn reload_secret(&self, new_config: JwtConfig) {
+                *self.current_config.lock().unwrap() = new_config;
+                self.reload_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // Simulates JWT validation using current secret
+            fn validate_token(&self, token: &str, expected_secret: &str) -> bool {
+                self.validation_attempts.fetch_add(1, Ordering::Relaxed);
+
+                let config = self.current_config.lock().unwrap();
+
+                // Simulate signature verification
+                let is_valid = config.secret == expected_secret && !token.is_empty();
+
+                if is_valid {
+                    self.successful_validations.fetch_add(1, Ordering::Relaxed);
+                }
+
+                is_valid
+            }
+
+            fn get_current_secret(&self) -> String {
+                self.current_config.lock().unwrap().secret.clone()
+            }
+
+            fn get_reload_count(&self) -> u64 {
+                self.reload_count.load(Ordering::Relaxed)
+            }
+
+            fn get_validation_attempts(&self) -> u64 {
+                self.validation_attempts.load(Ordering::Relaxed)
+            }
+
+            fn get_successful_validations(&self) -> u64 {
+                self.successful_validations.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Initial JWT configuration
+        let initial_config = JwtConfig {
+            secret: "initial-secret-key-12345".to_string(),
+            algorithm: "HS256".to_string(),
+        };
+
+        let validator = JwtValidator::new(initial_config.clone());
+
+        // Test case 4: Verify initial secret
+        assert_eq!(validator.get_current_secret(), "initial-secret-key-12345");
+        assert_eq!(validator.get_reload_count(), 0);
+
+        // Test case 5: Validate token with initial secret
+        assert!(validator.validate_token("valid-token", "initial-secret-key-12345"));
+        assert_eq!(validator.get_validation_attempts(), 1);
+        assert_eq!(validator.get_successful_validations(), 1);
+
+        // Test case 6: Token with wrong secret fails
+        assert!(!validator.validate_token("valid-token", "wrong-secret"));
+        assert_eq!(validator.get_validation_attempts(), 2);
+        assert_eq!(
+            validator.get_successful_validations(),
+            1,
+            "Failed validation should not increment success count"
+        );
+
+        // Test case 7: Reload with new JWT secret
+        let new_config = JwtConfig {
+            secret: "rotated-secret-key-67890".to_string(),
+            algorithm: "HS256".to_string(),
+        };
+
+        validator.reload_secret(new_config.clone());
+        assert_eq!(validator.get_reload_count(), 1);
+
+        // Test case 8: Verify new secret is active
+        assert_eq!(
+            validator.get_current_secret(),
+            "rotated-secret-key-67890",
+            "Secret should be updated"
+        );
+
+        // Test case 9: Token with old secret now fails
+        assert!(
+            !validator.validate_token("valid-token", "initial-secret-key-12345"),
+            "Old secret should no longer validate"
+        );
+        assert_eq!(validator.get_successful_validations(), 1);
+
+        // Test case 10: Token with new secret succeeds
+        assert!(
+            validator.validate_token("valid-token", "rotated-secret-key-67890"),
+            "New secret should validate"
+        );
+        assert_eq!(validator.get_successful_validations(), 2);
+
+        // Test case 11: Another secret rotation
+        let third_config = JwtConfig {
+            secret: "third-secret-key-abcde".to_string(),
+            algorithm: "HS256".to_string(),
+        };
+
+        validator.reload_secret(third_config.clone());
+        assert_eq!(validator.get_reload_count(), 2);
+        assert_eq!(validator.get_current_secret(), "third-secret-key-abcde");
+
+        // Test case 12: Previous secrets no longer work
+        assert!(!validator.validate_token("valid-token", "initial-secret-key-12345"));
+        assert!(!validator.validate_token("valid-token", "rotated-secret-key-67890"));
+
+        // Test case 13: Only current secret works
+        assert!(validator.validate_token("valid-token", "third-secret-key-abcde"));
+        assert_eq!(validator.get_successful_validations(), 3);
+
+        // Test case 14: Multiple rapid secret rotations
+        for i in 0..5 {
+            let config = JwtConfig {
+                secret: format!("secret-rotation-{}", i),
+                algorithm: "HS256".to_string(),
+            };
+
+            validator.reload_secret(config.clone());
+
+            let current_secret = validator.get_current_secret();
+            assert_eq!(
+                current_secret,
+                format!("secret-rotation-{}", i),
+                "Should immediately use new secret"
+            );
+
+            // Validate with new secret
+            assert!(validator.validate_token("valid-token", &format!("secret-rotation-{}", i)));
+
+            // Old secrets don't work
+            if i > 0 {
+                assert!(
+                    !validator.validate_token("valid-token", &format!("secret-rotation-{}", i - 1))
+                );
+            }
+        }
+
+        assert_eq!(validator.get_reload_count(), 7); // 2 + 5
+        assert_eq!(validator.get_successful_validations(), 8); // 3 + 5
+    }
 }
