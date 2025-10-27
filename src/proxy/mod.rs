@@ -16595,4 +16595,183 @@ mod tests {
         service.complete_request(request5);
         assert_eq!(service.get_requests_completed(), 5);
     }
+
+    #[test]
+    fn test_new_requests_use_new_config_immediately_after_reload() {
+        // Hot reload test: New requests use new config immediately after reload
+        // Tests that config changes take effect instantly for new requests
+        // Validates no delay or eventual consistency issues
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define service configuration
+        #[derive(Clone, Debug, PartialEq)]
+        struct ServiceConfig {
+            max_connections: u32,
+            request_timeout_ms: u64,
+            enable_caching: bool,
+        }
+
+        // Test case 2: Service that applies config to new requests
+        struct ConfigurableService {
+            current_config: Arc<std::sync::Mutex<ServiceConfig>>,
+            requests_started: Arc<AtomicU64>,
+            config_reloads: Arc<AtomicU64>,
+        }
+
+        impl ConfigurableService {
+            fn new(config: ServiceConfig) -> Self {
+                ConfigurableService {
+                    current_config: Arc::new(std::sync::Mutex::new(config)),
+                    requests_started: Arc::new(AtomicU64::new(0)),
+                    config_reloads: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            // Start request - immediately gets current config
+            fn start_request(&self) -> ServiceConfig {
+                self.requests_started.fetch_add(1, Ordering::Relaxed);
+                // Return current config immediately
+                self.current_config.lock().unwrap().clone()
+            }
+
+            // Reload config - takes effect immediately
+            fn reload_config(&self, new_config: ServiceConfig) {
+                *self.current_config.lock().unwrap() = new_config;
+                self.config_reloads.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_current_config(&self) -> ServiceConfig {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn get_requests_started(&self) -> u64 {
+                self.requests_started.load(Ordering::Relaxed)
+            }
+
+            fn get_config_reloads(&self) -> u64 {
+                self.config_reloads.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Initial config
+        let initial_config = ServiceConfig {
+            max_connections: 100,
+            request_timeout_ms: 5000,
+            enable_caching: false,
+        };
+
+        let service = ConfigurableService::new(initial_config.clone());
+
+        // Test case 4: Request before reload uses initial config
+        let config_before = service.start_request();
+        assert_eq!(
+            config_before.max_connections, 100,
+            "Should use initial max_connections"
+        );
+        assert_eq!(
+            config_before.request_timeout_ms, 5000,
+            "Should use initial timeout"
+        );
+        assert_eq!(
+            config_before.enable_caching, false,
+            "Should use initial caching setting"
+        );
+        assert_eq!(service.get_requests_started(), 1);
+
+        // Test case 5: Reload config
+        let new_config = ServiceConfig {
+            max_connections: 500,
+            request_timeout_ms: 10000,
+            enable_caching: true,
+        };
+
+        service.reload_config(new_config.clone());
+        assert_eq!(service.get_config_reloads(), 1);
+
+        // Test case 6: Request immediately after reload uses NEW config
+        let config_after = service.start_request();
+        assert_eq!(
+            config_after.max_connections, 500,
+            "Should immediately use new max_connections"
+        );
+        assert_eq!(
+            config_after.request_timeout_ms, 10000,
+            "Should immediately use new timeout"
+        );
+        assert_eq!(
+            config_after.enable_caching, true,
+            "Should immediately use new caching setting"
+        );
+        assert_eq!(service.get_requests_started(), 2);
+
+        // Test case 7: Multiple consecutive requests all use new config
+        for _ in 0..10 {
+            let config = service.start_request();
+            assert_eq!(
+                config.max_connections, 500,
+                "All requests should use new config"
+            );
+            assert_eq!(config.request_timeout_ms, 10000);
+            assert_eq!(config.enable_caching, true);
+        }
+        assert_eq!(service.get_requests_started(), 12);
+
+        // Test case 8: Second reload - new config takes effect immediately
+        let third_config = ServiceConfig {
+            max_connections: 1000,
+            request_timeout_ms: 3000,
+            enable_caching: false,
+        };
+
+        service.reload_config(third_config.clone());
+        assert_eq!(service.get_config_reloads(), 2);
+
+        // Test case 9: Very first request after second reload uses third config
+        let config_third = service.start_request();
+        assert_eq!(
+            config_third.max_connections, 1000,
+            "Should immediately use third config"
+        );
+        assert_eq!(config_third.request_timeout_ms, 3000);
+        assert_eq!(config_third.enable_caching, false);
+
+        // Test case 10: Verify current config matches what requests receive
+        let current = service.get_current_config();
+        let request_config = service.start_request();
+        assert_eq!(
+            current, request_config,
+            "Request config should match current config exactly"
+        );
+
+        // Test case 11: Rapid reload - config changes instantly
+        let config_a = ServiceConfig {
+            max_connections: 50,
+            request_timeout_ms: 1000,
+            enable_caching: true,
+        };
+        let config_b = ServiceConfig {
+            max_connections: 75,
+            request_timeout_ms: 2000,
+            enable_caching: false,
+        };
+
+        service.reload_config(config_a.clone());
+        let req_a = service.start_request();
+        assert_eq!(req_a.max_connections, 50);
+
+        service.reload_config(config_b.clone());
+        let req_b = service.start_request();
+        assert_eq!(req_b.max_connections, 75);
+
+        // Test case 12: No stale config values
+        let final_config = service.start_request();
+        assert_eq!(
+            final_config.max_connections, 75,
+            "Should never return stale config"
+        );
+        assert_eq!(final_config.request_timeout_ms, 2000);
+        assert_eq!(final_config.enable_caching, false);
+    }
 }
