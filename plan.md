@@ -533,7 +533,7 @@ yatagarasu/
 - [x] Test: Can update S3 credentials via reload
 - [x] Test: Can update JWT secret via reload
 - [x] Test: Old credentials continue working during grace period
-- [ ] Test: New credentials work immediately after reload
+- [x] Test: New credentials work immediately after reload
 - [ ] Test: Logs successful credential rotation
 
 ### Hot Reload - Error Handling

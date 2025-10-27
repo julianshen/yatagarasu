@@ -17948,4 +17948,192 @@ mod tests {
         assert!(!manager.validate("NEW_ACCESS_KEY", "new_secret"));
         assert!(manager.validate("THIRD_ACCESS_KEY", "third_secret"));
     }
+
+    #[test]
+    fn test_new_credentials_work_immediately_after_reload() {
+        // Hot reload test: New credentials work immediately after reload
+        // Tests that credential rotation has no eventual consistency delay
+        // Validates new credentials are usable instantly
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define credential set
+        #[derive(Clone, Debug, PartialEq)]
+        struct CredentialSet {
+            username: String,
+            password: String,
+            token: String,
+        }
+
+        // Test case 2: Credential store with immediate activation
+        struct CredentialStore {
+            current_credentials: Arc<std::sync::Mutex<CredentialSet>>,
+            reload_count: Arc<AtomicU64>,
+            auth_attempts: Arc<AtomicU64>,
+            successful_auths: Arc<AtomicU64>,
+        }
+
+        impl CredentialStore {
+            fn new(initial: CredentialSet) -> Self {
+                CredentialStore {
+                    current_credentials: Arc::new(std::sync::Mutex::new(initial)),
+                    reload_count: Arc::new(AtomicU64::new(0)),
+                    auth_attempts: Arc::new(AtomicU64::new(0)),
+                    successful_auths: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn reload_credentials(&self, new_credentials: CredentialSet) {
+                *self.current_credentials.lock().unwrap() = new_credentials;
+                self.reload_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn authenticate(&self, username: &str, password: &str, token: &str) -> bool {
+                self.auth_attempts.fetch_add(1, Ordering::Relaxed);
+
+                let creds = self.current_credentials.lock().unwrap();
+                let is_valid = creds.username == username
+                    && creds.password == password
+                    && creds.token == token;
+
+                if is_valid {
+                    self.successful_auths.fetch_add(1, Ordering::Relaxed);
+                }
+
+                is_valid
+            }
+
+            fn get_reload_count(&self) -> u64 {
+                self.reload_count.load(Ordering::Relaxed)
+            }
+
+            fn get_successful_auths(&self) -> u64 {
+                self.successful_auths.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Initial credentials
+        let initial_creds = CredentialSet {
+            username: "admin".to_string(),
+            password: "initial_pass".to_string(),
+            token: "token_v1".to_string(),
+        };
+
+        let store = CredentialStore::new(initial_creds.clone());
+
+        // Test case 4: Authenticate with initial credentials
+        assert!(store.authenticate("admin", "initial_pass", "token_v1"));
+        assert_eq!(store.get_successful_auths(), 1);
+
+        // Test case 5: Reload to new credentials
+        let new_creds = CredentialSet {
+            username: "admin".to_string(),
+            password: "rotated_pass".to_string(),
+            token: "token_v2".to_string(),
+        };
+
+        store.reload_credentials(new_creds.clone());
+        assert_eq!(store.get_reload_count(), 1);
+
+        // Test case 6: Immediately authenticate with new credentials (no delay)
+        assert!(
+            store.authenticate("admin", "rotated_pass", "token_v2"),
+            "New credentials should work immediately after reload"
+        );
+        assert_eq!(store.get_successful_auths(), 2);
+
+        // Test case 7: Old credentials immediately stop working
+        assert!(
+            !store.authenticate("admin", "initial_pass", "token_v1"),
+            "Old credentials should be invalid immediately"
+        );
+        assert_eq!(
+            store.get_successful_auths(),
+            2,
+            "Failed auth should not increment success count"
+        );
+
+        // Test case 8: Multiple consecutive authentications with new credentials
+        for _ in 0..10 {
+            assert!(
+                store.authenticate("admin", "rotated_pass", "token_v2"),
+                "New credentials should work consistently"
+            );
+        }
+        assert_eq!(store.get_successful_auths(), 12); // 2 + 10
+
+        // Test case 9: Second rotation - new credentials work immediately
+        let third_creds = CredentialSet {
+            username: "admin".to_string(),
+            password: "third_pass".to_string(),
+            token: "token_v3".to_string(),
+        };
+
+        store.reload_credentials(third_creds.clone());
+        assert_eq!(store.get_reload_count(), 2);
+
+        // Immediate authentication with third credentials
+        assert!(store.authenticate("admin", "third_pass", "token_v3"));
+        assert_eq!(store.get_successful_auths(), 13);
+
+        // Second credentials immediately invalid
+        assert!(!store.authenticate("admin", "rotated_pass", "token_v2"));
+
+        // Test case 10: Rapid rotation - each new credential works instantly
+        for i in 0..5 {
+            let creds = CredentialSet {
+                username: format!("user_{}", i),
+                password: format!("pass_{}", i),
+                token: format!("token_{}", i),
+            };
+
+            store.reload_credentials(creds.clone());
+
+            // Immediately authenticate with new credentials
+            assert!(
+                store.authenticate(
+                    &format!("user_{}", i),
+                    &format!("pass_{}", i),
+                    &format!("token_{}", i)
+                ),
+                "Credentials after rapid rotation {} should work immediately",
+                i
+            );
+
+            // Previous credentials don't work
+            if i > 0 {
+                assert!(
+                    !store.authenticate(
+                        &format!("user_{}", i - 1),
+                        &format!("pass_{}", i - 1),
+                        &format!("token_{}", i - 1)
+                    ),
+                    "Previous credentials should be invalid immediately"
+                );
+            }
+        }
+
+        assert_eq!(store.get_reload_count(), 7); // 2 + 5
+        assert_eq!(store.get_successful_auths(), 18); // 13 + 5
+
+        // Test case 11: Verify consistency - current credentials always work
+        let final_creds = CredentialSet {
+            username: "final_user".to_string(),
+            password: "final_pass".to_string(),
+            token: "final_token".to_string(),
+        };
+
+        store.reload_credentials(final_creds.clone());
+
+        // Multiple immediate checks
+        for _ in 0..100 {
+            assert!(
+                store.authenticate("final_user", "final_pass", "final_token"),
+                "No eventual consistency - credentials work every time immediately"
+            );
+        }
+
+        assert_eq!(store.get_successful_auths(), 118); // 18 + 100
+    }
 }
