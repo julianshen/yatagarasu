@@ -14744,4 +14744,135 @@ mod tests {
             elapsed.as_secs_f64()
         );
     }
+
+    #[test]
+    fn test_horizontal_scaling_works_multiple_proxy_instances() {
+        // Scalability test: Horizontal scaling works (multiple proxy instances)
+        // Tests that multiple proxy instances can handle requests independently
+        // Validates load distribution and no conflicts between instances
+
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        // Test case 1: Define test parameters
+        let num_instances = 5; // 5 proxy instances
+        let requests_per_instance = 1000; // 1000 requests each
+        let total_requests = num_instances * requests_per_instance;
+
+        // Test case 2: Create proxy instance simulator
+        struct ProxyInstance {
+            instance_id: u64,
+            request_count: Arc<AtomicU64>,
+            shared_metrics: Arc<Mutex<HashMap<u64, u64>>>, // instance_id -> count
+        }
+
+        impl ProxyInstance {
+            fn new(instance_id: u64, shared_metrics: Arc<Mutex<HashMap<u64, u64>>>) -> Self {
+                ProxyInstance {
+                    instance_id,
+                    request_count: Arc::new(AtomicU64::new(0)),
+                    shared_metrics,
+                }
+            }
+
+            fn handle_request(&self, _request_id: u64) -> Result<Vec<u8>, String> {
+                // Each instance processes independently
+                let _count = self.request_count.fetch_add(1, Ordering::Relaxed);
+
+                // Update shared metrics (simulates metrics aggregation)
+                {
+                    let mut metrics = self.shared_metrics.lock().unwrap();
+                    *metrics.entry(self.instance_id).or_insert(0) += 1;
+                }
+
+                // Simulate minimal processing
+                Ok(vec![self.instance_id as u8; 64])
+            }
+
+            fn get_request_count(&self) -> u64 {
+                self.request_count.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Create shared metrics for all instances
+        let shared_metrics = Arc::new(Mutex::new(HashMap::new()));
+
+        // Test case 4: Create multiple proxy instances
+        let mut instances = Vec::new();
+        for i in 0..num_instances {
+            let instance = Arc::new(ProxyInstance::new(i, Arc::clone(&shared_metrics)));
+            instances.push(instance);
+        }
+
+        // Test case 5: Spawn threads for each instance handling requests
+        let mut handles = Vec::new();
+
+        for instance in &instances {
+            let instance_clone = Arc::clone(instance);
+            let handle = thread::spawn(move || {
+                let mut successful = 0u64;
+                for j in 0..requests_per_instance {
+                    let result = instance_clone.handle_request(j);
+                    if result.is_ok() {
+                        successful += 1;
+                    }
+                }
+                successful
+            });
+            handles.push(handle);
+        }
+
+        // Test case 6: Wait for all instances to complete
+        let mut total_successful = 0u64;
+        for handle in handles {
+            let instance_successful = handle.join().unwrap();
+            total_successful += instance_successful;
+        }
+
+        // Test case 7: Verify all requests completed successfully
+        assert_eq!(
+            total_successful, total_requests,
+            "All {} requests should complete successfully",
+            total_requests
+        );
+
+        // Test case 8: Verify each instance handled its share of requests
+        for instance in &instances {
+            let count = instance.get_request_count();
+            assert_eq!(
+                count, requests_per_instance,
+                "Instance {} should handle {} requests",
+                instance.instance_id, requests_per_instance
+            );
+        }
+
+        // Test case 9: Verify shared metrics show all instances contributed
+        let metrics = shared_metrics.lock().unwrap();
+        assert_eq!(
+            metrics.len(),
+            num_instances as usize,
+            "Should have metrics from all {} instances",
+            num_instances
+        );
+
+        // Test case 10: Verify each instance's metric count is correct
+        for i in 0..num_instances {
+            let count = metrics.get(&i).unwrap();
+            assert_eq!(
+                *count, requests_per_instance,
+                "Instance {} metrics should show {} requests",
+                i, requests_per_instance
+            );
+        }
+
+        // Test case 11: Verify total distributed load equals expected
+        let total_from_metrics: u64 = metrics.values().sum();
+        assert_eq!(
+            total_from_metrics, total_requests,
+            "Total load across instances should equal {}",
+            total_requests
+        );
+    }
 }

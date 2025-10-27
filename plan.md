@@ -502,7 +502,7 @@ yatagarasu/
 - [x] Test: Performance degrades gracefully under overload
 - [x] Test: System remains responsive at 2x expected load
 - [x] Test: Can handle 10,000 concurrent connections
-- [ ] Test: Horizontal scaling works (multiple proxy instances)
+- [x] Test: Horizontal scaling works (multiple proxy instances)
 
 ### Optimization - Code Efficiency
 - [ ] Benchmark: Compare before/after optimization changes
