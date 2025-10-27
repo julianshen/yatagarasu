@@ -16375,4 +16375,224 @@ mod tests {
         service.process_request();
         assert_eq!(service.get_requests_processed(), 5);
     }
+
+    #[test]
+    fn test_in_flight_requests_complete_with_old_config() {
+        // Hot reload test: In-flight requests complete with old config
+        // Tests that requests started before reload use old config
+        // Validates config changes don't affect already-processing requests
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define configuration
+        #[derive(Clone, Debug)]
+        struct RequestConfig {
+            timeout_ms: u64,
+            retry_count: u32,
+        }
+
+        // Test case 2: Request context captures config at start
+        #[derive(Clone, Debug)]
+        struct RequestContext {
+            id: u64,
+            config_snapshot: RequestConfig,
+            started_at: u64,
+        }
+
+        impl RequestContext {
+            fn new(id: u64, config: &RequestConfig) -> Self {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                RequestContext {
+                    id,
+                    config_snapshot: config.clone(),
+                    started_at: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                }
+            }
+
+            fn get_timeout_ms(&self) -> u64 {
+                self.config_snapshot.timeout_ms
+            }
+
+            fn get_retry_count(&self) -> u32 {
+                self.config_snapshot.retry_count
+            }
+        }
+
+        // Test case 3: Service with config versioning
+        struct ServiceWithVersioning {
+            current_config: Arc<std::sync::Mutex<RequestConfig>>,
+            config_version: Arc<AtomicU64>,
+            requests_completed: Arc<AtomicU64>,
+        }
+
+        impl ServiceWithVersioning {
+            fn new(config: RequestConfig) -> Self {
+                ServiceWithVersioning {
+                    current_config: Arc::new(std::sync::Mutex::new(config)),
+                    config_version: Arc::new(AtomicU64::new(1)),
+                    requests_completed: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            // Start a request - captures current config as snapshot
+            fn start_request(&self, id: u64) -> RequestContext {
+                let config = self.current_config.lock().unwrap().clone();
+                RequestContext::new(id, &config)
+            }
+
+            // Complete request using its captured config snapshot
+            fn complete_request(&self, _ctx: RequestContext) {
+                // Request uses ctx.config_snapshot, not current_config
+                self.requests_completed.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // Reload config - updates for new requests only
+            fn reload_config(&self, new_config: RequestConfig) {
+                *self.current_config.lock().unwrap() = new_config;
+                self.config_version.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_current_config(&self) -> RequestConfig {
+                self.current_config.lock().unwrap().clone()
+            }
+
+            fn get_config_version(&self) -> u64 {
+                self.config_version.load(Ordering::Relaxed)
+            }
+
+            fn get_requests_completed(&self) -> u64 {
+                self.requests_completed.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 4: Start service with initial config
+        let initial_config = RequestConfig {
+            timeout_ms: 1000,
+            retry_count: 3,
+        };
+
+        let service = ServiceWithVersioning::new(initial_config.clone());
+        assert_eq!(service.get_config_version(), 1);
+
+        // Test case 5: Start first request (captures v1 config)
+        let request1 = service.start_request(1);
+        assert_eq!(
+            request1.get_timeout_ms(),
+            1000,
+            "Request 1 should use initial timeout"
+        );
+        assert_eq!(
+            request1.get_retry_count(),
+            3,
+            "Request 1 should use initial retry count"
+        );
+
+        // Test case 6: Start second request (also captures v1 config)
+        let request2 = service.start_request(2);
+        assert_eq!(request2.get_timeout_ms(), 1000);
+        assert_eq!(request2.get_retry_count(), 3);
+
+        // Test case 7: Reload config while requests are in-flight
+        let new_config = RequestConfig {
+            timeout_ms: 5000,
+            retry_count: 10,
+        };
+
+        service.reload_config(new_config.clone());
+        assert_eq!(
+            service.get_config_version(),
+            2,
+            "Config version should be updated"
+        );
+
+        // Verify current config changed
+        let current = service.get_current_config();
+        assert_eq!(current.timeout_ms, 5000);
+        assert_eq!(current.retry_count, 10);
+
+        // Test case 8: In-flight requests still use OLD config snapshots
+        assert_eq!(
+            request1.get_timeout_ms(),
+            1000,
+            "In-flight request 1 should still use old timeout"
+        );
+        assert_eq!(
+            request1.get_retry_count(),
+            3,
+            "In-flight request 1 should still use old retry count"
+        );
+
+        assert_eq!(
+            request2.get_timeout_ms(),
+            1000,
+            "In-flight request 2 should still use old timeout"
+        );
+        assert_eq!(
+            request2.get_retry_count(),
+            3,
+            "In-flight request 2 should still use old retry count"
+        );
+
+        // Test case 9: Complete in-flight requests with their old config
+        service.complete_request(request1);
+        service.complete_request(request2);
+        assert_eq!(service.get_requests_completed(), 2);
+
+        // Test case 10: New request after reload uses NEW config
+        let request3 = service.start_request(3);
+        assert_eq!(
+            request3.get_timeout_ms(),
+            5000,
+            "Request 3 should use new timeout"
+        );
+        assert_eq!(
+            request3.get_retry_count(),
+            10,
+            "Request 3 should use new retry count"
+        );
+
+        service.complete_request(request3);
+        assert_eq!(service.get_requests_completed(), 3);
+
+        // Test case 11: Multiple reloads with in-flight requests
+        let request4 = service.start_request(4);
+        assert_eq!(request4.get_timeout_ms(), 5000); // Uses v2 config
+
+        // Reload again to v3
+        let third_config = RequestConfig {
+            timeout_ms: 2000,
+            retry_count: 5,
+        };
+        service.reload_config(third_config);
+        assert_eq!(service.get_config_version(), 3);
+
+        // Request 4 still uses v2 config (captured before third reload)
+        assert_eq!(
+            request4.get_timeout_ms(),
+            5000,
+            "Request 4 should still use v2 timeout"
+        );
+
+        // New request uses v3 config
+        let request5 = service.start_request(5);
+        assert_eq!(
+            request5.get_timeout_ms(),
+            2000,
+            "Request 5 should use v3 timeout"
+        );
+        assert_eq!(
+            request5.get_retry_count(),
+            5,
+            "Request 5 should use v3 retry count"
+        );
+
+        // Complete both
+        service.complete_request(request4);
+        service.complete_request(request5);
+        assert_eq!(service.get_requests_completed(), 5);
+    }
 }

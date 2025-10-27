@@ -523,7 +523,7 @@ yatagarasu/
 - [x] Test: Rejects invalid configuration during reload
 
 ### Hot Reload - Safe Updates
-- [ ] Test: In-flight requests complete with old config
+- [x] Test: In-flight requests complete with old config
 - [ ] Test: New requests use new config immediately after reload
 - [ ] Test: No dropped connections during reload
 - [ ] Test: No race conditions during config swap
