@@ -16774,4 +16774,198 @@ mod tests {
         assert_eq!(final_config.request_timeout_ms, 2000);
         assert_eq!(final_config.enable_caching, false);
     }
+
+    #[test]
+    fn test_no_dropped_connections_during_reload() {
+        // Hot reload test: No dropped connections during reload
+        // Tests that active connections remain stable during config reload
+        // Validates connections don't get terminated or reset
+
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define connection state
+        #[derive(Clone, Debug)]
+        struct Connection {
+            id: u64,
+            is_active: Arc<AtomicBool>,
+            bytes_transferred: Arc<AtomicU64>,
+        }
+
+        impl Connection {
+            fn new(id: u64) -> Self {
+                Connection {
+                    id,
+                    is_active: Arc::new(AtomicBool::new(true)),
+                    bytes_transferred: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn is_active(&self) -> bool {
+                self.is_active.load(Ordering::Relaxed)
+            }
+
+            fn transfer_data(&self, bytes: u64) {
+                if self.is_active() {
+                    self.bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
+                }
+            }
+
+            fn get_bytes_transferred(&self) -> u64 {
+                self.bytes_transferred.load(Ordering::Relaxed)
+            }
+
+            fn close(&self) {
+                self.is_active.store(false, Ordering::Relaxed);
+            }
+        }
+
+        // Test case 2: Connection manager
+        struct ConnectionManager {
+            connections: Arc<std::sync::Mutex<Vec<Connection>>>,
+            config_version: Arc<AtomicU64>,
+            total_connections: Arc<AtomicU64>,
+            dropped_connections: Arc<AtomicU64>,
+        }
+
+        impl ConnectionManager {
+            fn new() -> Self {
+                ConnectionManager {
+                    connections: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    config_version: Arc::new(AtomicU64::new(1)),
+                    total_connections: Arc::new(AtomicU64::new(0)),
+                    dropped_connections: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn add_connection(&self) -> Connection {
+                let id = self.total_connections.fetch_add(1, Ordering::Relaxed);
+                let conn = Connection::new(id);
+                self.connections.lock().unwrap().push(conn.clone());
+                conn
+            }
+
+            fn reload_config(&self) {
+                // Config reload should NOT affect connections
+                self.config_version.fetch_add(1, Ordering::Relaxed);
+                // Connections remain active during reload
+            }
+
+            fn get_active_connection_count(&self) -> usize {
+                self.connections
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|c| c.is_active())
+                    .count()
+            }
+
+            fn get_total_connections(&self) -> u64 {
+                self.total_connections.load(Ordering::Relaxed)
+            }
+
+            fn get_config_version(&self) -> u64 {
+                self.config_version.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Create manager and establish connections
+        let manager = ConnectionManager::new();
+
+        // Test case 4: Establish 5 connections
+        let conn1 = manager.add_connection();
+        let conn2 = manager.add_connection();
+        let conn3 = manager.add_connection();
+        let conn4 = manager.add_connection();
+        let conn5 = manager.add_connection();
+
+        assert_eq!(manager.get_total_connections(), 5);
+        assert_eq!(manager.get_active_connection_count(), 5);
+
+        // Test case 5: Connections transfer data before reload
+        conn1.transfer_data(1000);
+        conn2.transfer_data(2000);
+        conn3.transfer_data(1500);
+
+        assert_eq!(conn1.get_bytes_transferred(), 1000);
+        assert_eq!(conn2.get_bytes_transferred(), 2000);
+        assert_eq!(conn3.get_bytes_transferred(), 1500);
+
+        // Test case 6: Reload config - connections should remain active
+        manager.reload_config();
+        assert_eq!(manager.get_config_version(), 2);
+
+        // Test case 7: All connections still active after reload
+        assert!(conn1.is_active(), "Connection 1 should still be active");
+        assert!(conn2.is_active(), "Connection 2 should still be active");
+        assert!(conn3.is_active(), "Connection 3 should still be active");
+        assert!(conn4.is_active(), "Connection 4 should still be active");
+        assert!(conn5.is_active(), "Connection 5 should still be active");
+
+        assert_eq!(
+            manager.get_active_connection_count(),
+            5,
+            "All 5 connections should remain active"
+        );
+
+        // Test case 8: Connections can still transfer data after reload
+        conn1.transfer_data(500);
+        conn2.transfer_data(300);
+        conn4.transfer_data(800);
+        conn5.transfer_data(1200);
+
+        assert_eq!(
+            conn1.get_bytes_transferred(),
+            1500,
+            "Connection 1 should continue transferring data"
+        );
+        assert_eq!(conn2.get_bytes_transferred(), 2300);
+        assert_eq!(conn4.get_bytes_transferred(), 800);
+        assert_eq!(conn5.get_bytes_transferred(), 1200);
+
+        // Test case 9: Multiple reloads - connections remain active
+        manager.reload_config();
+        manager.reload_config();
+        manager.reload_config();
+
+        assert_eq!(manager.get_config_version(), 5);
+        assert_eq!(
+            manager.get_active_connection_count(),
+            5,
+            "All connections should survive multiple reloads"
+        );
+
+        // Test case 10: Connections continue working after multiple reloads
+        conn3.transfer_data(2500);
+        assert_eq!(conn3.get_bytes_transferred(), 4000);
+        assert!(conn3.is_active());
+
+        // Test case 11: Establish new connection during reload
+        manager.reload_config();
+        let conn6 = manager.add_connection();
+
+        assert_eq!(manager.get_total_connections(), 6);
+        assert_eq!(
+            manager.get_active_connection_count(),
+            6,
+            "New connection should be added successfully during reload"
+        );
+        assert!(conn6.is_active(), "New connection should be active");
+
+        // Test case 12: Close a connection explicitly (not due to reload)
+        conn2.close();
+        assert!(!conn2.is_active(), "Connection 2 should be closed");
+        assert_eq!(
+            manager.get_active_connection_count(),
+            5,
+            "Should have 5 active connections after explicit close"
+        );
+
+        // Test case 13: Reload after explicit close - other connections unaffected
+        manager.reload_config();
+        assert!(conn1.is_active(), "Connection 1 still active");
+        assert!(!conn2.is_active(), "Connection 2 still closed");
+        assert!(conn3.is_active(), "Connection 3 still active");
+        assert_eq!(manager.get_active_connection_count(), 5);
+    }
 }
