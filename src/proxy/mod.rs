@@ -17759,4 +17759,193 @@ mod tests {
         assert_eq!(validator.get_reload_count(), 7); // 2 + 5
         assert_eq!(validator.get_successful_validations(), 8); // 3 + 5
     }
+
+    #[test]
+    fn test_old_credentials_continue_working_during_grace_period() {
+        // Hot reload test: Old credentials continue working during grace period
+        // Tests that rotated credentials have grace period where both old and new work
+        // Validates zero-downtime credential rotation
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime};
+
+        // Test case 1: Define credentials with expiration
+        #[derive(Clone, Debug)]
+        struct Credentials {
+            access_key: String,
+            secret_key: String,
+            expires_at: Option<u64>, // None = active forever, Some = expires at timestamp
+        }
+
+        impl Credentials {
+            fn is_expired(&self, current_time: u64) -> bool {
+                if let Some(expires_at) = self.expires_at {
+                    current_time > expires_at
+                } else {
+                    false
+                }
+            }
+        }
+
+        // Test case 2: Credential manager with grace period
+        struct GracefulCredentialManager {
+            current_credentials: Arc<std::sync::Mutex<Credentials>>,
+            old_credentials: Arc<std::sync::Mutex<Option<Credentials>>>,
+            rotation_count: Arc<AtomicU64>,
+            validation_attempts: Arc<AtomicU64>,
+        }
+
+        impl GracefulCredentialManager {
+            fn new(initial: Credentials) -> Self {
+                GracefulCredentialManager {
+                    current_credentials: Arc::new(std::sync::Mutex::new(initial)),
+                    old_credentials: Arc::new(std::sync::Mutex::new(None)),
+                    rotation_count: Arc::new(AtomicU64::new(0)),
+                    validation_attempts: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            // Rotate credentials with grace period (in milliseconds)
+            fn rotate_credentials(&self, new_creds: Credentials, grace_period_ms: u64) {
+                let current_time = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+
+                let expires_at = current_time + grace_period_ms;
+
+                // Move current to old with expiration
+                let mut current = self.current_credentials.lock().unwrap();
+                let old_creds = current.clone();
+                let mut old_creds_with_expiry = old_creds;
+                old_creds_with_expiry.expires_at = Some(expires_at);
+
+                *self.old_credentials.lock().unwrap() = Some(old_creds_with_expiry);
+                *current = new_creds;
+
+                self.rotation_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // Validate credentials - accepts both current and non-expired old
+            fn validate(&self, access_key: &str, secret_key: &str) -> bool {
+                self.validation_attempts.fetch_add(1, Ordering::Relaxed);
+
+                let current_time = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+
+                // Check current credentials
+                let current = self.current_credentials.lock().unwrap();
+                if current.access_key == access_key && current.secret_key == secret_key {
+                    return true;
+                }
+
+                // Check old credentials if not expired
+                let old = self.old_credentials.lock().unwrap();
+                if let Some(old_creds) = &*old {
+                    if !old_creds.is_expired(current_time)
+                        && old_creds.access_key == access_key
+                        && old_creds.secret_key == secret_key
+                    {
+                        return true;
+                    }
+                }
+
+                false
+            }
+
+            fn get_rotation_count(&self) -> u64 {
+                self.rotation_count.load(Ordering::Relaxed)
+            }
+
+            fn get_validation_attempts(&self) -> u64 {
+                self.validation_attempts.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 3: Initial credentials
+        let initial_creds = Credentials {
+            access_key: "INITIAL_ACCESS_KEY".to_string(),
+            secret_key: "initial_secret".to_string(),
+            expires_at: None,
+        };
+
+        let manager = GracefulCredentialManager::new(initial_creds.clone());
+
+        // Test case 4: Initial credentials validate
+        assert!(manager.validate("INITIAL_ACCESS_KEY", "initial_secret"));
+        assert_eq!(manager.get_validation_attempts(), 1);
+
+        // Test case 5: Wrong credentials fail
+        assert!(!manager.validate("WRONG_KEY", "wrong_secret"));
+        assert_eq!(manager.get_validation_attempts(), 2);
+
+        // Test case 6: Rotate to new credentials with 1000ms grace period
+        let new_creds = Credentials {
+            access_key: "NEW_ACCESS_KEY".to_string(),
+            secret_key: "new_secret".to_string(),
+            expires_at: None,
+        };
+
+        manager.rotate_credentials(new_creds.clone(), 1000);
+        assert_eq!(manager.get_rotation_count(), 1);
+
+        // Test case 7: Both old and new credentials work during grace period
+        assert!(
+            manager.validate("INITIAL_ACCESS_KEY", "initial_secret"),
+            "Old credentials should work during grace period"
+        );
+        assert!(
+            manager.validate("NEW_ACCESS_KEY", "new_secret"),
+            "New credentials should work immediately"
+        );
+
+        // Test case 8: Multiple validations with both credential sets
+        for _ in 0..5 {
+            assert!(manager.validate("INITIAL_ACCESS_KEY", "initial_secret"));
+            assert!(manager.validate("NEW_ACCESS_KEY", "new_secret"));
+        }
+
+        // Test case 9: Wait for grace period to expire
+        std::thread::sleep(Duration::from_millis(1100));
+
+        // Test case 10: After grace period, old credentials no longer work
+        assert!(
+            !manager.validate("INITIAL_ACCESS_KEY", "initial_secret"),
+            "Old credentials should be expired after grace period"
+        );
+
+        // Test case 11: New credentials still work after grace period
+        assert!(
+            manager.validate("NEW_ACCESS_KEY", "new_secret"),
+            "New credentials should continue working"
+        );
+
+        // Test case 12: Second rotation with shorter grace period
+        let third_creds = Credentials {
+            access_key: "THIRD_ACCESS_KEY".to_string(),
+            secret_key: "third_secret".to_string(),
+            expires_at: None,
+        };
+
+        manager.rotate_credentials(third_creds.clone(), 500);
+        assert_eq!(manager.get_rotation_count(), 2);
+
+        // Test case 13: During second grace period, second and third work
+        assert!(manager.validate("NEW_ACCESS_KEY", "new_secret"));
+        assert!(manager.validate("THIRD_ACCESS_KEY", "third_secret"));
+
+        // Test case 14: First credentials don't work (already expired)
+        assert!(!manager.validate("INITIAL_ACCESS_KEY", "initial_secret"));
+
+        // Test case 15: Wait for second grace period to expire
+        std::thread::sleep(Duration::from_millis(600));
+
+        // Test case 16: Only third credentials work now
+        assert!(!manager.validate("INITIAL_ACCESS_KEY", "initial_secret"));
+        assert!(!manager.validate("NEW_ACCESS_KEY", "new_secret"));
+        assert!(manager.validate("THIRD_ACCESS_KEY", "third_secret"));
+    }
 }
