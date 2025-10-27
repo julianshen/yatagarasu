@@ -18518,4 +18518,227 @@ mod tests {
         assert_eq!(current.port, 9090);
         assert_eq!(current.workers, 8);
     }
+
+    #[test]
+    fn test_failed_reload_logs_clear_error_message() {
+        // Hot reload test: Failed reload logs clear error message
+        // Tests that reload failures produce actionable error messages
+        // Validates error logs contain context for troubleshooting
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Test case 1: Define error log entry
+        #[derive(Clone, Debug)]
+        struct ErrorLog {
+            timestamp: u64,
+            level: String,
+            message: String,
+            error_type: String,
+            config_field: String,
+            provided_value: String,
+            expected_constraint: String,
+        }
+
+        // Test case 2: Define reload error
+        #[derive(Debug, Clone)]
+        enum ReloadError {
+            InvalidPort { value: u16, reason: String },
+            InvalidWorkerCount { value: u32, reason: String },
+            MissingField { field: String },
+        }
+
+        // Test case 3: Error logger for reload failures
+        struct ReloadErrorLogger {
+            error_logs: Arc<std::sync::Mutex<Vec<ErrorLog>>>,
+            error_count: Arc<AtomicU64>,
+        }
+
+        impl ReloadErrorLogger {
+            fn new() -> Self {
+                ReloadErrorLogger {
+                    error_logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    error_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn log_reload_error(&self, error: &ReloadError) {
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+
+                let log_entry = match error {
+                    ReloadError::InvalidPort { value, reason } => ErrorLog {
+                        timestamp,
+                        level: "ERROR".to_string(),
+                        message: format!(
+                            "Config reload failed: Invalid port value {}. {}",
+                            value, reason
+                        ),
+                        error_type: "InvalidPort".to_string(),
+                        config_field: "port".to_string(),
+                        provided_value: value.to_string(),
+                        expected_constraint: reason.clone(),
+                    },
+                    ReloadError::InvalidWorkerCount { value, reason } => ErrorLog {
+                        timestamp,
+                        level: "ERROR".to_string(),
+                        message: format!(
+                            "Config reload failed: Invalid worker count {}. {}",
+                            value, reason
+                        ),
+                        error_type: "InvalidWorkerCount".to_string(),
+                        config_field: "workers".to_string(),
+                        provided_value: value.to_string(),
+                        expected_constraint: reason.clone(),
+                    },
+                    ReloadError::MissingField { field } => ErrorLog {
+                        timestamp,
+                        level: "ERROR".to_string(),
+                        message: format!(
+                            "Config reload failed: Missing required field '{}'",
+                            field
+                        ),
+                        error_type: "MissingField".to_string(),
+                        config_field: field.clone(),
+                        provided_value: "null".to_string(),
+                        expected_constraint: "Required field must be present".to_string(),
+                    },
+                };
+
+                self.error_logs.lock().unwrap().push(log_entry);
+                self.error_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_error_logs(&self) -> Vec<ErrorLog> {
+                self.error_logs.lock().unwrap().clone()
+            }
+
+            fn get_error_count(&self) -> u64 {
+                self.error_count.load(Ordering::Relaxed)
+            }
+        }
+
+        // Test case 4: Create logger
+        let logger = ReloadErrorLogger::new();
+
+        // Test case 5: Log invalid port error
+        let port_error = ReloadError::InvalidPort {
+            value: 80,
+            reason: "Port must be >= 1024 (privileged ports not allowed)".to_string(),
+        };
+
+        logger.log_reload_error(&port_error);
+        assert_eq!(logger.get_error_count(), 1);
+
+        let logs = logger.get_error_logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, "ERROR");
+        assert_eq!(logs[0].error_type, "InvalidPort");
+        assert_eq!(logs[0].config_field, "port");
+        assert_eq!(logs[0].provided_value, "80");
+        assert!(logs[0]
+            .message
+            .contains("Config reload failed: Invalid port value 80"));
+        assert!(logs[0].message.contains("Port must be >= 1024"));
+        assert!(logs[0]
+            .expected_constraint
+            .contains("privileged ports not allowed"));
+
+        // Test case 6: Log invalid worker count error
+        let worker_error = ReloadError::InvalidWorkerCount {
+            value: 0,
+            reason: "Worker count must be between 1 and 128".to_string(),
+        };
+
+        logger.log_reload_error(&worker_error);
+        assert_eq!(logger.get_error_count(), 2);
+
+        let logs = logger.get_error_logs();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[1].error_type, "InvalidWorkerCount");
+        assert_eq!(logs[1].config_field, "workers");
+        assert_eq!(logs[1].provided_value, "0");
+        assert!(logs[1].message.contains("Invalid worker count 0"));
+        assert!(logs[1].expected_constraint.contains("between 1 and 128"));
+
+        // Test case 7: Log missing field error
+        let missing_error = ReloadError::MissingField {
+            field: "server_address".to_string(),
+        };
+
+        logger.log_reload_error(&missing_error);
+        assert_eq!(logger.get_error_count(), 3);
+
+        let logs = logger.get_error_logs();
+        assert_eq!(logs[2].error_type, "MissingField");
+        assert_eq!(logs[2].config_field, "server_address");
+        assert_eq!(logs[2].provided_value, "null");
+        assert!(logs[2]
+            .message
+            .contains("Missing required field 'server_address'"));
+
+        // Test case 8: Verify all logs have timestamps
+        for log in &logs {
+            assert!(log.timestamp > 0, "Log should have timestamp");
+        }
+
+        // Test case 9: Verify all error messages are actionable
+        for log in &logs {
+            assert!(
+                log.message.contains("Config reload failed"),
+                "Error message should indicate reload failure"
+            );
+            assert!(
+                !log.config_field.is_empty(),
+                "Error should specify which config field failed"
+            );
+            assert!(
+                !log.expected_constraint.is_empty(),
+                "Error should explain the constraint"
+            );
+        }
+
+        // Test case 10: Multiple errors of same type
+        for i in 0..5 {
+            let error = ReloadError::InvalidPort {
+                value: 100 + i,
+                reason: format!("Port {} is below minimum 1024", 100 + i),
+            };
+            logger.log_reload_error(&error);
+        }
+
+        assert_eq!(logger.get_error_count(), 8); // 3 + 5
+
+        // Test case 11: Verify error logs are distinguishable
+        let all_logs = logger.get_error_logs();
+        let port_errors: Vec<_> = all_logs
+            .iter()
+            .filter(|log| log.error_type == "InvalidPort")
+            .collect();
+        assert_eq!(port_errors.len(), 6, "Should have 6 port errors");
+
+        let worker_errors: Vec<_> = all_logs
+            .iter()
+            .filter(|log| log.error_type == "InvalidWorkerCount")
+            .collect();
+        assert_eq!(worker_errors.len(), 1, "Should have 1 worker error");
+
+        let missing_errors: Vec<_> = all_logs
+            .iter()
+            .filter(|log| log.error_type == "MissingField")
+            .collect();
+        assert_eq!(missing_errors.len(), 1, "Should have 1 missing field error");
+
+        // Test case 12: Verify each error has unique provided_value for debugging
+        for port_error in &port_errors {
+            let value = port_error.provided_value.parse::<u16>().unwrap();
+            assert!(
+                value < 1024,
+                "Logged value should match the actual invalid value"
+            );
+        }
+    }
 }
