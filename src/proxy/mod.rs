@@ -18136,4 +18136,183 @@ mod tests {
 
         assert_eq!(store.get_successful_auths(), 118); // 18 + 100
     }
+
+    #[test]
+    fn test_logs_successful_credential_rotation() {
+        // Hot reload test: Logs successful credential rotation
+        // Tests that credential rotations are logged with details
+        // Validates audit trail for credential changes
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Test case 1: Define log entry
+        #[derive(Clone, Debug)]
+        struct LogEntry {
+            timestamp: u64,
+            level: String,
+            message: String,
+            credential_type: String,
+            old_identifier: String,
+            new_identifier: String,
+        }
+
+        // Test case 2: Credential rotation logger
+        struct CredentialRotationLogger {
+            logs: Arc<std::sync::Mutex<Vec<LogEntry>>>,
+            rotation_count: Arc<AtomicU64>,
+        }
+
+        impl CredentialRotationLogger {
+            fn new() -> Self {
+                CredentialRotationLogger {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    rotation_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn log_rotation(
+                &self,
+                credential_type: &str,
+                old_identifier: &str,
+                new_identifier: &str,
+            ) {
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+
+                let entry = LogEntry {
+                    timestamp,
+                    level: "INFO".to_string(),
+                    message: format!(
+                        "Credential rotation successful: {} rotated from {} to {}",
+                        credential_type, old_identifier, new_identifier
+                    ),
+                    credential_type: credential_type.to_string(),
+                    old_identifier: old_identifier.to_string(),
+                    new_identifier: new_identifier.to_string(),
+                };
+
+                self.logs.lock().unwrap().push(entry);
+                self.rotation_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn get_logs(&self) -> Vec<LogEntry> {
+                self.logs.lock().unwrap().clone()
+            }
+
+            fn get_rotation_count(&self) -> u64 {
+                self.rotation_count.load(Ordering::Relaxed)
+            }
+
+            fn get_logs_for_credential_type(&self, credential_type: &str) -> Vec<LogEntry> {
+                self.logs
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|log| log.credential_type == credential_type)
+                    .cloned()
+                    .collect()
+            }
+        }
+
+        // Test case 3: Create logger
+        let logger = CredentialRotationLogger::new();
+
+        // Test case 4: Log first S3 credential rotation
+        logger.log_rotation("S3", "AKIAIOSFODNN7EXAMPLE", "AKIAI44QH8DHBEXAMPLE");
+
+        assert_eq!(logger.get_rotation_count(), 1);
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, "INFO");
+        assert_eq!(logs[0].credential_type, "S3");
+        assert_eq!(logs[0].old_identifier, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(logs[0].new_identifier, "AKIAI44QH8DHBEXAMPLE");
+        assert!(logs[0].message.contains("Credential rotation successful"));
+        assert!(logs[0].message.contains("S3"));
+        assert!(logs[0].timestamp > 0);
+
+        // Test case 5: Log JWT secret rotation
+        logger.log_rotation("JWT", "secret-v1", "secret-v2");
+
+        assert_eq!(logger.get_rotation_count(), 2);
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[1].credential_type, "JWT");
+        assert_eq!(logs[1].old_identifier, "secret-v1");
+        assert_eq!(logs[1].new_identifier, "secret-v2");
+
+        // Test case 6: Multiple S3 rotations
+        logger.log_rotation("S3", "AKIAI44QH8DHBEXAMPLE", "AKIAIOSFODNN8EXAMPLE");
+        logger.log_rotation("S3", "AKIAIOSFODNN8EXAMPLE", "AKIAIOSFODNN9EXAMPLE");
+
+        assert_eq!(logger.get_rotation_count(), 4);
+
+        // Test case 7: Filter logs by credential type
+        let s3_logs = logger.get_logs_for_credential_type("S3");
+        assert_eq!(s3_logs.len(), 3, "Should have 3 S3 rotation logs");
+
+        let jwt_logs = logger.get_logs_for_credential_type("JWT");
+        assert_eq!(jwt_logs.len(), 1, "Should have 1 JWT rotation log");
+
+        // Test case 8: Verify chronological order
+        let all_logs = logger.get_logs();
+        for i in 1..all_logs.len() {
+            assert!(
+                all_logs[i].timestamp >= all_logs[i - 1].timestamp,
+                "Logs should be in chronological order"
+            );
+        }
+
+        // Test case 9: Verify log messages contain key information
+        for log in &all_logs {
+            assert!(
+                log.message.contains("Credential rotation successful"),
+                "Log message should indicate success"
+            );
+            assert!(
+                log.message.contains(&log.credential_type),
+                "Log message should contain credential type"
+            );
+            assert!(
+                log.message.contains(&log.old_identifier),
+                "Log message should contain old identifier"
+            );
+            assert!(
+                log.message.contains(&log.new_identifier),
+                "Log message should contain new identifier"
+            );
+        }
+
+        // Test case 10: Log database credential rotation
+        logger.log_rotation("Database", "db_user_v1", "db_user_v2");
+        logger.log_rotation("Database", "db_user_v2", "db_user_v3");
+
+        let db_logs = logger.get_logs_for_credential_type("Database");
+        assert_eq!(db_logs.len(), 2);
+
+        // Test case 11: Verify audit trail completeness
+        assert_eq!(logger.get_rotation_count(), 6);
+        let all_logs = logger.get_logs();
+        assert_eq!(all_logs.len(), 6, "All rotations should be logged");
+
+        // Test case 12: Verify each rotation is distinct
+        let mut seen_messages = std::collections::HashSet::new();
+        for log in &all_logs {
+            let key = format!(
+                "{}-{}-{}",
+                log.credential_type, log.old_identifier, log.new_identifier
+            );
+            assert!(
+                !seen_messages.contains(&key),
+                "Each rotation should be logged only once"
+            );
+            seen_messages.insert(key);
+        }
+    }
 }

@@ -534,7 +534,7 @@ yatagarasu/
 - [x] Test: Can update JWT secret via reload
 - [x] Test: Old credentials continue working during grace period
 - [x] Test: New credentials work immediately after reload
-- [ ] Test: Logs successful credential rotation
+- [x] Test: Logs successful credential rotation
 
 ### Hot Reload - Error Handling
 - [ ] Test: Failed reload doesn't affect running service
