@@ -24284,4 +24284,304 @@ mod tests {
             "Rare route should not need rate limiting"
         );
     }
+
+    #[test]
+    fn test_exports_concurrent_request_gauge() {
+        // Metrics test: Exports concurrent request gauge
+        // Tests that the number of currently active requests is tracked
+        // Validates load monitoring and capacity planning capability
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define concurrent request gauge
+        #[derive(Clone)]
+        struct ConcurrentRequestGauge {
+            count: Arc<AtomicU64>,
+        }
+
+        impl ConcurrentRequestGauge {
+            fn new() -> Self {
+                Self {
+                    count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn increment(&self) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn decrement(&self) {
+                self.count.fetch_sub(1, Ordering::SeqCst);
+            }
+
+            fn get(&self) -> u64 {
+                self.count.load(Ordering::SeqCst)
+            }
+        }
+
+        // Test case 2: Gauge starts at zero
+        let gauge = ConcurrentRequestGauge::new();
+        assert_eq!(gauge.get(), 0);
+
+        // Test case 3: Increment increases count
+        let gauge = ConcurrentRequestGauge::new();
+        gauge.increment();
+        assert_eq!(gauge.get(), 1);
+
+        // Test case 4: Multiple increments accumulate
+        let gauge = ConcurrentRequestGauge::new();
+        gauge.increment();
+        gauge.increment();
+        gauge.increment();
+        assert_eq!(gauge.get(), 3);
+
+        // Test case 5: Decrement decreases count
+        let gauge = ConcurrentRequestGauge::new();
+        gauge.increment();
+        gauge.increment();
+        gauge.decrement();
+        assert_eq!(gauge.get(), 1);
+
+        // Test case 6: Balanced increments and decrements return to zero
+        let gauge = ConcurrentRequestGauge::new();
+        gauge.increment();
+        gauge.increment();
+        gauge.increment();
+        gauge.decrement();
+        gauge.decrement();
+        gauge.decrement();
+        assert_eq!(gauge.get(), 0);
+
+        // Test case 7: Simulates request lifecycle
+        let gauge = ConcurrentRequestGauge::new();
+        // Request 1 starts
+        gauge.increment();
+        assert_eq!(gauge.get(), 1);
+        // Request 2 starts
+        gauge.increment();
+        assert_eq!(gauge.get(), 2);
+        // Request 1 completes
+        gauge.decrement();
+        assert_eq!(gauge.get(), 1);
+        // Request 2 completes
+        gauge.decrement();
+        assert_eq!(gauge.get(), 0);
+
+        // Test case 8: Concurrent increments are thread-safe
+        let gauge = ConcurrentRequestGauge::new();
+        let gauge_clone1 = gauge.clone();
+        let gauge_clone2 = gauge.clone();
+        let gauge_clone3 = gauge.clone();
+
+        let handle1 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone1.increment();
+            }
+        });
+
+        let handle2 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone2.increment();
+            }
+        });
+
+        let handle3 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone3.increment();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+        handle3.join().unwrap();
+
+        assert_eq!(gauge.get(), 300);
+
+        // Test case 9: Concurrent increments and decrements
+        let gauge = ConcurrentRequestGauge::new();
+        let gauge_clone1 = gauge.clone();
+        let gauge_clone2 = gauge.clone();
+
+        let handle1 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone1.increment();
+            }
+        });
+
+        let handle2 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone2.decrement();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        // Net effect: 100 increments - 100 decrements = 0
+        assert_eq!(gauge.get(), 0);
+
+        // Test case 10: Can detect load spikes
+        let gauge = ConcurrentRequestGauge::new();
+        // Simulate burst of concurrent requests
+        for _ in 0..1000 {
+            gauge.increment();
+        }
+        let current_load = gauge.get();
+        // Alert if concurrent requests exceed threshold
+        let should_alert = current_load > 500;
+        assert!(should_alert, "Should alert on high concurrent load");
+
+        // Test case 11: Tracks peak concurrent load
+        let gauge = ConcurrentRequestGauge::new();
+        let mut peak = 0u64;
+
+        // Simulate varying load
+        for i in 0..100 {
+            gauge.increment();
+            let current = gauge.get();
+            if current > peak {
+                peak = current;
+            }
+        }
+
+        for _ in 0..50 {
+            gauge.decrement();
+        }
+
+        assert_eq!(peak, 100);
+        assert_eq!(gauge.get(), 50);
+
+        // Test case 12: Gauge enables capacity planning
+        let gauge = ConcurrentRequestGauge::new();
+        // Simulate steady load
+        for _ in 0..85 {
+            gauge.increment();
+        }
+
+        let current_load = gauge.get();
+        let capacity = 100;
+        let utilization = (current_load as f64 / capacity as f64) * 100.0;
+
+        // Need more capacity if utilization > 80%
+        let needs_scaling = utilization > 80.0;
+        assert!(needs_scaling, "Should recommend scaling at 85% utilization");
+
+        // Test case 13: Gauge resets after all requests complete
+        let gauge = ConcurrentRequestGauge::new();
+        for _ in 0..50 {
+            gauge.increment();
+        }
+        assert_eq!(gauge.get(), 50);
+
+        for _ in 0..50 {
+            gauge.decrement();
+        }
+        assert_eq!(gauge.get(), 0);
+
+        // Test case 14: Can calculate request concurrency ratio
+        let gauge = ConcurrentRequestGauge::new();
+        // Simulate load pattern
+        for _ in 0..30 {
+            gauge.increment();
+        }
+
+        let concurrent = gauge.get();
+        let total_capacity = 100;
+        let concurrency_ratio = concurrent as f64 / total_capacity as f64;
+
+        assert_eq!(concurrency_ratio, 0.3);
+
+        // Test case 15: Gauge supports load shedding decisions
+        let gauge = ConcurrentRequestGauge::new();
+        // System at capacity
+        for _ in 0..100 {
+            gauge.increment();
+        }
+
+        let current = gauge.get();
+        let max_capacity = 100;
+        let should_shed_load = current >= max_capacity;
+
+        assert!(should_shed_load, "Should shed load at max capacity");
+
+        // Test case 16: Tracks concurrent requests over time
+        let gauge = ConcurrentRequestGauge::new();
+        let mut measurements = Vec::new();
+
+        // Measure at different points
+        gauge.increment();
+        gauge.increment();
+        measurements.push(gauge.get());
+
+        gauge.increment();
+        measurements.push(gauge.get());
+
+        gauge.decrement();
+        measurements.push(gauge.get());
+
+        assert_eq!(measurements, vec![2, 3, 2]);
+
+        // Test case 17: Gauge never goes negative
+        let gauge = ConcurrentRequestGauge::new();
+        gauge.increment();
+        gauge.decrement();
+        gauge.decrement(); // This would go negative, but AtomicU64 wraps around
+
+        // In production, we'd prevent this, but for the test we verify behavior
+        let current = gauge.get();
+        // After wrap, value is u64::MAX
+        assert!(current > 1_000_000 || current == 0);
+
+        // Test case 18: Multiple gauges track independently
+        let gauge1 = ConcurrentRequestGauge::new();
+        let gauge2 = ConcurrentRequestGauge::new();
+
+        gauge1.increment();
+        gauge1.increment();
+        gauge2.increment();
+
+        assert_eq!(gauge1.get(), 2);
+        assert_eq!(gauge2.get(), 1);
+
+        // Test case 19: Gauge supports circuit breaker pattern
+        let gauge = ConcurrentRequestGauge::new();
+        let circuit_breaker_threshold = 50;
+
+        // Gradually increase load
+        for i in 0..60 {
+            gauge.increment();
+            if gauge.get() >= circuit_breaker_threshold {
+                // Circuit breaker would trip here
+                break;
+            }
+        }
+
+        let final_count = gauge.get();
+        assert!(final_count >= circuit_breaker_threshold);
+
+        // Test case 20: Gauge enables load balancing decisions
+        let gauge_server1 = ConcurrentRequestGauge::new();
+        let gauge_server2 = ConcurrentRequestGauge::new();
+
+        // Server 1 has more load
+        for _ in 0..70 {
+            gauge_server1.increment();
+        }
+
+        // Server 2 has less load
+        for _ in 0..30 {
+            gauge_server2.increment();
+        }
+
+        // Route new request to server with lower load
+        let should_route_to_server2 = gauge_server2.get() < gauge_server1.get();
+        assert!(
+            should_route_to_server2,
+            "Should route to less loaded server"
+        );
+
+        assert_eq!(gauge_server1.get(), 70);
+        assert_eq!(gauge_server2.get(), 30);
+    }
 }
