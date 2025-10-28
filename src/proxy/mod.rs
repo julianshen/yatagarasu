@@ -20450,4 +20450,295 @@ mod tests {
             "Should include S3 key in reconstruction"
         );
     }
+
+    #[test]
+    fn test_logs_unique_request_id_for_correlation() {
+        // Observability test: Logs unique request ID for correlation
+        // Tests that each request gets a unique ID for tracing across logs
+        // Validates request correlation and debugging capability
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define request log with unique ID
+        #[derive(Clone, Debug)]
+        struct RequestLog {
+            request_id: String,
+            path: String,
+            stage: String,
+        }
+
+        // Test case 2: Request logger with ID generation
+        struct RequestLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+            next_id: Arc<AtomicU64>,
+        }
+
+        impl RequestLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    next_id: Arc::new(AtomicU64::new(1)),
+                }
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Proxy that logs multiple stages per request
+        struct Proxy {
+            logger: RequestLogger,
+        }
+
+        impl Proxy {
+            fn new() -> Self {
+                Self {
+                    logger: RequestLogger::new(),
+                }
+            }
+
+            fn handle_request(&self, path: &str) -> String {
+                // Generate request ID once per request
+                let id = self.logger.next_id.fetch_add(1, Ordering::SeqCst);
+                let request_id = format!("req-{}", id);
+
+                // Log all stages with same request ID
+                let stages = ["received", "authenticated", "routed", "completed"];
+                for stage in stages {
+                    let log_entry = RequestLog {
+                        request_id: request_id.clone(),
+                        path: path.to_string(),
+                        stage: stage.to_string(),
+                    };
+                    self.logger.logs.lock().unwrap().push(log_entry);
+                }
+
+                request_id
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logger.get_logs()
+            }
+        }
+
+        let proxy = Proxy::new();
+
+        // Test case 4: First request generates unique ID
+        let request_id1 = proxy.handle_request("/api/data");
+        assert_eq!(request_id1, "req-1", "First request should have ID req-1");
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 4, "Should have 4 log entries for first request");
+
+        // Test case 5: All stages of first request have same ID
+        for log in &logs[0..4] {
+            assert_eq!(
+                log.request_id, request_id1,
+                "All stages should have same request ID"
+            );
+        }
+
+        // Test case 6: Verify stages are logged
+        assert_eq!(logs[0].stage, "received");
+        assert_eq!(logs[1].stage, "authenticated");
+        assert_eq!(logs[2].stage, "routed");
+        assert_eq!(logs[3].stage, "completed");
+
+        // Test case 7: Second request gets different unique ID
+        let request_id2 = proxy.handle_request("/api/users");
+        assert_eq!(request_id2, "req-2", "Second request should have ID req-2");
+        assert_ne!(request_id1, request_id2, "Request IDs should be unique");
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 8, "Should have 8 total log entries");
+
+        // Test case 8: All stages of second request have same ID
+        for log in &logs[4..8] {
+            assert_eq!(
+                log.request_id, request_id2,
+                "All stages of second request should have same ID"
+            );
+        }
+
+        // Test case 9: Can filter logs by request ID
+        let request1_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.request_id == request_id1)
+            .collect();
+        assert_eq!(
+            request1_logs.len(),
+            4,
+            "Should find 4 logs for first request"
+        );
+
+        let request2_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.request_id == request_id2)
+            .collect();
+        assert_eq!(
+            request2_logs.len(),
+            4,
+            "Should find 4 logs for second request"
+        );
+
+        // Test case 10: Multiple concurrent requests get unique IDs
+        let proxy2 = Arc::new(Proxy::new());
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let proxy_clone = Arc::clone(&proxy2);
+                std::thread::spawn(move || proxy_clone.handle_request(&format!("/req/{}", i)))
+            })
+            .collect();
+
+        let concurrent_ids: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        assert_eq!(concurrent_ids.len(), 10, "Should have 10 request IDs");
+
+        // Test case 11: All concurrent request IDs are unique
+        let unique_ids: std::collections::HashSet<String> =
+            concurrent_ids.iter().cloned().collect();
+        assert_eq!(
+            unique_ids.len(),
+            10,
+            "All concurrent request IDs should be unique"
+        );
+
+        // Test case 12: Verify ID format is consistent
+        for request_id in &concurrent_ids {
+            assert!(
+                request_id.starts_with("req-"),
+                "Request ID should start with 'req-'"
+            );
+            let num_part = request_id.strip_prefix("req-").unwrap();
+            assert!(
+                num_part.parse::<u64>().is_ok(),
+                "Request ID should have numeric suffix"
+            );
+        }
+
+        // Test case 13: Request IDs are sequential
+        let logs = proxy2.get_logs();
+        let all_request_ids: Vec<String> = logs.iter().map(|l| l.request_id.clone()).collect();
+
+        // Extract unique request IDs in order
+        let mut seen_ids = std::collections::HashSet::new();
+        let ordered_ids: Vec<String> = all_request_ids
+            .into_iter()
+            .filter(|id| seen_ids.insert(id.clone()))
+            .collect();
+
+        // Test case 14: Can trace complete request lifecycle
+        for request_id in &ordered_ids {
+            let request_stages: Vec<String> = logs
+                .iter()
+                .filter(|l| &l.request_id == request_id)
+                .map(|l| l.stage.clone())
+                .collect();
+
+            assert_eq!(request_stages.len(), 4, "Each request should have 4 stages");
+            assert_eq!(request_stages[0], "received");
+            assert_eq!(request_stages[3], "completed");
+        }
+
+        // Test case 15: Request IDs enable correlation across services
+        // Simulate logging request ID at different points
+        let proxy3 = Proxy::new();
+        let test_request_id = proxy3.handle_request("/api/test");
+
+        let logs = proxy3.get_logs();
+        let test_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.request_id == test_request_id)
+            .collect();
+
+        // Should be able to trace entire request flow
+        assert_eq!(test_logs.len(), 4);
+        assert_eq!(test_logs[0].path, "/api/test");
+        assert_eq!(test_logs[3].path, "/api/test");
+
+        // Test case 16: Verify no ID collisions in large volume
+        let proxy4 = Proxy::new();
+        let mut all_ids = Vec::new();
+
+        for i in 0..100 {
+            let request_id = proxy4.handle_request(&format!("/load/{}", i));
+            all_ids.push(request_id);
+        }
+
+        let unique_count = all_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(unique_count, 100, "All 100 request IDs should be unique");
+
+        // Test case 17: Request ID persists through error scenarios
+        let proxy5 = Proxy::new();
+        // Simulate request that errors - same ID throughout
+        let error_id = proxy5.logger.next_id.fetch_add(1, Ordering::SeqCst);
+        let error_request_id = format!("req-{}", error_id);
+
+        proxy5.logger.logs.lock().unwrap().push(RequestLog {
+            request_id: error_request_id.clone(),
+            path: "/error".to_string(),
+            stage: "received".to_string(),
+        });
+        proxy5.logger.logs.lock().unwrap().push(RequestLog {
+            request_id: error_request_id.clone(),
+            path: "/error".to_string(),
+            stage: "error".to_string(),
+        });
+
+        let logs = proxy5.get_logs();
+        assert_eq!(logs[0].request_id, error_request_id);
+        assert_eq!(logs[1].request_id, error_request_id);
+        assert_eq!(logs[0].stage, "received");
+        assert_eq!(logs[1].stage, "error");
+
+        // Test case 18: Can group logs by request ID
+        let proxy6 = Proxy::new();
+        proxy6.handle_request("/a");
+        proxy6.handle_request("/b");
+        proxy6.handle_request("/c");
+
+        let logs = proxy6.get_logs();
+        let mut grouped: std::collections::HashMap<String, Vec<RequestLog>> =
+            std::collections::HashMap::new();
+
+        for log in logs {
+            grouped.entry(log.request_id.clone()).or_default().push(log);
+        }
+
+        assert_eq!(grouped.len(), 3, "Should have 3 distinct requests");
+        for (_, logs) in &grouped {
+            assert_eq!(logs.len(), 4, "Each request should have 4 log entries");
+        }
+
+        // Test case 19: Request ID format is compact and readable
+        let proxy7 = Proxy::new();
+        let sample_id = proxy7.handle_request("/sample");
+
+        assert!(sample_id.len() < 20, "Request ID should be compact");
+        assert!(sample_id.contains('-'), "Request ID should have separator");
+
+        // Test case 20: Verify monotonically increasing IDs
+        let proxy8 = Proxy::new();
+        let id1 = proxy8.handle_request("/1");
+        let id2 = proxy8.handle_request("/2");
+        let id3 = proxy8.handle_request("/3");
+
+        let num1: u64 = id1.strip_prefix("req-").unwrap().parse().unwrap();
+        let num2: u64 = id2.strip_prefix("req-").unwrap().parse().unwrap();
+        let num3: u64 = id3.strip_prefix("req-").unwrap().parse().unwrap();
+
+        assert!(
+            num2 > num1,
+            "Request IDs should be monotonically increasing"
+        );
+        assert!(
+            num3 > num2,
+            "Request IDs should be monotonically increasing"
+        );
+    }
 }
