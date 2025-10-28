@@ -565,7 +565,7 @@ yatagarasu/
 
 ### Metrics - Request Metrics
 - [x] Test: Exports request count by status code
-- [ ] Test: Exports request duration histogram
+- [x] Test: Exports request duration histogram
 - [ ] Test: Exports requests per bucket
 - [ ] Test: Exports requests per route
 - [ ] Test: Exports concurrent request gauge

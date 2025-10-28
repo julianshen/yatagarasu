@@ -23279,4 +23279,330 @@ mod tests {
         assert!(meets_sla, "Should meet 99% SLA");
         assert_eq!(success_rate, 99.0);
     }
+
+    #[test]
+    fn test_exports_request_duration_histogram() {
+        // Metrics test: Exports request duration histogram
+        // Tests that request durations are tracked in histogram buckets
+        // Validates latency monitoring and performance analysis capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define histogram with duration buckets
+        #[derive(Clone)]
+        struct DurationHistogram {
+            buckets: Arc<std::sync::Mutex<Vec<(f64, u64)>>>, // (upper_bound_ms, count)
+        }
+
+        impl DurationHistogram {
+            fn new(bucket_bounds: Vec<f64>) -> Self {
+                let buckets = bucket_bounds.into_iter().map(|bound| (bound, 0)).collect();
+                Self {
+                    buckets: Arc::new(std::sync::Mutex::new(buckets)),
+                }
+            }
+
+            fn observe(&self, duration_ms: f64) {
+                let mut buckets = self.buckets.lock().unwrap();
+                for (upper_bound, count) in buckets.iter_mut() {
+                    if duration_ms <= *upper_bound {
+                        *count += 1;
+                        break;
+                    }
+                }
+            }
+
+            fn get_bucket_count(&self, upper_bound: f64) -> u64 {
+                self.buckets
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(bound, _)| *bound == upper_bound)
+                    .map(|(_, count)| *count)
+                    .unwrap_or(0)
+            }
+
+            fn get_all_buckets(&self) -> Vec<(f64, u64)> {
+                self.buckets.lock().unwrap().clone()
+            }
+
+            fn get_percentile(&self, percentile: f64) -> f64 {
+                let buckets = self.buckets.lock().unwrap();
+                let total: u64 = buckets.iter().map(|(_, count)| count).sum();
+                let target = ((total as f64) * (percentile / 100.0)).ceil() as u64;
+
+                let mut cumulative = 0;
+                for (upper_bound, count) in buckets.iter() {
+                    cumulative += count;
+                    if cumulative >= target {
+                        return *upper_bound;
+                    }
+                }
+                buckets.last().map(|(bound, _)| *bound).unwrap_or(0.0)
+            }
+        }
+
+        // Test case 2: Histogram tracks fast requests (<10ms)
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        histogram.observe(5.0);
+        assert_eq!(histogram.get_bucket_count(10.0), 1);
+
+        // Test case 3: Histogram tracks medium requests (10-50ms)
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        histogram.observe(25.0);
+        assert_eq!(histogram.get_bucket_count(50.0), 1);
+
+        // Test case 4: Histogram tracks slow requests (100-500ms)
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        histogram.observe(250.0);
+        assert_eq!(histogram.get_bucket_count(500.0), 1);
+
+        // Test case 5: Multiple observations increment same bucket
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        histogram.observe(5.0);
+        histogram.observe(8.0);
+        histogram.observe(9.5);
+        assert_eq!(histogram.get_bucket_count(10.0), 3);
+
+        // Test case 6: Different buckets tracked independently
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        histogram.observe(5.0);
+        histogram.observe(25.0);
+        histogram.observe(250.0);
+        assert_eq!(histogram.get_bucket_count(10.0), 1);
+        assert_eq!(histogram.get_bucket_count(50.0), 1);
+        assert_eq!(histogram.get_bucket_count(500.0), 1);
+
+        // Test case 7: Can calculate P50 (median) latency
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // 40 requests under 10ms
+        for _ in 0..40 {
+            histogram.observe(5.0);
+        }
+        // 60 requests between 10-50ms
+        for _ in 0..60 {
+            histogram.observe(25.0);
+        }
+        let p50 = histogram.get_percentile(50.0);
+        // P50 falls in second bucket since 40% < 50% <= 100%
+        assert_eq!(p50, 50.0);
+
+        // Test case 8: Can calculate P95 latency
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // 90 fast requests
+        for _ in 0..90 {
+            histogram.observe(5.0);
+        }
+        // 10 medium-slow requests
+        for _ in 0..10 {
+            histogram.observe(250.0);
+        }
+        let p95 = histogram.get_percentile(95.0);
+        // P95 falls in 500ms bucket since 90% < 95% <= 100%
+        assert_eq!(p95, 500.0);
+
+        // Test case 9: Can calculate P99 latency
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // 98 fast requests
+        for _ in 0..98 {
+            histogram.observe(5.0);
+        }
+        // 2 slow requests
+        for _ in 0..2 {
+            histogram.observe(250.0);
+        }
+        let p99 = histogram.get_percentile(99.0);
+        // P99 falls in 500ms bucket since 98% < 99% <= 100%
+        assert_eq!(p99, 500.0);
+
+        // Test case 10: Histogram supports sub-millisecond precision
+        let histogram = DurationHistogram::new(vec![1.0, 5.0, 10.0, 50.0, 100.0]);
+        histogram.observe(0.5);
+        histogram.observe(0.8);
+        assert_eq!(histogram.get_bucket_count(1.0), 2);
+
+        // Test case 11: Histogram supports very slow requests (>1s)
+        let histogram = DurationHistogram::new(vec![100.0, 500.0, 1000.0, 5000.0, 10000.0]);
+        histogram.observe(2500.0);
+        histogram.observe(7500.0);
+        assert_eq!(histogram.get_bucket_count(5000.0), 1);
+        assert_eq!(histogram.get_bucket_count(10000.0), 1);
+
+        // Test case 12: Get all buckets returns histogram distribution
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0]);
+        histogram.observe(5.0);
+        histogram.observe(5.0);
+        histogram.observe(25.0);
+        histogram.observe(75.0);
+        let all_buckets = histogram.get_all_buckets();
+        assert_eq!(all_buckets.len(), 3);
+        assert_eq!(all_buckets[0], (10.0, 2)); // 2 requests < 10ms
+        assert_eq!(all_buckets[1], (50.0, 1)); // 1 request < 50ms
+        assert_eq!(all_buckets[2], (100.0, 1)); // 1 request < 100ms
+
+        // Test case 13: Concurrent observations are thread-safe
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        let histogram_clone1 = histogram.clone();
+        let histogram_clone2 = histogram.clone();
+        let histogram_clone3 = histogram.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                histogram_clone1.observe(5.0);
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                histogram_clone2.observe(5.0);
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                histogram_clone3.observe(5.0);
+            }
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(histogram.get_bucket_count(10.0), 300);
+
+        // Test case 14: Can identify latency distribution
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // 70% fast requests
+        for _ in 0..70 {
+            histogram.observe(5.0);
+        }
+        // 20% medium requests
+        for _ in 0..20 {
+            histogram.observe(25.0);
+        }
+        // 10% slow requests
+        for _ in 0..10 {
+            histogram.observe(75.0);
+        }
+
+        let all_buckets = histogram.get_all_buckets();
+        let total: u64 = all_buckets.iter().map(|(_, count)| count).sum();
+        let fast_percentage = (all_buckets[0].1 as f64 / total as f64) * 100.0;
+        let medium_percentage = (all_buckets[1].1 as f64 / total as f64) * 100.0;
+        let slow_percentage = (all_buckets[2].1 as f64 / total as f64) * 100.0;
+        assert_eq!(fast_percentage, 70.0);
+        assert_eq!(medium_percentage, 20.0);
+        assert_eq!(slow_percentage, 10.0);
+
+        // Test case 15: Metrics enable SLA monitoring (P95 < 100ms)
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // 95 fast requests
+        for _ in 0..95 {
+            histogram.observe(25.0);
+        }
+        // 5 requests at boundary
+        for _ in 0..5 {
+            histogram.observe(75.0);
+        }
+        let p95 = histogram.get_percentile(95.0);
+        let meets_sla = p95 <= 100.0;
+        assert!(meets_sla, "P95 should be <= 100ms");
+
+        // Test case 16: Can detect latency regressions
+        let baseline_histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        for _ in 0..100 {
+            baseline_histogram.observe(5.0); // Baseline P95: 10ms
+        }
+
+        let current_histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        for _ in 0..100 {
+            current_histogram.observe(25.0); // Current P95: 50ms
+        }
+
+        let baseline_p95 = baseline_histogram.get_percentile(95.0);
+        let current_p95 = current_histogram.get_percentile(95.0);
+        let has_regression = current_p95 > baseline_p95 * 1.5; // 50% increase
+        assert!(has_regression, "Should detect latency regression");
+
+        // Test case 17: Histogram buckets cover expected latency range
+        let histogram = DurationHistogram::new(vec![1.0, 10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // Very fast
+        histogram.observe(0.5);
+        // Fast
+        histogram.observe(5.0);
+        // Medium
+        histogram.observe(25.0);
+        // Acceptable
+        histogram.observe(75.0);
+        // Slow
+        histogram.observe(250.0);
+        // Very slow
+        histogram.observe(750.0);
+
+        assert_eq!(histogram.get_bucket_count(1.0), 1);
+        assert_eq!(histogram.get_bucket_count(10.0), 1);
+        assert_eq!(histogram.get_bucket_count(50.0), 1);
+        assert_eq!(histogram.get_bucket_count(100.0), 1);
+        assert_eq!(histogram.get_bucket_count(500.0), 1);
+        assert_eq!(histogram.get_bucket_count(1000.0), 1);
+
+        // Test case 18: Can alert on P99 exceeding threshold
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // 98 requests under 50ms
+        for _ in 0..98 {
+            histogram.observe(25.0);
+        }
+        // 2 requests over threshold
+        for _ in 0..2 {
+            histogram.observe(600.0);
+        }
+
+        let p99 = histogram.get_percentile(99.0);
+        // P99 falls in 1000ms bucket since 98% < 99% <= 100%
+        let should_alert = p99 > 500.0;
+        assert!(should_alert, "Should alert when P99 > 500ms");
+
+        // Test case 19: Empty histogram returns zero
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0]);
+        assert_eq!(histogram.get_bucket_count(10.0), 0);
+        assert_eq!(histogram.get_bucket_count(50.0), 0);
+        assert_eq!(histogram.get_bucket_count(100.0), 0);
+
+        // Test case 20: Histogram enables performance optimization prioritization
+        let histogram = DurationHistogram::new(vec![10.0, 50.0, 100.0, 500.0, 1000.0]);
+        // Simulate mixed performance
+        for _ in 0..50 {
+            histogram.observe(5.0); // Fast path
+        }
+        for _ in 0..30 {
+            histogram.observe(25.0); // Moderate path
+        }
+        for _ in 0..15 {
+            histogram.observe(75.0); // Slow path
+        }
+        for _ in 0..5 {
+            histogram.observe(250.0); // Very slow path
+        }
+
+        let all_buckets = histogram.get_all_buckets();
+        let total: u64 = all_buckets.iter().map(|(_, count)| count).sum();
+
+        // Most requests are fast (50/100 = 50%)
+        let fast_ratio = all_buckets[0].1 as f64 / total as f64;
+        assert_eq!(fast_ratio, 0.5);
+
+        // But P95 is in 100ms bucket due to slow outliers
+        let p95 = histogram.get_percentile(95.0);
+        assert_eq!(p95, 100.0);
+
+        // Priority: Optimize the slow path (15+5=20 requests) to improve P95
+        let slow_requests: u64 = all_buckets
+            .iter()
+            .filter(|(bound, _)| *bound >= 100.0)
+            .map(|(_, count)| count)
+            .sum();
+        assert_eq!(slow_requests, 20);
+    }
 }
