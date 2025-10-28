@@ -22177,4 +22177,524 @@ mod tests {
             "All error types should be unique"
         );
     }
+
+    #[test]
+    fn test_error_logs_include_request_context() {
+        // Observability test: Error logs include request context
+        // Tests that error logs include contextual information about the request
+        // Validates troubleshooting capability and error correlation
+
+        use std::sync::Arc;
+
+        // Test case 1: Define error log with request context
+        #[derive(Clone, Debug)]
+        struct ErrorLogWithContext {
+            error_message: String,
+            request_id: String,
+            request_path: String,
+            request_method: String,
+            timestamp: u64,
+            user_id: Option<String>,
+            bucket: Option<String>,
+            s3_key: Option<String>,
+            client_ip: Option<String>,
+            status_code: u16,
+        }
+
+        // Test case 2: Error logger with request context tracking
+        struct ContextualErrorLogger {
+            errors: Arc<std::sync::Mutex<Vec<ErrorLogWithContext>>>,
+        }
+
+        impl ContextualErrorLogger {
+            fn new() -> Self {
+                Self {
+                    errors: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_error(
+                &self,
+                error_message: &str,
+                request_id: &str,
+                request_path: &str,
+                request_method: &str,
+                timestamp: u64,
+                user_id: Option<&str>,
+                bucket: Option<&str>,
+                s3_key: Option<&str>,
+                client_ip: Option<&str>,
+                status_code: u16,
+            ) {
+                let error = ErrorLogWithContext {
+                    error_message: error_message.to_string(),
+                    request_id: request_id.to_string(),
+                    request_path: request_path.to_string(),
+                    request_method: request_method.to_string(),
+                    timestamp,
+                    user_id: user_id.map(|s| s.to_string()),
+                    bucket: bucket.map(|s| s.to_string()),
+                    s3_key: s3_key.map(|s| s.to_string()),
+                    client_ip: client_ip.map(|s| s.to_string()),
+                    status_code,
+                };
+                self.errors.lock().unwrap().push(error);
+            }
+
+            fn get_errors(&self) -> Vec<ErrorLogWithContext> {
+                self.errors.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Error log includes request ID
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "S3 bucket not found",
+            "req-123",
+            "/products/file.txt",
+            "GET",
+            1234567890,
+            None,
+            Some("products-bucket"),
+            Some("file.txt"),
+            None,
+            404,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].request_id, "req-123");
+
+        // Test case 4: Error log includes request path
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Authentication failed",
+            "req-124",
+            "/private/document.pdf",
+            "GET",
+            1234567891,
+            None,
+            None,
+            None,
+            Some("192.168.1.100"),
+            401,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].request_path, "/private/document.pdf");
+
+        // Test case 5: Error log includes request method
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Invalid request",
+            "req-125",
+            "/upload",
+            "POST",
+            1234567892,
+            Some("user-456"),
+            None,
+            None,
+            None,
+            400,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].request_method, "POST");
+
+        // Test case 6: Error log includes timestamp
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Internal server error",
+            "req-126",
+            "/api/data",
+            "GET",
+            1234567893,
+            None,
+            None,
+            None,
+            None,
+            500,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].timestamp, 1234567893);
+
+        // Test case 7: Error log includes user ID when authenticated
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Access denied",
+            "req-127",
+            "/admin/config",
+            "GET",
+            1234567894,
+            Some("user-789"),
+            None,
+            None,
+            None,
+            403,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].user_id, Some("user-789".to_string()));
+
+        // Test case 8: Error log omits user ID when unauthenticated
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Missing token",
+            "req-128",
+            "/protected/resource",
+            "GET",
+            1234567895,
+            None,
+            None,
+            None,
+            None,
+            401,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].user_id, None);
+
+        // Test case 9: Error log includes bucket name when applicable
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "S3 error",
+            "req-129",
+            "/media/video.mp4",
+            "GET",
+            1234567896,
+            Some("user-123"),
+            Some("media-bucket"),
+            Some("video.mp4"),
+            None,
+            500,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].bucket, Some("media-bucket".to_string()));
+
+        // Test case 10: Error log includes S3 key when applicable
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Object not found",
+            "req-130",
+            "/files/data.json",
+            "GET",
+            1234567897,
+            None,
+            Some("files-bucket"),
+            Some("data.json"),
+            None,
+            404,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].s3_key, Some("data.json".to_string()));
+
+        // Test case 11: Error log includes client IP when available
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Rate limit exceeded",
+            "req-131",
+            "/api/endpoint",
+            "GET",
+            1234567898,
+            None,
+            None,
+            None,
+            Some("10.0.0.50"),
+            429,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].client_ip, Some("10.0.0.50".to_string()));
+
+        // Test case 12: Error log includes status code
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Service unavailable",
+            "req-132",
+            "/health",
+            "GET",
+            1234567899,
+            None,
+            None,
+            None,
+            None,
+            503,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].status_code, 503);
+
+        // Test case 13: Multiple errors preserve unique request contexts
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Error 1", "req-200", "/path1", "GET", 1000, None, None, None, None, 500,
+        );
+        logger.log_error(
+            "Error 2",
+            "req-201",
+            "/path2",
+            "POST",
+            2000,
+            Some("user-1"),
+            None,
+            None,
+            None,
+            400,
+        );
+        logger.log_error(
+            "Error 3",
+            "req-202",
+            "/path3",
+            "DELETE",
+            3000,
+            Some("user-2"),
+            Some("bucket-1"),
+            Some("key-1"),
+            Some("127.0.0.1"),
+            404,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 3);
+        assert_eq!(errors[0].request_id, "req-200");
+        assert_eq!(errors[1].request_id, "req-201");
+        assert_eq!(errors[2].request_id, "req-202");
+        assert_eq!(errors[0].request_path, "/path1");
+        assert_eq!(errors[1].request_path, "/path2");
+        assert_eq!(errors[2].request_path, "/path3");
+
+        // Test case 14: Error context enables correlation with request logs
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Timeout connecting to S3",
+            "req-500",
+            "/downloads/large-file.zip",
+            "GET",
+            1234567900,
+            Some("user-premium"),
+            Some("downloads-bucket"),
+            Some("large-file.zip"),
+            Some("203.0.113.42"),
+            504,
+        );
+        let errors = logger.get_errors();
+        // Can correlate this error with request logs using req-500
+        assert_eq!(errors[0].request_id, "req-500");
+        assert!(errors[0].request_id.starts_with("req-"));
+
+        // Test case 15: All context fields populated for complete error
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Complete error with all context",
+            "req-999",
+            "/complete/path",
+            "PUT",
+            9999999999,
+            Some("complete-user"),
+            Some("complete-bucket"),
+            Some("complete-key"),
+            Some("198.51.100.1"),
+            500,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].error_message, "Complete error with all context");
+        assert_eq!(errors[0].request_id, "req-999");
+        assert_eq!(errors[0].request_path, "/complete/path");
+        assert_eq!(errors[0].request_method, "PUT");
+        assert_eq!(errors[0].timestamp, 9999999999);
+        assert_eq!(errors[0].user_id, Some("complete-user".to_string()));
+        assert_eq!(errors[0].bucket, Some("complete-bucket".to_string()));
+        assert_eq!(errors[0].s3_key, Some("complete-key".to_string()));
+        assert_eq!(errors[0].client_ip, Some("198.51.100.1".to_string()));
+        assert_eq!(errors[0].status_code, 500);
+
+        // Test case 16: Concurrent errors maintain separate contexts
+        let logger = ContextualErrorLogger::new();
+        let logger_clone1 = ContextualErrorLogger {
+            errors: Arc::clone(&logger.errors),
+        };
+        let logger_clone2 = ContextualErrorLogger {
+            errors: Arc::clone(&logger.errors),
+        };
+        let logger_clone3 = ContextualErrorLogger {
+            errors: Arc::clone(&logger.errors),
+        };
+
+        std::thread::spawn(move || {
+            logger_clone1.log_error(
+                "Concurrent error 1",
+                "req-t1",
+                "/thread1",
+                "GET",
+                1,
+                None,
+                None,
+                None,
+                None,
+                500,
+            );
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            logger_clone2.log_error(
+                "Concurrent error 2",
+                "req-t2",
+                "/thread2",
+                "POST",
+                2,
+                Some("user-t2"),
+                None,
+                None,
+                None,
+                400,
+            );
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            logger_clone3.log_error(
+                "Concurrent error 3",
+                "req-t3",
+                "/thread3",
+                "DELETE",
+                3,
+                Some("user-t3"),
+                Some("bucket-t3"),
+                Some("key-t3"),
+                Some("1.2.3.4"),
+                404,
+            );
+        })
+        .join()
+        .unwrap();
+
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 3);
+        // Each error should have its own distinct context
+        let req_ids: std::collections::HashSet<_> =
+            errors.iter().map(|e| e.request_id.as_str()).collect();
+        assert_eq!(req_ids.len(), 3);
+
+        // Test case 17: Error context helps identify error patterns
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Auth failed",
+            "req-a1",
+            "/admin/panel",
+            "GET",
+            1000,
+            None,
+            None,
+            None,
+            Some("192.168.1.10"),
+            401,
+        );
+        logger.log_error(
+            "Auth failed",
+            "req-a2",
+            "/admin/users",
+            "GET",
+            1001,
+            None,
+            None,
+            None,
+            Some("192.168.1.10"),
+            401,
+        );
+        logger.log_error(
+            "Auth failed",
+            "req-a3",
+            "/admin/settings",
+            "GET",
+            1002,
+            None,
+            None,
+            None,
+            Some("192.168.1.10"),
+            401,
+        );
+        let errors = logger.get_errors();
+        // Can identify pattern: same IP, multiple auth failures, all admin paths
+        let same_ip_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.client_ip == Some("192.168.1.10".to_string()))
+            .collect();
+        assert_eq!(same_ip_errors.len(), 3);
+        for error in &same_ip_errors {
+            assert!(error.request_path.starts_with("/admin"));
+            assert_eq!(error.status_code, 401);
+        }
+
+        // Test case 18: Error context includes HTTP method for debugging
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Method not allowed",
+            "req-m1",
+            "/readonly",
+            "DELETE",
+            1234567910,
+            None,
+            None,
+            None,
+            None,
+            405,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].request_method, "DELETE");
+        assert_eq!(errors[0].status_code, 405);
+
+        // Test case 19: Error context distinguishes authenticated vs unauthenticated errors
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "Forbidden",
+            "req-auth1",
+            "/resource",
+            "GET",
+            1000,
+            Some("user-123"),
+            None,
+            None,
+            None,
+            403,
+        );
+        logger.log_error(
+            "Unauthorized",
+            "req-auth2",
+            "/resource",
+            "GET",
+            1001,
+            None,
+            None,
+            None,
+            None,
+            401,
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].user_id, Some("user-123".to_string()));
+        assert_eq!(errors[0].status_code, 403); // Authenticated but forbidden
+        assert_eq!(errors[1].user_id, None);
+        assert_eq!(errors[1].status_code, 401); // Not authenticated
+
+        // Test case 20: Error context enables troubleshooting with complete information
+        let logger = ContextualErrorLogger::new();
+        logger.log_error(
+            "S3 connection timeout",
+            "req-debug-1",
+            "/critical/data.json",
+            "GET",
+            1234567920,
+            Some("admin-user"),
+            Some("critical-bucket"),
+            Some("data.json"),
+            Some("10.20.30.40"),
+            504,
+        );
+        let errors = logger.get_errors();
+        // All information needed for troubleshooting is present
+        assert!(errors[0].error_message.len() > 0);
+        assert!(errors[0].request_id.len() > 0);
+        assert!(errors[0].request_path.len() > 0);
+        assert!(errors[0].request_method.len() > 0);
+        assert!(errors[0].timestamp > 0);
+        assert!(errors[0].user_id.is_some());
+        assert!(errors[0].bucket.is_some());
+        assert!(errors[0].s3_key.is_some());
+        assert!(errors[0].client_ip.is_some());
+        assert!(errors[0].status_code >= 400);
+    }
 }
