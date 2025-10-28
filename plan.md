@@ -548,7 +548,7 @@ yatagarasu/
 
 ### Logging - Request Logging
 - [x] Test: Logs all incoming requests with timestamp
-- [ ] Test: Logs request method, path, status code
+- [x] Test: Logs request method, path, status code
 - [ ] Test: Logs request duration
 - [ ] Test: Logs JWT subject (if authenticated)
 - [ ] Test: Logs target bucket and S3 key

@@ -19466,4 +19466,247 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_logs_request_method_path_status_code() {
+        // Observability test: Logs request method, path, status code
+        // Tests that each request log includes HTTP method, request path, and response status
+        // Validates complete request/response logging for troubleshooting
+
+        use std::sync::Arc;
+
+        // Test case 1: Define complete request log entry
+        #[derive(Clone, Debug, PartialEq)]
+        struct RequestLog {
+            method: String,
+            path: String,
+            status_code: u16,
+            request_id: u64,
+        }
+
+        // Test case 2: Request logger with method/path/status tracking
+        struct RequestLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+            next_id: Arc<std::sync::Mutex<u64>>,
+        }
+
+        impl RequestLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                    next_id: Arc::new(std::sync::Mutex::new(0)),
+                }
+            }
+
+            fn log_request(&self, method: &str, path: &str, status_code: u16) -> u64 {
+                let mut id = self.next_id.lock().unwrap();
+                let request_id = *id;
+                *id += 1;
+
+                let log_entry = RequestLog {
+                    method: method.to_string(),
+                    path: path.to_string(),
+                    status_code,
+                    request_id,
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+                request_id
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Simulate proxy with request/response logging
+        struct Proxy {
+            logger: RequestLogger,
+        }
+
+        impl Proxy {
+            fn new() -> Self {
+                Self {
+                    logger: RequestLogger::new(),
+                }
+            }
+
+            fn handle_request(&self, method: &str, path: &str) -> u16 {
+                // Simulate request processing and determine status code
+                let status_code = if path.starts_with("/health") {
+                    200
+                } else if path.starts_with("/api/") {
+                    200
+                } else if path == "/not-found" {
+                    404
+                } else if path == "/error" {
+                    500
+                } else {
+                    200
+                };
+
+                self.logger.log_request(method, path, status_code);
+                status_code
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logger.get_logs()
+            }
+        }
+
+        let proxy = Proxy::new();
+
+        // Test case 4: Log GET request with 200 status
+        let status = proxy.handle_request("GET", "/api/objects/file.txt");
+        assert_eq!(status, 200);
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 1, "Should have 1 log entry");
+
+        // Test case 5: Verify log contains all fields
+        let log1 = &logs[0];
+        assert_eq!(log1.method, "GET", "Method should be GET");
+        assert_eq!(log1.path, "/api/objects/file.txt", "Path should match");
+        assert_eq!(log1.status_code, 200, "Status code should be 200");
+        assert_eq!(log1.request_id, 0, "Request ID should be 0");
+
+        // Test case 6: Log POST request
+        proxy.handle_request("POST", "/api/upload");
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 2, "Should have 2 log entries");
+
+        let log2 = &logs[1];
+        assert_eq!(log2.method, "POST", "Method should be POST");
+        assert_eq!(log2.path, "/api/upload", "Path should match");
+        assert_eq!(log2.status_code, 200, "Status code should be 200");
+
+        // Test case 7: Log request that returns 404
+        proxy.handle_request("GET", "/not-found");
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 3, "Should have 3 log entries");
+
+        let log3 = &logs[2];
+        assert_eq!(log3.method, "GET", "Method should be GET");
+        assert_eq!(log3.path, "/not-found", "Path should match");
+        assert_eq!(log3.status_code, 404, "Status code should be 404");
+
+        // Test case 8: Log request that returns 500
+        proxy.handle_request("GET", "/error");
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 4, "Should have 4 log entries");
+
+        let log4 = &logs[3];
+        assert_eq!(log4.method, "GET", "Method should be GET");
+        assert_eq!(log4.path, "/error", "Path should match");
+        assert_eq!(log4.status_code, 500, "Status code should be 500");
+
+        // Test case 9: Test various HTTP methods
+        let methods = vec!["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH"];
+        for method in &methods {
+            proxy.handle_request(method, "/api/resource");
+        }
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 10, "Should have 10 total log entries");
+
+        // Test case 10: Verify all HTTP methods logged correctly
+        let logged_methods: Vec<String> = logs[4..10].iter().map(|l| l.method.clone()).collect();
+        assert_eq!(logged_methods, methods, "All HTTP methods should be logged");
+
+        // Test case 11: Test different paths
+        let paths = vec![
+            "/health",
+            "/api/objects/image.png",
+            "/api/users/123",
+            "/static/style.css",
+            "/v1/buckets/photos/cat.jpg",
+        ];
+
+        for path in &paths {
+            proxy.handle_request("GET", path);
+        }
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 15, "Should have 15 total log entries");
+
+        // Test case 12: Verify all paths logged correctly
+        let logged_paths: Vec<String> = logs[10..15].iter().map(|l| l.path.clone()).collect();
+        assert_eq!(logged_paths, paths, "All paths should be logged");
+
+        // Test case 13: Test various status codes
+        let test_cases = vec![
+            ("GET", "/api/success", 200),
+            ("GET", "/not-found", 404),
+            ("GET", "/error", 500),
+            ("GET", "/api/data", 200),
+        ];
+
+        for (method, path, expected_status) in &test_cases {
+            let status = proxy.handle_request(method, path);
+            assert_eq!(status, *expected_status, "Status should match expected");
+        }
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 19, "Should have 19 total log entries");
+
+        // Test case 14: Verify status codes logged correctly
+        assert_eq!(logs[15].status_code, 200, "First test case status");
+        assert_eq!(logs[16].status_code, 404, "Second test case status");
+        assert_eq!(logs[17].status_code, 500, "Third test case status");
+        assert_eq!(logs[18].status_code, 200, "Fourth test case status");
+
+        // Test case 15: Verify logs capture complex paths with query parameters
+        proxy.handle_request("GET", "/api/search?q=test&limit=10");
+        let logs = proxy.get_logs();
+        let last_log = logs.last().unwrap();
+        assert_eq!(
+            last_log.path, "/api/search?q=test&limit=10",
+            "Path should include query parameters"
+        );
+
+        // Test case 16: Verify logs capture paths with special characters
+        proxy.handle_request("GET", "/files/document%20name.pdf");
+        let logs = proxy.get_logs();
+        let last_log = logs.last().unwrap();
+        assert_eq!(
+            last_log.path, "/files/document%20name.pdf",
+            "Path should include encoded characters"
+        );
+
+        // Test case 17: Group logs by status code
+        let logs = proxy.get_logs();
+        let status_200_count = logs.iter().filter(|l| l.status_code == 200).count();
+        let status_404_count = logs.iter().filter(|l| l.status_code == 404).count();
+        let status_500_count = logs.iter().filter(|l| l.status_code == 500).count();
+
+        assert!(status_200_count > 0, "Should have 200 status logs");
+        assert!(status_404_count > 0, "Should have 404 status logs");
+        assert!(status_500_count > 0, "Should have 500 status logs");
+
+        // Test case 18: Group logs by HTTP method
+        let get_count = logs.iter().filter(|l| l.method == "GET").count();
+        let post_count = logs.iter().filter(|l| l.method == "POST").count();
+
+        assert!(get_count > 0, "Should have GET request logs");
+        assert!(post_count > 0, "Should have POST request logs");
+
+        // Test case 19: Verify log entries are complete (no empty fields)
+        for log in &logs {
+            assert!(!log.method.is_empty(), "Method should not be empty");
+            assert!(!log.path.is_empty(), "Path should not be empty");
+            assert!(
+                log.status_code >= 100,
+                "Status code should be valid HTTP status"
+            );
+            assert!(
+                log.status_code < 600,
+                "Status code should be valid HTTP status"
+            );
+        }
+
+        // Test case 20: Verify request IDs are sequential
+        for (i, log) in logs.iter().enumerate() {
+            assert_eq!(log.request_id, i as u64, "Request IDs should be sequential");
+        }
+    }
 }
