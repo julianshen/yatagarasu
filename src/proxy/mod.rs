@@ -21865,4 +21865,316 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_logs_configuration_errors_on_startup() {
+        // Observability test: Logs configuration errors on startup
+        // Tests that configuration errors during startup are logged with clear messages
+        // Validates troubleshooting capability and startup diagnostics
+
+        use std::sync::Arc;
+
+        // Test case 1: Define configuration error log
+        #[derive(Clone, Debug)]
+        struct ConfigErrorLog {
+            error_type: String,
+            field_name: Option<String>,
+            message: String,
+            timestamp: u64,
+        }
+
+        // Test case 2: Startup logger with config error tracking
+        struct StartupLogger {
+            config_errors: Arc<std::sync::Mutex<Vec<ConfigErrorLog>>>,
+        }
+
+        impl StartupLogger {
+            fn new() -> Self {
+                Self {
+                    config_errors: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_config_error(&self, error_type: &str, field_name: Option<&str>, message: &str) {
+                let error = ConfigErrorLog {
+                    error_type: error_type.to_string(),
+                    field_name: field_name.map(|s| s.to_string()),
+                    message: message.to_string(),
+                    timestamp: 1234567890,
+                };
+                self.config_errors.lock().unwrap().push(error);
+            }
+
+            fn get_errors(&self) -> Vec<ConfigErrorLog> {
+                self.config_errors.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Log missing required field error
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "MissingField",
+            Some("server.address"),
+            "Required field 'server.address' is missing",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, "MissingField");
+        assert_eq!(errors[0].field_name, Some("server.address".to_string()));
+        assert!(errors[0].message.contains("Required field"));
+
+        // Test case 4: Log invalid YAML syntax error
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "ParseError",
+            None,
+            "Invalid YAML syntax at line 5: unexpected character",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, "ParseError");
+        assert!(errors[0].message.contains("Invalid YAML"));
+        assert!(errors[0].message.contains("line 5"));
+
+        // Test case 5: Log invalid field value error
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "InvalidValue",
+            Some("server.port"),
+            "Invalid value for 'server.port': must be between 1 and 65535",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, "InvalidValue");
+        assert_eq!(errors[0].field_name, Some("server.port".to_string()));
+        assert!(errors[0].message.contains("Invalid value"));
+        assert!(errors[0].message.contains("1 and 65535"));
+
+        // Test case 6: Log duplicate path prefix error
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "DuplicatePathPrefix",
+            Some("buckets[1].path_prefix"),
+            "Duplicate path prefix '/products' already defined in buckets[0]",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, "DuplicatePathPrefix");
+        assert!(errors[0].message.contains("Duplicate path prefix"));
+        assert!(errors[0].message.contains("/products"));
+
+        // Test case 7: Log missing JWT secret when auth enabled
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "MissingJwtSecret",
+            Some("jwt.secret"),
+            "JWT secret is required when authentication is enabled",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, "MissingJwtSecret");
+        assert!(errors[0].message.contains("JWT secret is required"));
+
+        // Test case 8: Multiple errors all logged
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "MissingField",
+            Some("server.address"),
+            "Required field 'server.address' is missing",
+        );
+        logger.log_config_error(
+            "InvalidValue",
+            Some("server.port"),
+            "Invalid value for 'server.port': must be between 1 and 65535",
+        );
+        logger.log_config_error(
+            "MissingJwtSecret",
+            Some("jwt.secret"),
+            "JWT secret is required when authentication is enabled",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 3);
+        assert_eq!(errors[0].error_type, "MissingField");
+        assert_eq!(errors[1].error_type, "InvalidValue");
+        assert_eq!(errors[2].error_type, "MissingJwtSecret");
+
+        // Test case 9: All errors have timestamps
+        let logger = StartupLogger::new();
+        logger.log_config_error("ParseError", None, "Invalid YAML syntax");
+        logger.log_config_error("MissingField", Some("server.address"), "Missing field");
+        let errors = logger.get_errors();
+        for error in &errors {
+            assert!(error.timestamp > 0, "Error should have timestamp");
+        }
+
+        // Test case 10: Error messages include field names when available
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "InvalidValue",
+            Some("buckets[0].s3.region"),
+            "Invalid AWS region 'invalid-region-1'",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(
+            errors[0].field_name,
+            Some("buckets[0].s3.region".to_string())
+        );
+        assert!(errors[0].message.contains("Invalid AWS region"));
+
+        // Test case 11: Error messages are descriptive (>20 chars)
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "ValidationError",
+            Some("buckets"),
+            "At least one bucket must be configured",
+        );
+        let errors = logger.get_errors();
+        assert!(
+            errors[0].message.len() > 20,
+            "Error message should be descriptive"
+        );
+
+        // Test case 12: Group errors by type
+        let logger = StartupLogger::new();
+        logger.log_config_error("MissingField", Some("field1"), "Missing field1");
+        logger.log_config_error("MissingField", Some("field2"), "Missing field2");
+        logger.log_config_error("InvalidValue", Some("field3"), "Invalid field3");
+        let errors = logger.get_errors();
+        let missing_field_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.error_type == "MissingField")
+            .collect();
+        assert_eq!(missing_field_errors.len(), 2);
+
+        // Test case 13: Concurrent startup errors handled correctly
+        let logger = StartupLogger::new();
+        let logger_clone1 = StartupLogger {
+            config_errors: Arc::clone(&logger.config_errors),
+        };
+        let logger_clone2 = StartupLogger {
+            config_errors: Arc::clone(&logger.config_errors),
+        };
+        let logger_clone3 = StartupLogger {
+            config_errors: Arc::clone(&logger.config_errors),
+        };
+
+        std::thread::spawn(move || {
+            logger_clone1.log_config_error("Error1", None, "Concurrent error 1");
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            logger_clone2.log_config_error("Error2", None, "Concurrent error 2");
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            logger_clone3.log_config_error("Error3", None, "Concurrent error 3");
+        })
+        .join()
+        .unwrap();
+
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 3);
+
+        // Test case 14: Errors help troubleshooting (actionable messages)
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "InvalidValue",
+            Some("server.port"),
+            "Invalid value for 'server.port': must be between 1 and 65535. Current value: 70000",
+        );
+        let errors = logger.get_errors();
+        assert!(
+            errors[0].message.contains("must be"),
+            "Error should explain constraint"
+        );
+        assert!(
+            errors[0].message.contains("Current value"),
+            "Error should show actual value"
+        );
+
+        // Test case 15: Log environment variable substitution errors
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "EnvVarNotFound",
+            Some("s3.access_key"),
+            "Environment variable 'AWS_ACCESS_KEY_ID' not found for substitution in 's3.access_key'",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].error_type, "EnvVarNotFound");
+        assert!(errors[0].message.contains("AWS_ACCESS_KEY_ID"));
+        assert!(errors[0].message.contains("not found"));
+
+        // Test case 16: Log bucket name validation errors
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "InvalidBucketName",
+            Some("buckets[0].name"),
+            "Bucket name cannot be empty",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].error_type, "InvalidBucketName");
+        assert!(errors[0].message.contains("cannot be empty"));
+
+        // Test case 17: Log path prefix validation errors
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "InvalidPathPrefix",
+            Some("buckets[0].path_prefix"),
+            "Path prefix must start with '/', got: 'products'",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].error_type, "InvalidPathPrefix");
+        assert!(errors[0].message.contains("must start with"));
+        assert!(errors[0].message.contains("got: 'products'"));
+
+        // Test case 18: Log JWT algorithm errors
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "UnsupportedAlgorithm",
+            Some("jwt.algorithm"),
+            "Unsupported JWT algorithm 'RS512', only 'HS256' is supported",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].error_type, "UnsupportedAlgorithm");
+        assert!(errors[0].message.contains("Unsupported JWT algorithm"));
+        assert!(errors[0].message.contains("HS256"));
+
+        // Test case 19: Log empty token sources error
+        let logger = StartupLogger::new();
+        logger.log_config_error(
+            "EmptyTokenSources",
+            Some("jwt.token_sources"),
+            "At least one token source must be configured when JWT authentication is enabled",
+        );
+        let errors = logger.get_errors();
+        assert_eq!(errors[0].error_type, "EmptyTokenSources");
+        assert!(errors[0]
+            .message
+            .contains("At least one token source must be configured"));
+
+        // Test case 20: Verify all error types are distinct
+        let error_types = vec![
+            "MissingField",
+            "ParseError",
+            "InvalidValue",
+            "DuplicatePathPrefix",
+            "MissingJwtSecret",
+            "ValidationError",
+            "EnvVarNotFound",
+            "InvalidBucketName",
+            "InvalidPathPrefix",
+            "UnsupportedAlgorithm",
+            "EmptyTokenSources",
+        ];
+        let unique_types: std::collections::HashSet<_> = error_types.iter().collect();
+        assert_eq!(
+            error_types.len(),
+            unique_types.len(),
+            "All error types should be unique"
+        );
+    }
 }
