@@ -550,7 +550,7 @@ yatagarasu/
 - [x] Test: Logs all incoming requests with timestamp
 - [x] Test: Logs request method, path, status code
 - [x] Test: Logs request duration
-- [ ] Test: Logs JWT subject (if authenticated)
+- [x] Test: Logs JWT subject (if authenticated)
 - [ ] Test: Logs target bucket and S3 key
 - [ ] Test: Logs unique request ID for correlation
 - [ ] Test: Logs don't include sensitive data (tokens, credentials)

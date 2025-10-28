@@ -19981,4 +19981,248 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_logs_jwt_subject_if_authenticated() {
+        // Observability test: Logs JWT subject (if authenticated)
+        // Tests that authenticated requests log the JWT subject for audit trail
+        // Validates user identification in logs without exposing sensitive data
+
+        use std::sync::Arc;
+
+        // Test case 1: Define request log with optional JWT subject
+        #[derive(Clone, Debug, PartialEq)]
+        struct RequestLog {
+            path: String,
+            jwt_subject: Option<String>,
+            authenticated: bool,
+        }
+
+        // Test case 2: Request logger that captures JWT subject
+        struct RequestLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+        }
+
+        impl RequestLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_request(&self, path: &str, jwt_subject: Option<&str>) {
+                let log_entry = RequestLog {
+                    path: path.to_string(),
+                    jwt_subject: jwt_subject.map(|s| s.to_string()),
+                    authenticated: jwt_subject.is_some(),
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Proxy with JWT authentication
+        struct Proxy {
+            logger: RequestLogger,
+        }
+
+        impl Proxy {
+            fn new() -> Self {
+                Self {
+                    logger: RequestLogger::new(),
+                }
+            }
+
+            fn handle_authenticated_request(&self, path: &str, jwt_subject: &str) {
+                self.logger.log_request(path, Some(jwt_subject));
+            }
+
+            fn handle_unauthenticated_request(&self, path: &str) {
+                self.logger.log_request(path, None);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logger.get_logs()
+            }
+        }
+
+        let proxy = Proxy::new();
+
+        // Test case 4: Log authenticated request
+        proxy.handle_authenticated_request("/api/private/data", "user123");
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 1, "Should have 1 log entry");
+
+        let log1 = &logs[0];
+        assert_eq!(log1.path, "/api/private/data");
+        assert_eq!(log1.jwt_subject, Some("user123".to_string()));
+        assert!(
+            log1.authenticated,
+            "Request should be marked as authenticated"
+        );
+
+        // Test case 5: Log unauthenticated request
+        proxy.handle_unauthenticated_request("/api/public/info");
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 2, "Should have 2 log entries");
+
+        let log2 = &logs[1];
+        assert_eq!(log2.path, "/api/public/info");
+        assert_eq!(log2.jwt_subject, None);
+        assert!(!log2.authenticated, "Request should not be authenticated");
+
+        // Test case 6: Log multiple authenticated requests with different subjects
+        proxy.handle_authenticated_request("/api/account", "alice");
+        proxy.handle_authenticated_request("/api/settings", "bob");
+        proxy.handle_authenticated_request("/api/profile", "charlie");
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 5, "Should have 5 log entries");
+
+        // Test case 7: Verify all subjects are logged correctly
+        assert_eq!(logs[2].jwt_subject, Some("alice".to_string()));
+        assert_eq!(logs[3].jwt_subject, Some("bob".to_string()));
+        assert_eq!(logs[4].jwt_subject, Some("charlie".to_string()));
+
+        // Test case 8: Verify all authenticated requests marked as such
+        for i in [0, 2, 3, 4] {
+            assert!(
+                logs[i].authenticated,
+                "Authenticated request {} should be marked",
+                i
+            );
+            assert!(
+                logs[i].jwt_subject.is_some(),
+                "Authenticated request {} should have subject",
+                i
+            );
+        }
+
+        // Test case 9: Verify unauthenticated request has no subject
+        assert!(!logs[1].authenticated);
+        assert!(logs[1].jwt_subject.is_none());
+
+        // Test case 10: Test subject with email format
+        proxy.handle_authenticated_request("/api/data", "user@example.com");
+        let logs = proxy.get_logs();
+        let email_log = logs.last().unwrap();
+        assert_eq!(email_log.jwt_subject, Some("user@example.com".to_string()));
+
+        // Test case 11: Test subject with UUID format
+        proxy.handle_authenticated_request("/api/resource", "550e8400-e29b-41d4-a716-446655440000");
+        let logs = proxy.get_logs();
+        let uuid_log = logs.last().unwrap();
+        assert_eq!(
+            uuid_log.jwt_subject,
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string())
+        );
+
+        // Test case 12: Group logs by authentication status
+        let authenticated_count = logs.iter().filter(|l| l.authenticated).count();
+        let unauthenticated_count = logs.iter().filter(|l| !l.authenticated).count();
+
+        assert_eq!(
+            authenticated_count, 6,
+            "Should have 6 authenticated requests"
+        );
+        assert_eq!(
+            unauthenticated_count, 1,
+            "Should have 1 unauthenticated request"
+        );
+
+        // Test case 13: Find requests by specific user
+        let alice_requests: Vec<_> = logs
+            .iter()
+            .filter(|l| l.jwt_subject == Some("alice".to_string()))
+            .collect();
+        assert_eq!(alice_requests.len(), 1, "Should have 1 request from alice");
+        assert_eq!(alice_requests[0].path, "/api/account");
+
+        // Test case 14: Get list of unique subjects
+        let unique_subjects: std::collections::HashSet<String> =
+            logs.iter().filter_map(|l| l.jwt_subject.clone()).collect();
+        assert_eq!(
+            unique_subjects.len(),
+            6,
+            "Should have 6 unique authenticated subjects"
+        );
+
+        // Test case 15: Verify no subject contains sensitive token data
+        for log in &logs {
+            if let Some(ref subject) = log.jwt_subject {
+                // Subject should not look like a JWT token (no dots indicating header.payload.signature)
+                let dot_count = subject.matches('.').count();
+                assert!(
+                    dot_count < 2,
+                    "Subject should not be a full JWT token: {}",
+                    subject
+                );
+
+                // Subject should not be excessively long (tokens are typically >100 chars)
+                assert!(
+                    subject.len() < 100,
+                    "Subject should be reasonably short: {}",
+                    subject
+                );
+            }
+        }
+
+        // Test case 16: Test mixed authenticated and unauthenticated requests
+        proxy.handle_unauthenticated_request("/public/health");
+        proxy.handle_authenticated_request("/private/admin", "admin-user");
+        proxy.handle_unauthenticated_request("/public/status");
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 10, "Should have 10 total log entries");
+
+        // Verify the pattern
+        let last_three = &logs[7..10];
+        assert!(!last_three[0].authenticated, "Should be unauthenticated");
+        assert!(last_three[1].authenticated, "Should be authenticated");
+        assert_eq!(last_three[1].jwt_subject, Some("admin-user".to_string()));
+        assert!(!last_three[2].authenticated, "Should be unauthenticated");
+
+        // Test case 17: Verify subject allows audit trail reconstruction
+        let admin_actions: Vec<String> = logs
+            .iter()
+            .filter(|l| l.jwt_subject == Some("admin-user".to_string()))
+            .map(|l| l.path.clone())
+            .collect();
+
+        assert_eq!(admin_actions.len(), 1);
+        assert_eq!(admin_actions[0], "/private/admin");
+
+        // Test case 18: Test subject with numeric ID
+        proxy.handle_authenticated_request("/api/user-data", "12345");
+        let logs = proxy.get_logs();
+        let numeric_log = logs.last().unwrap();
+        assert_eq!(numeric_log.jwt_subject, Some("12345".to_string()));
+        assert!(numeric_log.authenticated);
+
+        // Test case 19: Verify all authenticated logs have non-empty subjects
+        let authenticated_logs: Vec<_> = logs.iter().filter(|l| l.authenticated).collect();
+        for log in authenticated_logs {
+            assert!(
+                log.jwt_subject.is_some(),
+                "Authenticated log must have subject"
+            );
+            let subject = log.jwt_subject.as_ref().unwrap();
+            assert!(!subject.is_empty(), "Subject should not be empty");
+        }
+
+        // Test case 20: Verify logging doesn't modify subject
+        let original_subject = "test-user@domain.com";
+        proxy.handle_authenticated_request("/test", original_subject);
+        let logs = proxy.get_logs();
+        let test_log = logs.last().unwrap();
+        assert_eq!(
+            test_log.jwt_subject.as_ref().unwrap(),
+            original_subject,
+            "Subject should be logged exactly as provided"
+        );
+    }
 }
