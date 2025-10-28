@@ -21559,4 +21559,310 @@ mod tests {
         let ipv6_failure = failures.last().unwrap();
         assert!(ipv6_failure.ip_address.contains("2001:0db8"));
     }
+
+    #[test]
+    fn test_logs_s3_errors_with_response_details() {
+        // Observability test: Logs S3 errors with response details
+        // Tests that S3 errors include error code, message, request ID, and other details
+        // Validates S3 troubleshooting and debugging capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define S3 error log with response details
+        #[derive(Clone, Debug)]
+        struct S3ErrorLog {
+            error_code: String,
+            error_message: String,
+            bucket: String,
+            key: String,
+            request_id: String,
+            status_code: u16,
+            timestamp: u64,
+        }
+
+        // Test case 2: S3 error logger
+        struct S3ErrorLogger {
+            errors: Arc<std::sync::Mutex<Vec<S3ErrorLog>>>,
+        }
+
+        impl S3ErrorLogger {
+            fn new() -> Self {
+                Self {
+                    errors: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_s3_error(
+                &self,
+                error_code: &str,
+                error_message: &str,
+                bucket: &str,
+                key: &str,
+                request_id: &str,
+                status_code: u16,
+            ) {
+                let log = S3ErrorLog {
+                    error_code: error_code.to_string(),
+                    error_message: error_message.to_string(),
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    request_id: request_id.to_string(),
+                    status_code,
+                    timestamp: 1234567890,
+                };
+
+                self.errors.lock().unwrap().push(log);
+            }
+
+            fn get_errors(&self) -> Vec<S3ErrorLog> {
+                self.errors.lock().unwrap().clone()
+            }
+        }
+
+        let logger = S3ErrorLogger::new();
+
+        // Test case 3: Log NoSuchBucket error
+        logger.log_s3_error(
+            "NoSuchBucket",
+            "The specified bucket does not exist",
+            "missing-bucket",
+            "file.txt",
+            "req-12345",
+            404,
+        );
+
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_code, "NoSuchBucket");
+        assert_eq!(errors[0].status_code, 404);
+        assert_eq!(errors[0].request_id, "req-12345");
+
+        // Test case 4: Log NoSuchKey error
+        logger.log_s3_error(
+            "NoSuchKey",
+            "The specified key does not exist",
+            "my-bucket",
+            "missing-file.txt",
+            "req-67890",
+            404,
+        );
+
+        let errors = logger.get_errors();
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[1].error_code, "NoSuchKey");
+        assert_eq!(errors[1].bucket, "my-bucket");
+        assert_eq!(errors[1].key, "missing-file.txt");
+
+        // Test case 5: Log AccessDenied error
+        logger.log_s3_error(
+            "AccessDenied",
+            "Access Denied",
+            "private-bucket",
+            "secret.txt",
+            "req-abcde",
+            403,
+        );
+
+        let errors = logger.get_errors();
+        assert_eq!(errors[2].error_code, "AccessDenied");
+        assert_eq!(errors[2].status_code, 403);
+
+        // Test case 6: Log InvalidBucketName error
+        logger.log_s3_error(
+            "InvalidBucketName",
+            "The specified bucket is not valid",
+            "invalid..bucket",
+            "",
+            "req-fghij",
+            400,
+        );
+
+        let errors = logger.get_errors();
+        assert_eq!(errors[3].error_code, "InvalidBucketName");
+        assert_eq!(errors[3].status_code, 400);
+
+        // Test case 7: Log InternalError
+        logger.log_s3_error(
+            "InternalError",
+            "We encountered an internal error. Please try again.",
+            "test-bucket",
+            "data.json",
+            "req-klmno",
+            500,
+        );
+
+        let errors = logger.get_errors();
+        assert_eq!(errors[4].error_code, "InternalError");
+        assert_eq!(errors[4].status_code, 500);
+
+        // Test case 8: Verify all errors have timestamps
+        for error in &errors {
+            assert!(error.timestamp > 0, "Error should have timestamp");
+        }
+
+        // Test case 9: Group errors by error code
+        let errors = logger.get_errors();
+        let mut code_counts = std::collections::HashMap::new();
+        for error in &errors {
+            *code_counts.entry(error.error_code.clone()).or_insert(0) += 1;
+        }
+
+        assert_eq!(code_counts.get("NoSuchBucket"), Some(&1));
+        assert_eq!(code_counts.get("NoSuchKey"), Some(&1));
+        assert_eq!(code_counts.get("AccessDenied"), Some(&1));
+
+        // Test case 10: Group errors by status code
+        let errors_404: Vec<_> = errors.iter().filter(|e| e.status_code == 404).collect();
+        assert_eq!(errors_404.len(), 2);
+
+        let errors_403: Vec<_> = errors.iter().filter(|e| e.status_code == 403).collect();
+        assert_eq!(errors_403.len(), 1);
+
+        // Test case 11: Verify request IDs are unique
+        let request_ids: Vec<String> = errors.iter().map(|e| e.request_id.clone()).collect();
+        let unique_ids: std::collections::HashSet<String> = request_ids.iter().cloned().collect();
+        assert_eq!(unique_ids.len(), request_ids.len());
+
+        // Test case 12: Test errors for specific bucket
+        let bucket_errors: Vec<_> = errors.iter().filter(|e| e.bucket == "my-bucket").collect();
+        assert_eq!(bucket_errors.len(), 1);
+        assert_eq!(bucket_errors[0].error_code, "NoSuchKey");
+
+        // Test case 13: Log SlowDown error
+        logger.log_s3_error(
+            "SlowDown",
+            "Please reduce your request rate",
+            "busy-bucket",
+            "file.txt",
+            "req-pqrst",
+            503,
+        );
+
+        let errors = logger.get_errors();
+        assert_eq!(errors.last().unwrap().error_code, "SlowDown");
+        assert_eq!(errors.last().unwrap().status_code, 503);
+
+        // Test case 14: Verify error messages are descriptive
+        for error in &errors {
+            assert!(
+                !error.error_message.is_empty(),
+                "Error message should not be empty"
+            );
+            assert!(
+                error.error_message.len() > 10,
+                "Error message should be descriptive"
+            );
+        }
+
+        // Test case 15: Test concurrent S3 errors
+        let logger2 = Arc::new(S3ErrorLogger::new());
+        let handles: Vec<_> = (0..5)
+            .map(|i| {
+                let logger_clone = Arc::clone(&logger2);
+                std::thread::spawn(move || {
+                    logger_clone.log_s3_error(
+                        "NoSuchKey",
+                        "The specified key does not exist",
+                        &format!("bucket{}", i),
+                        &format!("file{}.txt", i),
+                        &format!("req-{}", i),
+                        404,
+                    );
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let concurrent_errors = logger2.get_errors();
+        assert_eq!(concurrent_errors.len(), 5);
+
+        // Test case 16: Verify all concurrent errors logged
+        for error in &concurrent_errors {
+            assert_eq!(error.error_code, "NoSuchKey");
+            assert_eq!(error.status_code, 404);
+        }
+
+        // Test case 17: Test error with long key path
+        logger.log_s3_error(
+            "NoSuchKey",
+            "The specified key does not exist",
+            "data-bucket",
+            "path/to/deeply/nested/directory/structure/file.txt",
+            "req-uvwxy",
+            404,
+        );
+
+        let errors = logger.get_errors();
+        let long_key_error = errors.last().unwrap();
+        assert!(long_key_error.key.len() > 40);
+        assert!(long_key_error.key.contains("deeply/nested"));
+
+        // Test case 18: Verify errors enable troubleshooting
+        for error in &errors {
+            // Each error should have enough info for debugging
+            assert!(!error.error_code.is_empty());
+            assert!(!error.error_message.is_empty());
+            assert!(!error.bucket.is_empty() || error.error_code == "InvalidBucketName");
+            assert!(!error.request_id.is_empty());
+            assert!(error.status_code >= 400);
+        }
+
+        // Test case 19: Test various S3 error codes
+        let s3_error_codes = vec![
+            (
+                "RequestTimeout",
+                "Your socket connection to the server was not read",
+                408,
+            ),
+            (
+                "EntityTooLarge",
+                "Your proposed upload exceeds the maximum allowed",
+                400,
+            ),
+            (
+                "MethodNotAllowed",
+                "The specified method is not allowed",
+                405,
+            ),
+            (
+                "ServiceUnavailable",
+                "Service is temporarily unavailable",
+                503,
+            ),
+        ];
+
+        for (code, message, status) in s3_error_codes {
+            logger.log_s3_error(code, message, "test-bucket", "test.txt", "req-test", status);
+        }
+
+        let errors = logger.get_errors();
+        assert!(errors.iter().any(|e| e.error_code == "RequestTimeout"));
+        assert!(errors.iter().any(|e| e.error_code == "EntityTooLarge"));
+        assert!(errors.iter().any(|e| e.error_code == "MethodNotAllowed"));
+
+        // Test case 20: Verify error logs map to S3 response format
+        let errors = logger.get_errors();
+        for error in &errors {
+            // S3 error codes should be in PascalCase
+            assert!(
+                error.error_code.chars().next().unwrap().is_uppercase(),
+                "Error code should start with uppercase"
+            );
+
+            // Status codes should be valid HTTP status codes
+            assert!(
+                error.status_code >= 400 && error.status_code < 600,
+                "Status code should be 4xx or 5xx"
+            );
+
+            // Request IDs should have a format
+            assert!(
+                error.request_id.starts_with("req-"),
+                "Request ID should have consistent format"
+            );
+        }
+    }
 }

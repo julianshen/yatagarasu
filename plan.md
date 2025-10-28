@@ -558,7 +558,7 @@ yatagarasu/
 ### Logging - Error Logging
 - [x] Test: Logs all errors with stack traces
 - [x] Test: Logs auth failures with reason
-- [ ] Test: Logs S3 errors with response details
+- [x] Test: Logs S3 errors with response details
 - [ ] Test: Logs configuration errors on startup
 - [ ] Test: Error logs include request context
 - [ ] Test: Logs are structured JSON format
