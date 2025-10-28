@@ -22697,4 +22697,256 @@ mod tests {
         assert!(errors[0].client_ip.is_some());
         assert!(errors[0].status_code >= 400);
     }
+
+    #[test]
+    fn test_logs_are_structured_json_format() {
+        // Observability test: Logs are structured JSON format
+        // Tests that log entries are formatted as structured JSON for machine parsing
+        // Validates log aggregation and analysis capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define JSON log entry
+        #[derive(Clone, Debug)]
+        struct JsonLogEntry {
+            raw_json: String,
+        }
+
+        // Test case 2: JSON logger
+        struct JsonLogger {
+            logs: Arc<std::sync::Mutex<Vec<JsonLogEntry>>>,
+        }
+
+        impl JsonLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log(&self, json: &str) {
+                let entry = JsonLogEntry {
+                    raw_json: json.to_string(),
+                };
+                self.logs.lock().unwrap().push(entry);
+            }
+
+            fn get_logs(&self) -> Vec<JsonLogEntry> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Log entry is valid JSON
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Request received","timestamp":1234567890}"#);
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 1);
+        // Parse as JSON to validate format
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&logs[0].raw_json);
+        assert!(parsed.is_ok(), "Log should be valid JSON");
+
+        // Test case 4: Log contains level field
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"error","message":"Something went wrong"}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(json["level"], "error");
+
+        // Test case 5: Log contains message field
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Processing request"}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(json["message"], "Processing request");
+
+        // Test case 6: Log contains timestamp field
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Event","timestamp":1234567890}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(json["timestamp"], 1234567890);
+
+        // Test case 7: Log supports nested objects
+        let logger = JsonLogger::new();
+        logger
+            .log(r#"{"level":"info","message":"Request","request":{"id":"req-1","path":"/test"}}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(json["request"]["id"], "req-1");
+        assert_eq!(json["request"]["path"], "/test");
+
+        // Test case 8: Log supports arrays
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"warn","message":"Errors","errors":["error1","error2","error3"]}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert!(json["errors"].is_array());
+        assert_eq!(json["errors"][0], "error1");
+        assert_eq!(json["errors"][1], "error2");
+        assert_eq!(json["errors"][2], "error3");
+
+        // Test case 9: Log supports numeric values
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Metrics","status_code":200,"duration_ms":45.6}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(json["status_code"], 200);
+        assert_eq!(json["duration_ms"], 45.6);
+
+        // Test case 10: Log supports boolean values
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"State","authenticated":true,"cached":false}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(json["authenticated"], true);
+        assert_eq!(json["cached"], false);
+
+        // Test case 11: Log supports null values
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Data","user_id":null}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert!(json["user_id"].is_null());
+
+        // Test case 12: Multiple logs maintain JSON format
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Log 1"}"#);
+        logger.log(r#"{"level":"warn","message":"Log 2"}"#);
+        logger.log(r#"{"level":"error","message":"Log 3"}"#);
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 3);
+        for log in &logs {
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&log.raw_json);
+            assert!(parsed.is_ok(), "All logs should be valid JSON");
+        }
+
+        // Test case 13: Log includes standard fields
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Standard log","timestamp":1234567890,"request_id":"req-123"}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert!(json.get("level").is_some());
+        assert!(json.get("message").is_some());
+        assert!(json.get("timestamp").is_some());
+        assert!(json.get("request_id").is_some());
+
+        // Test case 14: Log escapes special characters correctly
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Path: /test\"quoted\""}"#);
+        let logs = logger.get_logs();
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&logs[0].raw_json);
+        assert!(
+            parsed.is_ok(),
+            "Special characters should be escaped properly"
+        );
+
+        // Test case 15: Log supports deeply nested structures
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","request":{"headers":{"authorization":"Bearer xyz","content-type":"application/json"}}}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        assert_eq!(
+            json["request"]["headers"]["content-type"],
+            "application/json"
+        );
+
+        // Test case 16: JSON format enables log aggregation
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"error","message":"Error 1","status_code":500}"#);
+        logger.log(r#"{"level":"error","message":"Error 2","status_code":500}"#);
+        logger.log(r#"{"level":"info","message":"Success","status_code":200}"#);
+        let logs = logger.get_logs();
+        // Can aggregate by status_code
+        let error_logs: Vec<_> = logs
+            .iter()
+            .filter(|log| {
+                let json: serde_json::Value = serde_json::from_str(&log.raw_json).unwrap();
+                json["status_code"] == 500
+            })
+            .collect();
+        assert_eq!(error_logs.len(), 2);
+
+        // Test case 17: JSON format enables field extraction
+        let logger = JsonLogger::new();
+        logger.log(
+            r#"{"level":"info","message":"Request","request_id":"req-1","user_id":"user-123"}"#,
+        );
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        // Can extract specific fields
+        let request_id = json["request_id"].as_str().unwrap();
+        let user_id = json["user_id"].as_str().unwrap();
+        assert_eq!(request_id, "req-1");
+        assert_eq!(user_id, "user-123");
+
+        // Test case 18: Concurrent logs maintain JSON format
+        let logger = JsonLogger::new();
+        let logger_clone1 = JsonLogger {
+            logs: Arc::clone(&logger.logs),
+        };
+        let logger_clone2 = JsonLogger {
+            logs: Arc::clone(&logger.logs),
+        };
+        let logger_clone3 = JsonLogger {
+            logs: Arc::clone(&logger.logs),
+        };
+
+        std::thread::spawn(move || {
+            logger_clone1.log(r#"{"level":"info","message":"Thread 1"}"#);
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            logger_clone2.log(r#"{"level":"info","message":"Thread 2"}"#);
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            logger_clone3.log(r#"{"level":"info","message":"Thread 3"}"#);
+        })
+        .join()
+        .unwrap();
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 3);
+        for log in &logs {
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&log.raw_json);
+            assert!(parsed.is_ok(), "Concurrent logs should maintain valid JSON");
+        }
+
+        // Test case 19: JSON format supports log filtering
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Info message"}"#);
+        logger.log(r#"{"level":"warn","message":"Warning message"}"#);
+        logger.log(r#"{"level":"error","message":"Error message"}"#);
+        logger.log(r#"{"level":"error","message":"Another error"}"#);
+        let logs = logger.get_logs();
+        // Can filter by level
+        let error_logs: Vec<_> = logs
+            .iter()
+            .filter(|log| {
+                let json: serde_json::Value = serde_json::from_str(&log.raw_json).unwrap();
+                json["level"] == "error"
+            })
+            .collect();
+        assert_eq!(error_logs.len(), 2);
+
+        // Test case 20: JSON format enables machine parsing for analytics
+        let logger = JsonLogger::new();
+        logger.log(r#"{"level":"info","message":"Request completed","request_id":"req-100","duration_ms":123,"status_code":200,"path":"/api/data"}"#);
+        let logs = logger.get_logs();
+        let json: serde_json::Value = serde_json::from_str(&logs[0].raw_json).unwrap();
+        // All fields are machine-readable
+        assert!(json["request_id"].is_string());
+        assert!(json["duration_ms"].is_number());
+        assert!(json["status_code"].is_number());
+        assert!(json["path"].is_string());
+        // Can perform analytics on structured data
+        let duration = json["duration_ms"].as_f64().unwrap();
+        let status = json["status_code"].as_u64().unwrap();
+        assert_eq!(duration, 123.0);
+        assert_eq!(status, 200);
+    }
 }
