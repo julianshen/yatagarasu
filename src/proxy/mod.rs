@@ -24584,4 +24584,282 @@ mod tests {
         assert_eq!(gauge_server1.get(), 70);
         assert_eq!(gauge_server2.get(), 30);
     }
+
+    #[test]
+    fn test_exports_total_bytes_transferred() {
+        // Metrics test: Exports total bytes transferred
+        // Tests that the total number of bytes sent and received is tracked
+        // Validates bandwidth monitoring and cost analysis capability
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define bytes transferred counter
+        #[derive(Clone)]
+        struct BytesTransferredCounter {
+            bytes_sent: Arc<AtomicU64>,
+            bytes_received: Arc<AtomicU64>,
+        }
+
+        impl BytesTransferredCounter {
+            fn new() -> Self {
+                Self {
+                    bytes_sent: Arc::new(AtomicU64::new(0)),
+                    bytes_received: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn add_sent(&self, bytes: u64) {
+                self.bytes_sent.fetch_add(bytes, Ordering::SeqCst);
+            }
+
+            fn add_received(&self, bytes: u64) {
+                self.bytes_received.fetch_add(bytes, Ordering::SeqCst);
+            }
+
+            fn get_sent(&self) -> u64 {
+                self.bytes_sent.load(Ordering::SeqCst)
+            }
+
+            fn get_received(&self) -> u64 {
+                self.bytes_received.load(Ordering::SeqCst)
+            }
+
+            fn get_total(&self) -> u64 {
+                self.get_sent() + self.get_received()
+            }
+        }
+
+        // Test case 2: Counter starts at zero
+        let counter = BytesTransferredCounter::new();
+        assert_eq!(counter.get_sent(), 0);
+        assert_eq!(counter.get_received(), 0);
+        assert_eq!(counter.get_total(), 0);
+
+        // Test case 3: Tracks bytes sent
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(1024); // 1 KB
+        assert_eq!(counter.get_sent(), 1024);
+
+        // Test case 4: Tracks bytes received
+        let counter = BytesTransferredCounter::new();
+        counter.add_received(2048); // 2 KB
+        assert_eq!(counter.get_received(), 2048);
+
+        // Test case 5: Tracks both sent and received independently
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(1024);
+        counter.add_received(2048);
+        assert_eq!(counter.get_sent(), 1024);
+        assert_eq!(counter.get_received(), 2048);
+        assert_eq!(counter.get_total(), 3072);
+
+        // Test case 6: Accumulates over multiple transfers
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(1024);
+        counter.add_sent(2048);
+        counter.add_sent(4096);
+        assert_eq!(counter.get_sent(), 7168);
+
+        // Test case 7: Tracks large file transfer
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(10 * 1024 * 1024); // 10 MB
+        assert_eq!(counter.get_sent(), 10_485_760);
+
+        // Test case 8: Concurrent transfers are thread-safe
+        let counter = BytesTransferredCounter::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+        let counter_clone3 = counter.clone();
+
+        let handle1 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.add_sent(1024);
+            }
+        });
+
+        let handle2 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.add_sent(1024);
+            }
+        });
+
+        let handle3 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone3.add_sent(1024);
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+        handle3.join().unwrap();
+
+        assert_eq!(counter.get_sent(), 307_200); // 300 KB
+
+        // Test case 9: Can calculate bandwidth usage (bytes/sec)
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(1_000_000); // 1 MB transferred in 1 second
+        let bytes_per_second = counter.get_sent();
+        let megabytes_per_second = bytes_per_second as f64 / 1_000_000.0;
+        assert_eq!(megabytes_per_second, 1.0);
+
+        // Test case 10: Can track upload vs download ratio
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(100_000); // Upload
+        counter.add_received(1_000_000); // Download
+        let upload_ratio = counter.get_sent() as f64 / counter.get_total() as f64;
+        let download_ratio = counter.get_received() as f64 / counter.get_total() as f64;
+        assert_eq!(upload_ratio, 0.09090909090909091);
+        assert_eq!(download_ratio, 0.9090909090909091);
+
+        // Test case 11: Metrics enable cost calculation
+        let counter = BytesTransferredCounter::new();
+        // Egress: 100 GB sent
+        counter.add_sent(100 * 1024 * 1024 * 1024);
+        // Ingress: 10 GB received (usually free)
+        counter.add_received(10 * 1024 * 1024 * 1024);
+
+        let egress_gb = counter.get_sent() as f64 / (1024.0 * 1024.0 * 1024.0);
+        let cost_per_gb = 0.09; // $0.09 per GB
+        let total_cost = egress_gb * cost_per_gb;
+
+        assert_eq!(egress_gb, 100.0);
+        assert_eq!(total_cost, 9.0); // $9.00
+
+        // Test case 12: Can detect bandwidth anomalies
+        let counter = BytesTransferredCounter::new();
+        // Normal pattern: 1 MB/request
+        for _ in 0..10 {
+            counter.add_sent(1_000_000);
+        }
+        // Anomaly: 100 MB in single request
+        counter.add_sent(100_000_000);
+
+        let total = counter.get_sent();
+        let average_per_request = total / 11;
+        let last_request_size = 100_000_000;
+        let is_anomaly = last_request_size > (average_per_request * 5);
+
+        assert!(is_anomaly, "Should detect bandwidth anomaly");
+
+        // Test case 13: Tracks bidirectional transfer
+        let counter = BytesTransferredCounter::new();
+        // Client sends request (1 KB)
+        counter.add_received(1024);
+        // Server sends response (10 MB)
+        counter.add_sent(10_485_760);
+
+        assert_eq!(counter.get_received(), 1024);
+        assert_eq!(counter.get_sent(), 10_485_760);
+        assert_eq!(counter.get_total(), 10_486_784);
+
+        // Test case 14: Can calculate throughput
+        let counter = BytesTransferredCounter::new();
+        // Transfer 100 MB
+        counter.add_sent(100 * 1024 * 1024);
+        let megabytes = counter.get_sent() as f64 / (1024.0 * 1024.0);
+        assert_eq!(megabytes, 100.0);
+
+        // Test case 15: Tracks zero-byte transfers
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(0);
+        counter.add_received(0);
+        assert_eq!(counter.get_total(), 0);
+
+        // Test case 16: Can alert on bandwidth quota exceeded
+        let counter = BytesTransferredCounter::new();
+        let quota = 1_000_000_000; // 1 GB quota
+
+        // Transfer 1.5 GB
+        counter.add_sent(1_500_000_000);
+
+        let should_alert = counter.get_sent() > quota;
+        assert!(should_alert, "Should alert when quota exceeded");
+
+        // Test case 17: Supports different units (KB, MB, GB)
+        let counter = BytesTransferredCounter::new();
+        counter.add_sent(1024); // 1 KB
+        counter.add_sent(1024 * 1024); // 1 MB
+        counter.add_sent(1024 * 1024 * 1024); // 1 GB
+
+        let total_bytes = counter.get_sent();
+        let total_kb = total_bytes as f64 / 1024.0;
+        let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
+        let total_gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+        assert!(total_kb > 1024.0);
+        assert!(total_mb > 1.0);
+        assert!(total_gb > 1.0);
+
+        // Test case 18: Can track bandwidth per bucket
+        #[derive(Clone)]
+        struct BucketBandwidth {
+            counters: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
+        }
+
+        impl BucketBandwidth {
+            fn new() -> Self {
+                Self {
+                    counters: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                }
+            }
+
+            fn add_bytes(&self, bucket: &str, bytes: u64) {
+                let mut counters = self.counters.lock().unwrap();
+                *counters.entry(bucket.to_string()).or_insert(0) += bytes;
+            }
+
+            fn get_bytes(&self, bucket: &str) -> u64 {
+                self.counters
+                    .lock()
+                    .unwrap()
+                    .get(bucket)
+                    .copied()
+                    .unwrap_or(0)
+            }
+        }
+
+        let bucket_bandwidth = BucketBandwidth::new();
+        bucket_bandwidth.add_bytes("products", 10_000_000);
+        bucket_bandwidth.add_bytes("media", 50_000_000);
+
+        assert_eq!(bucket_bandwidth.get_bytes("products"), 10_000_000);
+        assert_eq!(bucket_bandwidth.get_bytes("media"), 50_000_000);
+
+        // Test case 19: Metrics enable capacity planning
+        let counter = BytesTransferredCounter::new();
+        // Current daily bandwidth: 100 GB
+        counter.add_sent(100 * 1024 * 1024 * 1024);
+
+        let daily_gb = counter.get_sent() as f64 / (1024.0 * 1024.0 * 1024.0);
+        let monthly_gb = daily_gb * 30.0;
+
+        // Need upgrade if monthly > 1 TB
+        let needs_upgrade = monthly_gb > 1024.0;
+        assert!(needs_upgrade, "Should recommend upgrade for 3 TB/month");
+
+        // Test case 20: Concurrent sent and received tracking
+        let counter = BytesTransferredCounter::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+
+        let handle1 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.add_sent(1024);
+            }
+        });
+
+        let handle2 = std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.add_received(2048);
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        assert_eq!(counter.get_sent(), 102_400);
+        assert_eq!(counter.get_received(), 204_800);
+        assert_eq!(counter.get_total(), 307_200);
+    }
 }

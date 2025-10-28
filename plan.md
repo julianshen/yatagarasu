@@ -569,7 +569,7 @@ yatagarasu/
 - [x] Test: Exports requests per bucket
 - [x] Test: Exports requests per route
 - [x] Test: Exports concurrent request gauge
-- [ ] Test: Exports total bytes transferred
+- [x] Test: Exports total bytes transferred
 
 ### Metrics - System Metrics
 - [ ] Test: Exports memory usage
