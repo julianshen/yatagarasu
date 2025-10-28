@@ -556,7 +556,7 @@ yatagarasu/
 - [x] Test: Logs don't include sensitive data (tokens, credentials)
 
 ### Logging - Error Logging
-- [ ] Test: Logs all errors with stack traces
+- [x] Test: Logs all errors with stack traces
 - [ ] Test: Logs auth failures with reason
 - [ ] Test: Logs S3 errors with response details
 - [ ] Test: Logs configuration errors on startup

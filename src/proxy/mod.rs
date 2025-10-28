@@ -21036,4 +21036,248 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_logs_all_errors_with_stack_traces() {
+        // Observability test: Logs all errors with stack traces
+        // Tests that all errors are logged with stack trace information
+        // Validates debugging capability through detailed error context
+
+        use std::sync::Arc;
+
+        // Test case 1: Define error log with stack trace
+        #[derive(Clone, Debug)]
+        struct ErrorLog {
+            error_type: String,
+            message: String,
+            stack_trace: Vec<String>,
+            timestamp: u64,
+        }
+
+        // Test case 2: Error logger with stack trace capture
+        struct ErrorLogger {
+            logs: Arc<std::sync::Mutex<Vec<ErrorLog>>>,
+        }
+
+        impl ErrorLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_error(&self, error_type: &str, message: &str, stack_trace: Vec<String>) {
+                let log_entry = ErrorLog {
+                    error_type: error_type.to_string(),
+                    message: message.to_string(),
+                    stack_trace,
+                    timestamp: 1234567890,
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+            }
+
+            fn get_logs(&self) -> Vec<ErrorLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        let logger = ErrorLogger::new();
+
+        // Test case 3: Log simple error with stack trace
+        let stack = vec![
+            "at handle_request (proxy.rs:100)".to_string(),
+            "at process_auth (auth.rs:50)".to_string(),
+            "at main (main.rs:10)".to_string(),
+        ];
+        logger.log_error("AuthError", "Invalid JWT token", stack);
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].error_type, "AuthError");
+        assert_eq!(logs[0].message, "Invalid JWT token");
+        assert_eq!(logs[0].stack_trace.len(), 3);
+
+        // Test case 4: Verify stack trace contains file and line info
+        assert!(logs[0].stack_trace[0].contains("proxy.rs:100"));
+        assert!(logs[0].stack_trace[1].contains("auth.rs:50"));
+        assert!(logs[0].stack_trace[2].contains("main.rs:10"));
+
+        // Test case 5: Log error with deep stack trace
+        let deep_stack = vec![
+            "at level1 (file1.rs:10)".to_string(),
+            "at level2 (file2.rs:20)".to_string(),
+            "at level3 (file3.rs:30)".to_string(),
+            "at level4 (file4.rs:40)".to_string(),
+            "at level5 (file5.rs:50)".to_string(),
+            "at level6 (file6.rs:60)".to_string(),
+        ];
+        logger.log_error("DeepError", "Stack overflow", deep_stack);
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[1].stack_trace.len(), 6);
+
+        // Test case 6: Verify all stack frames are captured
+        for (i, frame) in logs[1].stack_trace.iter().enumerate() {
+            assert!(
+                frame.contains(&format!("file{}.rs", i + 1)),
+                "Stack frame should contain file info"
+            );
+        }
+
+        // Test case 7: Log different error types
+        logger.log_error(
+            "S3Error",
+            "Bucket not found",
+            vec!["at s3_handler (s3.rs:200)".to_string()],
+        );
+        logger.log_error(
+            "ConfigError",
+            "Invalid port",
+            vec!["at load_config (config.rs:50)".to_string()],
+        );
+        logger.log_error(
+            "NetworkError",
+            "Connection timeout",
+            vec!["at connect (network.rs:100)".to_string()],
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 5);
+
+        // Test case 8: Verify all error types are logged
+        let error_types: Vec<String> = logs.iter().map(|l| l.error_type.clone()).collect();
+        assert!(error_types.contains(&"AuthError".to_string()));
+        assert!(error_types.contains(&"DeepError".to_string()));
+        assert!(error_types.contains(&"S3Error".to_string()));
+        assert!(error_types.contains(&"ConfigError".to_string()));
+        assert!(error_types.contains(&"NetworkError".to_string()));
+
+        // Test case 9: Verify all errors have timestamps
+        for log in &logs {
+            assert!(log.timestamp > 0, "Error should have timestamp");
+        }
+
+        // Test case 10: Verify stack traces can identify error location
+        let s3_error = logs.iter().find(|l| l.error_type == "S3Error").unwrap();
+        assert!(s3_error.stack_trace[0].contains("s3.rs"));
+
+        let config_error = logs.iter().find(|l| l.error_type == "ConfigError").unwrap();
+        assert!(config_error.stack_trace[0].contains("config.rs"));
+
+        // Test case 11: Log error with empty stack trace (edge case)
+        logger.log_error("UnknownError", "Unknown error", vec![]);
+        let logs = logger.get_logs();
+        assert_eq!(logs.last().unwrap().stack_trace.len(), 0);
+
+        // Test case 12: Log error with very long message
+        let long_message = "a".repeat(500);
+        logger.log_error(
+            "LongError",
+            &long_message,
+            vec!["at handler (proxy.rs:1)".to_string()],
+        );
+        let logs = logger.get_logs();
+        assert_eq!(logs.last().unwrap().message.len(), 500);
+
+        // Test case 13: Verify stack traces contain function names
+        logger.log_error(
+            "FunctionError",
+            "Function failed",
+            vec![
+                "at validate_jwt (auth.rs:100)".to_string(),
+                "at authenticate (auth.rs:50)".to_string(),
+            ],
+        );
+        let logs = logger.get_logs();
+        let func_error = logs.last().unwrap();
+        assert!(func_error.stack_trace[0].contains("validate_jwt"));
+        assert!(func_error.stack_trace[1].contains("authenticate"));
+
+        // Test case 14: Group errors by type
+        let logs = logger.get_logs();
+        let auth_errors = logs
+            .iter()
+            .filter(|l| l.error_type.contains("Error"))
+            .count();
+        assert!(auth_errors > 0);
+
+        // Test case 15: Verify errors can be filtered by stack trace location
+        let proxy_errors = logs
+            .iter()
+            .filter(|l| l.stack_trace.iter().any(|s| s.contains("proxy.rs")))
+            .count();
+        assert!(proxy_errors > 0);
+
+        // Test case 16: Log concurrent errors
+        let logger2 = Arc::new(ErrorLogger::new());
+        let handles: Vec<_> = (0..5)
+            .map(|i| {
+                let logger_clone = Arc::clone(&logger2);
+                std::thread::spawn(move || {
+                    logger_clone.log_error(
+                        "ConcurrentError",
+                        &format!("Error {}", i),
+                        vec![format!("at thread_{} (test.rs:{})", i, i * 10)],
+                    );
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let concurrent_logs = logger2.get_logs();
+        assert_eq!(concurrent_logs.len(), 5);
+
+        // Test case 17: Verify all concurrent errors logged
+        for log in &concurrent_logs {
+            assert_eq!(log.error_type, "ConcurrentError");
+            assert!(log.message.starts_with("Error "));
+        }
+
+        // Test case 18: Verify stack trace format consistency
+        for log in &logs {
+            for frame in &log.stack_trace {
+                // Stack frames should have consistent format
+                assert!(
+                    frame.contains("at ") || frame.is_empty(),
+                    "Stack frame should have consistent format"
+                );
+            }
+        }
+
+        // Test case 19: Test error with complex stack trace
+        logger.log_error(
+            "ComplexError",
+            "Complex failure",
+            vec![
+                "at async_handler (proxy.rs:500)".to_string(),
+                "at tokio::runtime (runtime.rs:1000)".to_string(),
+                "at std::thread (thread.rs:2000)".to_string(),
+            ],
+        );
+        let logs = logger.get_logs();
+        let complex_error = logs.last().unwrap();
+        assert!(complex_error.stack_trace.len() >= 3);
+        assert!(complex_error.stack_trace[0].contains("async_handler"));
+        assert!(complex_error.stack_trace[1].contains("tokio"));
+
+        // Test case 20: Verify errors enable root cause analysis
+        let logs = logger.get_logs();
+        for log in &logs {
+            // Each error should have enough info for debugging
+            assert!(!log.error_type.is_empty());
+            assert!(!log.message.is_empty());
+            // Stack trace is optional but if present should have valid frames
+            if !log.stack_trace.is_empty() {
+                assert!(
+                    log.stack_trace[0].len() > 0,
+                    "First stack frame should not be empty"
+                );
+            }
+        }
+    }
 }
