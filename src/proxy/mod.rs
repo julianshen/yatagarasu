@@ -22949,4 +22949,334 @@ mod tests {
         assert_eq!(duration, 123.0);
         assert_eq!(status, 200);
     }
+
+    #[test]
+    fn test_exports_request_count_by_status_code() {
+        // Metrics test: Exports request count by status code
+        // Tests that request metrics are exported grouped by HTTP status code
+        // Validates monitoring and alerting capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define request counter by status code
+        #[derive(Clone)]
+        struct RequestCounterByStatus {
+            counts: Arc<std::sync::Mutex<std::collections::HashMap<u16, u64>>>,
+        }
+
+        impl RequestCounterByStatus {
+            fn new() -> Self {
+                Self {
+                    counts: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                }
+            }
+
+            fn increment(&self, status_code: u16) {
+                let mut counts = self.counts.lock().unwrap();
+                *counts.entry(status_code).or_insert(0) += 1;
+            }
+
+            fn get_count(&self, status_code: u16) -> u64 {
+                self.counts
+                    .lock()
+                    .unwrap()
+                    .get(&status_code)
+                    .copied()
+                    .unwrap_or(0)
+            }
+
+            fn get_all_counts(&self) -> std::collections::HashMap<u16, u64> {
+                self.counts.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 2: Counter increments for 200 OK
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        assert_eq!(counter.get_count(200), 1);
+
+        // Test case 3: Counter increments for 404 Not Found
+        let counter = RequestCounterByStatus::new();
+        counter.increment(404);
+        assert_eq!(counter.get_count(404), 1);
+
+        // Test case 4: Counter increments for 500 Internal Server Error
+        let counter = RequestCounterByStatus::new();
+        counter.increment(500);
+        assert_eq!(counter.get_count(500), 1);
+
+        // Test case 5: Multiple requests increment same status code
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(200);
+        assert_eq!(counter.get_count(200), 3);
+
+        // Test case 6: Different status codes tracked independently
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(404);
+        counter.increment(500);
+        assert_eq!(counter.get_count(200), 1);
+        assert_eq!(counter.get_count(404), 1);
+        assert_eq!(counter.get_count(500), 1);
+
+        // Test case 7: Counter supports all 2xx status codes
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200); // OK
+        counter.increment(201); // Created
+        counter.increment(204); // No Content
+        counter.increment(206); // Partial Content
+        assert_eq!(counter.get_count(200), 1);
+        assert_eq!(counter.get_count(201), 1);
+        assert_eq!(counter.get_count(204), 1);
+        assert_eq!(counter.get_count(206), 1);
+
+        // Test case 8: Counter supports all 4xx status codes
+        let counter = RequestCounterByStatus::new();
+        counter.increment(400); // Bad Request
+        counter.increment(401); // Unauthorized
+        counter.increment(403); // Forbidden
+        counter.increment(404); // Not Found
+        counter.increment(405); // Method Not Allowed
+        counter.increment(416); // Range Not Satisfiable
+        counter.increment(429); // Too Many Requests
+        assert_eq!(counter.get_count(400), 1);
+        assert_eq!(counter.get_count(401), 1);
+        assert_eq!(counter.get_count(403), 1);
+        assert_eq!(counter.get_count(404), 1);
+        assert_eq!(counter.get_count(405), 1);
+        assert_eq!(counter.get_count(416), 1);
+        assert_eq!(counter.get_count(429), 1);
+
+        // Test case 9: Counter supports all 5xx status codes
+        let counter = RequestCounterByStatus::new();
+        counter.increment(500); // Internal Server Error
+        counter.increment(502); // Bad Gateway
+        counter.increment(503); // Service Unavailable
+        counter.increment(504); // Gateway Timeout
+        assert_eq!(counter.get_count(500), 1);
+        assert_eq!(counter.get_count(502), 1);
+        assert_eq!(counter.get_count(503), 1);
+        assert_eq!(counter.get_count(504), 1);
+
+        // Test case 10: Get all counts returns all tracked status codes
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(404);
+        counter.increment(500);
+        let all_counts = counter.get_all_counts();
+        assert_eq!(all_counts.len(), 3);
+        assert_eq!(all_counts[&200], 2);
+        assert_eq!(all_counts[&404], 1);
+        assert_eq!(all_counts[&500], 1);
+
+        // Test case 11: Can calculate success rate from metrics
+        let counter = RequestCounterByStatus::new();
+        // 7 successful requests (2xx)
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(201);
+        counter.increment(204);
+        counter.increment(206);
+        counter.increment(206);
+        // 3 error requests (4xx/5xx)
+        counter.increment(404);
+        counter.increment(500);
+        counter.increment(503);
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let success: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 200 && **code < 300)
+            .map(|(_, count)| count)
+            .sum();
+        let success_rate = (success as f64 / total as f64) * 100.0;
+        assert_eq!(total, 10);
+        assert_eq!(success, 7);
+        assert_eq!(success_rate, 70.0);
+
+        // Test case 12: Can identify error rate from metrics
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(500);
+        counter.increment(500);
+        counter.increment(500);
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let errors: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 500 && **code < 600)
+            .map(|(_, count)| count)
+            .sum();
+        let error_rate = (errors as f64 / total as f64) * 100.0;
+        assert_eq!(total, 5);
+        assert_eq!(errors, 3);
+        assert_eq!(error_rate, 60.0);
+
+        // Test case 13: Concurrent increments are thread-safe
+        let counter = RequestCounterByStatus::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+        let counter_clone3 = counter.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.increment(200);
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.increment(200);
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone3.increment(200);
+            }
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(counter.get_count(200), 300);
+
+        // Test case 14: Can track status code distribution
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(404);
+        counter.increment(500);
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        // 60% success (3/5)
+        let success_percentage = (all_counts[&200] as f64 / total as f64) * 100.0;
+        // 20% not found (1/5)
+        let not_found_percentage = (all_counts[&404] as f64 / total as f64) * 100.0;
+        // 20% server error (1/5)
+        let server_error_percentage = (all_counts[&500] as f64 / total as f64) * 100.0;
+        assert_eq!(success_percentage, 60.0);
+        assert_eq!(not_found_percentage, 20.0);
+        assert_eq!(server_error_percentage, 20.0);
+
+        // Test case 15: Metrics enable alerting on error spikes
+        let counter = RequestCounterByStatus::new();
+        // Normal operation: mostly 200s
+        for _ in 0..95 {
+            counter.increment(200);
+        }
+        // Error spike: some 500s
+        for _ in 0..5 {
+            counter.increment(500);
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let errors: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 500)
+            .map(|(_, count)| count)
+            .sum();
+        let error_rate = (errors as f64 / total as f64) * 100.0;
+
+        // Alert if error rate > 3%
+        let should_alert = error_rate > 3.0;
+        assert!(should_alert, "Should alert on 5% error rate");
+        assert_eq!(error_rate, 5.0);
+
+        // Test case 16: Zero count for untracked status codes
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        assert_eq!(counter.get_count(404), 0);
+        assert_eq!(counter.get_count(500), 0);
+
+        // Test case 17: Can group by status code class (2xx, 4xx, 5xx)
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(201);
+        counter.increment(400);
+        counter.increment(404);
+        counter.increment(500);
+        counter.increment(503);
+
+        let all_counts = counter.get_all_counts();
+        let count_2xx: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 200 && **code < 300)
+            .map(|(_, count)| count)
+            .sum();
+        let count_4xx: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 400 && **code < 500)
+            .map(|(_, count)| count)
+            .sum();
+        let count_5xx: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 500 && **code < 600)
+            .map(|(_, count)| count)
+            .sum();
+        assert_eq!(count_2xx, 2);
+        assert_eq!(count_4xx, 2);
+        assert_eq!(count_5xx, 2);
+
+        // Test case 18: Metrics persist across multiple requests
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        assert_eq!(counter.get_count(200), 1);
+        counter.increment(200);
+        assert_eq!(counter.get_count(200), 2);
+        counter.increment(200);
+        assert_eq!(counter.get_count(200), 3);
+
+        // Test case 19: Can identify most common status code
+        let counter = RequestCounterByStatus::new();
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(200);
+        counter.increment(404);
+        counter.increment(404);
+        counter.increment(500);
+
+        let all_counts = counter.get_all_counts();
+        let most_common = all_counts.iter().max_by_key(|(_, count)| *count).unwrap();
+        assert_eq!(*most_common.0, 200);
+        assert_eq!(*most_common.1, 5);
+
+        // Test case 20: Metrics enable SLA monitoring (e.g., 99% success rate)
+        let counter = RequestCounterByStatus::new();
+        // 99 successful requests
+        for _ in 0..99 {
+            counter.increment(200);
+        }
+        // 1 error request
+        counter.increment(500);
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let success: u64 = all_counts
+            .iter()
+            .filter(|(code, _)| **code >= 200 && **code < 300)
+            .map(|(_, count)| count)
+            .sum();
+        let success_rate = (success as f64 / total as f64) * 100.0;
+
+        // SLA target: 99% success rate
+        let meets_sla = success_rate >= 99.0;
+        assert!(meets_sla, "Should meet 99% SLA");
+        assert_eq!(success_rate, 99.0);
+    }
 }

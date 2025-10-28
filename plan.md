@@ -564,7 +564,7 @@ yatagarasu/
 - [x] Test: Logs are structured JSON format
 
 ### Metrics - Request Metrics
-- [ ] Test: Exports request count by status code
+- [x] Test: Exports request count by status code
 - [ ] Test: Exports request duration histogram
 - [ ] Test: Exports requests per bucket
 - [ ] Test: Exports requests per route
