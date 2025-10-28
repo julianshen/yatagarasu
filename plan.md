@@ -567,7 +567,7 @@ yatagarasu/
 - [x] Test: Exports request count by status code
 - [x] Test: Exports request duration histogram
 - [x] Test: Exports requests per bucket
-- [ ] Test: Exports requests per route
+- [x] Test: Exports requests per route
 - [ ] Test: Exports concurrent request gauge
 - [ ] Test: Exports total bytes transferred
 

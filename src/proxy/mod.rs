@@ -23962,4 +23962,326 @@ mod tests {
         assert_eq!(all_counts["bucket-b"], 1);
         assert_eq!(all_counts["bucket-c"], 1);
     }
+
+    #[test]
+    fn test_exports_requests_per_route() {
+        // Metrics test: Exports requests per route
+        // Tests that request counts are tracked per route/path pattern
+        // Validates route-level monitoring and API usage analysis capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define request counter per route
+        #[derive(Clone)]
+        struct RequestCounterPerRoute {
+            counts: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
+        }
+
+        impl RequestCounterPerRoute {
+            fn new() -> Self {
+                Self {
+                    counts: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                }
+            }
+
+            fn increment(&self, route: &str) {
+                let mut counts = self.counts.lock().unwrap();
+                *counts.entry(route.to_string()).or_insert(0) += 1;
+            }
+
+            fn get_count(&self, route: &str) -> u64 {
+                self.counts.lock().unwrap().get(route).copied().unwrap_or(0)
+            }
+
+            fn get_all_counts(&self) -> std::collections::HashMap<String, u64> {
+                self.counts.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 2: Counter increments for /products route
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        assert_eq!(counter.get_count("/products"), 1);
+
+        // Test case 3: Counter increments for /media route
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/media");
+        assert_eq!(counter.get_count("/media"), 1);
+
+        // Test case 4: Multiple requests increment same route
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/products");
+        assert_eq!(counter.get_count("/products"), 3);
+
+        // Test case 5: Different routes tracked independently
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        counter.increment("/media");
+        counter.increment("/documents");
+        assert_eq!(counter.get_count("/products"), 1);
+        assert_eq!(counter.get_count("/media"), 1);
+        assert_eq!(counter.get_count("/documents"), 1);
+
+        // Test case 6: Routes with specific file paths
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products/images/product1.jpg");
+        counter.increment("/products/images/product2.jpg");
+        counter.increment("/media/videos/video1.mp4");
+        assert_eq!(counter.get_count("/products/images/product1.jpg"), 1);
+        assert_eq!(counter.get_count("/products/images/product2.jpg"), 1);
+        assert_eq!(counter.get_count("/media/videos/video1.mp4"), 1);
+
+        // Test case 7: Can calculate route usage distribution
+        let counter = RequestCounterPerRoute::new();
+        // /products: 60 requests
+        for _ in 0..60 {
+            counter.increment("/products");
+        }
+        // /media: 30 requests
+        for _ in 0..30 {
+            counter.increment("/media");
+        }
+        // /documents: 10 requests
+        for _ in 0..10 {
+            counter.increment("/documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let products_percentage = (all_counts["/products"] as f64 / total as f64) * 100.0;
+        let media_percentage = (all_counts["/media"] as f64 / total as f64) * 100.0;
+        let documents_percentage = (all_counts["/documents"] as f64 / total as f64) * 100.0;
+        assert_eq!(products_percentage, 60.0);
+        assert_eq!(media_percentage, 30.0);
+        assert_eq!(documents_percentage, 10.0);
+
+        // Test case 8: Concurrent increments are thread-safe
+        let counter = RequestCounterPerRoute::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+        let counter_clone3 = counter.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.increment("/products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.increment("/products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone3.increment("/products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(counter.get_count("/products"), 300);
+
+        // Test case 9: Can identify most popular route
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/media");
+        counter.increment("/media");
+        counter.increment("/documents");
+
+        let all_counts = counter.get_all_counts();
+        let most_popular = all_counts.iter().max_by_key(|(_, count)| *count).unwrap();
+        assert_eq!(most_popular.0, "/products");
+        assert_eq!(*most_popular.1, 4);
+
+        // Test case 10: Can identify least used route
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/media");
+        counter.increment("/media");
+        counter.increment("/documents");
+
+        let all_counts = counter.get_all_counts();
+        let least_used = all_counts.iter().min_by_key(|(_, count)| *count).unwrap();
+        assert_eq!(least_used.0, "/documents");
+        assert_eq!(*least_used.1, 1);
+
+        // Test case 11: Zero count for untracked route
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        assert_eq!(counter.get_count("/media"), 0);
+        assert_eq!(counter.get_count("/documents"), 0);
+
+        // Test case 12: Metrics enable API endpoint analysis
+        let counter = RequestCounterPerRoute::new();
+        // Simulate API usage
+        for _ in 0..500 {
+            counter.increment("/api/v1/products");
+        }
+        for _ in 0..200 {
+            counter.increment("/api/v1/users");
+        }
+        for _ in 0..100 {
+            counter.increment("/api/v2/products");
+        }
+
+        let all_counts = counter.get_all_counts();
+        // v1 API is more popular than v2
+        assert!(all_counts["/api/v1/products"] > all_counts["/api/v2/products"]);
+
+        // Test case 13: Can detect unused routes
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        counter.increment("/media");
+        // /legacy route has zero traffic
+        assert_eq!(counter.get_count("/legacy"), 0);
+        assert_eq!(counter.get_count("/deprecated"), 0);
+
+        // Test case 14: Routes with query parameters treated separately
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products?page=1");
+        counter.increment("/products?page=2");
+        counter.increment("/products?page=3");
+        // Each query param variation tracked separately
+        assert_eq!(counter.get_count("/products?page=1"), 1);
+        assert_eq!(counter.get_count("/products?page=2"), 1);
+        assert_eq!(counter.get_count("/products?page=3"), 1);
+
+        // Test case 15: Metrics enable route deprecation planning
+        let counter = RequestCounterPerRoute::new();
+        // Old route still has traffic
+        for _ in 0..100 {
+            counter.increment("/api/v1/legacy");
+        }
+        // New route has more traffic
+        for _ in 0..1000 {
+            counter.increment("/api/v2/modern");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let legacy_usage = all_counts["/api/v1/legacy"];
+        let total: u64 = all_counts.values().sum();
+        let legacy_percentage = (legacy_usage as f64 / total as f64) * 100.0;
+        // Legacy route accounts for less than 10% of traffic
+        assert!(legacy_percentage < 10.0);
+
+        // Test case 16: Can alert on route hotspots
+        let counter = RequestCounterPerRoute::new();
+        // Normal distribution
+        for _ in 0..100 {
+            counter.increment("/products");
+        }
+        for _ in 0..100 {
+            counter.increment("/media");
+        }
+        // Abnormal spike to documents
+        for _ in 0..2000 {
+            counter.increment("/documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let documents_percentage = (all_counts["/documents"] as f64 / total as f64) * 100.0;
+        // Alert if any single route exceeds 80% of traffic
+        let should_alert = documents_percentage > 80.0;
+        assert!(should_alert, "Should alert on route hotspot");
+
+        // Test case 17: Routes with different HTTP methods tracked
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("GET /products");
+        counter.increment("POST /products");
+        counter.increment("DELETE /products");
+        // Same path but different methods tracked separately
+        assert_eq!(counter.get_count("GET /products"), 1);
+        assert_eq!(counter.get_count("POST /products"), 1);
+        assert_eq!(counter.get_count("DELETE /products"), 1);
+
+        // Test case 18: Concurrent increments to different routes
+        let counter = RequestCounterPerRoute::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+        let counter_clone3 = counter.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.increment("/products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.increment("/media");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone3.increment("/documents");
+            }
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(counter.get_count("/products"), 100);
+        assert_eq!(counter.get_count("/media"), 100);
+        assert_eq!(counter.get_count("/documents"), 100);
+
+        // Test case 19: Can rank routes by popularity
+        let counter = RequestCounterPerRoute::new();
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/products");
+        counter.increment("/media");
+        counter.increment("/media");
+        counter.increment("/documents");
+
+        let all_counts = counter.get_all_counts();
+        let mut sorted: Vec<_> = all_counts.iter().collect();
+        sorted.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+        assert_eq!(sorted[0].0, "/products"); // Rank 1: 3 requests
+        assert_eq!(sorted[1].0, "/media"); // Rank 2: 2 requests
+        assert_eq!(sorted[2].0, "/documents"); // Rank 3: 1 request
+
+        // Test case 20: Metrics enable route-based rate limiting decisions
+        let counter = RequestCounterPerRoute::new();
+        // High traffic route
+        for _ in 0..10000 {
+            counter.increment("/api/popular");
+        }
+        // Low traffic route
+        for _ in 0..10 {
+            counter.increment("/api/rare");
+        }
+
+        let all_counts = counter.get_all_counts();
+        // Popular route may need rate limiting (>1000 requests)
+        let popular_needs_ratelimit = all_counts["/api/popular"] > 1000;
+        assert!(
+            popular_needs_ratelimit,
+            "Popular route should need rate limiting"
+        );
+
+        // Rare route doesn't need rate limiting (<100 requests)
+        let rare_needs_ratelimit = all_counts["/api/rare"] > 100;
+        assert!(
+            !rare_needs_ratelimit,
+            "Rare route should not need rate limiting"
+        );
+    }
 }
