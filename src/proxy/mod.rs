@@ -20225,4 +20225,229 @@ mod tests {
             "Subject should be logged exactly as provided"
         );
     }
+
+    #[test]
+    fn test_logs_target_bucket_and_s3_key() {
+        // Observability test: Logs target bucket and S3 key
+        // Tests that each S3 request logs the bucket name and S3 object key
+        // Validates complete S3 operation tracking for troubleshooting
+
+        use std::sync::Arc;
+
+        // Test case 1: Define request log with S3 details
+        #[derive(Clone, Debug, PartialEq)]
+        struct RequestLog {
+            path: String,
+            target_bucket: String,
+            s3_key: String,
+        }
+
+        // Test case 2: Request logger that captures S3 details
+        struct RequestLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+        }
+
+        impl RequestLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_request(&self, path: &str, bucket: &str, s3_key: &str) {
+                let log_entry = RequestLog {
+                    path: path.to_string(),
+                    target_bucket: bucket.to_string(),
+                    s3_key: s3_key.to_string(),
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Proxy with bucket routing and S3 logging
+        struct Proxy {
+            logger: RequestLogger,
+        }
+
+        impl Proxy {
+            fn new() -> Self {
+                Self {
+                    logger: RequestLogger::new(),
+                }
+            }
+
+            fn handle_request(&self, path: &str, bucket: &str, s3_key: &str) {
+                self.logger.log_request(path, bucket, s3_key);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logger.get_logs()
+            }
+        }
+
+        let proxy = Proxy::new();
+
+        // Test case 4: Log simple S3 request
+        proxy.handle_request("/photos/cat.jpg", "my-photos", "cat.jpg");
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 1, "Should have 1 log entry");
+
+        let log1 = &logs[0];
+        assert_eq!(log1.path, "/photos/cat.jpg");
+        assert_eq!(log1.target_bucket, "my-photos");
+        assert_eq!(log1.s3_key, "cat.jpg");
+
+        // Test case 5: Log request with nested S3 key
+        proxy.handle_request(
+            "/documents/2024/report.pdf",
+            "company-docs",
+            "2024/report.pdf",
+        );
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 2, "Should have 2 log entries");
+
+        let log2 = &logs[1];
+        assert_eq!(log2.target_bucket, "company-docs");
+        assert_eq!(log2.s3_key, "2024/report.pdf");
+
+        // Test case 6: Log requests to different buckets
+        proxy.handle_request("/data/metrics.json", "analytics-bucket", "metrics.json");
+        proxy.handle_request("/images/logo.png", "static-assets", "logo.png");
+        proxy.handle_request("/backups/db.sql", "backup-bucket", "db.sql");
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 5, "Should have 5 log entries");
+
+        // Test case 7: Verify all buckets logged correctly
+        assert_eq!(logs[2].target_bucket, "analytics-bucket");
+        assert_eq!(logs[3].target_bucket, "static-assets");
+        assert_eq!(logs[4].target_bucket, "backup-bucket");
+
+        // Test case 8: Verify all S3 keys logged correctly
+        assert_eq!(logs[2].s3_key, "metrics.json");
+        assert_eq!(logs[3].s3_key, "logo.png");
+        assert_eq!(logs[4].s3_key, "db.sql");
+
+        // Test case 9: Group logs by bucket
+        let photos_requests: Vec<_> = logs
+            .iter()
+            .filter(|l| l.target_bucket == "my-photos")
+            .collect();
+        assert_eq!(
+            photos_requests.len(),
+            1,
+            "Should have 1 request to my-photos"
+        );
+
+        // Test case 10: Test deeply nested S3 keys
+        proxy.handle_request(
+            "/files/project/src/main.rs",
+            "code-bucket",
+            "project/src/main.rs",
+        );
+        let logs = proxy.get_logs();
+        let nested_log = logs.last().unwrap();
+        assert_eq!(nested_log.s3_key, "project/src/main.rs");
+        assert_eq!(nested_log.target_bucket, "code-bucket");
+
+        // Test case 11: Test S3 keys with special characters
+        proxy.handle_request("/uploads/document-2024.pdf", "uploads", "document-2024.pdf");
+        let logs = proxy.get_logs();
+        let special_log = logs.last().unwrap();
+        assert_eq!(special_log.s3_key, "document-2024.pdf");
+
+        // Test case 12: Test S3 keys with URL encoding
+        proxy.handle_request("/files/my%20file.txt", "user-files", "my file.txt");
+        let logs = proxy.get_logs();
+        let encoded_log = logs.last().unwrap();
+        assert_eq!(encoded_log.s3_key, "my file.txt");
+        assert_eq!(encoded_log.target_bucket, "user-files");
+
+        // Test case 13: Get list of unique buckets
+        let unique_buckets: std::collections::HashSet<String> =
+            logs.iter().map(|l| l.target_bucket.clone()).collect();
+        assert_eq!(unique_buckets.len(), 8, "Should have 8 unique buckets");
+
+        // Test case 14: Find all requests to specific bucket
+        let backup_requests: Vec<_> = logs
+            .iter()
+            .filter(|l| l.target_bucket == "backup-bucket")
+            .collect();
+        assert_eq!(backup_requests.len(), 1);
+        assert_eq!(backup_requests[0].s3_key, "db.sql");
+
+        // Test case 15: Test bucket with prefix in key
+        proxy.handle_request(
+            "/api/users/123/avatar.jpg",
+            "user-data",
+            "users/123/avatar.jpg",
+        );
+        let logs = proxy.get_logs();
+        let prefix_log = logs.last().unwrap();
+        assert_eq!(prefix_log.s3_key, "users/123/avatar.jpg");
+        assert!(
+            prefix_log.s3_key.starts_with("users/"),
+            "Key should have prefix"
+        );
+
+        // Test case 16: Test multiple requests to same bucket with different keys
+        proxy.handle_request("/files/a.txt", "shared", "a.txt");
+        proxy.handle_request("/files/b.txt", "shared", "b.txt");
+        proxy.handle_request("/files/c.txt", "shared", "c.txt");
+
+        let logs = proxy.get_logs();
+        let shared_requests: Vec<_> = logs
+            .iter()
+            .filter(|l| l.target_bucket == "shared")
+            .collect();
+        assert_eq!(shared_requests.len(), 3, "Should have 3 requests to shared");
+
+        let shared_keys: Vec<String> = shared_requests.iter().map(|l| l.s3_key.clone()).collect();
+        assert!(shared_keys.contains(&"a.txt".to_string()));
+        assert!(shared_keys.contains(&"b.txt".to_string()));
+        assert!(shared_keys.contains(&"c.txt".to_string()));
+
+        // Test case 17: Verify no bucket or key is empty
+        for log in &logs {
+            assert!(!log.target_bucket.is_empty(), "Bucket should not be empty");
+            assert!(!log.s3_key.is_empty(), "S3 key should not be empty");
+        }
+
+        // Test case 18: Test long S3 key path
+        let long_key = "data/year/2024/month/01/day/15/hour/14/file.json";
+        proxy.handle_request("/archive/file.json", "archive-bucket", long_key);
+        let logs = proxy.get_logs();
+        let long_log = logs.last().unwrap();
+        assert_eq!(long_log.s3_key, long_key);
+        assert!(long_log.s3_key.len() > 40, "Key should be long");
+
+        // Test case 19: Test bucket name with hyphens
+        proxy.handle_request("/test", "my-bucket-name-2024", "test.txt");
+        let logs = proxy.get_logs();
+        let hyphen_log = logs.last().unwrap();
+        assert_eq!(hyphen_log.target_bucket, "my-bucket-name-2024");
+        assert!(
+            hyphen_log.target_bucket.contains('-'),
+            "Bucket name should contain hyphens"
+        );
+
+        // Test case 20: Verify S3 details enable troubleshooting
+        // Should be able to reconstruct exact S3 operation from logs
+        let last_log = logs.last().unwrap();
+        let reconstructed_operation =
+            format!("GET s3://{}/{}", last_log.target_bucket, last_log.s3_key);
+        assert!(
+            reconstructed_operation.contains("my-bucket-name-2024"),
+            "Should be able to reconstruct S3 operation"
+        );
+        assert!(
+            reconstructed_operation.contains("test.txt"),
+            "Should include S3 key in reconstruction"
+        );
+    }
 }

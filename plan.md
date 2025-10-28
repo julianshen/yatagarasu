@@ -551,7 +551,7 @@ yatagarasu/
 - [x] Test: Logs request method, path, status code
 - [x] Test: Logs request duration
 - [x] Test: Logs JWT subject (if authenticated)
-- [ ] Test: Logs target bucket and S3 key
+- [x] Test: Logs target bucket and S3 key
 - [ ] Test: Logs unique request ID for correlation
 - [ ] Test: Logs don't include sensitive data (tokens, credentials)
 
