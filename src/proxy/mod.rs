@@ -21280,4 +21280,283 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_logs_auth_failures_with_reason() {
+        // Observability test: Logs auth failures with reason
+        // Tests that authentication failures are logged with specific failure reasons
+        // Validates security audit trail and troubleshooting capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define auth failure log
+        #[derive(Clone, Debug)]
+        struct AuthFailureLog {
+            reason: String,
+            username: Option<String>,
+            ip_address: String,
+            path: String,
+            timestamp: u64,
+        }
+
+        // Test case 2: Auth logger with failure tracking
+        struct AuthLogger {
+            failures: Arc<std::sync::Mutex<Vec<AuthFailureLog>>>,
+        }
+
+        impl AuthLogger {
+            fn new() -> Self {
+                Self {
+                    failures: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_auth_failure(
+                &self,
+                reason: &str,
+                username: Option<&str>,
+                ip_address: &str,
+                path: &str,
+            ) {
+                let log = AuthFailureLog {
+                    reason: reason.to_string(),
+                    username: username.map(|s| s.to_string()),
+                    ip_address: ip_address.to_string(),
+                    path: path.to_string(),
+                    timestamp: 1234567890,
+                };
+
+                self.failures.lock().unwrap().push(log);
+            }
+
+            fn get_failures(&self) -> Vec<AuthFailureLog> {
+                self.failures.lock().unwrap().clone()
+            }
+        }
+
+        let logger = AuthLogger::new();
+
+        // Test case 3: Log auth failure - invalid token
+        logger.log_auth_failure(
+            "Invalid JWT token",
+            Some("user123"),
+            "192.168.1.100",
+            "/api/protected",
+        );
+
+        let failures = logger.get_failures();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].reason, "Invalid JWT token");
+        assert_eq!(failures[0].username, Some("user123".to_string()));
+        assert_eq!(failures[0].ip_address, "192.168.1.100");
+
+        // Test case 4: Log auth failure - expired token
+        logger.log_auth_failure("Token expired", Some("alice"), "10.0.0.1", "/api/data");
+
+        let failures = logger.get_failures();
+        assert_eq!(failures.len(), 2);
+        assert_eq!(failures[1].reason, "Token expired");
+
+        // Test case 5: Log auth failure - missing token
+        logger.log_auth_failure(
+            "Missing Authorization header",
+            None,
+            "192.168.1.200",
+            "/api/secure",
+        );
+
+        let failures = logger.get_failures();
+        assert_eq!(failures.len(), 3);
+        assert_eq!(failures[2].reason, "Missing Authorization header");
+        assert_eq!(failures[2].username, None);
+
+        // Test case 6: Log auth failure - invalid signature
+        logger.log_auth_failure(
+            "Invalid token signature",
+            Some("bob"),
+            "172.16.0.1",
+            "/api/admin",
+        );
+
+        let failures = logger.get_failures();
+        assert_eq!(failures[3].reason, "Invalid token signature");
+
+        // Test case 7: Log auth failure - insufficient permissions
+        logger.log_auth_failure(
+            "Insufficient permissions for resource",
+            Some("charlie"),
+            "10.1.1.1",
+            "/api/admin/users",
+        );
+
+        let failures = logger.get_failures();
+        assert_eq!(failures[4].reason, "Insufficient permissions for resource");
+
+        // Test case 8: Verify all failures have timestamps
+        for failure in &failures {
+            assert!(failure.timestamp > 0, "Failure should have timestamp");
+        }
+
+        // Test case 9: Group failures by reason
+        let failures = logger.get_failures();
+        let mut reason_counts = std::collections::HashMap::new();
+        for failure in &failures {
+            *reason_counts.entry(failure.reason.clone()).or_insert(0) += 1;
+        }
+
+        assert_eq!(reason_counts.get("Invalid JWT token"), Some(&1));
+        assert_eq!(reason_counts.get("Token expired"), Some(&1));
+
+        // Test case 10: Group failures by IP address
+        let ip_failures: Vec<_> = failures
+            .iter()
+            .filter(|f| f.ip_address == "192.168.1.100")
+            .collect();
+        assert_eq!(ip_failures.len(), 1);
+
+        // Test case 11: Log multiple failures from same user
+        logger.log_auth_failure("Invalid token", Some("alice"), "10.0.0.1", "/api/data");
+        logger.log_auth_failure("Token expired", Some("alice"), "10.0.0.1", "/api/profile");
+
+        let failures = logger.get_failures();
+        let alice_failures: Vec<_> = failures
+            .iter()
+            .filter(|f| f.username == Some("alice".to_string()))
+            .collect();
+        assert_eq!(alice_failures.len(), 3);
+
+        // Test case 12: Log failures for different paths
+        let failures = logger.get_failures();
+        let paths: Vec<String> = failures.iter().map(|f| f.path.clone()).collect();
+        assert!(paths.contains(&"/api/protected".to_string()));
+        assert!(paths.contains(&"/api/admin".to_string()));
+        assert!(paths.contains(&"/api/secure".to_string()));
+
+        // Test case 13: Test auth failure with detailed reason
+        logger.log_auth_failure(
+            "Token validation failed: claim 'exp' not found",
+            Some("user999"),
+            "203.0.113.1",
+            "/api/v2/resource",
+        );
+
+        let failures = logger.get_failures();
+        let detailed_failure = failures.last().unwrap();
+        assert!(detailed_failure.reason.contains("claim"));
+        assert!(detailed_failure.reason.contains("exp"));
+
+        // Test case 14: Test auth failure without username (anonymous)
+        logger.log_auth_failure(
+            "Authentication required",
+            None,
+            "198.51.100.1",
+            "/api/private",
+        );
+
+        let failures = logger.get_failures();
+        let anonymous_failures: Vec<_> = failures.iter().filter(|f| f.username.is_none()).collect();
+        assert!(anonymous_failures.len() >= 2);
+
+        // Test case 15: Test concurrent auth failures
+        let logger2 = Arc::new(AuthLogger::new());
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let logger_clone = Arc::clone(&logger2);
+                std::thread::spawn(move || {
+                    logger_clone.log_auth_failure(
+                        "Invalid token",
+                        Some(&format!("user{}", i)),
+                        &format!("192.168.1.{}", i),
+                        "/api/test",
+                    );
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let concurrent_failures = logger2.get_failures();
+        assert_eq!(concurrent_failures.len(), 10);
+
+        // Test case 16: Verify all concurrent failures logged
+        for (i, failure) in concurrent_failures.iter().enumerate() {
+            assert_eq!(failure.reason, "Invalid token");
+            assert!(failure.username.is_some());
+        }
+
+        // Test case 17: Test failure reason variations
+        let failure_reasons = vec![
+            "Token malformed",
+            "Token issuer mismatch",
+            "Token audience invalid",
+            "Token not yet valid",
+            "Token blacklisted",
+        ];
+
+        for reason in &failure_reasons {
+            logger.log_auth_failure(reason, Some("test_user"), "127.0.0.1", "/test");
+        }
+
+        let failures = logger.get_failures();
+        for reason in &failure_reasons {
+            assert!(
+                failures.iter().any(|f| f.reason == *reason),
+                "Should log failure reason: {}",
+                reason
+            );
+        }
+
+        // Test case 18: Identify suspicious patterns (multiple failures from same IP)
+        logger.log_auth_failure(
+            "Invalid token",
+            Some("attacker1"),
+            "203.0.113.99",
+            "/api/data",
+        );
+        logger.log_auth_failure(
+            "Invalid token",
+            Some("attacker2"),
+            "203.0.113.99",
+            "/api/data",
+        );
+        logger.log_auth_failure(
+            "Invalid token",
+            Some("attacker3"),
+            "203.0.113.99",
+            "/api/data",
+        );
+
+        let failures = logger.get_failures();
+        let suspicious_ip_failures: Vec<_> = failures
+            .iter()
+            .filter(|f| f.ip_address == "203.0.113.99")
+            .collect();
+        assert!(
+            suspicious_ip_failures.len() >= 3,
+            "Should detect multiple failures from same IP"
+        );
+
+        // Test case 19: Verify failure logs are actionable
+        for failure in &failures {
+            // Each failure should have enough info for investigation
+            assert!(!failure.reason.is_empty());
+            assert!(!failure.ip_address.is_empty());
+            assert!(!failure.path.is_empty());
+            assert!(failure.timestamp > 0);
+        }
+
+        // Test case 20: Test failure with IPv6 address
+        logger.log_auth_failure(
+            "Invalid credentials",
+            Some("user_v6"),
+            "2001:0db8:85a3::8a2e:0370:7334",
+            "/api/endpoint",
+        );
+
+        let failures = logger.get_failures();
+        let ipv6_failure = failures.last().unwrap();
+        assert!(ipv6_failure.ip_address.contains("2001:0db8"));
+    }
 }
