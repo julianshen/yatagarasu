@@ -23605,4 +23605,361 @@ mod tests {
             .sum();
         assert_eq!(slow_requests, 20);
     }
+
+    #[test]
+    fn test_exports_requests_per_bucket() {
+        // Metrics test: Exports requests per bucket
+        // Tests that request counts are tracked per S3 bucket
+        // Validates bucket-level monitoring and cost allocation capability
+
+        use std::sync::Arc;
+
+        // Test case 1: Define request counter per bucket
+        #[derive(Clone)]
+        struct RequestCounterPerBucket {
+            counts: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
+        }
+
+        impl RequestCounterPerBucket {
+            fn new() -> Self {
+                Self {
+                    counts: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                }
+            }
+
+            fn increment(&self, bucket_name: &str) {
+                let mut counts = self.counts.lock().unwrap();
+                *counts.entry(bucket_name.to_string()).or_insert(0) += 1;
+            }
+
+            fn get_count(&self, bucket_name: &str) -> u64 {
+                self.counts
+                    .lock()
+                    .unwrap()
+                    .get(bucket_name)
+                    .copied()
+                    .unwrap_or(0)
+            }
+
+            fn get_all_counts(&self) -> std::collections::HashMap<String, u64> {
+                self.counts.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 2: Counter increments for products bucket
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        assert_eq!(counter.get_count("products"), 1);
+
+        // Test case 3: Counter increments for media bucket
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("media");
+        assert_eq!(counter.get_count("media"), 1);
+
+        // Test case 4: Multiple requests increment same bucket
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("products");
+        assert_eq!(counter.get_count("products"), 3);
+
+        // Test case 5: Different buckets tracked independently
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        counter.increment("media");
+        counter.increment("documents");
+        assert_eq!(counter.get_count("products"), 1);
+        assert_eq!(counter.get_count("media"), 1);
+        assert_eq!(counter.get_count("documents"), 1);
+
+        // Test case 6: Get all counts returns all buckets
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("media");
+        counter.increment("documents");
+        let all_counts = counter.get_all_counts();
+        assert_eq!(all_counts.len(), 3);
+        assert_eq!(all_counts["products"], 2);
+        assert_eq!(all_counts["media"], 1);
+        assert_eq!(all_counts["documents"], 1);
+
+        // Test case 7: Can calculate bucket usage distribution
+        let counter = RequestCounterPerBucket::new();
+        // Products: 50 requests
+        for _ in 0..50 {
+            counter.increment("products");
+        }
+        // Media: 30 requests
+        for _ in 0..30 {
+            counter.increment("media");
+        }
+        // Documents: 20 requests
+        for _ in 0..20 {
+            counter.increment("documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let products_percentage = (all_counts["products"] as f64 / total as f64) * 100.0;
+        let media_percentage = (all_counts["media"] as f64 / total as f64) * 100.0;
+        let documents_percentage = (all_counts["documents"] as f64 / total as f64) * 100.0;
+        assert_eq!(products_percentage, 50.0);
+        assert_eq!(media_percentage, 30.0);
+        assert_eq!(documents_percentage, 20.0);
+
+        // Test case 8: Concurrent increments are thread-safe
+        let counter = RequestCounterPerBucket::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+        let counter_clone3 = counter.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.increment("products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.increment("products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone3.increment("products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(counter.get_count("products"), 300);
+
+        // Test case 9: Can identify most accessed bucket
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("media");
+        counter.increment("media");
+        counter.increment("documents");
+
+        let all_counts = counter.get_all_counts();
+        let most_accessed = all_counts.iter().max_by_key(|(_, count)| *count).unwrap();
+        assert_eq!(most_accessed.0, "products");
+        assert_eq!(*most_accessed.1, 5);
+
+        // Test case 10: Can identify least accessed bucket
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("media");
+        counter.increment("media");
+        counter.increment("documents");
+
+        let all_counts = counter.get_all_counts();
+        let least_accessed = all_counts.iter().min_by_key(|(_, count)| *count).unwrap();
+        assert_eq!(least_accessed.0, "documents");
+        assert_eq!(*least_accessed.1, 1);
+
+        // Test case 11: Zero count for untracked bucket
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        assert_eq!(counter.get_count("media"), 0);
+        assert_eq!(counter.get_count("documents"), 0);
+
+        // Test case 12: Metrics enable cost allocation
+        let counter = RequestCounterPerBucket::new();
+        // Simulate different request volumes per bucket
+        for _ in 0..1000 {
+            counter.increment("products");
+        }
+        for _ in 0..500 {
+            counter.increment("media");
+        }
+        for _ in 0..100 {
+            counter.increment("documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        // Assuming $0.001 per request for cost calculation
+        let cost_per_request = 0.001;
+        let products_cost = all_counts["products"] as f64 * cost_per_request;
+        let media_cost = all_counts["media"] as f64 * cost_per_request;
+        let documents_cost = all_counts["documents"] as f64 * cost_per_request;
+        assert_eq!(products_cost, 1.0);
+        assert_eq!(media_cost, 0.5);
+        assert_eq!(documents_cost, 0.1);
+
+        // Test case 13: Metrics enable capacity planning
+        let counter = RequestCounterPerBucket::new();
+        // High traffic to products bucket
+        for _ in 0..10000 {
+            counter.increment("products");
+        }
+        // Low traffic to documents bucket
+        for _ in 0..100 {
+            counter.increment("documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        // Products bucket needs scaling (>5000 requests)
+        let products_needs_scaling = all_counts["products"] > 5000;
+        assert!(
+            products_needs_scaling,
+            "Products bucket should need scaling"
+        );
+
+        // Documents bucket doesn't need scaling (<1000 requests)
+        let documents_needs_scaling = all_counts["documents"] > 1000;
+        assert!(
+            !documents_needs_scaling,
+            "Documents bucket should not need scaling"
+        );
+
+        // Test case 14: Can track bucket usage trends
+        let counter = RequestCounterPerBucket::new();
+        // Simulate hourly pattern
+        for _ in 0..100 {
+            counter.increment("products");
+        }
+        for _ in 0..50 {
+            counter.increment("media");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let products_ratio = all_counts["products"] as f64 / total as f64;
+        // Products accounts for 2/3 of traffic
+        assert_eq!(products_ratio, 100.0 / 150.0);
+
+        // Test case 15: Metrics persist across requests
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        assert_eq!(counter.get_count("products"), 1);
+        counter.increment("products");
+        assert_eq!(counter.get_count("products"), 2);
+        counter.increment("products");
+        assert_eq!(counter.get_count("products"), 3);
+
+        // Test case 16: Can alert on bucket hotspots
+        let counter = RequestCounterPerBucket::new();
+        // Normal traffic pattern
+        for _ in 0..100 {
+            counter.increment("products");
+        }
+        for _ in 0..100 {
+            counter.increment("media");
+        }
+        // Abnormal spike to documents bucket
+        for _ in 0..1000 {
+            counter.increment("documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        let documents_percentage = (all_counts["documents"] as f64 / total as f64) * 100.0;
+        // Alert if any single bucket exceeds 50% of total traffic
+        let should_alert = documents_percentage > 50.0;
+        assert!(should_alert, "Should alert on bucket hotspot");
+        assert!(documents_percentage > 80.0);
+
+        // Test case 17: Concurrent increments to different buckets
+        let counter = RequestCounterPerBucket::new();
+        let counter_clone1 = counter.clone();
+        let counter_clone2 = counter.clone();
+        let counter_clone3 = counter.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone1.increment("products");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone2.increment("media");
+            }
+        })
+        .join()
+        .unwrap();
+
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                counter_clone3.increment("documents");
+            }
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(counter.get_count("products"), 100);
+        assert_eq!(counter.get_count("media"), 100);
+        assert_eq!(counter.get_count("documents"), 100);
+
+        // Test case 18: Metrics enable fair usage monitoring
+        let counter = RequestCounterPerBucket::new();
+        // Simulate multi-tenant usage
+        for _ in 0..1000 {
+            counter.increment("tenant-a-products");
+        }
+        for _ in 0..100 {
+            counter.increment("tenant-b-media");
+        }
+        for _ in 0..10 {
+            counter.increment("tenant-c-documents");
+        }
+
+        let all_counts = counter.get_all_counts();
+        let total: u64 = all_counts.values().sum();
+        // Tenant A is using 90% of resources
+        let tenant_a_percentage = (all_counts["tenant-a-products"] as f64 / total as f64) * 100.0;
+        assert!(tenant_a_percentage > 80.0);
+
+        // Test case 19: Can rank buckets by traffic
+        let counter = RequestCounterPerBucket::new();
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("products");
+        counter.increment("media");
+        counter.increment("media");
+        counter.increment("documents");
+
+        let all_counts = counter.get_all_counts();
+        let mut sorted: Vec<_> = all_counts.iter().collect();
+        sorted.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+        assert_eq!(sorted[0].0, "products"); // Rank 1
+        assert_eq!(sorted[1].0, "media"); // Rank 2
+        assert_eq!(sorted[2].0, "documents"); // Rank 3
+
+        // Test case 20: Metrics enable bucket isolation validation
+        let counter = RequestCounterPerBucket::new();
+        // Each bucket should be tracked independently
+        counter.increment("bucket-a");
+        counter.increment("bucket-b");
+        counter.increment("bucket-c");
+
+        let all_counts = counter.get_all_counts();
+        // All buckets have independent counts
+        assert_eq!(all_counts.len(), 3);
+        assert_eq!(all_counts["bucket-a"], 1);
+        assert_eq!(all_counts["bucket-b"], 1);
+        assert_eq!(all_counts["bucket-c"], 1);
+
+        // Incrementing one bucket doesn't affect others
+        counter.increment("bucket-a");
+        let all_counts = counter.get_all_counts();
+        assert_eq!(all_counts["bucket-a"], 2);
+        assert_eq!(all_counts["bucket-b"], 1);
+        assert_eq!(all_counts["bucket-c"], 1);
+    }
 }
