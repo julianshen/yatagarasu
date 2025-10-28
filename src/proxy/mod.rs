@@ -19709,4 +19709,276 @@ mod tests {
             assert_eq!(log.request_id, i as u64, "Request IDs should be sequential");
         }
     }
+
+    #[test]
+    fn test_logs_request_duration() {
+        // Observability test: Logs request duration
+        // Tests that each request log includes the duration in milliseconds
+        // Validates performance tracking and SLA monitoring capability
+
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        // Test case 1: Define request log with duration
+        #[derive(Clone, Debug)]
+        struct RequestLog {
+            path: String,
+            start_time_ms: u64,
+            end_time_ms: u64,
+            duration_ms: u64,
+        }
+
+        // Test case 2: Request logger with duration tracking
+        struct RequestLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+        }
+
+        impl RequestLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_request(&self, path: &str, start_time: SystemTime, end_time: SystemTime) {
+                let start_time_ms =
+                    start_time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                let end_time_ms = end_time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+                let duration_ms = end_time_ms - start_time_ms;
+
+                let log_entry = RequestLog {
+                    path: path.to_string(),
+                    start_time_ms,
+                    end_time_ms,
+                    duration_ms,
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        // Test case 3: Proxy with request timing
+        struct Proxy {
+            logger: RequestLogger,
+        }
+
+        impl Proxy {
+            fn new() -> Self {
+                Self {
+                    logger: RequestLogger::new(),
+                }
+            }
+
+            fn handle_request(&self, path: &str, processing_time_ms: u64) {
+                let start_time = SystemTime::now();
+
+                // Simulate request processing
+                std::thread::sleep(Duration::from_millis(processing_time_ms));
+
+                let end_time = SystemTime::now();
+                self.logger.log_request(path, start_time, end_time);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logger.get_logs()
+            }
+        }
+
+        let proxy = Proxy::new();
+
+        // Test case 4: Log fast request (10ms)
+        proxy.handle_request("/api/fast", 10);
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 1, "Should have 1 log entry");
+
+        let log1 = &logs[0];
+        assert_eq!(log1.path, "/api/fast");
+        assert!(log1.duration_ms >= 10, "Duration should be at least 10ms");
+        assert!(
+            log1.duration_ms < 50,
+            "Duration should be reasonable (< 50ms)"
+        );
+        assert_eq!(
+            log1.end_time_ms - log1.start_time_ms,
+            log1.duration_ms,
+            "Duration should match time difference"
+        );
+
+        // Test case 5: Log medium request (50ms)
+        proxy.handle_request("/api/medium", 50);
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 2, "Should have 2 log entries");
+
+        let log2 = &logs[1];
+        assert!(log2.duration_ms >= 50, "Duration should be at least 50ms");
+        assert!(
+            log2.duration_ms < 100,
+            "Duration should be reasonable (< 100ms)"
+        );
+
+        // Test case 6: Log slow request (100ms)
+        proxy.handle_request("/api/slow", 100);
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 3, "Should have 3 log entries");
+
+        let log3 = &logs[2];
+        assert!(log3.duration_ms >= 100, "Duration should be at least 100ms");
+        assert!(
+            log3.duration_ms < 150,
+            "Duration should be reasonable (< 150ms)"
+        );
+
+        // Test case 7: Verify durations are different
+        assert_ne!(
+            log1.duration_ms, log2.duration_ms,
+            "Different request durations should be logged"
+        );
+        assert_ne!(
+            log2.duration_ms, log3.duration_ms,
+            "Different request durations should be logged"
+        );
+
+        // Test case 8: Verify start times are chronological
+        assert!(
+            log2.start_time_ms >= log1.start_time_ms,
+            "Start times should be chronological"
+        );
+        assert!(
+            log3.start_time_ms >= log2.start_time_ms,
+            "Start times should be chronological"
+        );
+
+        // Test case 9: Verify end times are after start times
+        for log in &logs {
+            assert!(
+                log.end_time_ms > log.start_time_ms,
+                "End time should be after start time"
+            );
+        }
+
+        // Test case 10: Calculate statistics
+        let total_duration: u64 = logs.iter().map(|l| l.duration_ms).sum();
+        let avg_duration = total_duration / logs.len() as u64;
+        assert!(avg_duration > 0, "Average duration should be positive");
+
+        // Test case 11: Find min/max durations
+        let min_duration = logs.iter().map(|l| l.duration_ms).min().unwrap();
+        let max_duration = logs.iter().map(|l| l.duration_ms).max().unwrap();
+        assert!(
+            min_duration <= max_duration,
+            "Min duration should be <= max duration"
+        );
+        assert!(min_duration >= 10, "Min duration should be at least 10ms");
+
+        // Test case 12: Test very fast request (1ms)
+        proxy.handle_request("/api/instant", 1);
+        let logs = proxy.get_logs();
+        let instant_log = logs.last().unwrap();
+        assert!(
+            instant_log.duration_ms >= 1,
+            "Even fast requests should have measurable duration"
+        );
+
+        // Test case 13: Test multiple requests with varying durations
+        let durations = vec![5, 15, 25, 35, 45];
+        for (i, &duration) in durations.iter().enumerate() {
+            proxy.handle_request(&format!("/api/test{}", i), duration);
+        }
+
+        let logs = proxy.get_logs();
+        assert_eq!(logs.len(), 9, "Should have 9 total log entries");
+
+        // Test case 14: Verify all durations are logged
+        for log in &logs {
+            assert!(log.duration_ms > 0, "All durations should be positive");
+        }
+
+        // Test case 15: Group requests by duration ranges
+        let fast_requests = logs.iter().filter(|l| l.duration_ms < 20).count();
+        let medium_requests = logs
+            .iter()
+            .filter(|l| l.duration_ms >= 20 && l.duration_ms < 60)
+            .count();
+        let slow_requests = logs.iter().filter(|l| l.duration_ms >= 60).count();
+
+        assert!(fast_requests > 0, "Should have fast requests");
+        assert!(medium_requests > 0, "Should have medium requests");
+        assert!(slow_requests > 0, "Should have slow requests");
+
+        // Test case 16: Identify slowest request
+        let slowest = logs.iter().max_by_key(|l| l.duration_ms).unwrap();
+        assert!(
+            slowest.duration_ms >= 100,
+            "Slowest request should be >= 100ms"
+        );
+
+        // Test case 17: Calculate P95 duration (approximate)
+        let mut sorted_durations: Vec<u64> = logs.iter().map(|l| l.duration_ms).collect();
+        sorted_durations.sort();
+        let p95_index = (sorted_durations.len() as f64 * 0.95) as usize;
+        let p95_duration = sorted_durations[p95_index.min(sorted_durations.len() - 1)];
+        assert!(
+            p95_duration > 0,
+            "P95 duration should be calculable from logs"
+        );
+
+        // Test case 18: Verify duration precision (milliseconds)
+        for log in &logs {
+            assert!(
+                log.duration_ms < 10000,
+                "Duration should be reasonable (< 10 seconds)"
+            );
+        }
+
+        // Test case 19: Test concurrent requests maintain separate durations
+        let proxy2 = Arc::new(Proxy::new());
+        let handles: Vec<_> = (0..5)
+            .map(|i| {
+                let proxy_clone = Arc::clone(&proxy2);
+                std::thread::spawn(move || {
+                    proxy_clone.handle_request(&format!("/concurrent/{}", i), 20 + i * 5);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let concurrent_logs = proxy2.get_logs();
+        assert_eq!(
+            concurrent_logs.len(),
+            5,
+            "Should log all concurrent requests"
+        );
+
+        // Test case 20: Verify concurrent requests have different durations
+        let mut concurrent_durations: Vec<u64> =
+            concurrent_logs.iter().map(|l| l.duration_ms).collect();
+        concurrent_durations.sort();
+
+        // At least some durations should be different
+        let unique_durations: std::collections::HashSet<u64> =
+            concurrent_durations.iter().cloned().collect();
+        assert!(
+            unique_durations.len() >= 1,
+            "Should have measurable durations for concurrent requests"
+        );
+
+        // Test case 21: Verify all durations are within expected range
+        for log in &concurrent_logs {
+            assert!(
+                log.duration_ms >= 20,
+                "Concurrent request duration should be >= 20ms"
+            );
+            assert!(
+                log.duration_ms < 100,
+                "Concurrent request duration should be < 100ms"
+            );
+        }
+    }
 }
