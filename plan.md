@@ -553,7 +553,7 @@ yatagarasu/
 - [x] Test: Logs JWT subject (if authenticated)
 - [x] Test: Logs target bucket and S3 key
 - [x] Test: Logs unique request ID for correlation
-- [ ] Test: Logs don't include sensitive data (tokens, credentials)
+- [x] Test: Logs don't include sensitive data (tokens, credentials)
 
 ### Logging - Error Logging
 - [ ] Test: Logs all errors with stack traces

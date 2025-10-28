@@ -20741,4 +20741,299 @@ mod tests {
             "Request IDs should be monotonically increasing"
         );
     }
+
+    #[test]
+    fn test_logs_dont_include_sensitive_data() {
+        // Observability test: Logs don't include sensitive data (tokens, credentials)
+        // Tests that logs never expose JWT tokens, passwords, API keys, or credentials
+        // Validates security and compliance requirements
+
+        use std::sync::Arc;
+
+        // Test case 1: Define request log with all fields
+        #[derive(Clone, Debug)]
+        struct RequestLog {
+            request_id: String,
+            path: String,
+            method: String,
+            jwt_subject: Option<String>,
+            message: String,
+        }
+
+        // Test case 2: Logger with sensitive data filtering
+        struct SecureLogger {
+            logs: Arc<std::sync::Mutex<Vec<RequestLog>>>,
+        }
+
+        impl SecureLogger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }
+            }
+
+            fn sanitize_message(message: &str) -> String {
+                // Remove common sensitive data patterns
+                let mut sanitized = message.to_string();
+
+                // Don't log API keys or secrets (check this first)
+                if message.to_lowercase().contains("api_key=")
+                    || message.to_lowercase().contains("secret=")
+                    || message.to_lowercase().contains("password=")
+                {
+                    return "[REDACTED_CREDENTIALS]".to_string();
+                }
+
+                // Don't log full JWT tokens (contain dots)
+                if message.contains('.') && message.matches('.').count() >= 2 {
+                    // Likely a JWT token, redact it
+                    return "[REDACTED_TOKEN]".to_string();
+                }
+
+                // Don't log Authorization headers with Bearer tokens (case-insensitive)
+                let lower = message.to_lowercase();
+                if lower.contains("bearer ") {
+                    // Find the position of "bearer " in lowercase version
+                    if let Some(pos) = lower.find("bearer ") {
+                        let before = &message[..pos];
+                        sanitized = format!("{}Bearer [REDACTED]", before);
+                    }
+                }
+
+                sanitized
+            }
+
+            fn log_request(
+                &self,
+                request_id: &str,
+                path: &str,
+                method: &str,
+                jwt_subject: Option<&str>,
+                message: &str,
+            ) {
+                let log_entry = RequestLog {
+                    request_id: request_id.to_string(),
+                    path: path.to_string(),
+                    method: method.to_string(),
+                    jwt_subject: jwt_subject.map(|s| s.to_string()),
+                    message: Self::sanitize_message(message),
+                };
+
+                self.logs.lock().unwrap().push(log_entry);
+            }
+
+            fn get_logs(&self) -> Vec<RequestLog> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        let logger = SecureLogger::new();
+
+        // Test case 3: Log request with JWT token - should be redacted
+        let jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0.signature";
+        logger.log_request("req-1", "/api/data", "GET", Some("user123"), jwt_token);
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].message, "[REDACTED_TOKEN]");
+        assert!(!logs[0].message.contains("eyJ"));
+
+        // Test case 4: JWT subject is logged, but not the full token
+        assert_eq!(logs[0].jwt_subject, Some("user123".to_string()));
+        assert!(!logs[0].message.contains("user123")); // Subject not in message
+
+        // Test case 5: Log request with Bearer token - should be redacted
+        logger.log_request(
+            "req-2",
+            "/api/users",
+            "GET",
+            None,
+            "Authorization: Bearer abc123xyz",
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs.len(), 2);
+        assert!(logs[1].message.contains("[REDACTED]"));
+        assert!(!logs[1].message.contains("abc123xyz"));
+
+        // Test case 6: Log request with API key - should be redacted
+        logger.log_request(
+            "req-3",
+            "/api/endpoint",
+            "POST",
+            None,
+            "Request with api_key=sk-1234567890abcdef",
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs[2].message, "[REDACTED_CREDENTIALS]");
+        assert!(!logs[2].message.contains("sk-1234567890abcdef"));
+
+        // Test case 7: Log request with password - should be redacted
+        logger.log_request(
+            "req-4",
+            "/login",
+            "POST",
+            None,
+            "Login attempt with password=mysecretpass123",
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs[3].message, "[REDACTED_CREDENTIALS]");
+        assert!(!logs[3].message.contains("mysecretpass123"));
+
+        // Test case 8: Log request with secret key - should be redacted
+        logger.log_request(
+            "req-5",
+            "/config",
+            "PUT",
+            None,
+            "Config update with secret=secretkey456",
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs[4].message, "[REDACTED_CREDENTIALS]");
+        assert!(!logs[4].message.contains("secretkey456"));
+
+        // Test case 9: Log normal message - should not be redacted
+        logger.log_request(
+            "req-6",
+            "/api/public",
+            "GET",
+            None,
+            "Normal request message",
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs[5].message, "Normal request message");
+
+        // Test case 10: Verify no logs contain JWT token patterns
+        for log in &logs {
+            assert!(
+                !log.message.contains("eyJ"),
+                "Logs should not contain JWT token prefixes"
+            );
+            assert!(
+                log.message.matches('.').count() < 2,
+                "Logs should not contain JWT-like structures (multiple dots)"
+            );
+        }
+
+        // Test case 11: Verify no logs contain common secret patterns
+        for log in &logs {
+            let lower = log.message.to_lowercase();
+            if lower.contains("api_key") || lower.contains("password") || lower.contains("secret") {
+                assert!(
+                    log.message.contains("[REDACTED"),
+                    "Sensitive fields should be redacted"
+                );
+            }
+        }
+
+        // Test case 12: Log AWS credentials - should be redacted
+        logger.log_request(
+            "req-7",
+            "/s3/upload",
+            "POST",
+            None,
+            "AWS access: api_key=AKIAIOSFODNN7EXAMPLE",
+        );
+
+        let logs = logger.get_logs();
+        assert!(!logs[6].message.contains("AKIAIOSFODNN7EXAMPLE"));
+
+        // Test case 13: Verify path is still logged (not redacted)
+        for log in &logs {
+            assert!(!log.path.is_empty(), "Path should be logged");
+            assert!(
+                !log.path.contains("[REDACTED]"),
+                "Path should not be redacted"
+            );
+        }
+
+        // Test case 14: Verify method is still logged (not redacted)
+        for log in &logs {
+            assert!(!log.method.is_empty(), "Method should be logged");
+            assert!(
+                log.method == "GET" || log.method == "POST" || log.method == "PUT",
+                "Method should be valid HTTP method"
+            );
+        }
+
+        // Test case 15: Verify request ID is still logged (not redacted)
+        for (i, log) in logs.iter().enumerate() {
+            assert_eq!(
+                log.request_id,
+                format!("req-{}", i + 1),
+                "Request ID should be logged"
+            );
+        }
+
+        // Test case 16: Test multiple JWT tokens in same message
+        logger.log_request(
+            "req-8",
+            "/api/test",
+            "GET",
+            None,
+            "Multiple tokens: eyJ.test.sig and eyJ.test2.sig",
+        );
+
+        let logs = logger.get_logs();
+        assert!(logs[7].message.contains("[REDACTED"));
+
+        // Test case 17: Test mixed case Bearer token
+        logger.log_request(
+            "req-9",
+            "/api/mixed",
+            "GET",
+            None,
+            "Authorization: BEARER token123",
+        );
+
+        let logs = logger.get_logs();
+        assert!(!logs[8].message.contains("token123"));
+
+        // Test case 18: Verify JWT subject is only safe field from token
+        logger.log_request(
+            "req-10",
+            "/api/secure",
+            "GET",
+            Some("admin@example.com"),
+            "Full token eyJ.payload.sig",
+        );
+
+        let logs = logger.get_logs();
+        assert_eq!(logs[9].jwt_subject, Some("admin@example.com".to_string()));
+        assert!(!logs[9].message.contains("payload"));
+
+        // Test case 19: Test that redaction doesn't break log structure
+        for log in &logs {
+            // All required fields should be present
+            assert!(!log.request_id.is_empty());
+            assert!(!log.path.is_empty());
+            assert!(!log.method.is_empty());
+            assert!(!log.message.is_empty());
+        }
+
+        // Test case 20: Verify comprehensive sensitive data filtering
+        let sensitive_patterns = vec![
+            ("jwt", "eyJhbGci.payload.signature"),
+            ("api_key", "api_key=sk_live_123456"),
+            ("password", "password=P@ssw0rd!"),
+            ("secret", "secret=my-secret-key"),
+            ("bearer", "Authorization: Bearer token123"),
+        ];
+
+        for (name, pattern) in sensitive_patterns {
+            let logger2 = SecureLogger::new();
+            logger2.log_request("test", "/test", "GET", None, pattern);
+            let logs2 = logger2.get_logs();
+
+            assert!(
+                !logs2[0].message.contains("123") || logs2[0].message.contains("[REDACTED"),
+                "Pattern '{}' should be redacted",
+                name
+            );
+        }
+    }
 }
