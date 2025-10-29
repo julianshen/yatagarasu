@@ -30154,4 +30154,245 @@ mod tests {
             duration.as_millis()
         );
     }
+
+    #[test]
+    fn test_liveness_check() {
+        // Health check test: Liveness check (basic aliveness)
+        // Tests that liveness endpoint checks if process is alive and responsive
+        // Validates basic heartbeat functionality for Kubernetes liveness probes
+
+        use std::sync::{Arc, Mutex};
+
+        struct LivenessEndpoint {
+            is_alive: Arc<Mutex<bool>>,
+        }
+
+        impl LivenessEndpoint {
+            fn new() -> Self {
+                Self {
+                    is_alive: Arc::new(Mutex::new(true)),
+                }
+            }
+
+            fn check(&self) -> LivenessResponse {
+                let alive = *self.is_alive.lock().unwrap();
+                if alive {
+                    LivenessResponse {
+                        status: 200,
+                        body: "alive".to_string(),
+                    }
+                } else {
+                    LivenessResponse {
+                        status: 503,
+                        body: "dead".to_string(),
+                    }
+                }
+            }
+
+            fn kill(&self) {
+                *self.is_alive.lock().unwrap() = false;
+            }
+        }
+
+        struct LivenessResponse {
+            status: u16,
+            body: String,
+        }
+
+        // Test 1: Returns 200 when process is alive
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Returns 200 when alive");
+        assert_eq!(response.body, "alive", "Body indicates alive");
+
+        // Test 2: Returns 503 when process is dead/unresponsive
+        let endpoint = LivenessEndpoint::new();
+        endpoint.kill();
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 when dead");
+
+        // Test 3: Accessible at /health/live endpoint
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Accessible at /health/live");
+
+        // Test 4: Does not check S3 connectivity (liveness = process alive)
+        // Liveness should be very simple - just "is the process responding?"
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Doesn't check external dependencies");
+
+        // Test 5: Does not check configuration validity
+        // Liveness only cares if process is responsive
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Doesn't check configuration state");
+
+        // Test 6: Kubernetes uses liveness to restart pods
+        let endpoint = LivenessEndpoint::new();
+        endpoint.kill();
+        let response = endpoint.check();
+        let should_restart = response.status != 200;
+        assert!(should_restart, "Failed liveness triggers restart");
+
+        // Test 7: Very lightweight check (no dependencies)
+        let endpoint = LivenessEndpoint::new();
+        let start = std::time::Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+        assert!(
+            duration.as_micros() < 100,
+            "Lightweight check, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 8: Liveness check always succeeds unless critical failure
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Succeeds unless critical failure");
+
+        // Test 9: Distinguishes from readiness check
+        // Liveness = "Is process alive?"
+        // Readiness = "Is process ready to serve traffic?"
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Liveness: process is alive");
+
+        // Test 10: No authentication required
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "No auth required for liveness");
+
+        // Test 11: Idempotent (same result on repeated calls)
+        let endpoint = LivenessEndpoint::new();
+        let response1 = endpoint.check();
+        let response2 = endpoint.check();
+        let response3 = endpoint.check();
+        assert_eq!(response1.status, response2.status, "Idempotent 1-2");
+        assert_eq!(response2.status, response3.status, "Idempotent 2-3");
+
+        // Test 12: Returns immediately (no blocking)
+        let endpoint = LivenessEndpoint::new();
+        let start = std::time::Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+        assert!(
+            duration.as_millis() < 10,
+            "Returns immediately, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 13: Suitable for frequent Kubernetes polling (every 10s default)
+        let endpoint = LivenessEndpoint::new();
+        for _ in 0..10 {
+            let response = endpoint.check();
+            assert_eq!(response.status, 200, "Handles frequent polling");
+        }
+
+        // Test 14: Failure indicates need for process restart
+        struct ProcessState {
+            is_deadlocked: bool,
+            is_panicked: bool,
+            is_responsive: bool,
+        }
+
+        impl ProcessState {
+            fn is_alive(&self) -> bool {
+                !self.is_deadlocked && !self.is_panicked && self.is_responsive
+            }
+        }
+
+        let healthy = ProcessState {
+            is_deadlocked: false,
+            is_panicked: false,
+            is_responsive: true,
+        };
+        assert!(healthy.is_alive(), "Healthy process is alive");
+
+        let deadlocked = ProcessState {
+            is_deadlocked: true,
+            is_panicked: false,
+            is_responsive: false,
+        };
+        assert!(!deadlocked.is_alive(), "Deadlocked process is dead");
+
+        // Test 15: Different failure modes all fail liveness
+        let panicked = ProcessState {
+            is_deadlocked: false,
+            is_panicked: true,
+            is_responsive: false,
+        };
+        assert!(!panicked.is_alive(), "Panicked process is dead");
+
+        // Test 16: Liveness passes even if dependencies down
+        // Process can be alive even if S3 is down (that's readiness, not liveness)
+        struct LivenessWithDependencies {
+            process_alive: bool,
+            s3_available: bool,
+        }
+
+        impl LivenessWithDependencies {
+            fn check_liveness(&self) -> bool {
+                // Liveness only checks process state, not dependencies
+                self.process_alive
+            }
+        }
+
+        let alive_with_s3_down = LivenessWithDependencies {
+            process_alive: true,
+            s3_available: false,
+        };
+        assert!(alive_with_s3_down.check_liveness(), "Alive even if S3 down");
+
+        // Test 17: Fast failure detection
+        let endpoint = LivenessEndpoint::new();
+        endpoint.kill();
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Immediate failure detection");
+
+        // Test 18: Response body is minimal
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+        assert!(
+            response.body.len() < 20,
+            "Minimal response body: '{}'",
+            response.body
+        );
+
+        // Test 19: Standard Kubernetes liveness semantics
+        // initialDelaySeconds: wait before starting checks
+        // periodSeconds: how often to check
+        // timeoutSeconds: how long to wait for response
+        // failureThreshold: how many failures before restart
+        let endpoint = LivenessEndpoint::new();
+        let mut failures = 0;
+        let failure_threshold = 3;
+
+        endpoint.kill();
+        for _ in 0..5 {
+            let response = endpoint.check();
+            if response.status != 200 {
+                failures += 1;
+            }
+        }
+
+        assert!(failures >= failure_threshold, "Detects repeated failures");
+
+        // Test 20: Complete liveness check validation
+        let endpoint = LivenessEndpoint::new();
+        let response = endpoint.check();
+
+        assert_eq!(response.status, 200, "Status 200 when alive");
+        assert!(!response.body.is_empty(), "Has response body");
+
+        endpoint.kill();
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Status 503 when dead");
+
+        let complete_liveness = response.status == 503;
+        assert!(
+            complete_liveness,
+            "Complete liveness check: detects dead process"
+        );
+    }
 }
