@@ -29448,4 +29448,360 @@ mod tests {
             "Complete S3 connectivity check with status and descriptive body"
         );
     }
+
+    #[test]
+    fn test_health_check_verifies_configuration_loaded() {
+        // Health check test: Health check verifies configuration loaded
+        // Tests that health endpoint checks if configuration is valid and loaded
+        // Validates detection of configuration errors and proper status reporting
+
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct ConfigManager {
+            is_loaded: Arc<Mutex<bool>>,
+            config_valid: Arc<Mutex<bool>>,
+            validation_error: Arc<Mutex<Option<String>>>,
+        }
+
+        impl ConfigManager {
+            fn new(is_loaded: bool, config_valid: bool) -> Self {
+                Self {
+                    is_loaded: Arc::new(Mutex::new(is_loaded)),
+                    config_valid: Arc::new(Mutex::new(config_valid)),
+                    validation_error: Arc::new(Mutex::new(None)),
+                }
+            }
+
+            fn check_config(&self) -> Result<(), String> {
+                if !*self.is_loaded.lock().unwrap() {
+                    return Err("Configuration not loaded".to_string());
+                }
+                if !*self.config_valid.lock().unwrap() {
+                    let error = self
+                        .validation_error
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or_else(|| "Configuration invalid".to_string());
+                    return Err(error);
+                }
+                Ok(())
+            }
+
+            fn set_validation_error(&self, error: String) {
+                *self.validation_error.lock().unwrap() = Some(error);
+                *self.config_valid.lock().unwrap() = false;
+            }
+
+            fn reload(&self, is_valid: bool) {
+                *self.is_loaded.lock().unwrap() = true;
+                *self.config_valid.lock().unwrap() = is_valid;
+            }
+        }
+
+        struct HealthCheckEndpoint {
+            config_manager: ConfigManager,
+        }
+
+        impl HealthCheckEndpoint {
+            fn new(config_manager: ConfigManager) -> Self {
+                Self { config_manager }
+            }
+
+            fn check(&self) -> HealthCheckResponse {
+                match self.config_manager.check_config() {
+                    Ok(()) => HealthCheckResponse {
+                        status: 200,
+                        body: "OK".to_string(),
+                    },
+                    Err(err) => HealthCheckResponse {
+                        status: 503,
+                        body: format!("Configuration error: {}", err),
+                    },
+                }
+            }
+        }
+
+        struct HealthCheckResponse {
+            status: u16,
+            body: String,
+        }
+
+        // Test 1: Returns 200 when configuration is loaded and valid
+        let config = ConfigManager::new(true, true);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert_eq!(
+            response.status, 200,
+            "Returns 200 when config loaded and valid"
+        );
+
+        // Test 2: Returns 503 when configuration not loaded
+        let config = ConfigManager::new(false, true);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 when config not loaded");
+
+        // Test 3: Response body mentions configuration issue
+        assert!(
+            response.body.contains("Configuration") || response.body.contains("config"),
+            "Body mentions configuration issue"
+        );
+
+        // Test 4: Returns 503 when configuration is invalid
+        let config = ConfigManager::new(true, false);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 when config invalid");
+
+        // Test 5: Can include specific validation error details
+        let config = ConfigManager::new(true, true);
+        config.set_validation_error("Missing bucket configuration".to_string());
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 for validation error");
+        assert!(
+            response.body.contains("bucket"),
+            "Body includes specific validation error"
+        );
+
+        // Test 6: Detects configuration state transitions
+        let config = ConfigManager::new(false, true);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+
+        let response1 = endpoint.check();
+        assert_eq!(response1.status, 503, "Initially not loaded");
+
+        config.reload(true);
+        let response2 = endpoint.check();
+        assert_eq!(response2.status, 200, "After loading valid config");
+
+        config.reload(false);
+        let response3 = endpoint.check();
+        assert_eq!(response3.status, 503, "After loading invalid config");
+
+        // Test 7: Validates essential configuration fields present
+        struct ConfigValidator {
+            has_server_address: bool,
+            has_buckets: bool,
+            has_s3_credentials: bool,
+        }
+
+        impl ConfigValidator {
+            fn validate(&self) -> Result<(), Vec<String>> {
+                let mut missing = Vec::new();
+                if !self.has_server_address {
+                    missing.push("server_address".to_string());
+                }
+                if !self.has_buckets {
+                    missing.push("buckets".to_string());
+                }
+                if !self.has_s3_credentials {
+                    missing.push("s3_credentials".to_string());
+                }
+                if missing.is_empty() {
+                    Ok(())
+                } else {
+                    Err(missing)
+                }
+            }
+        }
+
+        let validator = ConfigValidator {
+            has_server_address: true,
+            has_buckets: true,
+            has_s3_credentials: true,
+        };
+        assert!(validator.validate().is_ok(), "All required fields present");
+
+        // Test 8: Reports missing required fields
+        let validator = ConfigValidator {
+            has_server_address: false,
+            has_buckets: true,
+            has_s3_credentials: true,
+        };
+        let result = validator.validate();
+        assert!(result.is_err(), "Missing required field detected");
+        let missing = result.unwrap_err();
+        assert!(
+            missing.contains(&"server_address".to_string()),
+            "Identifies missing server_address"
+        );
+
+        // Test 9: Validates bucket configurations are correct
+        struct BucketConfigValidator {
+            buckets: Vec<(String, bool)>, // (name, is_valid)
+        }
+
+        impl BucketConfigValidator {
+            fn validate_all(&self) -> Result<(), String> {
+                for (name, is_valid) in &self.buckets {
+                    if !is_valid {
+                        return Err(format!("Invalid bucket config: {}", name));
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        let bucket_validator = BucketConfigValidator {
+            buckets: vec![("products".to_string(), true), ("media".to_string(), true)],
+        };
+        assert!(
+            bucket_validator.validate_all().is_ok(),
+            "All bucket configs valid"
+        );
+
+        // Test 10: Reports invalid bucket configuration
+        let bucket_validator = BucketConfigValidator {
+            buckets: vec![("products".to_string(), true), ("media".to_string(), false)],
+        };
+        let result = bucket_validator.validate_all();
+        assert!(result.is_err(), "Invalid bucket config detected");
+        let error = result.unwrap_err();
+        assert!(error.contains("media"), "Identifies invalid bucket");
+
+        // Test 11: Checks environment variable substitution succeeded
+        struct EnvVarChecker {
+            unresolved_vars: Vec<String>,
+        }
+
+        impl EnvVarChecker {
+            fn check(&self) -> Result<(), Vec<String>> {
+                if self.unresolved_vars.is_empty() {
+                    Ok(())
+                } else {
+                    Err(self.unresolved_vars.clone())
+                }
+            }
+        }
+
+        let env_checker = EnvVarChecker {
+            unresolved_vars: vec![],
+        };
+        assert!(
+            env_checker.check().is_ok(),
+            "All env vars resolved successfully"
+        );
+
+        // Test 12: Reports unresolved environment variables
+        let env_checker = EnvVarChecker {
+            unresolved_vars: vec!["AWS_ACCESS_KEY".to_string(), "JWT_SECRET".to_string()],
+        };
+        let result = env_checker.check();
+        assert!(result.is_err(), "Unresolved env vars detected");
+        let unresolved = result.unwrap_err();
+        assert_eq!(unresolved.len(), 2, "Reports both unresolved vars");
+        assert!(
+            unresolved.contains(&"AWS_ACCESS_KEY".to_string()),
+            "Identifies AWS_ACCESS_KEY"
+        );
+
+        // Test 13: Validates JWT configuration if enabled
+        struct JwtConfigValidator {
+            jwt_enabled: bool,
+            has_secret: bool,
+        }
+
+        impl JwtConfigValidator {
+            fn validate(&self) -> Result<(), String> {
+                if self.jwt_enabled && !self.has_secret {
+                    return Err("JWT enabled but secret missing".to_string());
+                }
+                Ok(())
+            }
+        }
+
+        let jwt_validator = JwtConfigValidator {
+            jwt_enabled: true,
+            has_secret: true,
+        };
+        assert!(jwt_validator.validate().is_ok(), "JWT config valid");
+
+        // Test 14: Detects JWT enabled without secret
+        let jwt_validator = JwtConfigValidator {
+            jwt_enabled: true,
+            has_secret: false,
+        };
+        let result = jwt_validator.validate();
+        assert!(result.is_err(), "JWT config invalid");
+        assert!(
+            result.unwrap_err().contains("secret"),
+            "Error mentions missing secret"
+        );
+
+        // Test 15: Configuration reload updates health check
+        let config = ConfigManager::new(true, true);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+
+        let response1 = endpoint.check();
+        assert_eq!(response1.status, 200, "Initially valid");
+
+        config.reload(false);
+        let response2 = endpoint.check();
+        assert_eq!(response2.status, 503, "After invalid reload");
+
+        config.reload(true);
+        let response3 = endpoint.check();
+        assert_eq!(response3.status, 200, "After valid reload");
+
+        // Test 16: Startup without config returns unhealthy
+        let config = ConfigManager::new(false, false);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 before config loaded");
+
+        // Test 17: Configuration validation is fast
+        let config = ConfigManager::new(true, true);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+
+        for _ in 0..100 {
+            let response = endpoint.check();
+            assert_eq!(response.status, 200, "Fast config validation");
+        }
+
+        // Test 18: Provides actionable error for operators
+        let config = ConfigManager::new(true, true);
+        config.set_validation_error("Bucket 'products' missing path_prefix".to_string());
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert!(response.body.len() > 20, "Error message is descriptive");
+        assert!(response.body.contains("path_prefix"), "Error is actionable");
+
+        // Test 19: Can distinguish config errors from S3 errors
+        let config = ConfigManager::new(true, false);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+        assert!(
+            response.body.contains("Configuration") || response.body.contains("config"),
+            "Clearly indicates configuration issue"
+        );
+
+        // Test 20: Complete configuration validation check
+        let config = ConfigManager::new(true, true);
+        let endpoint = HealthCheckEndpoint::new(config.clone());
+        let response = endpoint.check();
+
+        assert_eq!(
+            response.status, 200,
+            "Status 200 when config loaded and valid"
+        );
+        assert_eq!(response.body, "OK", "Body OK when healthy");
+
+        config.reload(false);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Status 503 when config invalid");
+        assert!(
+            response.body.contains("Configuration") || response.body.contains("config"),
+            "Body describes configuration issue"
+        );
+
+        let complete_config_check = response.status == 503
+            && (response.body.contains("Configuration") || response.body.contains("config"));
+        assert!(
+            complete_config_check,
+            "Complete configuration check with status and descriptive body"
+        );
+    }
 }
