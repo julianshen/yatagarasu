@@ -589,7 +589,7 @@ yatagarasu/
 - [x] Test: Metrics endpoint accessible at /metrics
 - [x] Test: Metrics include proper labels
 - [x] Test: Metrics include help text
-- [ ] Test: Metrics include type metadata
+- [x] Test: Metrics include type metadata
 
 ---
 

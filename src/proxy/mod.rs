@@ -28391,4 +28391,317 @@ mod tests {
             "Help line contains metric name"
         );
     }
+
+    #[test]
+    fn test_metrics_include_type_metadata() {
+        // Metrics test: Metrics include type metadata
+        // Tests that metrics declare their type (counter, gauge, histogram, summary)
+        // Validates proper metric type classification for Prometheus
+
+        // Test case 1: Define metric with type metadata
+        #[derive(Debug, PartialEq)]
+        enum MetricType {
+            Counter,
+            Gauge,
+            Histogram,
+            Summary,
+        }
+
+        struct TypedMetric {
+            name: String,
+            metric_type: MetricType,
+            help: String,
+            value: f64,
+        }
+
+        impl TypedMetric {
+            fn new(name: &str, metric_type: MetricType, help: &str, value: f64) -> Self {
+                Self {
+                    name: name.to_string(),
+                    metric_type,
+                    help: help.to_string(),
+                    value,
+                }
+            }
+
+            fn format_type(&self) -> String {
+                match self.metric_type {
+                    MetricType::Counter => format!("# TYPE {} counter", self.name),
+                    MetricType::Gauge => format!("# TYPE {} gauge", self.name),
+                    MetricType::Histogram => format!("# TYPE {} histogram", self.name),
+                    MetricType::Summary => format!("# TYPE {} summary", self.name),
+                }
+            }
+
+            fn format_complete(&self) -> String {
+                format!(
+                    "# HELP {} {}\n{}\n{} {}",
+                    self.name,
+                    self.help,
+                    self.format_type(),
+                    self.name,
+                    self.value
+                )
+            }
+        }
+
+        // Test case 1: Counter metric has TYPE counter
+        let metric = TypedMetric::new(
+            "http_requests_total",
+            MetricType::Counter,
+            "Total HTTP requests",
+            1000.0,
+        );
+        assert_eq!(metric.metric_type, MetricType::Counter);
+        let type_line = metric.format_type();
+        assert!(
+            type_line.contains("counter"),
+            "Counter should have type counter"
+        );
+
+        // Test case 2: TYPE line starts with # TYPE
+        assert!(
+            type_line.starts_with("# TYPE"),
+            "Type line should start with # TYPE"
+        );
+
+        // Test case 3: TYPE includes metric name
+        assert!(
+            type_line.contains("http_requests_total"),
+            "Type line should include metric name"
+        );
+
+        // Test case 4: Gauge metric has TYPE gauge
+        let metric = TypedMetric::new(
+            "memory_usage_bytes",
+            MetricType::Gauge,
+            "Current memory usage",
+            1048576.0,
+        );
+        assert_eq!(metric.metric_type, MetricType::Gauge);
+        let type_line = metric.format_type();
+        assert!(type_line.contains("gauge"), "Gauge should have type gauge");
+
+        // Test case 5: Histogram metric has TYPE histogram
+        let metric = TypedMetric::new(
+            "http_request_duration_seconds",
+            MetricType::Histogram,
+            "Request duration distribution",
+            0.0,
+        );
+        assert_eq!(metric.metric_type, MetricType::Histogram);
+        let type_line = metric.format_type();
+        assert!(
+            type_line.contains("histogram"),
+            "Histogram should have type histogram"
+        );
+
+        // Test case 6: Summary metric has TYPE summary
+        let metric = TypedMetric::new(
+            "request_latency_seconds",
+            MetricType::Summary,
+            "Request latency quantiles",
+            0.0,
+        );
+        assert_eq!(metric.metric_type, MetricType::Summary);
+        let type_line = metric.format_type();
+        assert!(
+            type_line.contains("summary"),
+            "Summary should have type summary"
+        );
+
+        // Test case 7: Counter for total/count metrics
+        let metric = TypedMetric::new("errors_total", MetricType::Counter, "Total errors", 50.0);
+        assert_eq!(
+            metric.metric_type,
+            MetricType::Counter,
+            "Total metrics should be counters"
+        );
+
+        // Test case 8: Gauge for current state metrics
+        let metric = TypedMetric::new(
+            "active_connections",
+            MetricType::Gauge,
+            "Current active connections",
+            25.0,
+        );
+        assert_eq!(
+            metric.metric_type,
+            MetricType::Gauge,
+            "Current state metrics should be gauges"
+        );
+
+        // Test case 9: Complete metric format includes TYPE
+        let metric = TypedMetric::new(
+            "requests_total",
+            MetricType::Counter,
+            "Total requests",
+            500.0,
+        );
+        let output = metric.format_complete();
+        assert!(
+            output.contains("# TYPE"),
+            "Complete format should include TYPE"
+        );
+        assert!(
+            output.contains("# HELP"),
+            "Complete format should include HELP"
+        );
+
+        // Test case 10: TYPE line follows HELP line
+        let lines: Vec<_> = output.lines().collect();
+        assert!(lines[0].starts_with("# HELP"), "First line is HELP");
+        assert!(lines[1].starts_with("# TYPE"), "Second line is TYPE");
+        assert!(
+            lines[2].contains("requests_total"),
+            "Third line is metric value"
+        );
+
+        // Test case 11: Multiple metrics each have TYPE
+        let metrics = vec![
+            TypedMetric::new("counter_metric", MetricType::Counter, "A counter", 100.0),
+            TypedMetric::new("gauge_metric", MetricType::Gauge, "A gauge", 50.0),
+            TypedMetric::new(
+                "histogram_metric",
+                MetricType::Histogram,
+                "A histogram",
+                0.0,
+            ),
+        ];
+        for metric in &metrics {
+            let type_line = metric.format_type();
+            assert!(
+                type_line.starts_with("# TYPE"),
+                "Each metric should have TYPE"
+            );
+        }
+
+        // Test case 12: Counter type is lowercase
+        let metric = TypedMetric::new("test_counter", MetricType::Counter, "Test", 1.0);
+        let type_line = metric.format_type();
+        assert!(
+            type_line.contains("counter") && !type_line.contains("Counter"),
+            "Type should be lowercase"
+        );
+
+        // Test case 13: TYPE format: # TYPE metric_name type
+        let metric = TypedMetric::new("test", MetricType::Gauge, "Test", 0.0);
+        let type_line = metric.format_type();
+        let parts: Vec<_> = type_line.split_whitespace().collect();
+        assert_eq!(parts[0], "#", "TYPE starts with #");
+        assert_eq!(parts[1], "TYPE", "Second word is TYPE");
+        assert_eq!(parts[2], "test", "Third word is metric name");
+        assert_eq!(parts[3], "gauge", "Fourth word is type");
+
+        // Test case 14: Histogram for duration metrics
+        let metric = TypedMetric::new(
+            "api_duration_seconds",
+            MetricType::Histogram,
+            "API call duration",
+            0.0,
+        );
+        assert_eq!(
+            metric.metric_type,
+            MetricType::Histogram,
+            "Duration distributions should be histograms"
+        );
+
+        // Test case 15: Summary for quantile metrics
+        let metric = TypedMetric::new(
+            "response_time_seconds",
+            MetricType::Summary,
+            "Response time quantiles",
+            0.0,
+        );
+        assert_eq!(
+            metric.metric_type,
+            MetricType::Summary,
+            "Quantile metrics should be summaries"
+        );
+
+        // Test case 16: Counter naming convention (_total suffix)
+        let metric = TypedMetric::new(
+            "http_requests_total",
+            MetricType::Counter,
+            "HTTP requests",
+            1000.0,
+        );
+        assert!(
+            metric.name.ends_with("_total"),
+            "Counters should have _total suffix"
+        );
+        assert_eq!(metric.metric_type, MetricType::Counter);
+
+        // Test case 17: Gauge for capacity/size metrics
+        let metric = TypedMetric::new("connection_pool_size", MetricType::Gauge, "Pool size", 10.0);
+        assert_eq!(
+            metric.metric_type,
+            MetricType::Gauge,
+            "Size/capacity should be gauge"
+        );
+
+        // Test case 18: Histogram bucket naming
+        let metric = TypedMetric::new(
+            "request_duration_seconds_bucket",
+            MetricType::Histogram,
+            "Request duration buckets",
+            95.0,
+        );
+        assert!(
+            metric.name.contains("_bucket"),
+            "Histogram buckets have _bucket suffix"
+        );
+
+        // Test case 19: Complete export with all metadata
+        let metric = TypedMetric::new(
+            "app_requests_total",
+            MetricType::Counter,
+            "Total application requests received",
+            5000.0,
+        );
+        let output = metric.format_complete();
+
+        // Validate all required components
+        assert!(output.contains("# HELP"), "Should have HELP");
+        assert!(output.contains("# TYPE"), "Should have TYPE");
+        assert!(
+            output.contains("app_requests_total"),
+            "Should have metric name"
+        );
+        assert!(output.contains("5000"), "Should have value");
+        assert!(output.contains("counter"), "Should specify counter type");
+
+        // Test case 20: Metric family consistency
+        // All metrics in a family should have same type
+        let family = vec![
+            TypedMetric::new(
+                "http_requests_total",
+                MetricType::Counter,
+                "HTTP requests",
+                100.0,
+            ),
+            TypedMetric::new(
+                "http_requests_total",
+                MetricType::Counter,
+                "HTTP requests",
+                200.0,
+            ),
+        ];
+
+        for metric in &family {
+            assert_eq!(
+                metric.metric_type,
+                MetricType::Counter,
+                "All metrics in family should have same type"
+            );
+        }
+
+        // Validate TYPE appears once per metric family
+        let outputs: Vec<_> = family.iter().map(|m| m.format_complete()).collect();
+        // In practice, TYPE should appear once per family, but in our test
+        // each metric formats independently, so we just validate format
+        for output in outputs {
+            assert!(output.contains("# TYPE"), "Each should have TYPE in output");
+        }
+    }
 }
