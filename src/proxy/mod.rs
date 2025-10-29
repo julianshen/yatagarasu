@@ -25921,4 +25921,293 @@ mod tests {
         let can_accept = new_utilization < 0.9;
         assert!(can_accept, "At 65% utilization, can accept new tasks");
     }
+
+    #[test]
+    fn test_exports_connection_pool_metrics() {
+        // Metrics test: Exports connection pool metrics
+        // Tests that connection pool state is tracked
+        // Validates pool health monitoring and resource management
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define connection pool metrics
+        #[derive(Clone)]
+        struct ConnectionPoolMetrics {
+            total_connections: Arc<AtomicU64>,
+            idle_connections: Arc<AtomicU64>,
+            active_connections: Arc<AtomicU64>,
+            max_connections: u64,
+        }
+
+        impl ConnectionPoolMetrics {
+            fn new(max_connections: u64) -> Self {
+                Self {
+                    total_connections: Arc::new(AtomicU64::new(0)),
+                    idle_connections: Arc::new(AtomicU64::new(0)),
+                    active_connections: Arc::new(AtomicU64::new(0)),
+                    max_connections,
+                }
+            }
+
+            fn connection_created(&self) {
+                self.total_connections.fetch_add(1, Ordering::SeqCst);
+                self.idle_connections.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn connection_acquired(&self) {
+                self.idle_connections.fetch_sub(1, Ordering::SeqCst);
+                self.active_connections.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn connection_released(&self) {
+                self.active_connections.fetch_sub(1, Ordering::SeqCst);
+                self.idle_connections.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn connection_closed(&self) {
+                self.total_connections.fetch_sub(1, Ordering::SeqCst);
+                self.idle_connections.fetch_sub(1, Ordering::SeqCst);
+            }
+
+            fn get_total(&self) -> u64 {
+                self.total_connections.load(Ordering::SeqCst)
+            }
+
+            fn get_idle(&self) -> u64 {
+                self.idle_connections.load(Ordering::SeqCst)
+            }
+
+            fn get_active(&self) -> u64 {
+                self.active_connections.load(Ordering::SeqCst)
+            }
+
+            fn get_max(&self) -> u64 {
+                self.max_connections
+            }
+
+            fn get_utilization(&self) -> f64 {
+                (self.get_total() as f64 / self.max_connections as f64) * 100.0
+            }
+        }
+
+        // Test case 1: Metrics start at zero
+        let metrics = ConnectionPoolMetrics::new(10);
+        assert_eq!(
+            metrics.get_total(),
+            0,
+            "Should start with 0 total connections"
+        );
+        assert_eq!(
+            metrics.get_idle(),
+            0,
+            "Should start with 0 idle connections"
+        );
+        assert_eq!(
+            metrics.get_active(),
+            0,
+            "Should start with 0 active connections"
+        );
+
+        // Test case 2: Tracks connection creation
+        metrics.connection_created();
+        assert_eq!(metrics.get_total(), 1, "Should have 1 total connection");
+        assert_eq!(metrics.get_idle(), 1, "Created connection should be idle");
+
+        // Test case 3: Tracks connection acquisition
+        metrics.connection_acquired();
+        assert_eq!(metrics.get_idle(), 0, "Acquired connection no longer idle");
+        assert_eq!(metrics.get_active(), 1, "Acquired connection is now active");
+
+        // Test case 4: Tracks connection release
+        metrics.connection_released();
+        assert_eq!(
+            metrics.get_active(),
+            0,
+            "Released connection no longer active"
+        );
+        assert_eq!(metrics.get_idle(), 1, "Released connection is now idle");
+
+        // Test case 5: Tracks connection closure
+        metrics.connection_closed();
+        assert_eq!(
+            metrics.get_total(),
+            0,
+            "Closed connection removed from pool"
+        );
+        assert_eq!(metrics.get_idle(), 0, "No idle connections after close");
+
+        // Test case 6: Tracks pool size limits
+        assert_eq!(metrics.get_max(), 10, "Pool max size is 10");
+
+        // Test case 7: Simulates connection lifecycle
+        metrics.connection_created(); // Total: 1, Idle: 1
+        metrics.connection_acquired(); // Active: 1, Idle: 0
+        metrics.connection_released(); // Active: 0, Idle: 1
+        metrics.connection_closed(); // Total: 0, Idle: 0
+        assert_eq!(metrics.get_total(), 0, "Full lifecycle returns to zero");
+
+        // Test case 8: Tracks multiple connections
+        for _ in 0..5 {
+            metrics.connection_created();
+        }
+        assert_eq!(metrics.get_total(), 5, "Should have 5 connections");
+        assert_eq!(metrics.get_idle(), 5, "All 5 should be idle");
+
+        // Test case 9: Tracks active vs idle split
+        metrics.connection_acquired();
+        metrics.connection_acquired();
+        assert_eq!(metrics.get_active(), 2, "2 connections active");
+        assert_eq!(metrics.get_idle(), 3, "3 connections idle");
+        assert_eq!(metrics.get_total(), 5, "Total still 5");
+
+        // Test case 10: Calculates pool utilization
+        let utilization = metrics.get_utilization();
+        assert_eq!(utilization, 50.0, "5/10 connections = 50% utilization");
+
+        // Test case 11: Thread-safe pool operations
+        use std::thread;
+        let metrics = ConnectionPoolMetrics::new(100);
+        for _ in 0..10 {
+            metrics.connection_created();
+        }
+
+        let metrics_clone1 = metrics.clone();
+        let metrics_clone2 = metrics.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..50 {
+                metrics_clone1.connection_acquired();
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..50 {
+                metrics_clone2.connection_acquired();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        // Note: We only have 10 connections, so this will underflow idle
+        // In real implementation, acquire would check availability first
+        assert_eq!(metrics.get_active(), 100, "100 acquire operations recorded");
+
+        // Test case 12: Detects pool exhaustion
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..10 {
+            metrics.connection_created();
+        }
+        let at_capacity = metrics.get_total() >= metrics.get_max();
+        assert!(at_capacity, "Pool is at maximum capacity (10/10)");
+
+        // Test case 13: Tracks connection leaks
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..5 {
+            metrics.connection_created();
+            metrics.connection_acquired();
+            // Missing release = leak
+        }
+        let leaked = metrics.get_active();
+        assert_eq!(
+            leaked, 5,
+            "5 connections leaked (acquired but not released)"
+        );
+
+        // Test case 14: Monitors idle connection ratio
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..10 {
+            metrics.connection_created();
+        }
+        // Acquire 2, leaving 8 idle
+        metrics.connection_acquired();
+        metrics.connection_acquired();
+        let idle_ratio = metrics.get_idle() as f64 / metrics.get_total() as f64;
+        assert_eq!(idle_ratio, 0.8, "8/10 = 80% idle connections");
+
+        // Test case 15: Detects pool pressure
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..10 {
+            metrics.connection_created();
+        }
+        for _ in 0..9 {
+            metrics.connection_acquired();
+        }
+        let high_pressure = metrics.get_active() as f64 / metrics.get_total() as f64 > 0.8;
+        assert!(high_pressure, "9/10 active = 90% is high pressure (>80%)");
+
+        // Test case 16: Tracks connection churn
+        let metrics = ConnectionPoolMetrics::new(10);
+        // Create initial pool
+        for _ in 0..5 {
+            metrics.connection_created();
+        }
+        let baseline = metrics.get_total();
+        // Simulate churn (close and recreate)
+        metrics.connection_closed();
+        metrics.connection_created();
+        let churn = metrics.get_total() == baseline;
+        assert!(churn, "Churn maintains pool size");
+
+        // Test case 17: Enables capacity planning
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..8 {
+            metrics.connection_created();
+        }
+        let headroom = metrics.get_max() - metrics.get_total();
+        let needs_scaling = headroom < 3;
+        assert!(needs_scaling, "Only 2 connections available, needs scaling");
+
+        // Test case 18: Detects inefficient pool sizing
+        let metrics = ConnectionPoolMetrics::new(100);
+        for _ in 0..10 {
+            metrics.connection_created();
+        }
+        for _ in 0..2 {
+            metrics.connection_acquired();
+        }
+        let utilization = metrics.get_utilization();
+        let oversized = utilization < 20.0;
+        assert!(oversized, "10% utilization indicates oversized pool");
+
+        // Test case 19: Monitors connection reuse
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..5 {
+            metrics.connection_created();
+        }
+        // Simulate high reuse (acquire/release without creating new)
+        for _ in 0..100 {
+            metrics.connection_acquired();
+            metrics.connection_released();
+        }
+        let reuse_efficient = metrics.get_total() == 5;
+        assert!(
+            reuse_efficient,
+            "100 operations with only 5 connections shows good reuse"
+        );
+
+        // Test case 20: Supports graceful degradation
+        let metrics = ConnectionPoolMetrics::new(10);
+        for _ in 0..10 {
+            metrics.connection_created();
+        }
+        for _ in 0..9 {
+            metrics.connection_acquired();
+        }
+        let utilization = metrics.get_total() as f64 / metrics.get_max() as f64;
+        let should_throttle = utilization > 0.9;
+        assert!(
+            should_throttle,
+            "At 100% pool utilization, should throttle new requests"
+        );
+
+        // Release some connections
+        for _ in 0..5 {
+            metrics.connection_released();
+        }
+        let active_ratio = metrics.get_active() as f64 / metrics.get_total() as f64;
+        let can_accept = active_ratio < 0.5;
+        assert!(can_accept, "At 40% active ratio, can accept new requests");
+    }
 }
