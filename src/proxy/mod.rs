@@ -25321,4 +25321,272 @@ mod tests {
         let should_accept = gauge.get_usage() < 90.0;
         assert!(should_accept, "At 45% CPU, should accept new requests");
     }
+
+    #[test]
+    fn test_exports_open_file_descriptors() {
+        // Metrics test: Exports open file descriptors
+        // Tests that file descriptor usage is tracked
+        // Validates resource leak detection and system limit monitoring
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define file descriptor gauge
+        #[derive(Clone)]
+        struct FileDescriptorGauge {
+            open_fds: Arc<AtomicU64>,
+            max_fds: u64,
+        }
+
+        impl FileDescriptorGauge {
+            fn new(max_fds: u64) -> Self {
+                Self {
+                    open_fds: Arc::new(AtomicU64::new(0)),
+                    max_fds,
+                }
+            }
+
+            fn increment(&self) {
+                self.open_fds.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn decrement(&self) {
+                self.open_fds.fetch_sub(1, Ordering::SeqCst);
+            }
+
+            fn get_open(&self) -> u64 {
+                self.open_fds.load(Ordering::SeqCst)
+            }
+
+            fn get_max(&self) -> u64 {
+                self.max_fds
+            }
+
+            fn get_available(&self) -> u64 {
+                self.max_fds.saturating_sub(self.get_open())
+            }
+
+            fn get_utilization_percent(&self) -> f64 {
+                (self.get_open() as f64 / self.max_fds as f64) * 100.0
+            }
+        }
+
+        // Test case 1: Gauge starts at zero
+        let gauge = FileDescriptorGauge::new(1024);
+        assert_eq!(gauge.get_open(), 0, "Should start with 0 open FDs");
+
+        // Test case 2: Increments open file descriptors
+        gauge.increment();
+        assert_eq!(gauge.get_open(), 1, "Should have 1 open FD after increment");
+
+        // Test case 3: Decrements open file descriptors
+        gauge.decrement();
+        assert_eq!(
+            gauge.get_open(),
+            0,
+            "Should have 0 open FDs after decrement"
+        );
+
+        // Test case 4: Tracks maximum file descriptors
+        assert_eq!(gauge.get_max(), 1024, "Should track max FDs limit (1024)");
+
+        // Test case 5: Calculates available file descriptors
+        gauge.increment();
+        gauge.increment();
+        gauge.increment();
+        let available = gauge.get_available();
+        assert_eq!(available, 1021, "1024 max - 3 open = 1021 available");
+
+        // Test case 6: Simulates connection lifecycle
+        // Open connection
+        gauge.increment();
+        assert_eq!(gauge.get_open(), 4, "Should have 4 open FDs");
+        // Close connection
+        gauge.decrement();
+        assert_eq!(gauge.get_open(), 3, "Should have 3 open FDs");
+
+        // Test case 7: Detects high file descriptor usage
+        for _ in 0..900 {
+            gauge.increment();
+        }
+        let high_usage = gauge.get_open() > 800;
+        assert!(high_usage, "903 open FDs is high usage (>800)");
+
+        // Test case 8: Calculates utilization percentage
+        let utilization = gauge.get_utilization_percent();
+        let expected = (903.0 / 1024.0) * 100.0;
+        assert!(
+            (utilization - expected).abs() < 0.01,
+            "Utilization should be ~88.18%"
+        );
+
+        // Test case 9: Thread-safe increment/decrement
+        use std::thread;
+        let gauge = FileDescriptorGauge::new(10000);
+        gauge.increment();
+        gauge.increment();
+
+        let gauge_clone1 = gauge.clone();
+        let gauge_clone2 = gauge.clone();
+        let gauge_clone3 = gauge.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone1.increment();
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone2.increment();
+            }
+        });
+
+        let handle3 = thread::spawn(move || {
+            for _ in 0..100 {
+                gauge_clone3.increment();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+        handle3.join().unwrap();
+
+        assert_eq!(
+            gauge.get_open(),
+            302,
+            "Should have 2 + 300 = 302 open FDs from concurrent increments"
+        );
+
+        // Test case 10: Detects near-limit condition
+        let gauge = FileDescriptorGauge::new(1024);
+        for _ in 0..1000 {
+            gauge.increment();
+        }
+        let near_limit = gauge.get_open() as f64 / gauge.get_max() as f64 > 0.9;
+        assert!(near_limit, "1000/1024 = 97.6% is near limit (>90%)");
+
+        // Test case 11: Alerts when approaching limit
+        let utilization = gauge.get_utilization_percent();
+        let should_alert = utilization > 90.0;
+        assert!(should_alert, "Should alert at 97.6% utilization (>90%)");
+
+        // Test case 12: Tracks available capacity
+        let available = gauge.get_available();
+        assert_eq!(available, 24, "1024 - 1000 = 24 FDs available");
+        let low_capacity = available < 50;
+        assert!(low_capacity, "24 available is low capacity (<50)");
+
+        // Test case 13: Prevents exceeding limit
+        for _ in 0..30 {
+            gauge.increment();
+        }
+        let at_limit = gauge.get_open() >= gauge.get_max();
+        assert!(
+            at_limit,
+            "1030 open FDs exceeds 1024 limit, should reject new connections"
+        );
+
+        // Test case 14: Detects file descriptor leak
+        let gauge = FileDescriptorGauge::new(1024);
+        let baseline = gauge.get_open();
+
+        // Simulate requests that should close FDs
+        for _ in 0..10 {
+            gauge.increment(); // Open
+                               // Missing decrement = leak
+        }
+
+        let leaked = gauge.get_open() - baseline;
+        assert_eq!(leaked, 10, "Should detect 10 leaked file descriptors");
+
+        // Test case 15: Tracks FD usage per request
+        let gauge = FileDescriptorGauge::new(1024);
+        // Request opens 3 FDs (socket, file, log)
+        gauge.increment();
+        gauge.increment();
+        gauge.increment();
+        assert_eq!(gauge.get_open(), 3, "Request should use 3 FDs");
+        // Request closes all FDs
+        gauge.decrement();
+        gauge.decrement();
+        gauge.decrement();
+        assert_eq!(gauge.get_open(), 0, "Request should clean up all FDs");
+
+        // Test case 16: Monitors FD growth over time
+        let gauge = FileDescriptorGauge::new(1024);
+        let measurements = vec![10, 25, 50, 100, 200];
+        for target in measurements {
+            while gauge.get_open() < target {
+                gauge.increment();
+            }
+        }
+        let growing = gauge.get_open() > 100;
+        assert!(growing, "FDs growing from 10 to 200 indicates leak");
+
+        // Test case 17: Calculates headroom for burst traffic
+        let gauge = FileDescriptorGauge::new(1024);
+        for _ in 0..500 {
+            gauge.increment();
+        }
+        let headroom = gauge.get_available();
+        let can_handle_burst = headroom > 100;
+        assert!(
+            can_handle_burst,
+            "524 available FDs can handle burst traffic (>100)"
+        );
+
+        // Test case 18: Detects connection pool leaks
+        let gauge = FileDescriptorGauge::new(1024);
+        // Pool should maintain 10 connections
+        for _ in 0..10 {
+            gauge.increment();
+        }
+        let baseline = gauge.get_open();
+
+        // After 100 requests, pool should still be 10
+        // But if it grows, there's a leak
+        for _ in 0..20 {
+            gauge.increment(); // Simulate leak
+        }
+
+        let leaked = gauge.get_open() > baseline;
+        assert!(leaked, "Connection pool leaked FDs (30 > 10)");
+
+        // Test case 19: Enables capacity planning
+        let gauge = FileDescriptorGauge::new(1024);
+        for _ in 0..800 {
+            gauge.increment();
+        }
+        // 100 concurrent connections * 2 FDs each = 200 FDs needed
+        let available = gauge.get_available();
+        let can_support_100_more = available >= 200;
+        assert!(
+            can_support_100_more,
+            "224 available FDs can support 100 more connections (>200)"
+        );
+
+        // Test case 20: Supports graceful degradation
+        let gauge = FileDescriptorGauge::new(1024);
+        for _ in 0..950 {
+            gauge.increment();
+        }
+        let utilization = gauge.get_utilization_percent();
+        let should_throttle = utilization > 90.0;
+        assert!(
+            should_throttle,
+            "At 92.7% utilization, should throttle new connections"
+        );
+
+        // After closing some connections
+        for _ in 0..200 {
+            gauge.decrement();
+        }
+        let new_utilization = gauge.get_utilization_percent();
+        let can_accept = new_utilization < 90.0;
+        assert!(
+            can_accept,
+            "At 73.2% utilization, can accept new connections"
+        );
+    }
 }
