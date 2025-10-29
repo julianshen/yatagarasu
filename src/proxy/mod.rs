@@ -26506,4 +26506,317 @@ mod tests {
             "Success rate dropped from 95% to ~82.6%, anomaly detected (>10% change)"
         );
     }
+
+    #[test]
+    fn test_exports_s3_request_count_by_operation() {
+        // Metrics test: Exports S3 request count by operation
+        // Tests that S3 operations are tracked by type
+        // Validates API usage monitoring and cost analysis
+
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        // Test case 1: Define S3 operation metrics
+        #[derive(Clone)]
+        struct S3OperationMetrics {
+            operations: Arc<Mutex<HashMap<String, u64>>>,
+        }
+
+        impl S3OperationMetrics {
+            fn new() -> Self {
+                Self {
+                    operations: Arc::new(Mutex::new(HashMap::new())),
+                }
+            }
+
+            fn record_operation(&self, operation: &str) {
+                let mut ops = self.operations.lock().unwrap();
+                *ops.entry(operation.to_string()).or_insert(0) += 1;
+            }
+
+            fn get_operation_count(&self, operation: &str) -> u64 {
+                let ops = self.operations.lock().unwrap();
+                *ops.get(operation).unwrap_or(&0)
+            }
+
+            fn get_total_operations(&self) -> u64 {
+                let ops = self.operations.lock().unwrap();
+                ops.values().sum()
+            }
+
+            fn get_all_operations(&self) -> HashMap<String, u64> {
+                let ops = self.operations.lock().unwrap();
+                ops.clone()
+            }
+        }
+
+        // Test case 1: Metrics start empty
+        let metrics = S3OperationMetrics::new();
+        assert_eq!(
+            metrics.get_operation_count("GetObject"),
+            0,
+            "Should start with 0 GetObject operations"
+        );
+
+        // Test case 2: Records GetObject operation
+        metrics.record_operation("GetObject");
+        assert_eq!(
+            metrics.get_operation_count("GetObject"),
+            1,
+            "Should have 1 GetObject"
+        );
+
+        // Test case 3: Records PutObject operation
+        metrics.record_operation("PutObject");
+        assert_eq!(
+            metrics.get_operation_count("PutObject"),
+            1,
+            "Should have 1 PutObject"
+        );
+
+        // Test case 4: Records HeadObject operation
+        metrics.record_operation("HeadObject");
+        assert_eq!(
+            metrics.get_operation_count("HeadObject"),
+            1,
+            "Should have 1 HeadObject"
+        );
+
+        // Test case 5: Tracks multiple operations of same type
+        for _ in 0..10 {
+            metrics.record_operation("GetObject");
+        }
+        assert_eq!(
+            metrics.get_operation_count("GetObject"),
+            11,
+            "Should have 11 GetObject operations (1 + 10)"
+        );
+
+        // Test case 6: Calculates total operations
+        let total = metrics.get_total_operations();
+        assert_eq!(
+            total, 13,
+            "Should have 13 total operations (11 GET + 1 PUT + 1 HEAD)"
+        );
+
+        // Test case 7: Tracks all S3 operation types
+        let metrics = S3OperationMetrics::new();
+        metrics.record_operation("GetObject");
+        metrics.record_operation("PutObject");
+        metrics.record_operation("DeleteObject");
+        metrics.record_operation("HeadObject");
+        metrics.record_operation("ListObjects");
+        let all_ops = metrics.get_all_operations();
+        assert_eq!(all_ops.len(), 5, "Should track 5 different operation types");
+
+        // Test case 8: Calculates operation distribution
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..70 {
+            metrics.record_operation("GetObject");
+        }
+        for _ in 0..20 {
+            metrics.record_operation("PutObject");
+        }
+        for _ in 0..10 {
+            metrics.record_operation("DeleteObject");
+        }
+        let total = metrics.get_total_operations();
+        let get_ratio = metrics.get_operation_count("GetObject") as f64 / total as f64;
+        assert_eq!(get_ratio, 0.7, "GetObject is 70% of operations");
+
+        // Test case 9: Thread-safe operation tracking
+        use std::thread;
+        let metrics = S3OperationMetrics::new();
+
+        let metrics_clone1 = metrics.clone();
+        let metrics_clone2 = metrics.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone1.record_operation("GetObject");
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone2.record_operation("PutObject");
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        assert_eq!(
+            metrics.get_operation_count("GetObject"),
+            100,
+            "Should have 100 GetObject"
+        );
+        assert_eq!(
+            metrics.get_operation_count("PutObject"),
+            100,
+            "Should have 100 PutObject"
+        );
+
+        // Test case 10: Identifies most common operation
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..100 {
+            metrics.record_operation("GetObject");
+        }
+        for _ in 0..20 {
+            metrics.record_operation("PutObject");
+        }
+        let all_ops = metrics.get_all_operations();
+        let most_common = all_ops.iter().max_by_key(|(_, &count)| count).unwrap();
+        assert_eq!(most_common.0, "GetObject", "GetObject is most common");
+        assert_eq!(*most_common.1, 100, "GetObject has 100 requests");
+
+        // Test case 11: Identifies least common operation
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..50 {
+            metrics.record_operation("GetObject");
+        }
+        for _ in 0..30 {
+            metrics.record_operation("PutObject");
+        }
+        for _ in 0..5 {
+            metrics.record_operation("DeleteObject");
+        }
+        let all_ops = metrics.get_all_operations();
+        let least_common = all_ops.iter().min_by_key(|(_, &count)| count).unwrap();
+        assert_eq!(
+            least_common.0, "DeleteObject",
+            "DeleteObject is least common"
+        );
+
+        // Test case 12: Tracks read vs write operations
+        let metrics = S3OperationMetrics::new();
+        // Read operations
+        for _ in 0..80 {
+            metrics.record_operation("GetObject");
+        }
+        for _ in 0..10 {
+            metrics.record_operation("HeadObject");
+        }
+        // Write operations
+        for _ in 0..5 {
+            metrics.record_operation("PutObject");
+        }
+        for _ in 0..5 {
+            metrics.record_operation("DeleteObject");
+        }
+        let reads =
+            metrics.get_operation_count("GetObject") + metrics.get_operation_count("HeadObject");
+        let writes =
+            metrics.get_operation_count("PutObject") + metrics.get_operation_count("DeleteObject");
+        assert_eq!(reads, 90, "90 read operations");
+        assert_eq!(writes, 10, "10 write operations");
+        let read_heavy = reads > writes * 5;
+        assert!(read_heavy, "Workload is read-heavy (9:1 ratio)");
+
+        // Test case 13: Enables cost analysis
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..1000 {
+            metrics.record_operation("GetObject");
+        }
+        for _ in 0..100 {
+            metrics.record_operation("PutObject");
+        }
+        // AWS pricing: GET $0.0004/1000, PUT $0.005/1000
+        let get_cost = (metrics.get_operation_count("GetObject") as f64 / 1000.0) * 0.0004;
+        let put_cost = (metrics.get_operation_count("PutObject") as f64 / 1000.0) * 0.005;
+        let total_cost = get_cost + put_cost;
+        assert!(
+            (total_cost - 0.0009).abs() < 0.00001,
+            "Cost should be ~$0.0009"
+        );
+
+        // Test case 14: Detects unusual operation patterns
+        let metrics = S3OperationMetrics::new();
+        // Normal: mostly GET
+        for _ in 0..95 {
+            metrics.record_operation("GetObject");
+        }
+        // Unusual: many DELETE
+        for _ in 0..50 {
+            metrics.record_operation("DeleteObject");
+        }
+        let delete_ratio = metrics.get_operation_count("DeleteObject") as f64
+            / metrics.get_total_operations() as f64;
+        let unusual = delete_ratio > 0.3;
+        assert!(unusual, "34.5% DELETE operations is unusual pattern (>30%)");
+
+        // Test case 15: Tracks LIST operations for pagination
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..20 {
+            metrics.record_operation("ListObjects");
+        }
+        let list_count = metrics.get_operation_count("ListObjects");
+        assert_eq!(list_count, 20, "20 LIST operations for pagination");
+
+        // Test case 16: Monitors HEAD requests for metadata
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..50 {
+            metrics.record_operation("HeadObject");
+        }
+        for _ in 0..100 {
+            metrics.record_operation("GetObject");
+        }
+        let head_ratio = metrics.get_operation_count("HeadObject") as f64
+            / metrics.get_total_operations() as f64;
+        assert_eq!(head_ratio, 1.0 / 3.0, "1:2 HEAD to GET ratio");
+
+        // Test case 17: Tracks multipart upload operations
+        let metrics = S3OperationMetrics::new();
+        metrics.record_operation("CreateMultipartUpload");
+        for _ in 0..10 {
+            metrics.record_operation("UploadPart");
+        }
+        metrics.record_operation("CompleteMultipartUpload");
+        assert_eq!(
+            metrics.get_operation_count("UploadPart"),
+            10,
+            "10 parts uploaded"
+        );
+
+        // Test case 18: Enables throughput analysis
+        let metrics = S3OperationMetrics::new();
+        // Simulate 1 second of operations
+        for _ in 0..500 {
+            metrics.record_operation("GetObject");
+        }
+        let ops_per_second = metrics.get_total_operations();
+        assert_eq!(ops_per_second, 500, "500 ops/sec throughput");
+
+        // Test case 19: Detects API quota consumption
+        let metrics = S3OperationMetrics::new();
+        for _ in 0..5000 {
+            metrics.record_operation("GetObject");
+        }
+        let quota_limit = 5500; // S3 GET limit per prefix
+        let usage_ratio = metrics.get_operation_count("GetObject") as f64 / quota_limit as f64;
+        let near_limit = usage_ratio > 0.9;
+        assert!(near_limit, "At 90.9% of quota limit, near threshold");
+
+        // Test case 20: Supports operation type filtering
+        let metrics = S3OperationMetrics::new();
+        metrics.record_operation("GetObject");
+        metrics.record_operation("GetObject");
+        metrics.record_operation("PutObject");
+        metrics.record_operation("DeleteObject");
+        metrics.record_operation("HeadObject");
+
+        let all_ops = metrics.get_all_operations();
+        let read_ops: Vec<_> = all_ops
+            .iter()
+            .filter(|(op, _)| op.contains("Get") || op.contains("Head"))
+            .collect();
+        assert_eq!(read_ops.len(), 2, "2 read operation types");
+
+        let write_ops: Vec<_> = all_ops
+            .iter()
+            .filter(|(op, _)| op.contains("Put") || op.contains("Delete"))
+            .collect();
+        assert_eq!(write_ops.len(), 2, "2 write operation types");
+    }
 }

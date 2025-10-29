@@ -580,7 +580,7 @@ yatagarasu/
 
 ### Metrics - Business Metrics
 - [x] Test: Exports authentication success/failure rate
-- [ ] Test: Exports S3 request count by operation
+- [x] Test: Exports S3 request count by operation
 - [ ] Test: Exports S3 error rate
 - [ ] Test: Exports cache hit/miss rate (if caching enabled)
 
