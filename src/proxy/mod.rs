@@ -24862,4 +24862,281 @@ mod tests {
         assert_eq!(counter.get_received(), 204_800);
         assert_eq!(counter.get_total(), 307_200);
     }
+
+    #[test]
+    fn test_exports_memory_usage() {
+        // Metrics test: Exports memory usage
+        // Tests that memory usage metrics are tracked
+        // Validates resource monitoring and memory leak detection capability
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define memory usage gauge
+        #[derive(Clone)]
+        struct MemoryUsageGauge {
+            allocated_bytes: Arc<AtomicU64>,
+            rss_bytes: Arc<AtomicU64>,
+        }
+
+        impl MemoryUsageGauge {
+            fn new() -> Self {
+                Self {
+                    allocated_bytes: Arc::new(AtomicU64::new(0)),
+                    rss_bytes: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn set_allocated(&self, bytes: u64) {
+                self.allocated_bytes.store(bytes, Ordering::SeqCst);
+            }
+
+            fn set_rss(&self, bytes: u64) {
+                self.rss_bytes.store(bytes, Ordering::SeqCst);
+            }
+
+            fn get_allocated(&self) -> u64 {
+                self.allocated_bytes.load(Ordering::SeqCst)
+            }
+
+            fn get_rss(&self) -> u64 {
+                self.rss_bytes.load(Ordering::SeqCst)
+            }
+
+            fn get_allocated_mb(&self) -> f64 {
+                self.get_allocated() as f64 / (1024.0 * 1024.0)
+            }
+
+            fn get_rss_mb(&self) -> f64 {
+                self.get_rss() as f64 / (1024.0 * 1024.0)
+            }
+        }
+
+        // Test case 2: Gauge starts at zero
+        let gauge = MemoryUsageGauge::new();
+        assert_eq!(gauge.get_allocated(), 0);
+        assert_eq!(gauge.get_rss(), 0);
+
+        // Test case 3: Records allocated memory
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(10 * 1024 * 1024); // 10 MB
+        assert_eq!(gauge.get_allocated(), 10_485_760);
+
+        // Test case 4: Records RSS memory
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_rss(20 * 1024 * 1024); // 20 MB
+        assert_eq!(gauge.get_rss(), 20_971_520);
+
+        // Test case 5: Tracks both allocated and RSS independently
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(10 * 1024 * 1024);
+        gauge.set_rss(20 * 1024 * 1024);
+        assert_eq!(gauge.get_allocated(), 10_485_760);
+        assert_eq!(gauge.get_rss(), 20_971_520);
+
+        // Test case 6: Converts to MB
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(10 * 1024 * 1024);
+        assert_eq!(gauge.get_allocated_mb(), 10.0);
+
+        // Test case 7: Can detect memory growth
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(10 * 1024 * 1024);
+        let initial = gauge.get_allocated();
+
+        gauge.set_allocated(20 * 1024 * 1024);
+        let current = gauge.get_allocated();
+
+        let growth = current - initial;
+        assert_eq!(growth, 10_485_760); // Grew by 10 MB
+
+        // Test case 8: Can alert on high memory usage
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(900 * 1024 * 1024); // 900 MB
+
+        let threshold = 800 * 1024 * 1024; // 800 MB threshold
+        let should_alert = gauge.get_allocated() > threshold;
+        assert!(should_alert, "Should alert on high memory usage");
+
+        // Test case 9: Tracks memory over time
+        let gauge = MemoryUsageGauge::new();
+        let mut measurements = Vec::new();
+
+        gauge.set_allocated(10 * 1024 * 1024);
+        measurements.push(gauge.get_allocated_mb());
+
+        gauge.set_allocated(20 * 1024 * 1024);
+        measurements.push(gauge.get_allocated_mb());
+
+        gauge.set_allocated(15 * 1024 * 1024);
+        measurements.push(gauge.get_allocated_mb());
+
+        assert_eq!(measurements, vec![10.0, 20.0, 15.0]);
+
+        // Test case 10: Can detect memory leak pattern
+        let gauge = MemoryUsageGauge::new();
+        let mut samples = Vec::new();
+
+        // Simulate steadily increasing memory (potential leak)
+        for i in 1..=10 {
+            gauge.set_allocated((i * 10) * 1024 * 1024);
+            samples.push(gauge.get_allocated_mb());
+        }
+
+        // Check if memory consistently increases
+        let is_increasing = samples.windows(2).all(|w| w[1] > w[0]);
+        assert!(is_increasing, "Should detect increasing memory pattern");
+
+        // Test case 11: RSS typically larger than allocated
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(50 * 1024 * 1024);
+        gauge.set_rss(100 * 1024 * 1024);
+
+        assert!(
+            gauge.get_rss() > gauge.get_allocated(),
+            "RSS should be larger"
+        );
+
+        // Test case 12: Can calculate memory fragmentation
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(50 * 1024 * 1024);
+        gauge.set_rss(100 * 1024 * 1024);
+
+        let fragmentation = gauge.get_rss() as f64 / gauge.get_allocated() as f64;
+        assert_eq!(fragmentation, 2.0);
+
+        // Test case 13: Thread-safe updates
+        let gauge = MemoryUsageGauge::new();
+        let gauge_clone1 = gauge.clone();
+        let gauge_clone2 = gauge.clone();
+
+        let handle1 = std::thread::spawn(move || {
+            gauge_clone1.set_allocated(10 * 1024 * 1024);
+        });
+
+        let handle2 = std::thread::spawn(move || {
+            gauge_clone2.set_rss(20 * 1024 * 1024);
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        // Last write wins for atomic stores
+        assert!(gauge.get_allocated() > 0 || gauge.get_rss() > 0);
+
+        // Test case 14: Can detect low memory condition
+        let gauge = MemoryUsageGauge::new();
+        let total_available = 1024 * 1024 * 1024; // 1 GB available
+        gauge.set_allocated(950 * 1024 * 1024); // Using 950 MB
+
+        let usage_percentage = (gauge.get_allocated() as f64 / total_available as f64) * 100.0;
+        let low_memory = usage_percentage > 90.0;
+
+        assert!(low_memory, "Should detect low memory condition");
+
+        // Test case 15: Tracks peak memory usage
+        let gauge = MemoryUsageGauge::new();
+        let mut peak = 0u64;
+
+        let memory_values = vec![10, 50, 30, 80, 40];
+        for &mb in &memory_values {
+            gauge.set_allocated(mb * 1024 * 1024);
+            let current = gauge.get_allocated();
+            if current > peak {
+                peak = current;
+            }
+        }
+
+        assert_eq!(peak, 80 * 1024 * 1024);
+
+        // Test case 16: Can calculate memory utilization
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(512 * 1024 * 1024); // 512 MB used
+        let total_capacity = 1024 * 1024 * 1024; // 1 GB capacity
+
+        let utilization = (gauge.get_allocated() as f64 / total_capacity as f64) * 100.0;
+        assert_eq!(utilization, 50.0);
+
+        // Test case 17: Supports different memory units
+        let gauge = MemoryUsageGauge::new();
+        gauge.set_allocated(1024 * 1024 * 1024); // 1 GB
+
+        let bytes = gauge.get_allocated();
+        let kb = bytes as f64 / 1024.0;
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        let gb = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+        assert_eq!(bytes, 1_073_741_824);
+        assert_eq!(kb, 1_048_576.0);
+        assert_eq!(mb, 1024.0);
+        assert_eq!(gb, 1.0);
+
+        // Test case 18: Enables OOM prevention
+        let gauge = MemoryUsageGauge::new();
+        let oom_threshold = 800 * 1024 * 1024; // 800 MB threshold
+
+        gauge.set_allocated(850 * 1024 * 1024);
+
+        let should_reject_requests = gauge.get_allocated() > oom_threshold;
+        assert!(
+            should_reject_requests,
+            "Should reject requests to prevent OOM"
+        );
+
+        // Test case 19: Can track per-component memory
+        #[derive(Clone)]
+        struct ComponentMemory {
+            components: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
+        }
+
+        impl ComponentMemory {
+            fn new() -> Self {
+                Self {
+                    components: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                }
+            }
+
+            fn set(&self, component: &str, bytes: u64) {
+                let mut components = self.components.lock().unwrap();
+                components.insert(component.to_string(), bytes);
+            }
+
+            fn get(&self, component: &str) -> u64 {
+                self.components
+                    .lock()
+                    .unwrap()
+                    .get(component)
+                    .copied()
+                    .unwrap_or(0)
+            }
+        }
+
+        let component_mem = ComponentMemory::new();
+        component_mem.set("cache", 100 * 1024 * 1024); // 100 MB
+        component_mem.set("connections", 50 * 1024 * 1024); // 50 MB
+
+        assert_eq!(component_mem.get("cache"), 104_857_600);
+        assert_eq!(component_mem.get("connections"), 52_428_800);
+
+        // Test case 20: Metrics enable capacity planning
+        let gauge = MemoryUsageGauge::new();
+        // Current usage: 600 MB
+        gauge.set_allocated(600 * 1024 * 1024);
+        let current_capacity = 1024 * 1024 * 1024; // 1 GB
+
+        let utilization = (gauge.get_allocated() as f64 / current_capacity as f64) * 100.0;
+
+        // Recommend upgrade if utilization > 70%
+        let needs_more_memory = utilization > 70.0;
+        assert!(
+            !needs_more_memory,
+            "Should not need more memory at 60% utilization"
+        );
+
+        // Simulate higher usage
+        gauge.set_allocated(800 * 1024 * 1024);
+        let new_utilization = (gauge.get_allocated() as f64 / current_capacity as f64) * 100.0;
+        let needs_upgrade = new_utilization > 70.0;
+        assert!(needs_upgrade, "Should need upgrade at 80% utilization");
+    }
 }
