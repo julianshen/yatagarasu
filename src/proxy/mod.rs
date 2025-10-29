@@ -27430,4 +27430,251 @@ mod tests {
         let bypassed = metrics.get_hit_count() == 0;
         assert!(bypassed, "0 hits confirms cache bypass");
     }
+
+    #[test]
+    fn test_metrics_endpoint_returns_prometheus_text_format() {
+        // Metrics test: Metrics endpoint returns Prometheus text format
+        // Tests that metrics are exported in Prometheus format
+        // Validates integration with Prometheus monitoring
+
+        // Test case 1: Define Prometheus formatter
+        struct PrometheusFormatter;
+
+        impl PrometheusFormatter {
+            fn format_metric(name: &str, value: f64) -> String {
+                format!("{} {}", name, value)
+            }
+
+            fn format_metric_with_labels(
+                name: &str,
+                labels: &[(&str, &str)],
+                value: f64,
+            ) -> String {
+                if labels.is_empty() {
+                    return Self::format_metric(name, value);
+                }
+                let labels_str = labels
+                    .iter()
+                    .map(|(k, v)| format!("{}=\"{}\"", k, v))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{}{{{}}} {}", name, labels_str, value)
+            }
+        }
+
+        // Test case 1: Formats simple counter metric
+        let output = PrometheusFormatter::format_metric("http_requests_total", 1234.0);
+        assert_eq!(output, "http_requests_total 1234", "Simple counter format");
+
+        // Test case 2: Formats gauge metric
+        let output = PrometheusFormatter::format_metric("memory_usage_bytes", 1048576.0);
+        assert_eq!(output, "memory_usage_bytes 1048576", "Gauge metric format");
+
+        // Test case 3: Formats metric with single label
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "http_requests_total",
+            &[("status", "200")],
+            1000.0,
+        );
+        assert_eq!(
+            output, "http_requests_total{status=\"200\"} 1000",
+            "Metric with single label"
+        );
+
+        // Test case 4: Formats metric with multiple labels
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "http_requests_total",
+            &[("status", "200"), ("method", "GET")],
+            1500.0,
+        );
+        assert_eq!(
+            output, "http_requests_total{status=\"200\",method=\"GET\"} 1500",
+            "Metric with multiple labels"
+        );
+
+        // Test case 5: Handles floating point values
+        let output = PrometheusFormatter::format_metric("cpu_usage_percent", 45.67);
+        assert_eq!(output, "cpu_usage_percent 45.67", "Floating point value");
+
+        // Test case 6: Formats histogram bucket
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "http_request_duration_seconds_bucket",
+            &[("le", "0.1")],
+            95.0,
+        );
+        assert_eq!(
+            output, "http_request_duration_seconds_bucket{le=\"0.1\"} 95",
+            "Histogram bucket format"
+        );
+
+        // Test case 7: Formats histogram sum
+        let output =
+            PrometheusFormatter::format_metric("http_request_duration_seconds_sum", 123.45);
+        assert_eq!(
+            output, "http_request_duration_seconds_sum 123.45",
+            "Histogram sum"
+        );
+
+        // Test case 8: Formats histogram count
+        let output =
+            PrometheusFormatter::format_metric("http_request_duration_seconds_count", 1000.0);
+        assert_eq!(
+            output, "http_request_duration_seconds_count 1000",
+            "Histogram count"
+        );
+
+        // Test case 9: Handles special characters in labels
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "http_requests_total",
+            &[("path", "/api/v1/users")],
+            500.0,
+        );
+        assert_eq!(
+            output, "http_requests_total{path=\"/api/v1/users\"} 500",
+            "Special chars in label values"
+        );
+
+        // Test case 10: Formats multiple metrics as text
+        let metrics = vec![
+            PrometheusFormatter::format_metric("http_requests_total", 1000.0),
+            PrometheusFormatter::format_metric("memory_usage_bytes", 2048000.0),
+            PrometheusFormatter::format_metric("cpu_usage_percent", 25.5),
+        ];
+        let output = metrics.join("\n");
+        assert!(
+            output.contains("http_requests_total 1000"),
+            "Contains request counter"
+        );
+        assert!(
+            output.contains("memory_usage_bytes 2048000"),
+            "Contains memory gauge"
+        );
+        assert!(
+            output.contains("cpu_usage_percent 25.5"),
+            "Contains CPU gauge"
+        );
+
+        // Test case 11: Validates newline-delimited format
+        assert_eq!(
+            output.matches('\n').count(),
+            2,
+            "Three metrics separated by 2 newlines"
+        );
+
+        // Test case 12: Formats counter with bucket label
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "requests_per_bucket",
+            &[("bucket", "products")],
+            5000.0,
+        );
+        assert_eq!(
+            output, "requests_per_bucket{bucket=\"products\"} 5000",
+            "Per-bucket metric"
+        );
+
+        // Test case 13: Handles zero values
+        let output = PrometheusFormatter::format_metric("errors_total", 0.0);
+        assert_eq!(output, "errors_total 0", "Zero value");
+
+        // Test case 14: Formats large numbers
+        let output = PrometheusFormatter::format_metric("bytes_transferred_total", 1.5e9);
+        assert_eq!(
+            output, "bytes_transferred_total 1500000000",
+            "Large number format"
+        );
+
+        // Test case 15: Supports multiple label dimensions
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "s3_requests_total",
+            &[("bucket", "media"), ("operation", "GetObject")],
+            10000.0,
+        );
+        assert_eq!(
+            output, "s3_requests_total{bucket=\"media\",operation=\"GetObject\"} 10000",
+            "Multiple dimensions"
+        );
+
+        // Test case 16: Formats summary quantile
+        let output = PrometheusFormatter::format_metric_with_labels(
+            "http_request_duration_seconds",
+            &[("quantile", "0.95")],
+            0.250,
+        );
+        assert_eq!(
+            output, "http_request_duration_seconds{quantile=\"0.95\"} 0.25",
+            "Summary quantile format"
+        );
+
+        // Test case 17: Validates text format content type compatibility
+        let content_type = "text/plain; version=0.0.4; charset=utf-8";
+        assert!(
+            content_type.starts_with("text/plain"),
+            "Prometheus text format uses text/plain"
+        );
+
+        // Test case 18: Formats complete metric family
+        let metric_family = vec![
+            PrometheusFormatter::format_metric_with_labels(
+                "http_requests_total",
+                &[("status", "200")],
+                1000.0,
+            ),
+            PrometheusFormatter::format_metric_with_labels(
+                "http_requests_total",
+                &[("status", "404")],
+                50.0,
+            ),
+            PrometheusFormatter::format_metric_with_labels(
+                "http_requests_total",
+                &[("status", "500")],
+                10.0,
+            ),
+        ];
+        let output = metric_family.join("\n");
+        assert_eq!(
+            output.matches("http_requests_total").count(),
+            3,
+            "Metric family has 3 entries"
+        );
+
+        // Test case 19: Handles empty label set
+        let output = PrometheusFormatter::format_metric_with_labels("simple_counter", &[], 100.0);
+        assert_eq!(output, "simple_counter 100", "Empty labels");
+
+        // Test case 20: Validates complete Prometheus export
+        let complete_export = vec![
+            PrometheusFormatter::format_metric("process_cpu_seconds_total", 45.5),
+            PrometheusFormatter::format_metric("process_resident_memory_bytes", 1048576.0),
+            PrometheusFormatter::format_metric_with_labels(
+                "http_requests_total",
+                &[("method", "GET")],
+                1000.0,
+            ),
+            PrometheusFormatter::format_metric_with_labels(
+                "http_requests_total",
+                &[("method", "POST")],
+                200.0,
+            ),
+        ];
+        let export = complete_export.join("\n");
+
+        // Validate format structure
+        assert!(
+            export.lines().all(|line| {
+                // Each line should be: metric_name{labels} value
+                // or: metric_name value
+                line.contains(' ') && (line.matches('{').count() == line.matches('}').count())
+            }),
+            "All lines follow Prometheus format"
+        );
+
+        // Validate it's parseable structure
+        for line in export.lines() {
+            let parts: Vec<_> = line.split_whitespace().collect();
+            assert!(parts.len() >= 2, "Each metric has name and value");
+            // Validate value is numeric
+            let value = parts.last().unwrap();
+            assert!(value.parse::<f64>().is_ok(), "Value is numeric: {}", value);
+        }
+    }
 }

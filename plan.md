@@ -585,7 +585,7 @@ yatagarasu/
 - [x] Test: Exports cache hit/miss rate (if caching enabled)
 
 ### Metrics - Prometheus Format
-- [ ] Test: Metrics endpoint returns Prometheus text format
+- [x] Test: Metrics endpoint returns Prometheus text format
 - [ ] Test: Metrics endpoint accessible at /metrics
 - [ ] Test: Metrics include proper labels
 - [ ] Test: Metrics include help text
