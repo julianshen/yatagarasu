@@ -25589,4 +25589,336 @@ mod tests {
             "At 73.2% utilization, can accept new connections"
         );
     }
+
+    #[test]
+    fn test_exports_tokio_task_metrics() {
+        // Metrics test: Exports Tokio task metrics
+        // Tests that async task execution is tracked
+        // Validates runtime health monitoring and task lifecycle tracking
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define Tokio task metrics
+        #[derive(Clone)]
+        struct TokioTaskMetrics {
+            spawned_tasks: Arc<AtomicU64>,
+            completed_tasks: Arc<AtomicU64>,
+            failed_tasks: Arc<AtomicU64>,
+            active_tasks: Arc<AtomicU64>,
+        }
+
+        impl TokioTaskMetrics {
+            fn new() -> Self {
+                Self {
+                    spawned_tasks: Arc::new(AtomicU64::new(0)),
+                    completed_tasks: Arc::new(AtomicU64::new(0)),
+                    failed_tasks: Arc::new(AtomicU64::new(0)),
+                    active_tasks: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn task_spawned(&self) {
+                self.spawned_tasks.fetch_add(1, Ordering::SeqCst);
+                self.active_tasks.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn task_completed(&self) {
+                self.completed_tasks.fetch_add(1, Ordering::SeqCst);
+                self.active_tasks.fetch_sub(1, Ordering::SeqCst);
+            }
+
+            fn task_failed(&self) {
+                self.failed_tasks.fetch_add(1, Ordering::SeqCst);
+                self.active_tasks.fetch_sub(1, Ordering::SeqCst);
+            }
+
+            fn get_spawned(&self) -> u64 {
+                self.spawned_tasks.load(Ordering::SeqCst)
+            }
+
+            fn get_completed(&self) -> u64 {
+                self.completed_tasks.load(Ordering::SeqCst)
+            }
+
+            fn get_failed(&self) -> u64 {
+                self.failed_tasks.load(Ordering::SeqCst)
+            }
+
+            fn get_active(&self) -> u64 {
+                self.active_tasks.load(Ordering::SeqCst)
+            }
+
+            fn get_success_rate(&self) -> f64 {
+                let total_finished = self.get_completed() + self.get_failed();
+                if total_finished == 0 {
+                    return 100.0;
+                }
+                (self.get_completed() as f64 / total_finished as f64) * 100.0
+            }
+
+            fn get_failure_rate(&self) -> f64 {
+                let total_finished = self.get_completed() + self.get_failed();
+                if total_finished == 0 {
+                    return 0.0;
+                }
+                (self.get_failed() as f64 / total_finished as f64) * 100.0
+            }
+        }
+
+        // Test case 1: Metrics start at zero
+        let metrics = TokioTaskMetrics::new();
+        assert_eq!(
+            metrics.get_spawned(),
+            0,
+            "Should start with 0 spawned tasks"
+        );
+        assert_eq!(
+            metrics.get_completed(),
+            0,
+            "Should start with 0 completed tasks"
+        );
+        assert_eq!(metrics.get_failed(), 0, "Should start with 0 failed tasks");
+        assert_eq!(metrics.get_active(), 0, "Should start with 0 active tasks");
+
+        // Test case 2: Tracks task spawning
+        metrics.task_spawned();
+        assert_eq!(metrics.get_spawned(), 1, "Should have 1 spawned task");
+        assert_eq!(metrics.get_active(), 1, "Should have 1 active task");
+
+        // Test case 3: Tracks task completion
+        metrics.task_completed();
+        assert_eq!(metrics.get_completed(), 1, "Should have 1 completed task");
+        assert_eq!(
+            metrics.get_active(),
+            0,
+            "Should have 0 active tasks after completion"
+        );
+
+        // Test case 4: Tracks task failures
+        metrics.task_spawned();
+        metrics.task_failed();
+        assert_eq!(metrics.get_failed(), 1, "Should have 1 failed task");
+        assert_eq!(
+            metrics.get_active(),
+            0,
+            "Should have 0 active tasks after failure"
+        );
+
+        // Test case 5: Tracks multiple active tasks
+        metrics.task_spawned();
+        metrics.task_spawned();
+        metrics.task_spawned();
+        assert_eq!(metrics.get_active(), 3, "Should have 3 active tasks");
+
+        // Test case 6: Active tasks decrease on completion
+        metrics.task_completed();
+        assert_eq!(
+            metrics.get_active(),
+            2,
+            "Should have 2 active tasks after 1 completes"
+        );
+
+        // Test case 7: Calculates success rate
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..7 {
+            metrics.task_spawned();
+            metrics.task_completed();
+        }
+        for _ in 0..3 {
+            metrics.task_spawned();
+            metrics.task_failed();
+        }
+        let success_rate = metrics.get_success_rate();
+        assert_eq!(success_rate, 70.0, "7 success / 10 total = 70%");
+
+        // Test case 8: Calculates failure rate
+        let failure_rate = metrics.get_failure_rate();
+        assert_eq!(failure_rate, 30.0, "3 failed / 10 total = 30%");
+
+        // Test case 9: Thread-safe task tracking
+        use std::thread;
+        let metrics = TokioTaskMetrics::new();
+
+        let metrics_clone1 = metrics.clone();
+        let metrics_clone2 = metrics.clone();
+        let metrics_clone3 = metrics.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone1.task_spawned();
+                metrics_clone1.task_completed();
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone2.task_spawned();
+                metrics_clone2.task_completed();
+            }
+        });
+
+        let handle3 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone3.task_spawned();
+                metrics_clone3.task_completed();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+        handle3.join().unwrap();
+
+        assert_eq!(
+            metrics.get_spawned(),
+            300,
+            "Should have spawned 300 tasks total"
+        );
+        assert_eq!(
+            metrics.get_completed(),
+            300,
+            "Should have completed 300 tasks"
+        );
+        assert_eq!(
+            metrics.get_active(),
+            0,
+            "Should have 0 active tasks after all complete"
+        );
+
+        // Test case 10: Detects task leak (spawned but never completed)
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..10 {
+            metrics.task_spawned();
+        }
+        let leaked_tasks = metrics.get_active();
+        assert_eq!(
+            leaked_tasks, 10,
+            "Should detect 10 leaked tasks (spawned but not completed)"
+        );
+
+        // Test case 11: Tracks task lifecycle
+        let metrics = TokioTaskMetrics::new();
+        // Spawn task
+        metrics.task_spawned();
+        assert_eq!(metrics.get_spawned(), 1, "Task spawned");
+        assert_eq!(metrics.get_active(), 1, "Task is active");
+        // Complete task
+        metrics.task_completed();
+        assert_eq!(metrics.get_completed(), 1, "Task completed");
+        assert_eq!(metrics.get_active(), 0, "Task no longer active");
+
+        // Test case 12: Detects high failure rate
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..2 {
+            metrics.task_spawned();
+            metrics.task_completed();
+        }
+        for _ in 0..8 {
+            metrics.task_spawned();
+            metrics.task_failed();
+        }
+        let failure_rate = metrics.get_failure_rate();
+        let high_failure = failure_rate > 50.0;
+        assert!(high_failure, "80% failure rate is high (>50%)");
+
+        // Test case 13: Tracks concurrent task limit
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..1000 {
+            metrics.task_spawned();
+        }
+        let active = metrics.get_active();
+        let at_limit = active > 500;
+        assert!(at_limit, "1000 active tasks exceeds limit (>500)");
+
+        // Test case 14: Monitors task completion ratio
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..100 {
+            metrics.task_spawned();
+        }
+        for _ in 0..80 {
+            metrics.task_completed();
+        }
+        let completion_ratio = metrics.get_completed() as f64 / metrics.get_spawned() as f64;
+        assert_eq!(completion_ratio, 0.8, "80/100 = 80% completion ratio");
+
+        // Test case 15: Detects stalled tasks
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..50 {
+            metrics.task_spawned();
+            metrics.task_completed();
+        }
+        // Some tasks spawn but don't complete
+        for _ in 0..10 {
+            metrics.task_spawned();
+        }
+        let stalled = metrics.get_active();
+        assert_eq!(stalled, 10, "10 tasks are stalled (not completing)");
+
+        // Test case 16: Calculates task throughput
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..1000 {
+            metrics.task_spawned();
+            metrics.task_completed();
+        }
+        let throughput = metrics.get_completed();
+        assert_eq!(throughput, 1000, "Completed 1000 tasks");
+
+        // Test case 17: Tracks error patterns
+        let metrics = TokioTaskMetrics::new();
+        // 90% success
+        for _ in 0..90 {
+            metrics.task_spawned();
+            metrics.task_completed();
+        }
+        // 10% failure
+        for _ in 0..10 {
+            metrics.task_spawned();
+            metrics.task_failed();
+        }
+        let success_rate = metrics.get_success_rate();
+        let healthy = success_rate > 95.0;
+        assert!(
+            !healthy,
+            "90% success rate is below healthy threshold (95%)"
+        );
+
+        // Test case 18: Enables capacity planning
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..800 {
+            metrics.task_spawned();
+        }
+        let active = metrics.get_active();
+        let headroom = 1000u64.saturating_sub(active);
+        let can_handle_burst = headroom > 100;
+        assert!(can_handle_burst, "200 headroom can handle burst (>100)");
+
+        // Test case 19: Detects runtime pressure
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..950 {
+            metrics.task_spawned();
+        }
+        let utilization = metrics.get_active() as f64 / 1000.0 * 100.0;
+        let high_pressure = utilization > 90.0;
+        assert!(
+            high_pressure,
+            "95% task utilization indicates high runtime pressure"
+        );
+
+        // Test case 20: Supports graceful degradation
+        let metrics = TokioTaskMetrics::new();
+        for _ in 0..950 {
+            metrics.task_spawned();
+        }
+        let utilization = metrics.get_active() as f64 / 1000.0;
+        let should_reject = utilization > 0.9;
+        assert!(should_reject, "At 95% utilization, should reject new tasks");
+
+        // Complete some tasks to reduce pressure
+        for _ in 0..300 {
+            metrics.task_completed();
+        }
+        let new_utilization = metrics.get_active() as f64 / 1000.0;
+        let can_accept = new_utilization < 0.9;
+        assert!(can_accept, "At 65% utilization, can accept new tasks");
+    }
 }

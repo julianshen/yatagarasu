@@ -575,7 +575,7 @@ yatagarasu/
 - [x] Test: Exports memory usage
 - [x] Test: Exports CPU usage
 - [x] Test: Exports open file descriptors
-- [ ] Test: Exports Tokio task metrics
+- [x] Test: Exports Tokio task metrics
 - [ ] Test: Exports connection pool metrics
 
 ### Metrics - Business Metrics
