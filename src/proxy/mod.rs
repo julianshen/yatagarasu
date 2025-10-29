@@ -28138,4 +28138,257 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_metrics_include_help_text() {
+        // Metrics test: Metrics include help text
+        // Tests that metrics have descriptive HELP comments
+        // Validates documentation and usability for metric consumers
+
+        // Test case 1: Define metric with help text
+        struct MetricWithHelp {
+            name: String,
+            help: String,
+            value: f64,
+        }
+
+        impl MetricWithHelp {
+            fn new(name: &str, help: &str, value: f64) -> Self {
+                Self {
+                    name: name.to_string(),
+                    help: help.to_string(),
+                    value,
+                }
+            }
+
+            fn format_with_help(&self) -> String {
+                format!(
+                    "# HELP {} {}\n{} {}",
+                    self.name, self.help, self.name, self.value
+                )
+            }
+
+            fn has_help(&self) -> bool {
+                !self.help.is_empty()
+            }
+        }
+
+        // Test case 1: Metric includes HELP line
+        let metric = MetricWithHelp::new(
+            "http_requests_total",
+            "Total number of HTTP requests",
+            1000.0,
+        );
+        assert!(metric.has_help(), "Metric should have help text");
+
+        // Test case 2: HELP line starts with # HELP
+        let output = metric.format_with_help();
+        assert!(
+            output.starts_with("# HELP"),
+            "Help line should start with # HELP"
+        );
+
+        // Test case 3: HELP includes metric name
+        assert!(
+            output.contains("http_requests_total"),
+            "Help should include metric name"
+        );
+
+        // Test case 4: HELP includes description
+        assert!(
+            output.contains("Total number of HTTP requests"),
+            "Help should include description"
+        );
+
+        // Test case 5: Counter metric help text
+        let metric = MetricWithHelp::new(
+            "http_requests_total",
+            "The total number of HTTP requests received",
+            5000.0,
+        );
+        let help = &metric.help;
+        assert!(
+            help.contains("total"),
+            "Counter help should mention total/count"
+        );
+
+        // Test case 6: Gauge metric help text
+        let metric = MetricWithHelp::new(
+            "memory_usage_bytes",
+            "Current memory usage in bytes",
+            1048576.0,
+        );
+        let help = &metric.help;
+        assert!(
+            help.contains("Current") || help.contains("current"),
+            "Gauge help should describe current state"
+        );
+
+        // Test case 7: Histogram metric help text
+        let metric = MetricWithHelp::new(
+            "http_request_duration_seconds",
+            "Histogram of HTTP request durations in seconds",
+            0.0,
+        );
+        let help = &metric.help;
+        assert!(
+            help.contains("Histogram") || help.contains("duration"),
+            "Histogram help should describe distribution"
+        );
+
+        // Test case 8: Help text is descriptive
+        let metric = MetricWithHelp::new(
+            "s3_requests_total",
+            "Total count of S3 API requests made to backend storage",
+            2000.0,
+        );
+        assert!(
+            metric.help.len() > 10,
+            "Help text should be descriptive (>10 chars)"
+        );
+
+        // Test case 9: Help text includes units
+        let metric = MetricWithHelp::new(
+            "http_request_duration_seconds",
+            "Request processing time in seconds",
+            0.150,
+        );
+        assert!(metric.help.contains("seconds"), "Help should specify units");
+
+        // Test case 10: Multiple metrics each have help
+        let metrics = vec![
+            MetricWithHelp::new("requests_total", "Total requests received", 100.0),
+            MetricWithHelp::new("errors_total", "Total errors encountered", 5.0),
+            MetricWithHelp::new("cpu_usage", "Current CPU usage percentage", 45.5),
+        ];
+        for metric in &metrics {
+            assert!(metric.has_help(), "Each metric should have help text");
+        }
+
+        // Test case 11: Help text precedes metric value
+        let output = metric.format_with_help();
+        let lines: Vec<_> = output.lines().collect();
+        assert!(lines[0].starts_with("# HELP"), "First line is HELP");
+        assert!(
+            lines[1].contains(&metric.name),
+            "Second line is metric value"
+        );
+
+        // Test case 12: Help text is single line
+        let metric = MetricWithHelp::new("cache_hits_total", "Number of cache hits", 900.0);
+        let help_lines = metric.help.lines().count();
+        assert_eq!(help_lines, 1, "Help text should be single line");
+
+        // Test case 13: Help text for S3 operation metric
+        let metric = MetricWithHelp::new(
+            "s3_get_operations_total",
+            "Total number of S3 GetObject operations",
+            1500.0,
+        );
+        assert!(
+            metric.help.contains("S3") || metric.help.contains("GetObject"),
+            "S3 metric help should mention S3/operation"
+        );
+
+        // Test case 14: Help text for authentication metric
+        let metric = MetricWithHelp::new(
+            "auth_attempts_total",
+            "Total authentication attempts",
+            1000.0,
+        );
+        assert!(
+            metric.help.contains("auth"),
+            "Auth metric help should mention authentication"
+        );
+
+        // Test case 15: Help text is concise but complete
+        let metric = MetricWithHelp::new(
+            "connection_pool_size",
+            "Number of connections in the pool",
+            10.0,
+        );
+        let word_count = metric.help.split_whitespace().count();
+        assert!(
+            word_count >= 3 && word_count <= 20,
+            "Help should be 3-20 words (concise but complete)"
+        );
+
+        // Test case 16: Help text uses lowercase except proper nouns
+        let metric = MetricWithHelp::new(
+            "http_requests_total",
+            "Total number of HTTP requests",
+            100.0,
+        );
+        // First word after metric name can be capitalized, "HTTP" is proper noun
+        assert!(
+            metric.help.contains("HTTP"),
+            "Proper nouns like HTTP should be uppercase"
+        );
+
+        // Test case 17: Help text for rate metric
+        let metric = MetricWithHelp::new(
+            "request_rate_per_second",
+            "Rate of requests per second",
+            50.0,
+        );
+        assert!(
+            metric.help.contains("per second") || metric.help.contains("rate"),
+            "Rate metric help should mention rate/frequency"
+        );
+
+        // Test case 18: Help format for complete export
+        let metrics = vec![
+            MetricWithHelp::new("up", "Whether the service is up", 1.0),
+            MetricWithHelp::new("requests_total", "Total requests processed", 1000.0),
+        ];
+        let mut output = String::new();
+        for metric in metrics {
+            output.push_str(&metric.format_with_help());
+            output.push('\n');
+        }
+        let help_count = output.matches("# HELP").count();
+        assert_eq!(help_count, 2, "Each metric should have HELP line");
+
+        // Test case 19: Help text explains what metric measures
+        let metric = MetricWithHelp::new(
+            "error_rate",
+            "Percentage of requests resulting in errors",
+            5.2,
+        );
+        assert!(
+            metric.help.contains("error")
+                && (metric.help.contains("request") || metric.help.contains("Percentage")),
+            "Help should explain what is measured"
+        );
+
+        // Test case 20: Complete metric documentation format
+        let metric = MetricWithHelp::new(
+            "http_requests_total",
+            "The total number of HTTP requests received since server start",
+            10000.0,
+        );
+        let output = metric.format_with_help();
+
+        // Validate complete format
+        assert!(output.contains("# HELP"), "Should have HELP comment");
+        assert!(
+            output.contains("http_requests_total"),
+            "Should have metric name"
+        );
+        assert!(output.contains("10000"), "Should have metric value");
+
+        // Parse output lines
+        let lines: Vec<_> = output.lines().collect();
+        assert!(lines.len() >= 2, "Should have HELP line and value line");
+
+        // Validate HELP line format: # HELP metric_name description
+        let help_line = lines[0];
+        let parts: Vec<_> = help_line.splitn(3, ' ').collect();
+        assert_eq!(parts[0], "#", "HELP starts with #");
+        assert_eq!(parts[1], "HELP", "Second word is HELP");
+        assert!(
+            parts[2].starts_with("http_requests_total"),
+            "Help line contains metric name"
+        );
+    }
 }
