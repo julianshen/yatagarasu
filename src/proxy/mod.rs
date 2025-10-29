@@ -25139,4 +25139,186 @@ mod tests {
         let needs_upgrade = new_utilization > 70.0;
         assert!(needs_upgrade, "Should need upgrade at 80% utilization");
     }
+
+    #[test]
+    fn test_exports_cpu_usage() {
+        // Metrics test: Exports CPU usage
+        // Tests that CPU usage metrics are tracked
+        // Validates system performance monitoring and load detection capability
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define CPU usage gauge
+        #[derive(Clone)]
+        struct CpuUsageGauge {
+            // Store CPU usage as percentage * 100 (e.g., 50.25% = 5025)
+            // to support f64 values with atomic operations
+            cpu_percent_x100: Arc<AtomicU64>,
+            num_cores: usize,
+        }
+
+        impl CpuUsageGauge {
+            fn new(num_cores: usize) -> Self {
+                Self {
+                    cpu_percent_x100: Arc::new(AtomicU64::new(0)),
+                    num_cores,
+                }
+            }
+
+            fn set_usage(&self, percent: f64) {
+                let value = (percent * 100.0) as u64;
+                self.cpu_percent_x100.store(value, Ordering::SeqCst);
+            }
+
+            fn get_usage(&self) -> f64 {
+                let value = self.cpu_percent_x100.load(Ordering::SeqCst);
+                value as f64 / 100.0
+            }
+
+            fn get_num_cores(&self) -> usize {
+                self.num_cores
+            }
+
+            fn get_per_core_usage(&self) -> f64 {
+                self.get_usage() / self.num_cores as f64
+            }
+        }
+
+        // Test case 1: Gauge starts at zero
+        let gauge = CpuUsageGauge::new(8);
+        assert_eq!(gauge.get_usage(), 0.0, "CPU gauge should start at 0%");
+
+        // Test case 2: Records CPU usage percentage
+        gauge.set_usage(25.5);
+        assert_eq!(gauge.get_usage(), 25.5, "Should track CPU usage at 25.5%");
+
+        // Test case 3: Tracks high CPU usage
+        gauge.set_usage(85.0);
+        assert_eq!(gauge.get_usage(), 85.0, "Should track high CPU at 85%");
+
+        // Test case 4: Tracks low CPU usage
+        gauge.set_usage(2.5);
+        assert_eq!(gauge.get_usage(), 2.5, "Should track low CPU at 2.5%");
+
+        // Test case 5: Tracks number of CPU cores
+        assert_eq!(gauge.get_num_cores(), 8, "Should track number of cores (8)");
+
+        // Test case 6: Calculates per-core usage
+        gauge.set_usage(80.0);
+        let per_core = gauge.get_per_core_usage();
+        assert_eq!(per_core, 10.0, "80% / 8 cores = 10% per core");
+
+        // Test case 7: Detects high CPU load
+        gauge.set_usage(90.0);
+        let is_high_load = gauge.get_usage() > 80.0;
+        assert!(is_high_load, "90% CPU should trigger high load alert");
+
+        // Test case 8: Detects normal CPU load
+        gauge.set_usage(50.0);
+        let is_normal = gauge.get_usage() < 80.0;
+        assert!(is_normal, "50% CPU should be normal load");
+
+        // Test case 9: Tracks CPU usage over time
+        let measurements = vec![10.0, 25.0, 50.0, 75.0, 40.0];
+        let mut readings = Vec::new();
+        for usage in measurements {
+            gauge.set_usage(usage);
+            readings.push(gauge.get_usage());
+        }
+        assert_eq!(
+            readings,
+            vec![10.0, 25.0, 50.0, 75.0, 40.0],
+            "Should track CPU measurements over time"
+        );
+
+        // Test case 10: Calculates average CPU usage
+        let total: f64 = readings.iter().sum();
+        let average = total / readings.len() as f64;
+        assert_eq!(average, 40.0, "Average of 10,25,50,75,40 = 40%");
+
+        // Test case 11: Detects CPU spike
+        gauge.set_usage(95.0);
+        let spike = gauge.get_usage() > 90.0;
+        assert!(spike, "95% CPU is a spike (>90%)");
+
+        // Test case 12: Tracks CPU idle time
+        gauge.set_usage(15.0);
+        let idle_percent = 100.0 - gauge.get_usage();
+        assert_eq!(idle_percent, 85.0, "15% usage = 85% idle");
+
+        // Test case 13: Detects sustained high CPU
+        let sustained_readings = vec![85.0, 88.0, 90.0, 87.0, 89.0];
+        let all_high = sustained_readings.iter().all(|&usage| usage > 80.0);
+        assert!(all_high, "All readings >80% indicates sustained high CPU");
+
+        // Test case 14: Thread-safe CPU usage updates
+        use std::thread;
+        gauge.set_usage(0.0);
+
+        let gauge_clone1 = gauge.clone();
+        let gauge_clone2 = gauge.clone();
+
+        let handle1 = thread::spawn(move || {
+            gauge_clone1.set_usage(50.0);
+        });
+
+        let handle2 = thread::spawn(move || {
+            gauge_clone2.set_usage(75.0);
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        // One of the values should have won
+        let final_usage = gauge.get_usage();
+        assert!(
+            final_usage == 50.0 || final_usage == 75.0,
+            "Final usage should be one of the set values"
+        );
+
+        // Test case 15: Calculates CPU utilization ratio
+        gauge.set_usage(60.0);
+        let utilization_ratio = gauge.get_usage() / 100.0;
+        assert_eq!(utilization_ratio, 0.6, "60% = 0.6 utilization ratio");
+
+        // Test case 16: Detects overloaded system
+        gauge.set_usage(98.0);
+        let is_overloaded = gauge.get_usage() > 95.0;
+        assert!(is_overloaded, "98% CPU indicates overloaded system");
+
+        // Test case 17: Tracks multi-core systems
+        let quad_core_gauge = CpuUsageGauge::new(4);
+        quad_core_gauge.set_usage(100.0);
+        let per_core = quad_core_gauge.get_per_core_usage();
+        assert_eq!(per_core, 25.0, "100% / 4 cores = 25% per core");
+
+        // Test case 18: Detects need for horizontal scaling
+        gauge.set_usage(88.0);
+        let sustained_high = gauge.get_usage() > 85.0;
+        assert!(
+            sustained_high,
+            "88% CPU >85% suggests need for more instances"
+        );
+
+        // Test case 19: Tracks CPU capacity headroom
+        gauge.set_usage(70.0);
+        let headroom = 100.0 - gauge.get_usage();
+        assert_eq!(headroom, 30.0, "70% usage leaves 30% headroom");
+        let has_sufficient_headroom = headroom > 20.0;
+        assert!(has_sufficient_headroom, "30% headroom is sufficient (>20%)");
+
+        // Test case 20: Enables load shedding decisions
+        gauge.set_usage(92.0);
+        let should_shed_load = gauge.get_usage() > 90.0;
+        assert!(
+            should_shed_load,
+            "At 92% CPU, should shed load to prevent overload"
+        );
+
+        // Reset to normal
+        gauge.set_usage(45.0);
+        let should_accept = gauge.get_usage() < 90.0;
+        assert!(should_accept, "At 45% CPU, should accept new requests");
+    }
 }

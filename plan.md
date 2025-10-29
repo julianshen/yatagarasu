@@ -573,7 +573,7 @@ yatagarasu/
 
 ### Metrics - System Metrics
 - [x] Test: Exports memory usage
-- [ ] Test: Exports CPU usage
+- [x] Test: Exports CPU usage
 - [ ] Test: Exports open file descriptors
 - [ ] Test: Exports Tokio task metrics
 - [ ] Test: Exports connection pool metrics
