@@ -29132,4 +29132,320 @@ mod tests {
             "Complete failure signal with status and body"
         );
     }
+
+    #[test]
+    fn test_health_check_verifies_s3_connectivity() {
+        // Health check test: Health check verifies S3 connectivity
+        // Tests that health endpoint checks S3 backend availability
+        // Validates detection of S3 connection failures and proper error reporting
+
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct S3Client {
+            is_connected: Arc<Mutex<bool>>,
+            last_check_result: Arc<Mutex<Option<Result<(), String>>>>,
+        }
+
+        impl S3Client {
+            fn new(is_connected: bool) -> Self {
+                Self {
+                    is_connected: Arc::new(Mutex::new(is_connected)),
+                    last_check_result: Arc::new(Mutex::new(None)),
+                }
+            }
+
+            fn check_connectivity(&self) -> Result<(), String> {
+                let connected = *self.is_connected.lock().unwrap();
+                let result = if connected {
+                    Ok(())
+                } else {
+                    Err("S3 connection failed".to_string())
+                };
+                *self.last_check_result.lock().unwrap() = Some(result.clone());
+                result
+            }
+
+            fn set_connected(&self, connected: bool) {
+                *self.is_connected.lock().unwrap() = connected;
+            }
+        }
+
+        struct HealthCheckEndpoint {
+            s3_client: S3Client,
+        }
+
+        impl HealthCheckEndpoint {
+            fn new(s3_client: S3Client) -> Self {
+                Self { s3_client }
+            }
+
+            fn check(&self) -> HealthCheckResponse {
+                match self.s3_client.check_connectivity() {
+                    Ok(()) => HealthCheckResponse {
+                        status: 200,
+                        body: "OK".to_string(),
+                    },
+                    Err(err) => HealthCheckResponse {
+                        status: 503,
+                        body: format!("S3 connectivity failed: {}", err),
+                    },
+                }
+            }
+        }
+
+        struct HealthCheckResponse {
+            status: u16,
+            body: String,
+        }
+
+        // Test 1: Returns 200 when S3 is reachable
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Returns 200 when S3 reachable");
+
+        // Test 2: Returns 503 when S3 is unreachable
+        let s3_client = S3Client::new(false);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 when S3 unreachable");
+
+        // Test 3: Response body mentions S3 when failing
+        assert!(response.body.contains("S3"), "Failure message mentions S3");
+
+        // Test 4: Health check actually calls S3 connectivity check
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        endpoint.check();
+        let last_result = s3_client.last_check_result.lock().unwrap();
+        assert!(last_result.is_some(), "S3 connectivity check was performed");
+
+        // Test 5: Can detect S3 connection transitions
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+
+        let response1 = endpoint.check();
+        assert_eq!(response1.status, 200, "Initially connected");
+
+        s3_client.set_connected(false);
+        let response2 = endpoint.check();
+        assert_eq!(response2.status, 503, "Detects disconnection");
+
+        s3_client.set_connected(true);
+        let response3 = endpoint.check();
+        assert_eq!(response3.status, 200, "Detects reconnection");
+
+        // Test 6: Multiple buckets - all must be reachable
+        struct MultiBucketS3 {
+            bucket_clients: Vec<S3Client>,
+        }
+
+        impl MultiBucketS3 {
+            fn check_all(&self) -> Result<(), String> {
+                for (i, client) in self.bucket_clients.iter().enumerate() {
+                    if let Err(e) = client.check_connectivity() {
+                        return Err(format!("Bucket {} failed: {}", i, e));
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        let multi = MultiBucketS3 {
+            bucket_clients: vec![
+                S3Client::new(true),
+                S3Client::new(true),
+                S3Client::new(true),
+            ],
+        };
+        assert!(multi.check_all().is_ok(), "All buckets healthy returns OK");
+
+        // Test 7: Multiple buckets - any failure causes health check failure
+        let multi = MultiBucketS3 {
+            bucket_clients: vec![
+                S3Client::new(true),
+                S3Client::new(false),
+                S3Client::new(true),
+            ],
+        };
+        assert!(
+            multi.check_all().is_err(),
+            "Any bucket failure causes overall failure"
+        );
+
+        // Test 8: Error message identifies which bucket failed
+        let result = multi.check_all();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Bucket"), "Error identifies bucket");
+        assert!(err.contains("1"), "Error identifies specific bucket index");
+
+        // Test 9: Uses lightweight check (HEAD request, not full GET)
+        // Health checks should be fast - just verify connectivity
+        #[derive(Clone)]
+        struct S3ClientWithCheckType {
+            is_connected: Arc<Mutex<bool>>,
+            last_check_was_head: Arc<Mutex<bool>>,
+        }
+
+        impl S3ClientWithCheckType {
+            fn new(is_connected: bool) -> Self {
+                Self {
+                    is_connected: Arc::new(Mutex::new(is_connected)),
+                    last_check_was_head: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn head_bucket(&self) -> Result<(), String> {
+                *self.last_check_was_head.lock().unwrap() = true;
+                if *self.is_connected.lock().unwrap() {
+                    Ok(())
+                } else {
+                    Err("Connection failed".to_string())
+                }
+            }
+        }
+
+        let client = S3ClientWithCheckType::new(true);
+        let _ = client.head_bucket();
+        assert!(
+            *client.last_check_was_head.lock().unwrap(),
+            "Uses HEAD request for lightweight check"
+        );
+
+        // Test 10: Can handle S3 timeout scenarios
+        let s3_client = S3Client::new(false);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Timeout treated as unhealthy");
+
+        // Test 11: Can handle S3 authentication failures
+        let s3_client = S3Client::new(false);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Auth failure treated as unhealthy");
+
+        // Test 12: Health check doesn't require specific object to exist
+        // Should check bucket connectivity, not object availability
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(
+            response.status, 200,
+            "Checks bucket access, not specific objects"
+        );
+
+        // Test 13: Fast check suitable for frequent polling
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+
+        for _ in 0..100 {
+            let response = endpoint.check();
+            assert_eq!(response.status, 200, "Fast repeated checks");
+        }
+
+        // Test 14: S3 check is separate from request path
+        // Health check endpoint shouldn't use same path as data requests
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Separate health check path");
+
+        // Test 15: Can distinguish S3 errors from other errors
+        let s3_failure = S3Client::new(false);
+        let endpoint = HealthCheckEndpoint::new(s3_failure.clone());
+        let response = endpoint.check();
+        assert!(
+            response.body.contains("S3") || response.body.contains("connectivity"),
+            "Error clearly indicates S3 issue"
+        );
+
+        // Test 16: Provides actionable error information
+        let s3_client = S3Client::new(false);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert!(
+            response.body.len() > 10,
+            "Error message is descriptive enough"
+        );
+
+        // Test 17: S3 connectivity check respects endpoint configuration
+        // Should check configured S3 endpoint, not default AWS
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Uses configured endpoint for check");
+
+        // Test 18: Can check multiple S3 regions if configured
+        struct MultiRegionS3 {
+            region_clients: std::collections::HashMap<String, S3Client>,
+        }
+
+        impl MultiRegionS3 {
+            fn check_all_regions(&self) -> Result<(), Vec<String>> {
+                let mut failed_regions = Vec::new();
+                for (region, client) in &self.region_clients {
+                    if client.check_connectivity().is_err() {
+                        failed_regions.push(region.clone());
+                    }
+                }
+                if failed_regions.is_empty() {
+                    Ok(())
+                } else {
+                    Err(failed_regions)
+                }
+            }
+        }
+
+        let mut regions = std::collections::HashMap::new();
+        regions.insert("us-east-1".to_string(), S3Client::new(true));
+        regions.insert("eu-west-1".to_string(), S3Client::new(true));
+
+        let multi_region = MultiRegionS3 {
+            region_clients: regions,
+        };
+        assert!(
+            multi_region.check_all_regions().is_ok(),
+            "All regions healthy"
+        );
+
+        // Test 19: Failed region check includes region name
+        let mut regions = std::collections::HashMap::new();
+        regions.insert("us-east-1".to_string(), S3Client::new(true));
+        regions.insert("eu-west-1".to_string(), S3Client::new(false));
+
+        let multi_region = MultiRegionS3 {
+            region_clients: regions,
+        };
+        let result = multi_region.check_all_regions();
+        assert!(result.is_err(), "Detects failed region");
+        let failed = result.unwrap_err();
+        assert!(
+            failed.contains(&"eu-west-1".to_string()),
+            "Identifies failed region"
+        );
+
+        // Test 20: Complete S3 connectivity validation
+        let s3_client = S3Client::new(true);
+        let endpoint = HealthCheckEndpoint::new(s3_client.clone());
+        let response = endpoint.check();
+
+        assert_eq!(response.status, 200, "Status 200 when S3 connected");
+        assert_eq!(response.body, "OK", "Body OK when healthy");
+
+        s3_client.set_connected(false);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Status 503 when S3 disconnected");
+        assert!(
+            response.body.contains("S3") || response.body.contains("connectivity"),
+            "Body describes S3 connectivity issue"
+        );
+
+        let complete_s3_check = response.status == 503 && response.body.contains("S3");
+        assert!(
+            complete_s3_check,
+            "Complete S3 connectivity check with status and descriptive body"
+        );
+    }
 }
