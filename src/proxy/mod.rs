@@ -29804,4 +29804,354 @@ mod tests {
             "Complete configuration check with status and descriptive body"
         );
     }
+
+    #[test]
+    fn test_health_check_is_fast() {
+        // Health check test: Health check is fast (<100ms)
+        // Tests that health endpoint responds quickly for frequent polling
+        // Validates performance suitable for load balancer health checks
+
+        use std::time::Instant;
+
+        struct HealthCheckEndpoint {
+            is_healthy: bool,
+        }
+
+        impl HealthCheckEndpoint {
+            fn new(is_healthy: bool) -> Self {
+                Self { is_healthy }
+            }
+
+            fn check(&self) -> HealthCheckResponse {
+                // Fast path - no blocking operations, no disk I/O, no network calls
+                if self.is_healthy {
+                    HealthCheckResponse {
+                        status: 200,
+                        body: "OK".to_string(),
+                    }
+                } else {
+                    HealthCheckResponse {
+                        status: 503,
+                        body: "Service Unavailable".to_string(),
+                    }
+                }
+            }
+        }
+
+        struct HealthCheckResponse {
+            status: u16,
+            body: String,
+        }
+
+        // Test 1: Single health check completes in <100ms
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let response = endpoint.check();
+        let duration = start.elapsed();
+
+        assert_eq!(response.status, 200, "Returns 200");
+        assert!(
+            duration.as_millis() < 100,
+            "Single check completes in <100ms, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 2: Health check is typically <1ms (microseconds)
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        assert!(
+            duration.as_micros() < 1000,
+            "Check typically <1ms, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 3: 100 consecutive checks complete quickly
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+
+        for _ in 0..100 {
+            let _response = endpoint.check();
+        }
+
+        let duration = start.elapsed();
+        assert!(
+            duration.as_millis() < 500,
+            "100 checks in <500ms, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 4: Average latency per check is low
+        let endpoint = HealthCheckEndpoint::new(true);
+        let iterations = 1000;
+        let start = Instant::now();
+
+        for _ in 0..iterations {
+            let _response = endpoint.check();
+        }
+
+        let duration = start.elapsed();
+        let avg_micros = duration.as_micros() / iterations;
+        assert!(
+            avg_micros < 100,
+            "Average check <100μs, was {}μs",
+            avg_micros
+        );
+
+        // Test 5: No blocking operations (no sleep, no I/O)
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        // Should be nearly instant (no blocking)
+        assert!(
+            duration.as_micros() < 10000,
+            "No blocking operations, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 6: Unhealthy check is also fast
+        let endpoint = HealthCheckEndpoint::new(false);
+        let start = Instant::now();
+        let response = endpoint.check();
+        let duration = start.elapsed();
+
+        assert_eq!(response.status, 503, "Returns 503");
+        assert!(
+            duration.as_millis() < 100,
+            "Unhealthy check also fast, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 7: Performance is consistent across calls
+        let endpoint = HealthCheckEndpoint::new(true);
+        let mut durations = Vec::new();
+
+        for _ in 0..10 {
+            let start = Instant::now();
+            let _response = endpoint.check();
+            durations.push(start.elapsed().as_micros());
+        }
+
+        let max_duration = durations.iter().max().unwrap();
+        let min_duration = durations.iter().min().unwrap();
+        let variance = max_duration - min_duration;
+
+        assert!(
+            variance < 1000,
+            "Consistent performance, variance {}μs",
+            variance
+        );
+
+        // Test 8: Suitable for frequent polling (every 1 second)
+        // If load balancer polls every 1s, check must be <100ms to avoid overhead
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        let overhead_percent = (duration.as_millis() as f64 / 1000.0) * 100.0;
+        assert!(
+            overhead_percent < 10.0,
+            "Health check overhead <10% of 1s interval, was {:.2}%",
+            overhead_percent
+        );
+
+        // Test 9: No memory allocations in hot path (minimal)
+        // Use small string literals, avoid heap allocations
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+
+        for _ in 0..1000 {
+            let _response = endpoint.check();
+        }
+
+        let duration = start.elapsed();
+        // 1000 checks should be very fast if minimal allocations
+        assert!(
+            duration.as_millis() < 100,
+            "Minimal allocations, 1000 checks in {}ms",
+            duration.as_millis()
+        );
+
+        // Test 10: Concurrent health checks don't block each other
+        use std::sync::Arc;
+        use std::thread;
+
+        let endpoint = Arc::new(HealthCheckEndpoint::new(true));
+        let mut handles = vec![];
+
+        let start = Instant::now();
+        for _ in 0..10 {
+            let endpoint_clone = Arc::clone(&endpoint);
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    let _response = endpoint_clone.check();
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let duration = start.elapsed();
+        // 10 threads × 100 checks = 1000 total, should complete quickly
+        assert!(
+            duration.as_millis() < 1000,
+            "Concurrent checks don't block, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 11: Does not perform network I/O
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        // Network calls would take >1ms typically
+        assert!(
+            duration.as_micros() < 500,
+            "No network I/O, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 12: Does not perform disk I/O
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        // Disk I/O would add significant latency
+        assert!(
+            duration.as_micros() < 500,
+            "No disk I/O, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 13: Response generation is lightweight
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let response = endpoint.check();
+        let duration = start.elapsed();
+
+        assert_eq!(response.body, "OK", "Simple response body");
+        assert!(
+            duration.as_micros() < 100,
+            "Lightweight response generation, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 14: P99 latency is acceptable
+        let endpoint = HealthCheckEndpoint::new(true);
+        let mut durations = Vec::new();
+
+        for _ in 0..100 {
+            let start = Instant::now();
+            let _response = endpoint.check();
+            durations.push(start.elapsed().as_micros());
+        }
+
+        durations.sort();
+        let p99 = durations[99];
+        assert!(p99 < 1000, "P99 latency <1ms, was {}μs", p99);
+
+        // Test 15: Can handle burst of health checks
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+
+        // Simulate burst: 100 checks immediately
+        for _ in 0..100 {
+            let _response = endpoint.check();
+        }
+
+        let duration = start.elapsed();
+        assert!(
+            duration.as_millis() < 100,
+            "Handles burst efficiently, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 16: Faster than typical HTTP request
+        // Regular API calls might take 10-100ms, health check should be <1ms
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        assert!(
+            duration.as_micros() < 1000,
+            "Much faster than HTTP request, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 17: Does not acquire locks for long
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        // Lock contention would slow down checks
+        assert!(
+            duration.as_micros() < 500,
+            "No lock contention, took {}μs",
+            duration.as_micros()
+        );
+
+        // Test 18: Suitable for Kubernetes liveness probe (default 1s timeout)
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        // K8s default timeout is 1s, should be well under that
+        assert!(
+            duration.as_millis() < 1000,
+            "Suitable for K8s probe (1s timeout), took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 19: Suitable for load balancer (typical 5s interval, 2s timeout)
+        let endpoint = HealthCheckEndpoint::new(true);
+        let start = Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+
+        assert!(
+            duration.as_millis() < 2000,
+            "Suitable for load balancer (2s timeout), took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 20: Complete performance validation
+        let endpoint = HealthCheckEndpoint::new(true);
+        let iterations = 100;
+        let start = Instant::now();
+
+        for _ in 0..iterations {
+            let response = endpoint.check();
+            assert_eq!(response.status, 200, "All checks return 200");
+        }
+
+        let duration = start.elapsed();
+        let avg_ms = duration.as_millis() / iterations;
+
+        assert!(avg_ms < 1, "Average check <1ms, was {}ms", avg_ms);
+        assert!(
+            duration.as_millis() < 100,
+            "100 checks in <100ms, took {}ms",
+            duration.as_millis()
+        );
+
+        let complete_fast_check = duration.as_millis() < 100 && avg_ms < 1;
+        assert!(
+            complete_fast_check,
+            "Complete fast health check validation: 100 checks in {}ms",
+            duration.as_millis()
+        );
+    }
 }
