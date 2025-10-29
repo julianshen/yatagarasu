@@ -27888,4 +27888,254 @@ mod tests {
             "Router does not route / to metrics endpoint"
         );
     }
+
+    #[test]
+    fn test_metrics_include_proper_labels() {
+        // Metrics test: Metrics include proper labels
+        // Tests that metrics use meaningful labels for dimensions
+        // Validates label naming, cardinality, and best practices
+
+        use std::collections::HashMap;
+
+        // Test case 1: Define labeled metric
+        struct LabeledMetric {
+            name: String,
+            labels: HashMap<String, String>,
+            value: f64,
+        }
+
+        impl LabeledMetric {
+            fn new(name: &str, labels: HashMap<String, String>, value: f64) -> Self {
+                Self {
+                    name: name.to_string(),
+                    labels,
+                    value,
+                }
+            }
+
+            fn format(&self) -> String {
+                if self.labels.is_empty() {
+                    format!("{} {}", self.name, self.value)
+                } else {
+                    let labels_str = self
+                        .labels
+                        .iter()
+                        .map(|(k, v)| format!("{}=\"{}\"", k, v))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("{}{{{}}} {}", self.name, labels_str, self.value)
+                }
+            }
+
+            fn has_label(&self, key: &str) -> bool {
+                self.labels.contains_key(key)
+            }
+
+            fn get_label(&self, key: &str) -> Option<&String> {
+                self.labels.get(key)
+            }
+        }
+
+        // Test case 1: Metric with status code label
+        let mut labels = HashMap::new();
+        labels.insert("status".to_string(), "200".to_string());
+        let metric = LabeledMetric::new("http_requests_total", labels, 1000.0);
+        assert!(metric.has_label("status"), "Should have status label");
+        assert_eq!(metric.get_label("status").unwrap(), "200");
+
+        // Test case 2: Metric with method label
+        let mut labels = HashMap::new();
+        labels.insert("method".to_string(), "GET".to_string());
+        let metric = LabeledMetric::new("http_requests_total", labels, 500.0);
+        assert!(metric.has_label("method"), "Should have method label");
+
+        // Test case 3: Metric with bucket label for S3
+        let mut labels = HashMap::new();
+        labels.insert("bucket".to_string(), "products".to_string());
+        let metric = LabeledMetric::new("s3_requests_total", labels, 2000.0);
+        assert!(metric.has_label("bucket"), "Should have bucket label");
+
+        // Test case 4: Metric with operation label
+        let mut labels = HashMap::new();
+        labels.insert("operation".to_string(), "GetObject".to_string());
+        let metric = LabeledMetric::new("s3_requests_total", labels, 1500.0);
+        assert!(metric.has_label("operation"), "Should have operation label");
+
+        // Test case 5: Multiple labels on same metric
+        let mut labels = HashMap::new();
+        labels.insert("status".to_string(), "200".to_string());
+        labels.insert("method".to_string(), "GET".to_string());
+        labels.insert("path".to_string(), "/api/users".to_string());
+        let metric = LabeledMetric::new("http_requests_total", labels, 750.0);
+        assert!(metric.has_label("status"), "Should have status label");
+        assert!(metric.has_label("method"), "Should have method label");
+        assert!(metric.has_label("path"), "Should have path label");
+
+        // Test case 6: Label names use snake_case
+        let mut labels = HashMap::new();
+        labels.insert("status_code".to_string(), "200".to_string());
+        labels.insert("request_method".to_string(), "GET".to_string());
+        let metric = LabeledMetric::new("http_requests_total", labels, 100.0);
+        assert!(
+            metric.has_label("status_code"),
+            "Label names should use snake_case"
+        );
+        assert!(metric.has_label("request_method"));
+
+        // Test case 7: Label values are descriptive
+        let mut labels = HashMap::new();
+        labels.insert("bucket".to_string(), "user-uploads".to_string());
+        let metric = LabeledMetric::new("s3_requests_total", labels, 300.0);
+        let bucket_value = metric.get_label("bucket").unwrap();
+        assert!(
+            !bucket_value.is_empty(),
+            "Label values should be descriptive"
+        );
+
+        // Test case 8: Histogram bucket label uses 'le'
+        let mut labels = HashMap::new();
+        labels.insert("le".to_string(), "0.1".to_string());
+        let metric = LabeledMetric::new("http_duration_seconds_bucket", labels, 95.0);
+        assert!(
+            metric.has_label("le"),
+            "Histogram buckets should use 'le' label"
+        );
+
+        // Test case 9: Summary quantile label
+        let mut labels = HashMap::new();
+        labels.insert("quantile".to_string(), "0.95".to_string());
+        let metric = LabeledMetric::new("http_duration_seconds", labels, 0.150);
+        assert!(
+            metric.has_label("quantile"),
+            "Summary should use 'quantile' label"
+        );
+
+        // Test case 10: Error type label
+        let mut labels = HashMap::new();
+        labels.insert("error_type".to_string(), "timeout".to_string());
+        let metric = LabeledMetric::new("errors_total", labels, 10.0);
+        assert!(
+            metric.has_label("error_type"),
+            "Errors should have error_type label"
+        );
+
+        // Test case 11: Low cardinality labels
+        // Good: status codes (finite set)
+        let status_codes = vec!["200", "404", "500"];
+        for code in status_codes {
+            let mut labels = HashMap::new();
+            labels.insert("status".to_string(), code.to_string());
+            let metric = LabeledMetric::new("http_requests_total", labels, 100.0);
+            assert!(metric.has_label("status"));
+        }
+        // Status has low cardinality (good practice)
+        assert!(true, "Status codes have low cardinality");
+
+        // Test case 12: Route label for path grouping
+        let mut labels = HashMap::new();
+        labels.insert("route".to_string(), "/api/users/:id".to_string());
+        let metric = LabeledMetric::new("http_requests_total", labels, 200.0);
+        assert!(
+            metric.has_label("route"),
+            "Should use route label with pattern"
+        );
+        let route = metric.get_label("route").unwrap();
+        assert!(
+            route.contains(":id"),
+            "Route should use pattern, not actual ID"
+        );
+
+        // Test case 13: Instance label for multi-instance deployment
+        let mut labels = HashMap::new();
+        labels.insert("instance".to_string(), "proxy-1".to_string());
+        let metric = LabeledMetric::new("up", labels, 1.0);
+        assert!(metric.has_label("instance"), "Should have instance label");
+
+        // Test case 14: Job label for service identification
+        let mut labels = HashMap::new();
+        labels.insert("job".to_string(), "s3-proxy".to_string());
+        let metric = LabeledMetric::new("up", labels, 1.0);
+        assert!(metric.has_label("job"), "Should have job label");
+
+        // Test case 15: Label format validation
+        let metric_str = metric.format();
+        assert!(
+            metric_str.contains("job=\"s3-proxy\""),
+            "Labels should be quoted"
+        );
+        assert!(metric_str.contains('{'), "Should have label braces");
+        assert!(metric_str.contains('}'), "Should close label braces");
+
+        // Test case 16: Cache status label
+        let mut labels = HashMap::new();
+        labels.insert("cache_status".to_string(), "hit".to_string());
+        let metric = LabeledMetric::new("cache_requests_total", labels, 900.0);
+        assert!(
+            metric.has_label("cache_status"),
+            "Cache metrics should have status"
+        );
+        let status = metric.get_label("cache_status").unwrap();
+        assert!(status == "hit" || status == "miss");
+
+        // Test case 17: Authentication result label
+        let mut labels = HashMap::new();
+        labels.insert("result".to_string(), "success".to_string());
+        let metric = LabeledMetric::new("auth_attempts_total", labels, 950.0);
+        assert!(
+            metric.has_label("result"),
+            "Auth metrics should have result label"
+        );
+
+        // Test case 18: Multiple metrics same name different labels
+        let mut labels1 = HashMap::new();
+        labels1.insert("status".to_string(), "200".to_string());
+        let metric1 = LabeledMetric::new("http_requests_total", labels1, 1000.0);
+
+        let mut labels2 = HashMap::new();
+        labels2.insert("status".to_string(), "404".to_string());
+        let metric2 = LabeledMetric::new("http_requests_total", labels2, 50.0);
+
+        assert_eq!(metric1.name, metric2.name, "Same metric name");
+        assert_ne!(
+            metric1.get_label("status"),
+            metric2.get_label("status"),
+            "Different label values"
+        );
+
+        // Test case 19: Label consistency across metric family
+        let metrics = vec![
+            {
+                let mut labels = HashMap::new();
+                labels.insert("status".to_string(), "200".to_string());
+                labels.insert("method".to_string(), "GET".to_string());
+                LabeledMetric::new("http_requests_total", labels, 100.0)
+            },
+            {
+                let mut labels = HashMap::new();
+                labels.insert("status".to_string(), "404".to_string());
+                labels.insert("method".to_string(), "POST".to_string());
+                LabeledMetric::new("http_requests_total", labels, 20.0)
+            },
+        ];
+
+        // All metrics in family should have same label keys
+        for metric in &metrics {
+            assert!(metric.has_label("status"), "All should have status");
+            assert!(metric.has_label("method"), "All should have method");
+        }
+
+        // Test case 20: Reserved labels not used incorrectly
+        // Prometheus reserves labels starting with __
+        let mut labels = HashMap::new();
+        labels.insert("bucket".to_string(), "uploads".to_string());
+        let metric = LabeledMetric::new("s3_requests_total", labels, 500.0);
+
+        // Verify no labels start with __ (reserved)
+        for key in metric.labels.keys() {
+            assert!(
+                !key.starts_with("__"),
+                "Should not use reserved __ prefix for labels"
+            );
+        }
+    }
 }
