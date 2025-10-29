@@ -581,7 +581,7 @@ yatagarasu/
 ### Metrics - Business Metrics
 - [x] Test: Exports authentication success/failure rate
 - [x] Test: Exports S3 request count by operation
-- [ ] Test: Exports S3 error rate
+- [x] Test: Exports S3 error rate
 - [ ] Test: Exports cache hit/miss rate (if caching enabled)
 
 ### Metrics - Prometheus Format

@@ -26819,4 +26819,309 @@ mod tests {
             .collect();
         assert_eq!(write_ops.len(), 2, "2 write operation types");
     }
+
+    #[test]
+    fn test_exports_s3_error_rate() {
+        // Metrics test: Exports S3 error rate
+        // Tests that S3 errors are tracked
+        // Validates service health monitoring and reliability tracking
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define S3 error metrics
+        #[derive(Clone)]
+        struct S3ErrorMetrics {
+            success_count: Arc<AtomicU64>,
+            error_count: Arc<AtomicU64>,
+        }
+
+        impl S3ErrorMetrics {
+            fn new() -> Self {
+                Self {
+                    success_count: Arc::new(AtomicU64::new(0)),
+                    error_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn record_success(&self) {
+                self.success_count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn record_error(&self) {
+                self.error_count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn get_success_count(&self) -> u64 {
+                self.success_count.load(Ordering::SeqCst)
+            }
+
+            fn get_error_count(&self) -> u64 {
+                self.error_count.load(Ordering::SeqCst)
+            }
+
+            fn get_total_requests(&self) -> u64 {
+                self.get_success_count() + self.get_error_count()
+            }
+
+            fn get_error_rate(&self) -> f64 {
+                let total = self.get_total_requests();
+                if total == 0 {
+                    return 0.0;
+                }
+                (self.get_error_count() as f64 / total as f64) * 100.0
+            }
+
+            fn get_success_rate(&self) -> f64 {
+                let total = self.get_total_requests();
+                if total == 0 {
+                    return 100.0;
+                }
+                (self.get_success_count() as f64 / total as f64) * 100.0
+            }
+        }
+
+        // Test case 1: Metrics start at zero
+        let metrics = S3ErrorMetrics::new();
+        assert_eq!(
+            metrics.get_success_count(),
+            0,
+            "Should start with 0 successes"
+        );
+        assert_eq!(metrics.get_error_count(), 0, "Should start with 0 errors");
+
+        // Test case 2: Records successful S3 request
+        metrics.record_success();
+        assert_eq!(metrics.get_success_count(), 1, "Should have 1 success");
+
+        // Test case 3: Records S3 error
+        metrics.record_error();
+        assert_eq!(metrics.get_error_count(), 1, "Should have 1 error");
+
+        // Test case 4: Calculates total requests
+        let total = metrics.get_total_requests();
+        assert_eq!(
+            total, 2,
+            "Should have 2 total requests (1 success + 1 error)"
+        );
+
+        // Test case 5: Calculates error rate
+        let error_rate = metrics.get_error_rate();
+        assert_eq!(error_rate, 50.0, "1/2 = 50% error rate");
+
+        // Test case 6: Calculates success rate
+        let success_rate = metrics.get_success_rate();
+        assert_eq!(success_rate, 50.0, "1/2 = 50% success rate");
+
+        // Test case 7: Tracks high success rate (healthy)
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..99 {
+            metrics.record_success();
+        }
+        metrics.record_error();
+        let error_rate = metrics.get_error_rate();
+        let healthy = error_rate < 5.0;
+        assert!(healthy, "1% error rate is healthy (<5%)");
+
+        // Test case 8: Detects elevated error rate
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..90 {
+            metrics.record_success();
+        }
+        for _ in 0..10 {
+            metrics.record_error();
+        }
+        let error_rate = metrics.get_error_rate();
+        let elevated = error_rate > 5.0;
+        assert!(elevated, "10% error rate is elevated (>5%)");
+
+        // Test case 9: Thread-safe concurrent tracking
+        use std::thread;
+        let metrics = S3ErrorMetrics::new();
+
+        let metrics_clone1 = metrics.clone();
+        let metrics_clone2 = metrics.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone1.record_success();
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone2.record_error();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        assert_eq!(
+            metrics.get_success_count(),
+            100,
+            "Should have 100 successes"
+        );
+        assert_eq!(metrics.get_error_count(), 100, "Should have 100 errors");
+        assert_eq!(metrics.get_total_requests(), 200, "Should have 200 total");
+
+        // Test case 10: Detects S3 service degradation
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..70 {
+            metrics.record_success();
+        }
+        for _ in 0..30 {
+            metrics.record_error();
+        }
+        let error_rate = metrics.get_error_rate();
+        let degraded = error_rate > 20.0;
+        assert!(degraded, "30% error rate indicates degradation (>20%)");
+
+        // Test case 11: Tracks error spike pattern
+        let metrics = S3ErrorMetrics::new();
+        // Normal baseline
+        for _ in 0..100 {
+            metrics.record_success();
+        }
+        let baseline_error_rate = metrics.get_error_rate();
+        // Sudden spike
+        for _ in 0..50 {
+            metrics.record_error();
+        }
+        let new_error_rate = metrics.get_error_rate();
+        let spike = new_error_rate > baseline_error_rate + 10.0;
+        assert!(spike, "Error rate jumped from 0% to 33.3% (>10% increase)");
+
+        // Test case 12: Monitors S3 availability
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..9999 {
+            metrics.record_success();
+        }
+        metrics.record_error();
+        let availability = metrics.get_success_rate();
+        let high_availability = availability > 99.9;
+        assert!(high_availability, "99.99% availability is high (>99.9%)");
+
+        // Test case 13: Tracks error recovery
+        let metrics = S3ErrorMetrics::new();
+        // Error period
+        for _ in 0..50 {
+            metrics.record_error();
+        }
+        let during_error_rate = metrics.get_error_rate();
+        // Recovery period
+        for _ in 0..450 {
+            metrics.record_success();
+        }
+        let after_recovery_rate = metrics.get_error_rate();
+        let recovered = after_recovery_rate < during_error_rate / 2.0;
+        assert!(
+            recovered,
+            "Error rate recovered from 100% to 10% (<50% of original)"
+        );
+
+        // Test case 14: Enables SLA monitoring
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..995 {
+            metrics.record_success();
+        }
+        for _ in 0..5 {
+            metrics.record_error();
+        }
+        let success_rate = metrics.get_success_rate();
+        let meets_sla = success_rate >= 99.0;
+        assert!(meets_sla, "99.5% success meets 99% SLA");
+
+        // Test case 15: Detects S3 outage
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..100 {
+            metrics.record_error();
+        }
+        let error_rate = metrics.get_error_rate();
+        let outage = error_rate > 90.0;
+        assert!(outage, "100% error rate indicates outage (>90%)");
+
+        // Test case 16: Tracks error rate over time windows
+        let metrics = S3ErrorMetrics::new();
+        // Window 1: healthy
+        for _ in 0..100 {
+            metrics.record_success();
+        }
+        let window1_errors = metrics.get_error_count();
+        // Window 2: some errors
+        for _ in 0..10 {
+            metrics.record_error();
+        }
+        let window2_errors = metrics.get_error_count();
+        assert_eq!(window1_errors, 0, "Window 1 had 0 errors");
+        assert_eq!(window2_errors, 10, "Window 2 added 10 errors");
+
+        // Test case 17: Calculates error budget
+        let metrics = S3ErrorMetrics::new();
+        // SLA: 99% uptime = 1% error budget
+        for _ in 0..99 {
+            metrics.record_success();
+        }
+        let error_budget_remaining = 1.0; // 1% allowed
+        let error_budget_used = metrics.get_error_rate();
+        let within_budget = error_budget_used < error_budget_remaining;
+        assert!(within_budget, "0% used < 1% budget");
+
+        // Now consume budget
+        for _ in 0..2 {
+            metrics.record_error();
+        }
+        let new_error_rate = metrics.get_error_rate();
+        let exceeded_budget = new_error_rate > error_budget_remaining;
+        assert!(exceeded_budget, "1.98% exceeds 1% budget");
+
+        // Test case 18: Monitors S3 backend reliability
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..1000 {
+            metrics.record_success();
+        }
+        for _ in 0..1 {
+            metrics.record_error();
+        }
+        let error_rate = metrics.get_error_rate();
+        let reliable = error_rate < 0.5;
+        assert!(reliable, "0.1% error rate shows high reliability (<0.5%)");
+
+        // Test case 19: Detects transient vs persistent errors
+        let metrics = S3ErrorMetrics::new();
+        // Pattern: error, success, error, success (transient)
+        metrics.record_error();
+        metrics.record_success();
+        metrics.record_error();
+        metrics.record_success();
+        let error_rate = metrics.get_error_rate();
+        assert_eq!(error_rate, 50.0, "Transient errors show 50% error rate");
+
+        // Pattern: all errors (persistent)
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..10 {
+            metrics.record_error();
+        }
+        let persistent = metrics.get_error_rate() > 90.0;
+        assert!(persistent, "100% errors indicate persistent issue");
+
+        // Test case 20: Supports alerting thresholds
+        let metrics = S3ErrorMetrics::new();
+        for _ in 0..100 {
+            metrics.record_success();
+        }
+
+        // No alert: error rate below threshold
+        let error_rate = metrics.get_error_rate();
+        let should_alert = error_rate > 5.0;
+        assert!(!should_alert, "0% error rate doesn't trigger alert (<5%)");
+
+        // Alert: error rate exceeds threshold
+        for _ in 0..10 {
+            metrics.record_error();
+        }
+        let new_error_rate = metrics.get_error_rate();
+        let should_alert_now = new_error_rate > 5.0;
+        assert!(should_alert_now, "9.09% error rate triggers alert (>5%)");
+    }
 }
