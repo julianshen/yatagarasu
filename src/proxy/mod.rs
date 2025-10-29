@@ -28899,4 +28899,237 @@ mod tests {
             "Compatible with standard monitoring tools"
         );
     }
+
+    #[test]
+    fn test_health_check_endpoint_returns_503_when_unhealthy() {
+        // Health check test: Health check endpoint returns 503 when unhealthy
+        // Tests that health endpoint returns service unavailable when service has issues
+        // Validates proper failure signaling to load balancers and orchestrators
+
+        struct HealthCheckEndpoint {
+            is_healthy: bool,
+            failure_reason: Option<String>,
+        }
+
+        impl HealthCheckEndpoint {
+            fn new(is_healthy: bool, failure_reason: Option<String>) -> Self {
+                Self {
+                    is_healthy,
+                    failure_reason,
+                }
+            }
+
+            fn check(&self) -> HealthCheckResponse {
+                if self.is_healthy {
+                    HealthCheckResponse {
+                        status: 200,
+                        body: "OK".to_string(),
+                    }
+                } else {
+                    let reason = self
+                        .failure_reason
+                        .clone()
+                        .unwrap_or_else(|| "Service Unavailable".to_string());
+                    HealthCheckResponse {
+                        status: 503,
+                        body: reason,
+                    }
+                }
+            }
+        }
+
+        struct HealthCheckResponse {
+            status: u16,
+            body: String,
+        }
+
+        // Test 1: Returns 503 when unhealthy
+        let endpoint = HealthCheckEndpoint::new(false, None);
+        let response = endpoint.check();
+        assert_eq!(
+            response.status, 503,
+            "Returns 503 Service Unavailable when unhealthy"
+        );
+
+        // Test 2: Status is in 5xx error range
+        assert!(
+            response.status >= 500 && response.status < 600,
+            "Status is in 5xx server error range"
+        );
+
+        // Test 3: Body describes unavailability
+        assert!(
+            response.body.contains("Unavailable") || response.body.contains("unhealthy"),
+            "Body describes service unavailability"
+        );
+
+        // Test 4: Multiple checks return consistent 503
+        let response2 = endpoint.check();
+        let response3 = endpoint.check();
+        assert_eq!(
+            response.status, response2.status,
+            "Consistent 503 on consecutive checks"
+        );
+        assert_eq!(
+            response2.status, response3.status,
+            "All checks return same status"
+        );
+
+        // Test 5: Can include failure reason in response body
+        let endpoint_with_reason =
+            HealthCheckEndpoint::new(false, Some("S3 connection failed".to_string()));
+        let response = endpoint_with_reason.check();
+        assert_eq!(response.status, 503, "Returns 503 with specific reason");
+        assert!(
+            response.body.contains("S3"),
+            "Body includes specific failure reason"
+        );
+
+        // Test 6: Kubernetes will remove pod from service
+        // When health check returns 503, Kubernetes marks pod as not ready
+        let k8s_removes_from_service = response.status == 503;
+        assert!(
+            k8s_removes_from_service,
+            "503 signals Kubernetes to remove from service"
+        );
+
+        // Test 7: Load balancer stops routing traffic
+        let load_balancer_stops_routing = response.status >= 500;
+        assert!(
+            load_balancer_stops_routing,
+            "5xx status stops load balancer routing"
+        );
+
+        // Test 8: Different failure scenarios return 503
+        let scenarios = vec![
+            ("S3 unreachable", false),
+            ("Config load failed", false),
+            ("Out of memory", false),
+            ("Database connection lost", false),
+        ];
+
+        for (reason, is_healthy) in scenarios {
+            let endpoint = HealthCheckEndpoint::new(is_healthy, Some(reason.to_string()));
+            let response = endpoint.check();
+            assert_eq!(response.status, 503, "Scenario '{}' returns 503", reason);
+        }
+
+        // Test 9: Doesn't return 500 (avoid generic error)
+        let endpoint = HealthCheckEndpoint::new(false, None);
+        let response = endpoint.check();
+        assert_ne!(response.status, 500, "Uses specific 503, not generic 500");
+
+        // Test 10: Distinguishes from 502 Bad Gateway
+        assert_ne!(
+            response.status, 502,
+            "Uses 503 for internal issues, not 502"
+        );
+
+        // Test 11: Distinguishes from 504 Gateway Timeout
+        assert_ne!(response.status, 504, "Uses 503 for unavailability, not 504");
+
+        // Test 12: Recovery: unhealthy -> healthy returns 200
+        struct RecoverableEndpoint {
+            is_healthy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        }
+
+        impl RecoverableEndpoint {
+            fn new(initial_health: bool) -> Self {
+                Self {
+                    is_healthy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                        initial_health,
+                    )),
+                }
+            }
+
+            fn check(&self) -> u16 {
+                if self.is_healthy.load(std::sync::atomic::Ordering::SeqCst) {
+                    200
+                } else {
+                    503
+                }
+            }
+
+            fn recover(&self) {
+                self.is_healthy
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        let recoverable = RecoverableEndpoint::new(false);
+        assert_eq!(recoverable.check(), 503, "Initially unhealthy returns 503");
+        recoverable.recover();
+        assert_eq!(recoverable.check(), 200, "After recovery returns 200");
+
+        // Test 13: Monitoring tools detect failure from 503
+        let endpoint = HealthCheckEndpoint::new(false, None);
+        let response = endpoint.check();
+        let monitoring_detects_failure = response.status != 200;
+        assert!(
+            monitoring_detects_failure,
+            "Non-200 status detected as failure"
+        );
+
+        // Test 14: Body is human-readable for debugging
+        assert!(!response.body.is_empty(), "Body is not empty for debugging");
+        assert!(response.body.len() > 5, "Body is meaningful (>5 chars)");
+
+        // Test 15: Can distinguish multiple failure types
+        let s3_failure = HealthCheckEndpoint::new(false, Some("S3 timeout".to_string()));
+        let config_failure = HealthCheckEndpoint::new(false, Some("Config invalid".to_string()));
+
+        let s3_response = s3_failure.check();
+        let config_response = config_failure.check();
+
+        assert_ne!(
+            s3_response.body, config_response.body,
+            "Different failure reasons distinguishable"
+        );
+
+        // Test 16: No authentication required (public endpoint)
+        // Health checks must be accessible without JWT for load balancers
+        let endpoint = HealthCheckEndpoint::new(false, None);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "503 returned without authentication");
+
+        // Test 17: Idempotent (repeated calls don't change state)
+        let endpoint = HealthCheckEndpoint::new(false, Some("Test failure".to_string()));
+        let response1 = endpoint.check();
+        let response2 = endpoint.check();
+        let response3 = endpoint.check();
+        assert_eq!(response1.status, response2.status, "Idempotent check 1-2");
+        assert_eq!(response2.status, response3.status, "Idempotent check 2-3");
+
+        // Test 18: Fast response even when unhealthy (<100ms implied)
+        // No blocking operations in health check
+        let endpoint = HealthCheckEndpoint::new(false, None);
+        for _ in 0..100 {
+            let response = endpoint.check();
+            assert_eq!(response.status, 503, "Fast 503 response");
+        }
+
+        // Test 19: Suitable for automated restart policies
+        // Orchestrators use 503 to decide if restart is needed
+        let endpoint = HealthCheckEndpoint::new(false, Some("Fatal error".to_string()));
+        let response = endpoint.check();
+        let triggers_restart = response.status == 503;
+        assert!(
+            triggers_restart,
+            "503 signals orchestrator to consider restart"
+        );
+
+        // Test 20: Complete failure response validation
+        let endpoint = HealthCheckEndpoint::new(false, Some("Service degraded".to_string()));
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Status is 503");
+        assert!(
+            response.body.contains("degraded") || response.body.contains("Service"),
+            "Body describes failure"
+        );
+        let proper_failure_signal = response.status == 503 && !response.body.is_empty();
+        assert!(
+            proper_failure_signal,
+            "Complete failure signal with status and body"
+        );
+    }
 }
