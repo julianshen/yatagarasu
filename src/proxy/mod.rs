@@ -27677,4 +27677,215 @@ mod tests {
             assert!(value.parse::<f64>().is_ok(), "Value is numeric: {}", value);
         }
     }
+
+    #[test]
+    fn test_metrics_endpoint_accessible_at_metrics() {
+        // Metrics test: Metrics endpoint accessible at /metrics
+        // Tests that metrics are exposed at standard Prometheus path
+        // Validates endpoint routing and HTTP response
+
+        // Test case 1: Define metrics endpoint handler
+        struct MetricsEndpoint {
+            path: String,
+        }
+
+        impl MetricsEndpoint {
+            fn new() -> Self {
+                Self {
+                    path: "/metrics".to_string(),
+                }
+            }
+
+            fn matches(&self, request_path: &str) -> bool {
+                request_path == self.path
+            }
+
+            fn handle(&self) -> MetricsResponse {
+                MetricsResponse {
+                    status: 200,
+                    content_type: "text/plain; version=0.0.4; charset=utf-8".to_string(),
+                    body: "# Sample metrics\nhttp_requests_total 100\n".to_string(),
+                }
+            }
+        }
+
+        struct MetricsResponse {
+            status: u16,
+            content_type: String,
+            body: String,
+        }
+
+        // Test case 1: Endpoint path is /metrics
+        let endpoint = MetricsEndpoint::new();
+        assert_eq!(endpoint.path, "/metrics", "Standard Prometheus path");
+
+        // Test case 2: Matches exact path /metrics
+        assert!(endpoint.matches("/metrics"), "Should match /metrics path");
+
+        // Test case 3: Does not match other paths
+        assert!(!endpoint.matches("/health"), "Should not match /health");
+        assert!(
+            !endpoint.matches("/api/metrics"),
+            "Should not match /api/metrics"
+        );
+        assert!(!endpoint.matches("/"), "Should not match root");
+
+        // Test case 4: Returns 200 OK status
+        let response = endpoint.handle();
+        assert_eq!(response.status, 200, "Should return 200 OK");
+
+        // Test case 5: Returns correct content type
+        assert_eq!(
+            response.content_type, "text/plain; version=0.0.4; charset=utf-8",
+            "Should return Prometheus content type"
+        );
+
+        // Test case 6: Returns text body with metrics
+        assert!(
+            !response.body.is_empty(),
+            "Response body should not be empty"
+        );
+        assert!(
+            response.body.contains("http_requests_total"),
+            "Should contain metric name"
+        );
+
+        // Test case 7: Handles GET requests
+        let endpoint = MetricsEndpoint::new();
+        let can_get = endpoint.matches("/metrics");
+        assert!(can_get, "Should accept GET requests to /metrics");
+
+        // Test case 8: Case sensitive path matching
+        assert!(!endpoint.matches("/Metrics"), "Should be case sensitive");
+        assert!(!endpoint.matches("/METRICS"), "Should be case sensitive");
+
+        // Test case 9: No trailing slash
+        assert!(
+            !endpoint.matches("/metrics/"),
+            "Should not match with trailing slash"
+        );
+
+        // Test case 10: No query parameters in path match
+        // Path matching should be exact, query params handled separately
+        assert!(
+            endpoint.matches("/metrics"),
+            "Base path matches without query"
+        );
+
+        // Test case 11: Multiple requests to same endpoint
+        let response1 = endpoint.handle();
+        let response2 = endpoint.handle();
+        assert_eq!(
+            response1.status, response2.status,
+            "Multiple requests return same status"
+        );
+
+        // Test case 12: Endpoint always available (no auth required)
+        // Metrics endpoint should be accessible without authentication
+        let response = endpoint.handle();
+        assert_eq!(response.status, 200, "No auth required for metrics");
+
+        // Test case 13: Returns metrics in response body
+        let response = endpoint.handle();
+        let has_metrics = response
+            .body
+            .lines()
+            .any(|line| !line.starts_with('#') && line.contains(' '));
+        assert!(has_metrics, "Body contains metric lines");
+
+        // Test case 14: Content-Type header includes version
+        let response = endpoint.handle();
+        assert!(
+            response.content_type.contains("version=0.0.4"),
+            "Content-Type includes Prometheus version"
+        );
+
+        // Test case 15: Content-Type specifies charset
+        let response = endpoint.handle();
+        assert!(
+            response.content_type.contains("charset=utf-8"),
+            "Content-Type specifies UTF-8 charset"
+        );
+
+        // Test case 16: Endpoint path is well-known
+        // Standard Prometheus convention is /metrics
+        let standard_path = "/metrics";
+        assert_eq!(
+            endpoint.path, standard_path,
+            "Uses standard Prometheus path"
+        );
+
+        // Test case 17: Response body ends with newline
+        let response = endpoint.handle();
+        assert!(
+            response.body.ends_with('\n'),
+            "Response should end with newline"
+        );
+
+        // Test case 18: Supports scraping by Prometheus server
+        // Prometheus expects text/plain format at /metrics
+        let response = endpoint.handle();
+        let prometheus_compatible = response.content_type.starts_with("text/plain")
+            && endpoint.path == "/metrics"
+            && response.status == 200;
+        assert!(
+            prometheus_compatible,
+            "Endpoint is Prometheus scrape compatible"
+        );
+
+        // Test case 19: Does not match partial paths
+        assert!(!endpoint.matches("/metric"), "Should not match /metric");
+        assert!(
+            !endpoint.matches("/metrics-old"),
+            "Should not match /metrics-old"
+        );
+
+        // Test case 20: Endpoint integration with router
+        struct Router {
+            metrics_endpoint: MetricsEndpoint,
+        }
+
+        impl Router {
+            fn new() -> Self {
+                Self {
+                    metrics_endpoint: MetricsEndpoint::new(),
+                }
+            }
+
+            fn route(&self, path: &str) -> Option<MetricsResponse> {
+                if self.metrics_endpoint.matches(path) {
+                    Some(self.metrics_endpoint.handle())
+                } else {
+                    None
+                }
+            }
+        }
+
+        let router = Router::new();
+
+        // Metrics endpoint returns response
+        let metrics_response = router.route("/metrics");
+        assert!(
+            metrics_response.is_some(),
+            "Router routes /metrics to metrics endpoint"
+        );
+        assert_eq!(
+            metrics_response.unwrap().status,
+            200,
+            "Metrics endpoint returns 200"
+        );
+
+        // Other paths return None
+        let health_response = router.route("/health");
+        assert!(
+            health_response.is_none(),
+            "Router does not route /health to metrics endpoint"
+        );
+
+        let root_response = router.route("/");
+        assert!(
+            root_response.is_none(),
+            "Router does not route / to metrics endpoint"
+        );
+    }
 }

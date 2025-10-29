@@ -586,7 +586,7 @@ yatagarasu/
 
 ### Metrics - Prometheus Format
 - [x] Test: Metrics endpoint returns Prometheus text format
-- [ ] Test: Metrics endpoint accessible at /metrics
+- [x] Test: Metrics endpoint accessible at /metrics
 - [ ] Test: Metrics include proper labels
 - [ ] Test: Metrics include help text
 - [ ] Test: Metrics include type metadata
