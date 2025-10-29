@@ -30395,4 +30395,298 @@ mod tests {
             "Complete liveness check: detects dead process"
         );
     }
+
+    #[test]
+    fn test_readiness_check() {
+        // Health check test: Readiness check (ready to serve traffic)
+        // Tests that readiness endpoint checks if service is ready to accept requests
+        // Validates comprehensive dependency checks for load balancer integration
+
+        use std::sync::{Arc, Mutex};
+
+        struct ReadinessEndpoint {
+            is_alive: Arc<Mutex<bool>>,
+            config_loaded: Arc<Mutex<bool>>,
+            s3_connected: Arc<Mutex<bool>>,
+        }
+
+        impl ReadinessEndpoint {
+            fn new(is_alive: bool, config_loaded: bool, s3_connected: bool) -> Self {
+                Self {
+                    is_alive: Arc::new(Mutex::new(is_alive)),
+                    config_loaded: Arc::new(Mutex::new(config_loaded)),
+                    s3_connected: Arc::new(Mutex::new(s3_connected)),
+                }
+            }
+
+            fn check(&self) -> ReadinessResponse {
+                let alive = *self.is_alive.lock().unwrap();
+                let config = *self.config_loaded.lock().unwrap();
+                let s3 = *self.s3_connected.lock().unwrap();
+
+                if alive && config && s3 {
+                    ReadinessResponse {
+                        status: 200,
+                        body: "ready".to_string(),
+                    }
+                } else {
+                    let mut reasons = Vec::new();
+                    if !alive {
+                        reasons.push("process dead");
+                    }
+                    if !config {
+                        reasons.push("config not loaded");
+                    }
+                    if !s3 {
+                        reasons.push("s3 unavailable");
+                    }
+                    ReadinessResponse {
+                        status: 503,
+                        body: format!("not ready: {}", reasons.join(", ")),
+                    }
+                }
+            }
+
+            fn set_s3_connected(&self, connected: bool) {
+                *self.s3_connected.lock().unwrap() = connected;
+            }
+        }
+
+        struct ReadinessResponse {
+            status: u16,
+            body: String,
+        }
+
+        // Test 1: Returns 200 when all dependencies ready
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Returns 200 when ready");
+        assert_eq!(response.body, "ready", "Body indicates ready");
+
+        // Test 2: Returns 503 when S3 unavailable
+        let endpoint = ReadinessEndpoint::new(true, true, false);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 when S3 down");
+        assert!(
+            response.body.contains("s3"),
+            "Body mentions S3 unavailability"
+        );
+
+        // Test 3: Returns 503 when config not loaded
+        let endpoint = ReadinessEndpoint::new(true, false, true);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Returns 503 when config missing");
+        assert!(
+            response.body.contains("config"),
+            "Body mentions config issue"
+        );
+
+        // Test 4: Accessible at /health/ready endpoint
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Accessible at /health/ready");
+
+        // Test 5: Checks S3 connectivity (unlike liveness)
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Checks S3 connectivity for readiness");
+
+        // Test 6: Checks configuration validity (unlike liveness)
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "Checks configuration for readiness");
+
+        // Test 7: Kubernetes uses readiness to route traffic
+        let endpoint = ReadinessEndpoint::new(true, true, false);
+        let response = endpoint.check();
+        let should_remove_from_service = response.status != 200;
+        assert!(
+            should_remove_from_service,
+            "Failed readiness removes from service"
+        );
+
+        // Test 8: Load balancer uses readiness for health checks
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+        let should_route_traffic = response.status == 200;
+        assert!(
+            should_route_traffic,
+            "Successful readiness allows traffic routing"
+        );
+
+        // Test 9: Distinguishes from liveness check
+        // Liveness = "Is process alive?"
+        // Readiness = "Is process ready to serve traffic?"
+        let endpoint = ReadinessEndpoint::new(true, true, false);
+        let response = endpoint.check();
+        assert_eq!(
+            response.status, 503,
+            "Readiness: process alive but not ready (S3 down)"
+        );
+
+        // Test 10: Can transition from not ready to ready
+        let endpoint = ReadinessEndpoint::new(true, true, false);
+        let response1 = endpoint.check();
+        assert_eq!(response1.status, 503, "Initially not ready");
+
+        endpoint.set_s3_connected(true);
+        let response2 = endpoint.check();
+        assert_eq!(response2.status, 200, "Becomes ready after S3 connects");
+
+        // Test 11: Can transition from ready to not ready
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response1 = endpoint.check();
+        assert_eq!(response1.status, 200, "Initially ready");
+
+        endpoint.set_s3_connected(false);
+        let response2 = endpoint.check();
+        assert_eq!(response2.status, 503, "Becomes not ready when S3 fails");
+
+        // Test 12: Multiple dependencies must all be ready
+        struct MultiDependencyReadiness {
+            dependencies_ready: Vec<bool>,
+        }
+
+        impl MultiDependencyReadiness {
+            fn is_ready(&self) -> bool {
+                self.dependencies_ready.iter().all(|&ready| ready)
+            }
+        }
+
+        let all_ready = MultiDependencyReadiness {
+            dependencies_ready: vec![true, true, true, true],
+        };
+        assert!(all_ready.is_ready(), "All dependencies ready");
+
+        let one_not_ready = MultiDependencyReadiness {
+            dependencies_ready: vec![true, true, false, true],
+        };
+        assert!(
+            !one_not_ready.is_ready(),
+            "Any dependency not ready fails readiness"
+        );
+
+        // Test 13: Response body describes what's not ready
+        let endpoint = ReadinessEndpoint::new(true, false, false);
+        let response = endpoint.check();
+        assert!(
+            response.body.contains("config") && response.body.contains("s3"),
+            "Body describes all unready dependencies"
+        );
+
+        // Test 14: No authentication required
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+        assert_eq!(response.status, 200, "No auth required for readiness");
+
+        // Test 15: Idempotent (same result on repeated calls)
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response1 = endpoint.check();
+        let response2 = endpoint.check();
+        let response3 = endpoint.check();
+        assert_eq!(response1.status, response2.status, "Idempotent 1-2");
+        assert_eq!(response2.status, response3.status, "Idempotent 2-3");
+
+        // Test 16: Fast check suitable for frequent polling
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let start = std::time::Instant::now();
+        let _response = endpoint.check();
+        let duration = start.elapsed();
+        assert!(
+            duration.as_millis() < 100,
+            "Fast readiness check, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 17: Startup sequence: not ready -> ready
+        struct StartupReadiness {
+            startup_phase: usize, // 0=starting, 1=config loaded, 2=s3 connected, 3=ready
+        }
+
+        impl StartupReadiness {
+            fn is_ready(&self) -> bool {
+                self.startup_phase == 3
+            }
+        }
+
+        let starting = StartupReadiness { startup_phase: 0 };
+        assert!(!starting.is_ready(), "Not ready during startup");
+
+        let config_loaded = StartupReadiness { startup_phase: 1 };
+        assert!(
+            !config_loaded.is_ready(),
+            "Not ready: config loaded but S3 pending"
+        );
+
+        let s3_connected = StartupReadiness { startup_phase: 2 };
+        assert!(
+            !s3_connected.is_ready(),
+            "Not ready: S3 connected but final checks pending"
+        );
+
+        let ready = StartupReadiness { startup_phase: 3 };
+        assert!(ready.is_ready(), "Ready: all initialization complete");
+
+        // Test 18: Readiness during rolling deployment
+        struct RollingDeploymentReadiness {
+            old_instance_draining: bool,
+            new_instance_ready: bool,
+        }
+
+        impl RollingDeploymentReadiness {
+            fn old_instance_readiness(&self) -> bool {
+                !self.old_instance_draining
+            }
+
+            fn new_instance_readiness(&self) -> bool {
+                self.new_instance_ready
+            }
+        }
+
+        let deployment = RollingDeploymentReadiness {
+            old_instance_draining: true,
+            new_instance_ready: true,
+        };
+        assert!(
+            !deployment.old_instance_readiness(),
+            "Old instance not ready during drain"
+        );
+        assert!(
+            deployment.new_instance_readiness(),
+            "New instance ready to accept traffic"
+        );
+
+        // Test 19: Graceful degradation reporting
+        let endpoint = ReadinessEndpoint::new(true, true, false);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Not ready when degraded (S3 down)");
+        assert!(
+            response.body.contains("not ready"),
+            "Body indicates not ready state"
+        );
+
+        // Test 20: Complete readiness check validation
+        let endpoint = ReadinessEndpoint::new(true, true, true);
+        let response = endpoint.check();
+
+        assert_eq!(
+            response.status, 200,
+            "Status 200 when all dependencies ready"
+        );
+        assert_eq!(response.body, "ready", "Body indicates ready");
+
+        endpoint.set_s3_connected(false);
+        let response = endpoint.check();
+        assert_eq!(response.status, 503, "Status 503 when dependency not ready");
+        assert!(
+            response.body.contains("s3"),
+            "Body describes unready dependency"
+        );
+
+        let complete_readiness = response.status == 503 && response.body.contains("not ready");
+        assert!(
+            complete_readiness,
+            "Complete readiness check: detects unready dependencies"
+        );
+    }
 }

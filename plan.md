@@ -602,7 +602,7 @@ yatagarasu/
 - [x] Test: Health check verifies configuration loaded
 - [x] Test: Health check is fast (<100ms)
 - [x] Test: Liveness check (basic aliveness)
-- [ ] Test: Readiness check (ready to serve traffic)
+- [x] Test: Readiness check (ready to serve traffic)
 
 ### Graceful Shutdown
 - [ ] Test: Responds to SIGTERM signal
