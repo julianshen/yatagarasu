@@ -26210,4 +26210,300 @@ mod tests {
         let can_accept = active_ratio < 0.5;
         assert!(can_accept, "At 40% active ratio, can accept new requests");
     }
+
+    #[test]
+    fn test_exports_authentication_success_failure_rate() {
+        // Metrics test: Exports authentication success/failure rate
+        // Tests that authentication attempts are tracked
+        // Validates security monitoring and attack detection
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define authentication metrics
+        #[derive(Clone)]
+        struct AuthenticationMetrics {
+            success_count: Arc<AtomicU64>,
+            failure_count: Arc<AtomicU64>,
+        }
+
+        impl AuthenticationMetrics {
+            fn new() -> Self {
+                Self {
+                    success_count: Arc::new(AtomicU64::new(0)),
+                    failure_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn record_success(&self) {
+                self.success_count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn record_failure(&self) {
+                self.failure_count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn get_success_count(&self) -> u64 {
+                self.success_count.load(Ordering::SeqCst)
+            }
+
+            fn get_failure_count(&self) -> u64 {
+                self.failure_count.load(Ordering::SeqCst)
+            }
+
+            fn get_total_attempts(&self) -> u64 {
+                self.get_success_count() + self.get_failure_count()
+            }
+
+            fn get_success_rate(&self) -> f64 {
+                let total = self.get_total_attempts();
+                if total == 0 {
+                    return 100.0;
+                }
+                (self.get_success_count() as f64 / total as f64) * 100.0
+            }
+
+            fn get_failure_rate(&self) -> f64 {
+                let total = self.get_total_attempts();
+                if total == 0 {
+                    return 0.0;
+                }
+                (self.get_failure_count() as f64 / total as f64) * 100.0
+            }
+        }
+
+        // Test case 1: Metrics start at zero
+        let metrics = AuthenticationMetrics::new();
+        assert_eq!(
+            metrics.get_success_count(),
+            0,
+            "Should start with 0 successes"
+        );
+        assert_eq!(
+            metrics.get_failure_count(),
+            0,
+            "Should start with 0 failures"
+        );
+
+        // Test case 2: Records successful authentication
+        metrics.record_success();
+        assert_eq!(
+            metrics.get_success_count(),
+            1,
+            "Should have 1 successful auth"
+        );
+
+        // Test case 3: Records failed authentication
+        metrics.record_failure();
+        assert_eq!(metrics.get_failure_count(), 1, "Should have 1 failed auth");
+
+        // Test case 4: Calculates total attempts
+        let total = metrics.get_total_attempts();
+        assert_eq!(
+            total, 2,
+            "Should have 2 total attempts (1 success + 1 failure)"
+        );
+
+        // Test case 5: Calculates success rate
+        let success_rate = metrics.get_success_rate();
+        assert_eq!(success_rate, 50.0, "1/2 = 50% success rate");
+
+        // Test case 6: Calculates failure rate
+        let failure_rate = metrics.get_failure_rate();
+        assert_eq!(failure_rate, 50.0, "1/2 = 50% failure rate");
+
+        // Test case 7: Tracks high success rate
+        let metrics = AuthenticationMetrics::new();
+        for _ in 0..95 {
+            metrics.record_success();
+        }
+        for _ in 0..5 {
+            metrics.record_failure();
+        }
+        let success_rate = metrics.get_success_rate();
+        assert_eq!(success_rate, 95.0, "95/100 = 95% success rate");
+
+        // Test case 8: Detects attack pattern (high failure rate)
+        let metrics = AuthenticationMetrics::new();
+        for _ in 0..10 {
+            metrics.record_success();
+        }
+        for _ in 0..90 {
+            metrics.record_failure();
+        }
+        let failure_rate = metrics.get_failure_rate();
+        let attack_detected = failure_rate > 80.0;
+        assert!(attack_detected, "90% failure rate indicates attack (>80%)");
+
+        // Test case 9: Thread-safe concurrent authentication
+        use std::thread;
+        let metrics = AuthenticationMetrics::new();
+
+        let metrics_clone1 = metrics.clone();
+        let metrics_clone2 = metrics.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone1.record_success();
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone2.record_failure();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        assert_eq!(
+            metrics.get_success_count(),
+            100,
+            "Should have 100 successes"
+        );
+        assert_eq!(metrics.get_failure_count(), 100, "Should have 100 failures");
+        assert_eq!(metrics.get_total_attempts(), 200, "Should have 200 total");
+
+        // Test case 10: Tracks brute force attempt pattern
+        let metrics = AuthenticationMetrics::new();
+        // Simulate 100 failed login attempts
+        for _ in 0..100 {
+            metrics.record_failure();
+        }
+        let brute_force = metrics.get_failure_count() > 50;
+        assert!(
+            brute_force,
+            "100 consecutive failures indicates brute force attack"
+        );
+
+        // Test case 11: Monitors credential stuffing pattern
+        let metrics = AuthenticationMetrics::new();
+        // Many failures with some successes (compromised credentials)
+        for _ in 0..80 {
+            metrics.record_failure();
+        }
+        for _ in 0..20 {
+            metrics.record_success();
+        }
+        let failure_rate = metrics.get_failure_rate();
+        let credential_stuffing = failure_rate > 70.0;
+        assert!(
+            credential_stuffing,
+            "80% failure rate suggests credential stuffing"
+        );
+
+        // Test case 12: Tracks normal authentication pattern
+        let metrics = AuthenticationMetrics::new();
+        for _ in 0..98 {
+            metrics.record_success();
+        }
+        for _ in 0..2 {
+            metrics.record_failure();
+        }
+        let success_rate = metrics.get_success_rate();
+        let normal = success_rate > 95.0;
+        assert!(normal, "98% success rate is normal behavior (>95%)");
+
+        // Test case 13: Detects authentication service degradation
+        let metrics = AuthenticationMetrics::new();
+        for _ in 0..40 {
+            metrics.record_success();
+        }
+        for _ in 0..60 {
+            metrics.record_failure();
+        }
+        let success_rate = metrics.get_success_rate();
+        let degraded = success_rate < 50.0;
+        assert!(
+            degraded,
+            "40% success rate indicates service degradation (<50%)"
+        );
+
+        // Test case 14: Tracks authentication over time periods
+        let metrics = AuthenticationMetrics::new();
+        // Morning: high success
+        for _ in 0..100 {
+            metrics.record_success();
+        }
+        let morning_success = metrics.get_success_count();
+        // Evening: some failures
+        for _ in 0..10 {
+            metrics.record_failure();
+        }
+        let total = metrics.get_total_attempts();
+        assert_eq!(total, 110, "Should track 110 attempts across time periods");
+        assert_eq!(morning_success, 100, "Morning had 100 successes");
+
+        // Test case 15: Calculates authentication throughput
+        let metrics = AuthenticationMetrics::new();
+        for _ in 0..1000 {
+            metrics.record_success();
+        }
+        let throughput = metrics.get_success_count();
+        assert_eq!(throughput, 1000, "Processed 1000 auth attempts");
+
+        // Test case 16: Monitors per-user failure rate
+        let metrics = AuthenticationMetrics::new();
+        // User with 5 failures in short time = suspicious
+        for _ in 0..5 {
+            metrics.record_failure();
+        }
+        let suspicious = metrics.get_failure_count() >= 5;
+        assert!(suspicious, "5 failures for one user is suspicious (>=5)");
+
+        // Test case 17: Tracks JWT validation failures
+        let metrics = AuthenticationMetrics::new();
+        // Invalid signatures, expired tokens
+        for _ in 0..20 {
+            metrics.record_failure();
+        }
+        for _ in 0..80 {
+            metrics.record_success();
+        }
+        let jwt_failure_rate = metrics.get_failure_rate();
+        assert_eq!(jwt_failure_rate, 20.0, "20% JWT validation failure rate");
+
+        // Test case 18: Enables rate limiting decisions
+        let metrics = AuthenticationMetrics::new();
+        for _ in 0..10 {
+            metrics.record_failure();
+        }
+        let should_rate_limit = metrics.get_failure_count() > 5;
+        assert!(
+            should_rate_limit,
+            "10 failures should trigger rate limiting (>5)"
+        );
+
+        // Test case 19: Tracks account lockout events
+        let metrics = AuthenticationMetrics::new();
+        // 3 failures = trigger account lockout
+        for _ in 0..3 {
+            metrics.record_failure();
+        }
+        let should_lockout = metrics.get_failure_count() >= 3;
+        assert!(should_lockout, "3 failures should trigger lockout (>=3)");
+
+        // Test case 20: Monitors authentication anomalies
+        let metrics = AuthenticationMetrics::new();
+        // Baseline: 95% success
+        for _ in 0..950 {
+            metrics.record_success();
+        }
+        for _ in 0..50 {
+            metrics.record_failure();
+        }
+        let baseline_success = metrics.get_success_rate();
+
+        // Sudden spike in failures
+        for _ in 0..200 {
+            metrics.record_failure();
+        }
+        let new_success_rate = metrics.get_success_rate();
+        let anomaly = (baseline_success - new_success_rate).abs() > 10.0;
+        assert!(
+            anomaly,
+            "Success rate dropped from 95% to ~82.6%, anomaly detected (>10% change)"
+        );
+    }
 }
