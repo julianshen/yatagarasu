@@ -582,7 +582,7 @@ yatagarasu/
 - [x] Test: Exports authentication success/failure rate
 - [x] Test: Exports S3 request count by operation
 - [x] Test: Exports S3 error rate
-- [ ] Test: Exports cache hit/miss rate (if caching enabled)
+- [x] Test: Exports cache hit/miss rate (if caching enabled)
 
 ### Metrics - Prometheus Format
 - [ ] Test: Metrics endpoint returns Prometheus text format

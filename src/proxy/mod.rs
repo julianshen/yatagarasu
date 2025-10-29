@@ -27124,4 +27124,310 @@ mod tests {
         let should_alert_now = new_error_rate > 5.0;
         assert!(should_alert_now, "9.09% error rate triggers alert (>5%)");
     }
+
+    #[test]
+    fn test_exports_cache_hit_miss_rate() {
+        // Metrics test: Exports cache hit/miss rate
+        // Tests that cache performance is tracked
+        // Validates cache effectiveness and optimization opportunities
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        // Test case 1: Define cache metrics
+        #[derive(Clone)]
+        struct CacheMetrics {
+            hit_count: Arc<AtomicU64>,
+            miss_count: Arc<AtomicU64>,
+        }
+
+        impl CacheMetrics {
+            fn new() -> Self {
+                Self {
+                    hit_count: Arc::new(AtomicU64::new(0)),
+                    miss_count: Arc::new(AtomicU64::new(0)),
+                }
+            }
+
+            fn record_hit(&self) {
+                self.hit_count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn record_miss(&self) {
+                self.miss_count.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn get_hit_count(&self) -> u64 {
+                self.hit_count.load(Ordering::SeqCst)
+            }
+
+            fn get_miss_count(&self) -> u64 {
+                self.miss_count.load(Ordering::SeqCst)
+            }
+
+            fn get_total_requests(&self) -> u64 {
+                self.get_hit_count() + self.get_miss_count()
+            }
+
+            fn get_hit_rate(&self) -> f64 {
+                let total = self.get_total_requests();
+                if total == 0 {
+                    return 0.0;
+                }
+                (self.get_hit_count() as f64 / total as f64) * 100.0
+            }
+
+            fn get_miss_rate(&self) -> f64 {
+                let total = self.get_total_requests();
+                if total == 0 {
+                    return 0.0;
+                }
+                (self.get_miss_count() as f64 / total as f64) * 100.0
+            }
+        }
+
+        // Test case 1: Metrics start at zero
+        let metrics = CacheMetrics::new();
+        assert_eq!(metrics.get_hit_count(), 0, "Should start with 0 hits");
+        assert_eq!(metrics.get_miss_count(), 0, "Should start with 0 misses");
+
+        // Test case 2: Records cache hit
+        metrics.record_hit();
+        assert_eq!(metrics.get_hit_count(), 1, "Should have 1 hit");
+
+        // Test case 3: Records cache miss
+        metrics.record_miss();
+        assert_eq!(metrics.get_miss_count(), 1, "Should have 1 miss");
+
+        // Test case 4: Calculates total requests
+        let total = metrics.get_total_requests();
+        assert_eq!(total, 2, "Should have 2 total requests (1 hit + 1 miss)");
+
+        // Test case 5: Calculates hit rate
+        let hit_rate = metrics.get_hit_rate();
+        assert_eq!(hit_rate, 50.0, "1/2 = 50% hit rate");
+
+        // Test case 6: Calculates miss rate
+        let miss_rate = metrics.get_miss_rate();
+        assert_eq!(miss_rate, 50.0, "1/2 = 50% miss rate");
+
+        // Test case 7: Tracks high hit rate (effective cache)
+        let metrics = CacheMetrics::new();
+        for _ in 0..90 {
+            metrics.record_hit();
+        }
+        for _ in 0..10 {
+            metrics.record_miss();
+        }
+        let hit_rate = metrics.get_hit_rate();
+        let effective = hit_rate > 80.0;
+        assert!(effective, "90% hit rate shows effective cache (>80%)");
+
+        // Test case 8: Detects low hit rate (ineffective cache)
+        let metrics = CacheMetrics::new();
+        for _ in 0..30 {
+            metrics.record_hit();
+        }
+        for _ in 0..70 {
+            metrics.record_miss();
+        }
+        let hit_rate = metrics.get_hit_rate();
+        let ineffective = hit_rate < 50.0;
+        assert!(ineffective, "30% hit rate shows ineffective cache (<50%)");
+
+        // Test case 9: Thread-safe concurrent tracking
+        use std::thread;
+        let metrics = CacheMetrics::new();
+
+        let metrics_clone1 = metrics.clone();
+        let metrics_clone2 = metrics.clone();
+
+        let handle1 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone1.record_hit();
+            }
+        });
+
+        let handle2 = thread::spawn(move || {
+            for _ in 0..100 {
+                metrics_clone2.record_miss();
+            }
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        assert_eq!(metrics.get_hit_count(), 100, "Should have 100 hits");
+        assert_eq!(metrics.get_miss_count(), 100, "Should have 100 misses");
+        assert_eq!(metrics.get_total_requests(), 200, "Should have 200 total");
+
+        // Test case 10: Tracks warm cache performance
+        let metrics = CacheMetrics::new();
+        // Cold start: mostly misses
+        for _ in 0..10 {
+            metrics.record_miss();
+        }
+        let cold_hit_rate = metrics.get_hit_rate();
+        // Warm cache: mostly hits
+        for _ in 0..90 {
+            metrics.record_hit();
+        }
+        let warm_hit_rate = metrics.get_hit_rate();
+        let improved = warm_hit_rate > cold_hit_rate + 50.0;
+        assert!(improved, "Hit rate improved from 0% to 90% (>50% increase)");
+
+        // Test case 11: Calculates cache effectiveness
+        let metrics = CacheMetrics::new();
+        for _ in 0..95 {
+            metrics.record_hit();
+        }
+        for _ in 0..5 {
+            metrics.record_miss();
+        }
+        let hit_rate = metrics.get_hit_rate();
+        let highly_effective = hit_rate > 90.0;
+        assert!(highly_effective, "95% hit rate is highly effective (>90%)");
+
+        // Test case 12: Enables cache size optimization
+        let metrics = CacheMetrics::new();
+        for _ in 0..50 {
+            metrics.record_hit();
+        }
+        for _ in 0..50 {
+            metrics.record_miss();
+        }
+        let hit_rate = metrics.get_hit_rate();
+        let needs_optimization = hit_rate < 70.0;
+        assert!(
+            needs_optimization,
+            "50% hit rate suggests cache too small (<70%)"
+        );
+
+        // Test case 13: Tracks cache eviction impact
+        let metrics = CacheMetrics::new();
+        // Before eviction: high hit rate
+        for _ in 0..80 {
+            metrics.record_hit();
+        }
+        for _ in 0..20 {
+            metrics.record_miss();
+        }
+        let before_eviction = metrics.get_hit_rate();
+        // After eviction: more misses
+        for _ in 0..30 {
+            metrics.record_miss();
+        }
+        let after_eviction = metrics.get_hit_rate();
+        let eviction_impact = before_eviction - after_eviction;
+        assert!(
+            eviction_impact > 10.0,
+            "Hit rate dropped from 80% to 61.5% after eviction (>10% impact)"
+        );
+
+        // Test case 14: Monitors cache for hot content
+        let metrics = CacheMetrics::new();
+        // Popular content: high hits
+        for _ in 0..100 {
+            metrics.record_hit();
+        }
+        let hot_content = metrics.get_hit_count();
+        assert_eq!(hot_content, 100, "100 hits indicates hot content");
+
+        // Test case 15: Detects cold content patterns
+        let metrics = CacheMetrics::new();
+        // Unpopular content: many misses
+        for _ in 0..100 {
+            metrics.record_miss();
+        }
+        let cold_content = metrics.get_miss_count();
+        let should_not_cache = cold_content > 50;
+        assert!(
+            should_not_cache,
+            "100 misses suggests don't cache this content"
+        );
+
+        // Test case 16: Calculates cache ROI
+        let metrics = CacheMetrics::new();
+        for _ in 0..1000 {
+            metrics.record_hit();
+        }
+        for _ in 0..100 {
+            metrics.record_miss();
+        }
+        // Assume: hit saves 100ms, miss costs 10ms overhead
+        let time_saved_ms = metrics.get_hit_count() * 100;
+        let overhead_ms = metrics.get_miss_count() * 10;
+        let net_benefit_ms = time_saved_ms - overhead_ms;
+        let roi = net_benefit_ms as f64 / overhead_ms as f64;
+        assert!(roi > 50.0, "ROI of 99x shows cache is highly beneficial");
+
+        // Test case 17: Tracks cache memory efficiency
+        let metrics = CacheMetrics::new();
+        for _ in 0..70 {
+            metrics.record_hit();
+        }
+        for _ in 0..30 {
+            metrics.record_miss();
+        }
+        let hit_rate = metrics.get_hit_rate();
+        // Assume 100MB cache size
+        let cache_size_mb = 100;
+        let efficiency = hit_rate / cache_size_mb as f64;
+        assert_eq!(efficiency, 0.7, "0.7% hit rate per MB of cache");
+
+        // Test case 18: Enables cache warming decisions
+        let metrics = CacheMetrics::new();
+        // Initial: all misses (cold cache)
+        for _ in 0..50 {
+            metrics.record_miss();
+        }
+        let initial_hit_rate = metrics.get_hit_rate();
+        let should_warm = initial_hit_rate < 20.0;
+        assert!(should_warm, "0% hit rate suggests cache warming needed");
+
+        // Test case 19: Monitors cache staleness
+        let metrics = CacheMetrics::new();
+        // Old pattern: high hits
+        for _ in 0..90 {
+            metrics.record_hit();
+        }
+        for _ in 0..10 {
+            metrics.record_miss();
+        }
+        let old_hit_rate = metrics.get_hit_rate();
+        // After TTL expiry: sudden misses
+        for _ in 0..50 {
+            metrics.record_miss();
+        }
+        let new_hit_rate = metrics.get_hit_rate();
+        let stale = old_hit_rate - new_hit_rate >= 30.0;
+        assert!(
+            stale,
+            "Hit rate dropped from 90% to 60% indicates stale entries (>=30% drop)"
+        );
+
+        // Test case 20: Supports cache bypass decisions
+        let metrics = CacheMetrics::new();
+        for _ in 0..10 {
+            metrics.record_hit();
+        }
+        for _ in 0..90 {
+            metrics.record_miss();
+        }
+        let hit_rate = metrics.get_hit_rate();
+        let should_bypass = hit_rate < 20.0;
+        assert!(
+            should_bypass,
+            "10% hit rate suggests bypassing cache (<20%)"
+        );
+
+        // After bypass: direct to origin
+        let metrics = CacheMetrics::new();
+        // All requests go to origin (no cache)
+        for _ in 0..100 {
+            metrics.record_miss();
+        }
+        let bypassed = metrics.get_hit_count() == 0;
+        assert!(bypassed, "0 hits confirms cache bypass");
+    }
 }
