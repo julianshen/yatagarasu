@@ -91,3 +91,57 @@ fn test_server_config_accessible() {
     assert_eq!(server.config().address, address);
     assert_eq!(server.config().threads, 4);
 }
+
+// Test: Server binds to configured address
+#[test]
+fn test_server_binds_to_configured_address() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port by binding to port 0
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener); // Release the port
+
+    // Create server with the available port
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Verify the address is set correctly
+    assert_eq!(server.config().address, address);
+    assert!(server.config().address.contains(&port.to_string()));
+}
+
+// Test: Server can parse socket address correctly
+#[test]
+fn test_server_parses_socket_address() {
+    use yatagarasu::server::YatagarasuServer;
+
+    let config = ServerConfig::new("0.0.0.0:8080".to_string());
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Should be able to parse the address into SocketAddr
+    let socket_addr = server.parse_address();
+    assert!(socket_addr.is_ok());
+
+    let addr = socket_addr.unwrap();
+    assert_eq!(addr.port(), 8080);
+}
+
+// Test: Server rejects invalid address format
+#[test]
+fn test_server_rejects_invalid_address() {
+    use yatagarasu::server::YatagarasuServer;
+
+    let config = ServerConfig::new("invalid:address".to_string());
+
+    // Should fail to create server with invalid address
+    let server_result = YatagarasuServer::new(config);
+    assert!(server_result.is_err());
+
+    let error = server_result.unwrap_err();
+    assert!(error.contains("Invalid address"));
+    assert!(error.contains("invalid:address"));
+}

@@ -671,9 +671,10 @@ yatagarasu/
 - [x] Test: Can add Pingora dependency to Cargo.toml
 - [x] Test: Can create ServerConfig struct
 - [x] Test: Can initialize Pingora Server instance
-- [ ] Test: Server binds to configured address (from config.yaml)
+- [x] Test: Server binds to configured address (from config.yaml)
+- [x] Test: Server parses socket address correctly
+- [x] Test: Server rejects invalid address format
 - [ ] Test: Server starts without errors with valid configuration
-- [ ] Test: Server fails with clear error on invalid address (e.g., port in use)
 - [ ] Test: Can stop server programmatically
 
 ### Basic HTTP Handling

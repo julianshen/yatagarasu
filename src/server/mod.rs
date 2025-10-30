@@ -2,7 +2,6 @@
 
 use crate::config::Config;
 use pingora::server::configuration::Opt as ServerOpt;
-use std::sync::Arc;
 
 /// Configuration for the HTTP server
 #[derive(Debug, Clone)]
@@ -14,6 +13,7 @@ pub struct ServerConfig {
 }
 
 /// Yatagarasu HTTP Server wrapper around Pingora
+#[derive(Debug)]
 pub struct YatagarasuServer {
     config: ServerConfig,
     server_opt: ServerOpt,
@@ -43,6 +43,10 @@ impl ServerConfig {
 impl YatagarasuServer {
     /// Create a new YatagarasuServer instance
     pub fn new(config: ServerConfig) -> Result<Self, String> {
+        // Validate that the address can be parsed
+        config.address.parse::<std::net::SocketAddr>()
+            .map_err(|e| format!("Invalid address '{}': {}", config.address, e))?;
+
         // Create Pingora server options
         let mut server_opt = ServerOpt::default();
         server_opt.upgrade = false; // Disable graceful upgrade for now
@@ -65,6 +69,13 @@ impl YatagarasuServer {
     /// Get the Pingora server options
     pub fn server_opt(&self) -> &ServerOpt {
         &self.server_opt
+    }
+
+    /// Parse the configured address into a SocketAddr
+    pub fn parse_address(&self) -> Result<std::net::SocketAddr, String> {
+        self.config.address
+            .parse()
+            .map_err(|e| format!("Failed to parse address '{}': {}", self.config.address, e))
     }
 }
 
