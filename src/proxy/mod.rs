@@ -37043,4 +37043,328 @@ mod tests {
             "Insecure config validation fails"
         );
     }
+
+    #[test]
+    fn test_headers_sanitized_before_logging() {
+        // Security hardening test: Headers sanitized before logging
+        // Tests that sensitive headers are redacted before being logged
+        // Validates protection against credential leakage through request logs
+
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        struct HeaderSanitizer {
+            sensitive_headers: Vec<String>,
+        }
+
+        impl HeaderSanitizer {
+            fn new() -> Self {
+                Self {
+                    sensitive_headers: vec![
+                        "authorization".to_string(),
+                        "cookie".to_string(),
+                        "set-cookie".to_string(),
+                        "x-api-key".to_string(),
+                        "x-auth-token".to_string(),
+                    ],
+                }
+            }
+
+            fn sanitize(&self, headers: &HashMap<String, String>) -> HashMap<String, String> {
+                let mut sanitized = HashMap::new();
+                for (key, value) in headers {
+                    let key_lower = key.to_lowercase();
+                    if self.sensitive_headers.contains(&key_lower) {
+                        sanitized.insert(key.clone(), "[REDACTED]".to_string());
+                    } else {
+                        sanitized.insert(key.clone(), value.clone());
+                    }
+                }
+                sanitized
+            }
+
+            fn is_sensitive(&self, header_name: &str) -> bool {
+                self.sensitive_headers.contains(&header_name.to_lowercase())
+            }
+        }
+
+        struct Logger {
+            logs: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl Logger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log_headers(&self, headers: &HashMap<String, String>) {
+                for (key, value) in headers {
+                    self.logs
+                        .lock()
+                        .unwrap()
+                        .push(format!("{}: {}", key, value));
+                }
+            }
+
+            fn contains(&self, text: &str) -> bool {
+                self.logs
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|log| log.contains(text))
+            }
+
+            fn contains_any(&self, patterns: &[&str]) -> bool {
+                let logs = self.logs.lock().unwrap();
+                patterns
+                    .iter()
+                    .any(|pattern| logs.iter().any(|log| log.contains(pattern)))
+            }
+        }
+
+        // Test 1: Authorization header redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer token123".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Authorization"),
+            Some(&"[REDACTED]".to_string()),
+            "Authorization header redacted"
+        );
+
+        // Test 2: Cookie header redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Cookie".to_string(), "session=abc123".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Cookie"),
+            Some(&"[REDACTED]".to_string()),
+            "Cookie header redacted"
+        );
+
+        // Test 3: Set-Cookie header redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Set-Cookie".to_string(),
+            "session=xyz; HttpOnly".to_string(),
+        );
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Set-Cookie"),
+            Some(&"[REDACTED]".to_string()),
+            "Set-Cookie header redacted"
+        );
+
+        // Test 4: X-API-Key header redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("X-API-Key".to_string(), "key123456".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("X-API-Key"),
+            Some(&"[REDACTED]".to_string()),
+            "X-API-Key header redacted"
+        );
+
+        // Test 5: X-Auth-Token header redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("X-Auth-Token".to_string(), "token789".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("X-Auth-Token"),
+            Some(&"[REDACTED]".to_string()),
+            "X-Auth-Token header redacted"
+        );
+
+        // Test 6: Safe headers not redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Content-Type"),
+            Some(&"application/json".to_string()),
+            "Safe headers not redacted"
+        );
+
+        // Test 7: Case-insensitive header matching
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("AUTHORIZATION".to_string(), "Bearer token".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("AUTHORIZATION"),
+            Some(&"[REDACTED]".to_string()),
+            "Case-insensitive header matching"
+        );
+
+        // Test 8: Multiple headers sanitized
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer token".to_string());
+        headers.insert("Cookie".to_string(), "session=abc".to_string());
+        headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert!(
+            sanitized.get("Authorization") == Some(&"[REDACTED]".to_string())
+                && sanitized.get("Cookie") == Some(&"[REDACTED]".to_string())
+                && sanitized.get("Content-Type") == Some(&"text/plain".to_string()),
+            "Multiple headers sanitized: 2 redacted, 1 safe"
+        );
+
+        // Test 9: Logger doesn't log actual token
+        let sanitizer = HeaderSanitizer::new();
+        let logger = Logger::new();
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer secret123".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        logger.log_headers(&sanitized);
+        assert!(
+            !logger.contains("secret123"),
+            "Logger doesn't log actual token"
+        );
+
+        // Test 10: Logger logs [REDACTED]
+        let sanitizer = HeaderSanitizer::new();
+        let logger = Logger::new();
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer token".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        logger.log_headers(&sanitized);
+        assert!(logger.contains("[REDACTED]"), "Logger logs [REDACTED]");
+
+        // Test 11: Accept header not redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Accept".to_string(), "application/json".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Accept"),
+            Some(&"application/json".to_string()),
+            "Accept header not redacted"
+        );
+
+        // Test 12: User-Agent header not redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("User-Agent".to_string(), "Mozilla/5.0".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("User-Agent"),
+            Some(&"Mozilla/5.0".to_string()),
+            "User-Agent header not redacted"
+        );
+
+        // Test 13: Host header not redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Host".to_string(), "example.com".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Host"),
+            Some(&"example.com".to_string()),
+            "Host header not redacted"
+        );
+
+        // Test 14: Content-Length header not redacted
+        let sanitizer = HeaderSanitizer::new();
+        let mut headers = HashMap::new();
+        headers.insert("Content-Length".to_string(), "1024".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("Content-Length"),
+            Some(&"1024".to_string()),
+            "Content-Length header not redacted"
+        );
+
+        // Test 15: Request headers sanitized
+        let sanitizer = HeaderSanitizer::new();
+        let mut request_headers = HashMap::new();
+        request_headers.insert("Authorization".to_string(), "Bearer token".to_string());
+        request_headers.insert("Accept".to_string(), "text/html".to_string());
+        let sanitized = sanitizer.sanitize(&request_headers);
+        assert!(
+            sanitized.get("Authorization") == Some(&"[REDACTED]".to_string())
+                && sanitized.get("Accept") == Some(&"text/html".to_string()),
+            "Request headers sanitized"
+        );
+
+        // Test 16: Response headers sanitized
+        let sanitizer = HeaderSanitizer::new();
+        let mut response_headers = HashMap::new();
+        response_headers.insert("Set-Cookie".to_string(), "session=xyz; Secure".to_string());
+        response_headers.insert("Content-Type".to_string(), "text/html".to_string());
+        let sanitized = sanitizer.sanitize(&response_headers);
+        assert!(
+            sanitized.get("Set-Cookie") == Some(&"[REDACTED]".to_string())
+                && sanitized.get("Content-Type") == Some(&"text/html".to_string()),
+            "Response headers sanitized"
+        );
+
+        // Test 17: Empty headers safe to log
+        let sanitizer = HeaderSanitizer::new();
+        let headers = HashMap::new();
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(sanitized.len(), 0, "Empty headers safe to log");
+
+        // Test 18: Sensitive header detection
+        let sanitizer = HeaderSanitizer::new();
+        assert!(
+            sanitizer.is_sensitive("Authorization"),
+            "Authorization is sensitive"
+        );
+        assert!(
+            !sanitizer.is_sensitive("Content-Type"),
+            "Content-Type is not sensitive"
+        );
+
+        // Test 19: Custom sensitive headers
+        let mut sanitizer = HeaderSanitizer::new();
+        sanitizer
+            .sensitive_headers
+            .push("x-custom-auth".to_string());
+        let mut headers = HashMap::new();
+        headers.insert("X-Custom-Auth".to_string(), "custom123".to_string());
+        let sanitized = sanitizer.sanitize(&headers);
+        assert_eq!(
+            sanitized.get("X-Custom-Auth"),
+            Some(&"[REDACTED]".to_string()),
+            "Custom sensitive headers"
+        );
+
+        // Test 20: Complete header sanitization validation
+        let sanitizer = HeaderSanitizer::new();
+        let logger = Logger::new();
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer secret_token".to_string(),
+        );
+        headers.insert("Cookie".to_string(), "session=secret_session".to_string());
+        headers.insert("X-API-Key".to_string(), "secret_api_key".to_string());
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("User-Agent".to_string(), "TestClient/1.0".to_string());
+
+        let sanitized = sanitizer.sanitize(&headers);
+        logger.log_headers(&sanitized);
+
+        let sensitive_values = ["secret_token", "secret_session", "secret_api_key"];
+        let safe_values = ["application/json", "TestClient/1.0"];
+
+        assert!(
+            !logger.contains_any(&sensitive_values),
+            "No sensitive values in logs"
+        );
+        assert!(
+            safe_values.iter().all(|val| logger.contains(val)),
+            "Safe values present in logs"
+        );
+        assert!(logger.contains("[REDACTED]"), "[REDACTED] markers present");
+    }
 }

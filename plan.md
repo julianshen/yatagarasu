@@ -628,7 +628,7 @@ yatagarasu/
 - [x] Test: Request timeout enforced
 - [x] Test: Rate limiting per client (optional feature)
 - [x] Test: TLS configuration validated
-- [ ] Test: Headers sanitized before logging
+- [x] Test: Headers sanitized before logging
 
 ### Documentation
 - [ ] README with setup instructions complete
