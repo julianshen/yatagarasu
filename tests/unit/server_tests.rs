@@ -145,3 +145,27 @@ fn test_server_rejects_invalid_address() {
     assert!(error.contains("Invalid address"));
     assert!(error.contains("invalid:address"));
 }
+
+// Test: Server starts without errors with valid configuration
+#[test]
+fn test_server_starts_without_errors() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Should be able to build a Pingora Server instance
+    let pingora_server_result = server.build_pingora_server();
+    assert!(pingora_server_result.is_ok());
+
+    // If we get here, the server was created successfully
+    let _pingora_server = pingora_server_result.unwrap();
+}

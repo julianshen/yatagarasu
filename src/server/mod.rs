@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use pingora::server::configuration::Opt as ServerOpt;
+use pingora::server::Server;
 
 /// Configuration for the HTTP server
 #[derive(Debug, Clone)]
@@ -16,7 +17,6 @@ pub struct ServerConfig {
 #[derive(Debug)]
 pub struct YatagarasuServer {
     config: ServerConfig,
-    server_opt: ServerOpt,
 }
 
 impl ServerConfig {
@@ -47,17 +47,8 @@ impl YatagarasuServer {
         config.address.parse::<std::net::SocketAddr>()
             .map_err(|e| format!("Invalid address '{}': {}", config.address, e))?;
 
-        // Create Pingora server options
-        let mut server_opt = ServerOpt::default();
-        server_opt.upgrade = false; // Disable graceful upgrade for now
-        server_opt.daemon = false; // Don't daemonize
-        server_opt.nocapture = false; // Don't capture stdout/stderr
-        server_opt.test = false; // Not in test mode
-        server_opt.conf = None; // No config file for now
-
         Ok(Self {
             config,
-            server_opt,
         })
     }
 
@@ -66,9 +57,15 @@ impl YatagarasuServer {
         &self.config
     }
 
-    /// Get the Pingora server options
-    pub fn server_opt(&self) -> &ServerOpt {
-        &self.server_opt
+    /// Create Pingora server options
+    fn create_server_opt(&self) -> ServerOpt {
+        let mut server_opt = ServerOpt::default();
+        server_opt.upgrade = false; // Disable graceful upgrade for now
+        server_opt.daemon = false; // Don't daemonize
+        server_opt.nocapture = false; // Don't capture stdout/stderr
+        server_opt.test = false; // Not in test mode
+        server_opt.conf = None; // No config file for now
+        server_opt
     }
 
     /// Parse the configured address into a SocketAddr
@@ -76,6 +73,19 @@ impl YatagarasuServer {
         self.config.address
             .parse()
             .map_err(|e| format!("Failed to parse address '{}': {}", self.config.address, e))
+    }
+
+    /// Build a Pingora Server instance
+    pub fn build_pingora_server(&self) -> Result<Server, String> {
+        // Create a new Pingora server with the configured options
+        let server_opt = self.create_server_opt();
+        let mut server = Server::new(Some(server_opt))
+            .map_err(|e| format!("Failed to create Pingora server: {}", e))?;
+
+        // Bootstrap the server with default configuration
+        server.bootstrap();
+
+        Ok(server)
     }
 }
 
