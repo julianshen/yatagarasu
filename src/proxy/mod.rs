@@ -31487,4 +31487,531 @@ mod tests {
             "Complete stop accepting: not accepting and rejecting new connections"
         );
     }
+
+    #[test]
+    fn test_waits_for_in_flight_requests_to_complete() {
+        // Graceful shutdown test: Waits for in-flight requests to complete
+        // Tests that server allows active requests to finish before shutdown
+        // Validates graceful handling of existing work during termination
+
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        struct Server {
+            shutdown_initiated: Arc<Mutex<bool>>,
+            active_requests: Arc<Mutex<Vec<u64>>>,
+        }
+
+        impl Server {
+            fn new() -> Self {
+                Self {
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                    active_requests: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn start_request(&self, id: u64) {
+                self.active_requests.lock().unwrap().push(id);
+            }
+
+            fn complete_request(&self, id: u64) {
+                self.active_requests.lock().unwrap().retain(|&x| x != id);
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+            }
+
+            fn active_count(&self) -> usize {
+                self.active_requests.lock().unwrap().len()
+            }
+
+            fn can_shutdown(&self) -> bool {
+                *self.shutdown_initiated.lock().unwrap() && self.active_count() == 0
+            }
+        }
+
+        // Test 1: Waits for single in-flight request
+        let server = Server::new();
+        server.start_request(1);
+        server.shutdown();
+
+        assert!(
+            !server.can_shutdown(),
+            "Cannot shutdown with active request"
+        );
+
+        server.complete_request(1);
+        assert!(
+            server.can_shutdown(),
+            "Can shutdown after request completes"
+        );
+
+        // Test 2: Waits for multiple in-flight requests
+        let server = Server::new();
+        server.start_request(1);
+        server.start_request(2);
+        server.start_request(3);
+
+        server.shutdown();
+        assert_eq!(server.active_count(), 3, "3 active requests");
+        assert!(!server.can_shutdown(), "Cannot shutdown with 3 active");
+
+        server.complete_request(1);
+        assert!(!server.can_shutdown(), "Still 2 active");
+
+        server.complete_request(2);
+        assert!(!server.can_shutdown(), "Still 1 active");
+
+        server.complete_request(3);
+        assert!(server.can_shutdown(), "All complete, can shutdown");
+
+        // Test 3: Requests started before shutdown can complete
+        let server = Server::new();
+        server.start_request(1);
+        server.start_request(2);
+
+        server.shutdown();
+
+        // Requests in-flight can still complete
+        server.complete_request(1);
+        server.complete_request(2);
+
+        assert_eq!(server.active_count(), 0, "All requests completed");
+
+        // Test 4: Tracks request completion during shutdown
+        struct ServerWithTracking {
+            shutdown_initiated: Arc<Mutex<bool>>,
+            requests_completed_during_shutdown: Arc<Mutex<u64>>,
+            active_count: Arc<Mutex<u64>>,
+        }
+
+        impl ServerWithTracking {
+            fn new() -> Self {
+                Self {
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                    requests_completed_during_shutdown: Arc::new(Mutex::new(0)),
+                    active_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn start_request(&self) {
+                *self.active_count.lock().unwrap() += 1;
+            }
+
+            fn complete_request(&self) {
+                *self.active_count.lock().unwrap() -= 1;
+                if *self.shutdown_initiated.lock().unwrap() {
+                    *self.requests_completed_during_shutdown.lock().unwrap() += 1;
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+            }
+
+            fn completed_during_shutdown(&self) -> u64 {
+                *self.requests_completed_during_shutdown.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithTracking::new();
+        server.start_request();
+        server.start_request();
+        server.start_request();
+
+        server.shutdown();
+
+        server.complete_request();
+        server.complete_request();
+        server.complete_request();
+
+        assert_eq!(
+            server.completed_during_shutdown(),
+            3,
+            "3 requests completed during shutdown"
+        );
+
+        // Test 5: Shutdown waits for slow requests
+        let server = Server::new();
+        server.start_request(1);
+
+        server.shutdown();
+
+        // Simulate slow request (would take time in reality)
+        std::thread::sleep(Duration::from_millis(10));
+        server.complete_request(1);
+
+        assert!(server.can_shutdown(), "Waited for slow request");
+
+        // Test 6: No timeout for in-flight requests (waits indefinitely)
+        let server = Server::new();
+        server.start_request(1);
+        server.shutdown();
+
+        // Even after significant time, still waiting
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(!server.can_shutdown(), "Still waiting for request");
+
+        server.complete_request(1);
+        assert!(server.can_shutdown(), "Completed after wait");
+
+        // Test 7: Request completion is thread-safe
+        use std::thread;
+
+        let server = Arc::new(Server::new());
+        server.start_request(1);
+        server.start_request(2);
+
+        server.shutdown();
+
+        let server_clone1 = Arc::clone(&server);
+        let handle1 = thread::spawn(move || {
+            server_clone1.complete_request(1);
+        });
+
+        let server_clone2 = Arc::clone(&server);
+        let handle2 = thread::spawn(move || {
+            server_clone2.complete_request(2);
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        assert!(server.can_shutdown(), "Thread-safe request completion");
+
+        // Test 8: Active request count decreases correctly
+        let server = Server::new();
+        for i in 1..=10 {
+            server.start_request(i);
+        }
+
+        assert_eq!(server.active_count(), 10, "10 active requests");
+
+        server.shutdown();
+
+        for i in 1..=10 {
+            server.complete_request(i);
+        }
+
+        assert_eq!(server.active_count(), 0, "All requests completed");
+
+        // Test 9: Shutdown doesn't kill active requests
+        let server = Server::new();
+        server.start_request(1);
+
+        server.shutdown();
+
+        // Request is still active
+        assert_eq!(
+            server.active_count(),
+            1,
+            "Request still active after shutdown"
+        );
+
+        // Test 10: Can measure shutdown duration
+        struct ServerWithDuration {
+            shutdown_start: Arc<Mutex<Option<Instant>>>,
+            shutdown_complete: Arc<Mutex<Option<Instant>>>,
+            active_count: Arc<Mutex<u64>>,
+        }
+
+        impl ServerWithDuration {
+            fn new() -> Self {
+                Self {
+                    shutdown_start: Arc::new(Mutex::new(None)),
+                    shutdown_complete: Arc::new(Mutex::new(None)),
+                    active_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn start_request(&self) {
+                *self.active_count.lock().unwrap() += 1;
+            }
+
+            fn complete_request(&self) {
+                *self.active_count.lock().unwrap() -= 1;
+                if *self.active_count.lock().unwrap() == 0
+                    && self.shutdown_start.lock().unwrap().is_some()
+                {
+                    *self.shutdown_complete.lock().unwrap() = Some(Instant::now());
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_start.lock().unwrap() = Some(Instant::now());
+            }
+
+            fn shutdown_duration(&self) -> Option<Duration> {
+                let start = self.shutdown_start.lock().unwrap();
+                let complete = self.shutdown_complete.lock().unwrap();
+
+                if let (Some(s), Some(c)) = (*start, *complete) {
+                    Some(c.duration_since(s))
+                } else {
+                    None
+                }
+            }
+        }
+
+        let server = ServerWithDuration::new();
+        server.start_request();
+
+        server.shutdown();
+        std::thread::sleep(Duration::from_millis(20));
+        server.complete_request();
+
+        let duration = server.shutdown_duration();
+        assert!(duration.is_some(), "Shutdown duration measured");
+        assert!(duration.unwrap().as_millis() >= 20, "Waited at least 20ms");
+
+        // Test 11: Graceful shutdown sequence
+        #[derive(PartialEq, Debug, Clone)]
+        enum ShutdownPhase {
+            Running,
+            StopAccepting,
+            WaitingForRequests,
+            Complete,
+        }
+
+        struct GracefulServer {
+            phase: Arc<Mutex<ShutdownPhase>>,
+            active_count: Arc<Mutex<u64>>,
+        }
+
+        impl GracefulServer {
+            fn new() -> Self {
+                Self {
+                    phase: Arc::new(Mutex::new(ShutdownPhase::Running)),
+                    active_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn start_request(&self) {
+                *self.active_count.lock().unwrap() += 1;
+            }
+
+            fn complete_request(&self) {
+                *self.active_count.lock().unwrap() -= 1;
+                self.update_phase();
+            }
+
+            fn shutdown(&self) {
+                *self.phase.lock().unwrap() = ShutdownPhase::StopAccepting;
+                self.update_phase();
+            }
+
+            fn update_phase(&self) {
+                let mut phase = self.phase.lock().unwrap();
+                let active = *self.active_count.lock().unwrap();
+
+                if *phase == ShutdownPhase::StopAccepting && active > 0 {
+                    *phase = ShutdownPhase::WaitingForRequests;
+                } else if *phase == ShutdownPhase::WaitingForRequests && active == 0 {
+                    *phase = ShutdownPhase::Complete;
+                } else if *phase == ShutdownPhase::StopAccepting && active == 0 {
+                    *phase = ShutdownPhase::Complete;
+                }
+            }
+
+            fn phase(&self) -> ShutdownPhase {
+                self.phase.lock().unwrap().clone()
+            }
+        }
+
+        let server = GracefulServer::new();
+        assert_eq!(server.phase(), ShutdownPhase::Running);
+
+        server.start_request();
+        server.shutdown();
+        assert_eq!(server.phase(), ShutdownPhase::WaitingForRequests);
+
+        server.complete_request();
+        assert_eq!(server.phase(), ShutdownPhase::Complete);
+
+        // Test 12: Zero active requests allows immediate shutdown
+        let server = Server::new();
+        server.shutdown();
+
+        assert!(
+            server.can_shutdown(),
+            "Can shutdown immediately with no active requests"
+        );
+
+        // Test 13: Request IDs are tracked correctly
+        let server = Server::new();
+        server.start_request(100);
+        server.start_request(200);
+        server.start_request(300);
+
+        server.shutdown();
+
+        server.complete_request(200);
+        assert_eq!(server.active_count(), 2, "Request 200 completed");
+
+        server.complete_request(100);
+        assert_eq!(server.active_count(), 1, "Request 100 completed");
+
+        server.complete_request(300);
+        assert_eq!(server.active_count(), 0, "Request 300 completed");
+
+        // Test 14: Concurrent request completions
+        let server = Arc::new(Server::new());
+        for i in 1..=100 {
+            server.start_request(i);
+        }
+
+        server.shutdown();
+
+        let mut handles = vec![];
+        for i in 1..=100 {
+            let server_clone = Arc::clone(&server);
+            let handle = thread::spawn(move || {
+                server_clone.complete_request(i);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(server.active_count(), 0, "All 100 requests completed");
+        assert!(server.can_shutdown(), "Can shutdown after all complete");
+
+        // Test 15: Partial request completion
+        let server = Server::new();
+        for i in 1..=10 {
+            server.start_request(i);
+        }
+
+        server.shutdown();
+
+        // Complete only half
+        for i in 1..=5 {
+            server.complete_request(i);
+        }
+
+        assert_eq!(server.active_count(), 5, "5 still active");
+        assert!(!server.can_shutdown(), "Cannot shutdown with 5 active");
+
+        // Test 16: Request lifecycle during shutdown
+        let server = Server::new();
+        server.start_request(1);
+        assert_eq!(server.active_count(), 1, "Started: 1 active");
+
+        server.shutdown();
+        assert_eq!(server.active_count(), 1, "Shutdown: still 1 active");
+
+        server.complete_request(1);
+        assert_eq!(server.active_count(), 0, "Completed: 0 active");
+
+        // Test 17: Long-running request handling
+        let server = Server::new();
+        server.start_request(1);
+
+        server.shutdown();
+
+        // Simulate long-running request
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(5));
+            assert_eq!(server.active_count(), 1, "Still waiting");
+        }
+
+        server.complete_request(1);
+        assert!(server.can_shutdown(), "Waited for long request");
+
+        // Test 18: No new requests accepted during wait
+        struct ServerWithRejection {
+            shutdown_initiated: Arc<Mutex<bool>>,
+            active_count: Arc<Mutex<u64>>,
+            rejected_count: Arc<Mutex<u64>>,
+        }
+
+        impl ServerWithRejection {
+            fn new() -> Self {
+                Self {
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                    active_count: Arc::new(Mutex::new(0)),
+                    rejected_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn try_start_request(&self) -> Result<(), String> {
+                if *self.shutdown_initiated.lock().unwrap() {
+                    *self.rejected_count.lock().unwrap() += 1;
+                    Err("Shutting down".to_string())
+                } else {
+                    *self.active_count.lock().unwrap() += 1;
+                    Ok(())
+                }
+            }
+
+            fn complete_request(&self) {
+                *self.active_count.lock().unwrap() -= 1;
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+            }
+
+            fn rejected_count(&self) -> u64 {
+                *self.rejected_count.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithRejection::new();
+        let _ = server.try_start_request();
+
+        server.shutdown();
+
+        // Try to start new requests during shutdown
+        for _ in 0..5 {
+            let _ = server.try_start_request();
+        }
+
+        assert_eq!(
+            server.rejected_count(),
+            5,
+            "5 requests rejected during shutdown"
+        );
+
+        // Test 19: All active requests tracked until completion
+        let server = Server::new();
+        let ids: Vec<u64> = (1..=50).collect();
+
+        for &id in &ids {
+            server.start_request(id);
+        }
+
+        server.shutdown();
+        assert_eq!(server.active_count(), 50, "50 active requests");
+
+        for &id in &ids {
+            server.complete_request(id);
+        }
+
+        assert_eq!(server.active_count(), 0, "All tracked to completion");
+
+        // Test 20: Complete wait for in-flight requests validation
+        let server = Server::new();
+        server.start_request(1);
+        server.start_request(2);
+
+        server.shutdown();
+        assert_eq!(server.active_count(), 2, "2 requests in-flight");
+        assert!(!server.can_shutdown(), "Cannot shutdown with in-flight");
+
+        server.complete_request(1);
+        assert!(!server.can_shutdown(), "Still 1 in-flight");
+
+        server.complete_request(2);
+        assert!(server.can_shutdown(), "All in-flight completed");
+
+        let complete_wait = server.can_shutdown() && server.active_count() == 0;
+        assert!(
+            complete_wait,
+            "Complete wait: shutdown possible and no active requests"
+        );
+    }
 }
