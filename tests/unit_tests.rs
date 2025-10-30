@@ -5,4 +5,5 @@ mod unit {
     mod router_tests;
     mod config_tests;
     mod proxy_tests;
+    mod s3_tests;
 }
