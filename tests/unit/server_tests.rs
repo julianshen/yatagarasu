@@ -607,3 +607,34 @@ fn test_health_endpoint_works_early() {
     let json: serde_json::Value = serde_json::from_str(body).unwrap();
     assert_eq!(json["status"], "ok");
 }
+
+// Test: HEAD /health returns 200 without body
+#[test]
+fn test_health_endpoint_head_request() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // HEAD request to /health endpoint
+    let response = service.handle_request("HEAD", "/health");
+    assert!(response.is_ok());
+
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 200);
+
+    // Should have Content-Type header
+    assert_eq!(resp.get_header("Content-Type"), Some("application/json"));
+
+    // Body should be empty for HEAD request
+    assert_eq!(resp.body(), b"");
+}

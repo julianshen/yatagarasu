@@ -140,9 +140,12 @@ impl HttpService {
                 let mut response = HttpResponse::new(200);
                 response.add_header("Content-Type", "application/json");
 
-                // Create JSON response body with config status
-                let body = r#"{"status":"ok","config_loaded":true}"#;
-                response.set_body(body.as_bytes().to_vec());
+                // For HEAD requests, only return headers (no body)
+                if method != "HEAD" {
+                    // Create JSON response body with config status
+                    let body = r#"{"status":"ok","config_loaded":true}"#;
+                    response.set_body(body.as_bytes().to_vec());
+                }
 
                 Ok(response)
             }

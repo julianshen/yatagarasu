@@ -692,7 +692,7 @@ yatagarasu/
 - [x] Test: /health checks configuration is loaded
 - [x] Test: /health response time < 10ms
 - [x] Test: /health works before other endpoints are ready
-- [ ] Test: HEAD /health returns 200 without body
+- [x] Test: HEAD /health returns 200 without body
 
 ### Error Handling
 - [ ] Test: Unknown paths return 404 Not Found
