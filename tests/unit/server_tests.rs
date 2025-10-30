@@ -678,3 +678,57 @@ fn test_unknown_paths_return_404() {
         );
     }
 }
+
+// Test: Invalid HTTP methods return 405 Method Not Allowed
+#[test]
+fn test_invalid_http_methods_return_405() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Test unsupported HTTP methods
+    let invalid_methods = vec![
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS",
+        "TRACE",
+        "CONNECT",
+    ];
+
+    for method in invalid_methods {
+        // Test against /health endpoint
+        let response = service.handle_request(method, "/health");
+        assert!(response.is_ok(), "Request with method {} should succeed", method);
+
+        let resp = response.unwrap();
+        assert_eq!(
+            resp.status_code(),
+            405,
+            "Method {} should return 405 Method Not Allowed",
+            method
+        );
+
+        // Test against other paths too
+        let response2 = service.handle_request(method, "/unknown");
+        assert!(response2.is_ok(), "Request with method {} should succeed", method);
+
+        let resp2 = response2.unwrap();
+        assert_eq!(
+            resp2.status_code(),
+            405,
+            "Method {} should return 405 Method Not Allowed even for unknown paths",
+            method
+        );
+    }
+}

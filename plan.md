@@ -696,7 +696,7 @@ yatagarasu/
 
 ### Error Handling
 - [x] Test: Unknown paths return 404 Not Found
-- [ ] Test: Invalid HTTP methods return 405 Method Not Allowed
+- [x] Test: Invalid HTTP methods return 405 Method Not Allowed
 - [ ] Test: Malformed requests return 400 Bad Request
 - [ ] Test: Server errors return 500 Internal Server Error
 - [ ] Test: Error responses include JSON body with error details
