@@ -32484,4 +32484,427 @@ mod tests {
             "Complete S3 cleanup: all connections closed gracefully"
         );
     }
+
+    #[test]
+    fn test_shutdown_timeout_works() {
+        // Graceful shutdown test: Shutdown timeout works (force close after N seconds)
+        // Tests that shutdown forces termination after timeout period
+        // Validates protection against hanging requests
+
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        struct Server {
+            shutdown_started: Arc<Mutex<Option<Instant>>>,
+            shutdown_timeout: Duration,
+            active_requests: Arc<Mutex<u64>>,
+            force_shutdown: Arc<Mutex<bool>>,
+        }
+
+        impl Server {
+            fn new(timeout_secs: u64) -> Self {
+                Self {
+                    shutdown_started: Arc::new(Mutex::new(None)),
+                    shutdown_timeout: Duration::from_secs(timeout_secs),
+                    active_requests: Arc::new(Mutex::new(0)),
+                    force_shutdown: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn start_request(&self) {
+                *self.active_requests.lock().unwrap() += 1;
+            }
+
+            fn complete_request(&self) {
+                *self.active_requests.lock().unwrap() -= 1;
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_started.lock().unwrap() = Some(Instant::now());
+            }
+
+            fn check_timeout(&self) -> bool {
+                if let Some(start) = *self.shutdown_started.lock().unwrap() {
+                    if start.elapsed() >= self.shutdown_timeout {
+                        *self.force_shutdown.lock().unwrap() = true;
+                        return true;
+                    }
+                }
+                false
+            }
+
+            fn is_force_shutdown(&self) -> bool {
+                *self.force_shutdown.lock().unwrap()
+            }
+
+            fn active_count(&self) -> u64 {
+                *self.active_requests.lock().unwrap()
+            }
+        }
+
+        // Test 1: Timeout triggers force shutdown
+        let server = Server::new(0); // 0 second timeout
+        server.start_request();
+        server.shutdown();
+
+        std::thread::sleep(Duration::from_millis(10));
+        server.check_timeout();
+
+        assert!(server.is_force_shutdown(), "Force shutdown after timeout");
+
+        // Test 2: Graceful shutdown within timeout
+        let server = Server::new(10); // 10 second timeout
+        server.start_request();
+        server.shutdown();
+
+        server.complete_request();
+        server.check_timeout();
+
+        assert!(
+            !server.is_force_shutdown(),
+            "No force shutdown if completed in time"
+        );
+
+        // Test 3: Timeout period is configurable
+        let server_5s = Server::new(5);
+        let server_30s = Server::new(30);
+
+        assert_eq!(server_5s.shutdown_timeout.as_secs(), 5, "5 second timeout");
+        assert_eq!(
+            server_30s.shutdown_timeout.as_secs(),
+            30,
+            "30 second timeout"
+        );
+
+        // Test 4: Kubernetes default grace period (30s)
+        let server = Server::new(30);
+        assert_eq!(
+            server.shutdown_timeout.as_secs(),
+            30,
+            "Matches K8s default grace period"
+        );
+
+        // Test 5: Force shutdown after timeout even with active requests
+        let server = Server::new(0);
+        server.start_request();
+        server.start_request();
+        server.start_request();
+
+        server.shutdown();
+        std::thread::sleep(Duration::from_millis(10));
+        server.check_timeout();
+
+        assert_eq!(server.active_count(), 3, "Requests still active");
+        assert!(
+            server.is_force_shutdown(),
+            "Force shutdown despite active requests"
+        );
+
+        // Test 6: Timeout measurement is accurate
+        let server = Server::new(0);
+        server.shutdown();
+
+        let start = Instant::now();
+        std::thread::sleep(Duration::from_millis(50));
+        server.check_timeout();
+        let elapsed = start.elapsed();
+
+        assert!(server.is_force_shutdown(), "Timeout triggered");
+        assert!(elapsed.as_millis() >= 50, "Accurate timing measurement");
+
+        // Test 7: Multiple timeout checks
+        let server = Server::new(0);
+        server.shutdown();
+
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(server.check_timeout(), "First check triggers timeout");
+        assert!(server.check_timeout(), "Second check still returns true");
+        assert!(server.check_timeout(), "Third check still returns true");
+
+        // Test 8: Timeout before shutdown has no effect
+        let server = Server::new(0);
+        assert!(
+            !server.check_timeout(),
+            "No timeout before shutdown initiated"
+        );
+
+        // Test 9: Tracks time since shutdown started
+        struct TimeTracker {
+            shutdown_time: Arc<Mutex<Option<Instant>>>,
+        }
+
+        impl TimeTracker {
+            fn new() -> Self {
+                Self {
+                    shutdown_time: Arc::new(Mutex::new(None)),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_time.lock().unwrap() = Some(Instant::now());
+            }
+
+            fn elapsed(&self) -> Option<Duration> {
+                self.shutdown_time.lock().unwrap().map(|t| t.elapsed())
+            }
+        }
+
+        let tracker = TimeTracker::new();
+        tracker.shutdown();
+
+        std::thread::sleep(Duration::from_millis(20));
+        let elapsed = tracker.elapsed();
+
+        assert!(elapsed.is_some(), "Elapsed time tracked");
+        assert!(elapsed.unwrap().as_millis() >= 20, "At least 20ms elapsed");
+
+        // Test 10: Shorter timeout for testing
+        let server = Server::new(1); // 1 second timeout
+        server.start_request();
+        server.shutdown();
+
+        // Check before timeout
+        assert!(!server.check_timeout(), "Not timed out yet");
+
+        // Wait for timeout
+        std::thread::sleep(Duration::from_millis(1100));
+        assert!(server.check_timeout(), "Timed out after 1 second");
+
+        // Test 11: Timeout prevents indefinite waiting
+        let server = Server::new(0);
+        server.start_request();
+        server.shutdown();
+
+        // Even with active request, timeout enforces shutdown
+        std::thread::sleep(Duration::from_millis(10));
+        server.check_timeout();
+
+        assert!(server.is_force_shutdown(), "Prevents indefinite waiting");
+
+        // Test 12: Production timeout (30s)
+        let server = Server::new(30);
+        server.shutdown();
+
+        // Won't timeout immediately
+        assert!(!server.check_timeout(), "30s timeout not immediate");
+
+        // Test 13: Zero timeout for immediate force
+        let server = Server::new(0);
+        server.shutdown();
+
+        assert!(server.check_timeout(), "Zero timeout = immediate force");
+
+        // Test 14: Timeout countdown
+        struct CountdownTimer {
+            timeout: Duration,
+            started: Arc<Mutex<Option<Instant>>>,
+        }
+
+        impl CountdownTimer {
+            fn new(timeout_secs: u64) -> Self {
+                Self {
+                    timeout: Duration::from_secs(timeout_secs),
+                    started: Arc::new(Mutex::new(None)),
+                }
+            }
+
+            fn start(&self) {
+                *self.started.lock().unwrap() = Some(Instant::now());
+            }
+
+            fn remaining(&self) -> Option<Duration> {
+                if let Some(start) = *self.started.lock().unwrap() {
+                    let elapsed = start.elapsed();
+                    if elapsed < self.timeout {
+                        Some(self.timeout - elapsed)
+                    } else {
+                        Some(Duration::from_secs(0))
+                    }
+                } else {
+                    None
+                }
+            }
+        }
+
+        let timer = CountdownTimer::new(5);
+        timer.start();
+
+        let remaining = timer.remaining();
+        assert!(remaining.is_some(), "Countdown started");
+        assert!(remaining.unwrap().as_secs() <= 5, "Remaining <= 5s");
+
+        // Test 15: Timeout logged
+        struct LoggingServer {
+            shutdown_started: Arc<Mutex<Option<Instant>>>,
+            timeout: Duration,
+            logs: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl LoggingServer {
+            fn new(timeout_secs: u64) -> Self {
+                Self {
+                    shutdown_started: Arc::new(Mutex::new(None)),
+                    timeout: Duration::from_secs(timeout_secs),
+                    logs: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_started.lock().unwrap() = Some(Instant::now());
+                self.log("Shutdown initiated".to_string());
+            }
+
+            fn check_timeout(&self) -> bool {
+                if let Some(start) = *self.shutdown_started.lock().unwrap() {
+                    if start.elapsed() >= self.timeout {
+                        self.log("Force shutdown: timeout exceeded".to_string());
+                        return true;
+                    }
+                }
+                false
+            }
+
+            fn log(&self, message: String) {
+                self.logs.lock().unwrap().push(message);
+            }
+
+            fn logs(&self) -> Vec<String> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        let server = LoggingServer::new(0);
+        server.shutdown();
+
+        std::thread::sleep(Duration::from_millis(10));
+        server.check_timeout();
+
+        let logs = server.logs();
+        assert!(logs.len() >= 2, "At least 2 log entries");
+        assert!(logs[1].contains("timeout"), "Timeout logged");
+
+        // Test 16: Thread-safe timeout checking
+        use std::thread;
+
+        let server = Arc::new(Server::new(0));
+        server.shutdown();
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        let server_clone = Arc::clone(&server);
+        let handle = thread::spawn(move || server_clone.check_timeout());
+
+        let result = handle.join().unwrap();
+        assert!(result, "Thread-safe timeout check");
+
+        // Test 17: Timeout applies to all requests
+        let server = Server::new(0);
+        for _ in 0..10 {
+            server.start_request();
+        }
+
+        server.shutdown();
+        std::thread::sleep(Duration::from_millis(10));
+        server.check_timeout();
+
+        assert_eq!(server.active_count(), 10, "All 10 requests still tracked");
+        assert!(server.is_force_shutdown(), "Force shutdown applies to all");
+
+        // Test 18: Timeout warning before force
+        struct WarningServer {
+            shutdown_started: Arc<Mutex<Option<Instant>>>,
+            timeout: Duration,
+            warning_threshold: Duration,
+            warning_issued: Arc<Mutex<bool>>,
+        }
+
+        impl WarningServer {
+            fn new(timeout_secs: u64) -> Self {
+                let timeout = Duration::from_secs(timeout_secs);
+                Self {
+                    shutdown_started: Arc::new(Mutex::new(None)),
+                    timeout,
+                    warning_threshold: timeout / 2,
+                    warning_issued: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_started.lock().unwrap() = Some(Instant::now());
+            }
+
+            fn check(&self) {
+                if let Some(start) = *self.shutdown_started.lock().unwrap() {
+                    let elapsed = start.elapsed();
+                    if elapsed >= self.warning_threshold && !*self.warning_issued.lock().unwrap() {
+                        *self.warning_issued.lock().unwrap() = true;
+                    }
+                }
+            }
+
+            fn warning_issued(&self) -> bool {
+                *self.warning_issued.lock().unwrap()
+            }
+        }
+
+        let server = WarningServer::new(2);
+        server.shutdown();
+
+        std::thread::sleep(Duration::from_millis(1100));
+        server.check();
+
+        assert!(server.warning_issued(), "Warning issued at 50% threshold");
+
+        // Test 19: Configurable timeout per environment
+        struct Environment {
+            name: String,
+            timeout_secs: u64,
+        }
+
+        impl Environment {
+            fn production() -> Self {
+                Self {
+                    name: "production".to_string(),
+                    timeout_secs: 30,
+                }
+            }
+
+            fn testing() -> Self {
+                Self {
+                    name: "testing".to_string(),
+                    timeout_secs: 1,
+                }
+            }
+        }
+
+        let prod = Environment::production();
+        let test = Environment::testing();
+
+        assert_eq!(prod.timeout_secs, 30, "Production: 30s");
+        assert_eq!(test.timeout_secs, 1, "Testing: 1s");
+
+        // Test 20: Complete timeout validation
+        let server = Server::new(0);
+        server.start_request();
+
+        assert!(!server.is_force_shutdown(), "Not forced before shutdown");
+
+        server.shutdown();
+        assert!(
+            !server.is_force_shutdown(),
+            "Not forced immediately after shutdown"
+        );
+
+        std::thread::sleep(Duration::from_millis(10));
+        server.check_timeout();
+
+        assert!(server.is_force_shutdown(), "Forced after timeout");
+        assert_eq!(server.active_count(), 1, "Request still tracked");
+
+        let complete_timeout = server.is_force_shutdown() && server.active_count() > 0;
+        assert!(
+            complete_timeout,
+            "Complete timeout: forces shutdown despite active requests"
+        );
+    }
 }

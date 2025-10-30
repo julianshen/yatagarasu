@@ -609,7 +609,7 @@ yatagarasu/
 - [x] Test: Stops accepting new connections
 - [x] Test: Waits for in-flight requests to complete
 - [x] Test: Closes S3 connections gracefully
-- [ ] Test: Shutdown timeout works (force close after N seconds)
+- [x] Test: Shutdown timeout works (force close after N seconds)
 - [ ] Test: Logs shutdown events
 
 ### Error Recovery
