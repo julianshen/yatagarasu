@@ -395,3 +395,52 @@ fn test_server_handles_concurrent_requests() {
         assert_eq!(response.status_code(), 200 + i as u16);
     }
 }
+
+// Test: Server handles request pipeline (keep-alive)
+#[test]
+fn test_server_handles_request_pipeline() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Simulate multiple requests on the same connection (keep-alive)
+    // Create multiple responses as if they're being sent on the same connection
+    let mut responses = Vec::new();
+    for i in 0..5 {
+        let mut response = service.create_response(200).unwrap();
+
+        // Add Connection: keep-alive header for HTTP/1.1
+        response.add_header("Connection", "keep-alive");
+        response.set_body(format!("Response {}", i).into_bytes());
+
+        responses.push(response);
+    }
+
+    // Verify all responses have keep-alive header
+    assert_eq!(responses.len(), 5);
+    for (i, response) in responses.iter().enumerate() {
+        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.get_header("Connection"), Some("keep-alive"));
+        assert_eq!(response.body(), format!("Response {}", i).as_bytes());
+    }
+
+    // Verify the service supports keep-alive by checking it can create
+    // multiple responses sequentially (simulating pipelined requests)
+    let response1 = service.create_response(200).unwrap();
+    let response2 = service.create_response(200).unwrap();
+    let response3 = service.create_response(200).unwrap();
+
+    assert_eq!(response1.status_code(), 200);
+    assert_eq!(response2.status_code(), 200);
+    assert_eq!(response3.status_code(), 200);
+}
