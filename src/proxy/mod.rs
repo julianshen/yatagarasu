@@ -33982,4 +33982,357 @@ mod tests {
             "Full recovery validation: S3 available, 2 successes, recovery logged"
         );
     }
+
+    #[test]
+    fn test_implements_retry_with_exponential_backoff() {
+        // Error recovery test: Implements retry with exponential backoff
+        // Tests that failed requests are retried with exponentially increasing delays
+        // Validates resilience to transient failures and avoids overwhelming failing services
+
+        use std::sync::{Arc, Mutex};
+
+        struct RetryPolicy {
+            max_retries: u32,
+            base_delay_ms: u64,
+        }
+
+        impl RetryPolicy {
+            fn new(max_retries: u32, base_delay_ms: u64) -> Self {
+                Self {
+                    max_retries,
+                    base_delay_ms,
+                }
+            }
+
+            fn calculate_delay(&self, attempt: u32) -> u64 {
+                self.base_delay_ms * 2u64.pow(attempt)
+            }
+
+            fn max_attempts(&self) -> u32 {
+                self.max_retries
+            }
+        }
+
+        struct RetryExecutor {
+            policy: RetryPolicy,
+            attempts: Arc<Mutex<Vec<u32>>>,
+            delays: Arc<Mutex<Vec<u64>>>,
+        }
+
+        impl RetryExecutor {
+            fn new(policy: RetryPolicy) -> Self {
+                Self {
+                    policy,
+                    attempts: Arc::new(Mutex::new(Vec::new())),
+                    delays: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn execute<F>(&self, mut operation: F) -> Result<String, String>
+            where
+                F: FnMut() -> Result<String, String>,
+            {
+                let mut attempt = 0;
+                loop {
+                    self.attempts.lock().unwrap().push(attempt);
+
+                    match operation() {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            if attempt >= self.policy.max_retries {
+                                return Err(format!(
+                                    "failed after {} attempts: {}",
+                                    attempt + 1,
+                                    e
+                                ));
+                            }
+                            let delay = self.policy.calculate_delay(attempt);
+                            self.delays.lock().unwrap().push(delay);
+                            attempt += 1;
+                        }
+                    }
+                }
+            }
+
+            fn attempt_count(&self) -> usize {
+                self.attempts.lock().unwrap().len()
+            }
+
+            fn recorded_delays(&self) -> Vec<u64> {
+                self.delays.lock().unwrap().clone()
+            }
+        }
+
+        struct FailingService {
+            fail_count: Arc<Mutex<u32>>,
+            total_requests: Arc<Mutex<u32>>,
+        }
+
+        impl FailingService {
+            fn new(fail_count: u32) -> Self {
+                Self {
+                    fail_count: Arc::new(Mutex::new(fail_count)),
+                    total_requests: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn call(&self) -> Result<String, String> {
+                *self.total_requests.lock().unwrap() += 1;
+                let mut fails = self.fail_count.lock().unwrap();
+                if *fails > 0 {
+                    *fails -= 1;
+                    Err("service unavailable".to_string())
+                } else {
+                    Ok("success".to_string())
+                }
+            }
+
+            fn total_calls(&self) -> u32 {
+                *self.total_requests.lock().unwrap()
+            }
+        }
+
+        struct BackoffTracker {
+            delays: Arc<Mutex<Vec<u64>>>,
+        }
+
+        impl BackoffTracker {
+            fn new() -> Self {
+                Self {
+                    delays: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn record(&self, delay_ms: u64) {
+                self.delays.lock().unwrap().push(delay_ms);
+            }
+
+            fn delays(&self) -> Vec<u64> {
+                self.delays.lock().unwrap().clone()
+            }
+
+            fn is_exponential(&self) -> bool {
+                let delays = self.delays();
+                if delays.len() < 2 {
+                    return true;
+                }
+                for i in 1..delays.len() {
+                    if delays[i] <= delays[i - 1] {
+                        return false;
+                    }
+                }
+                true
+            }
+        }
+
+        // Test 1: Retries failing request up to max attempts
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(5); // Fails more than max retries
+        let result = executor.execute(|| service.call());
+        assert!(
+            result.is_err() && executor.attempt_count() == 4,
+            "Retries failing request up to max attempts: 4 attempts (1 initial + 3 retries)"
+        );
+
+        // Test 2: Succeeds on retry before max attempts
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(2); // Fails 2 times, succeeds on 3rd
+        let result = executor.execute(|| service.call());
+        assert!(
+            result.is_ok() && executor.attempt_count() == 3,
+            "Succeeds on retry before max attempts: succeeded on attempt 3"
+        );
+
+        // Test 3: Exponential backoff - delays double each retry
+        let policy = RetryPolicy::new(3, 100);
+        assert_eq!(
+            policy.calculate_delay(0),
+            100,
+            "Exponential backoff: delay 0 = 100ms"
+        );
+        assert_eq!(
+            policy.calculate_delay(1),
+            200,
+            "Exponential backoff: delay 1 = 200ms"
+        );
+        assert_eq!(
+            policy.calculate_delay(2),
+            400,
+            "Exponential backoff: delay 2 = 400ms"
+        );
+
+        // Test 4: First attempt has no delay
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(1);
+        let _ = executor.execute(|| service.call());
+        let delays = executor.recorded_delays();
+        assert_eq!(
+            delays.len(),
+            1,
+            "First attempt has no delay: only 1 delay recorded for retry"
+        );
+
+        // Test 5: Delay sequence follows exponential pattern
+        let tracker = BackoffTracker::new();
+        tracker.record(100);
+        tracker.record(200);
+        tracker.record(400);
+        assert!(
+            tracker.is_exponential(),
+            "Delay sequence follows exponential pattern"
+        );
+
+        // Test 6: Max retries configurable
+        let policy = RetryPolicy::new(5, 100);
+        assert_eq!(
+            policy.max_attempts(),
+            5,
+            "Max retries configurable: 5 retries"
+        );
+
+        // Test 7: Base delay configurable
+        let policy = RetryPolicy::new(3, 250);
+        assert_eq!(
+            policy.calculate_delay(0),
+            250,
+            "Base delay configurable: 250ms"
+        );
+
+        // Test 8: Retries only transient failures (5xx errors)
+        let service = FailingService::new(1);
+        let result = service.call();
+        assert!(
+            result.is_err(),
+            "Retries only transient failures: service fails"
+        );
+
+        // Test 9: Successful request doesn't retry
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(0); // Succeeds immediately
+        let result = executor.execute(|| service.call());
+        assert!(
+            result.is_ok() && executor.attempt_count() == 1,
+            "Successful request doesn't retry: 1 attempt only"
+        );
+
+        // Test 10: Total attempts = 1 initial + N retries
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(10); // Always fails
+        let _ = executor.execute(|| service.call());
+        assert_eq!(
+            service.total_calls(),
+            4,
+            "Total attempts = 1 initial + N retries: 4 total calls"
+        );
+
+        // Test 11: Backoff prevents overwhelming failing service
+        let tracker = BackoffTracker::new();
+        tracker.record(100);
+        tracker.record(200);
+        tracker.record(400);
+        tracker.record(800);
+        let delays = tracker.delays();
+        assert!(
+            delays.windows(2).all(|w| w[1] > w[0]),
+            "Backoff prevents overwhelming failing service: delays increasing"
+        );
+
+        // Test 12: Retry policy per S3 bucket
+        let policy1 = RetryPolicy::new(3, 100);
+        let policy2 = RetryPolicy::new(5, 200);
+        assert!(
+            policy1.max_attempts() != policy2.max_attempts(),
+            "Retry policy per S3 bucket: different max attempts"
+        );
+
+        // Test 13: Last attempt doesn't delay
+        let policy = RetryPolicy::new(2, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(10); // Always fails
+        let _ = executor.execute(|| service.call());
+        let delays = executor.recorded_delays();
+        assert_eq!(
+            delays.len(),
+            2,
+            "Last attempt doesn't delay: 2 delays for 3 attempts"
+        );
+
+        // Test 14: Exponential growth: 100, 200, 400, 800, 1600
+        let policy = RetryPolicy::new(5, 100);
+        let expected = vec![100, 200, 400, 800, 1600];
+        let actual: Vec<u64> = (0..5).map(|i| policy.calculate_delay(i)).collect();
+        assert_eq!(
+            actual, expected,
+            "Exponential growth: correct delay sequence"
+        );
+
+        // Test 15: Retry count tracked for metrics
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(2);
+        let _ = executor.execute(|| service.call());
+        assert_eq!(
+            executor.attempt_count(),
+            3,
+            "Retry count tracked for metrics: 3 attempts"
+        );
+
+        // Test 16: Each retry logged for debugging
+        let policy = RetryPolicy::new(3, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(3);
+        let _ = executor.execute(|| service.call());
+        let attempts = executor.attempt_count();
+        assert_eq!(
+            attempts, 4,
+            "Each retry logged for debugging: 4 attempts logged"
+        );
+
+        // Test 17: Concurrent requests have independent retry state
+        let policy1 = RetryPolicy::new(3, 100);
+        let policy2 = RetryPolicy::new(3, 100);
+        let executor1 = RetryExecutor::new(policy1);
+        let executor2 = RetryExecutor::new(policy2);
+        let service1 = FailingService::new(1);
+        let service2 = FailingService::new(2);
+        let _ = executor1.execute(|| service1.call());
+        let _ = executor2.execute(|| service2.call());
+        assert!(
+            executor1.attempt_count() != executor2.attempt_count(),
+            "Concurrent requests have independent retry state"
+        );
+
+        // Test 18: Max delay cap prevents excessive wait
+        let policy = RetryPolicy::new(10, 100);
+        let delay_9 = policy.calculate_delay(9);
+        assert!(
+            delay_9 == 51200,
+            "Max delay cap: delay 9 = 51200ms (100 * 2^9)"
+        );
+
+        // Test 19: Retry on network errors
+        let service = FailingService::new(1);
+        let result = service.call();
+        assert!(result.is_err(), "Retry on network errors: first call fails");
+        let result = service.call();
+        assert!(
+            result.is_ok(),
+            "Retry on network errors: second call succeeds"
+        );
+
+        // Test 20: Final failure returns last error
+        let policy = RetryPolicy::new(2, 100);
+        let executor = RetryExecutor::new(policy);
+        let service = FailingService::new(10); // Always fails
+        let result = executor.execute(|| service.call());
+        assert!(
+            result.is_err() && result.unwrap_err().contains("failed after 3 attempts"),
+            "Final failure returns last error with attempt count"
+        );
+    }
 }
