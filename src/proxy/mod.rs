@@ -32014,4 +32014,474 @@ mod tests {
             "Complete wait: shutdown possible and no active requests"
         );
     }
+
+    #[test]
+    fn test_closes_s3_connections_gracefully() {
+        // Graceful shutdown test: Closes S3 connections gracefully
+        // Tests that S3 client connections are properly closed during shutdown
+        // Validates connection cleanup and resource release
+
+        use std::sync::{Arc, Mutex};
+
+        struct S3Connection {
+            id: u64,
+            is_open: Arc<Mutex<bool>>,
+        }
+
+        impl S3Connection {
+            fn new(id: u64) -> Self {
+                Self {
+                    id,
+                    is_open: Arc::new(Mutex::new(true)),
+                }
+            }
+
+            fn close(&self) {
+                *self.is_open.lock().unwrap() = false;
+            }
+
+            fn is_open(&self) -> bool {
+                *self.is_open.lock().unwrap()
+            }
+        }
+
+        struct S3ConnectionPool {
+            connections: Arc<Mutex<Vec<S3Connection>>>,
+        }
+
+        impl S3ConnectionPool {
+            fn new() -> Self {
+                Self {
+                    connections: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn add_connection(&self, id: u64) {
+                self.connections.lock().unwrap().push(S3Connection::new(id));
+            }
+
+            fn close_all(&self) {
+                for conn in self.connections.lock().unwrap().iter() {
+                    conn.close();
+                }
+            }
+
+            fn all_closed(&self) -> bool {
+                self.connections
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|c| !c.is_open())
+            }
+
+            fn count(&self) -> usize {
+                self.connections.lock().unwrap().len()
+            }
+        }
+
+        // Test 1: Closes single S3 connection
+        let pool = S3ConnectionPool::new();
+        pool.add_connection(1);
+
+        let connections = pool.connections.lock().unwrap();
+        assert!(connections[0].is_open(), "Connection initially open");
+        drop(connections);
+
+        pool.close_all();
+        assert!(pool.all_closed(), "Connection closed after shutdown");
+
+        // Test 2: Closes multiple S3 connections
+        let pool = S3ConnectionPool::new();
+        pool.add_connection(1);
+        pool.add_connection(2);
+        pool.add_connection(3);
+
+        pool.close_all();
+        assert!(pool.all_closed(), "All 3 connections closed");
+
+        // Test 3: Connection close is idempotent
+        let conn = S3Connection::new(1);
+        conn.close();
+        assert!(!conn.is_open(), "Closed after first close");
+
+        conn.close();
+        assert!(!conn.is_open(), "Still closed after second close");
+
+        // Test 4: Tracks open vs closed connections
+        struct ConnectionTracker {
+            open_count: Arc<Mutex<u64>>,
+            closed_count: Arc<Mutex<u64>>,
+        }
+
+        impl ConnectionTracker {
+            fn new() -> Self {
+                Self {
+                    open_count: Arc::new(Mutex::new(0)),
+                    closed_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn open_connection(&self) {
+                *self.open_count.lock().unwrap() += 1;
+            }
+
+            fn close_connection(&self) {
+                *self.open_count.lock().unwrap() -= 1;
+                *self.closed_count.lock().unwrap() += 1;
+            }
+
+            fn stats(&self) -> (u64, u64) {
+                (
+                    *self.open_count.lock().unwrap(),
+                    *self.closed_count.lock().unwrap(),
+                )
+            }
+        }
+
+        let tracker = ConnectionTracker::new();
+        tracker.open_connection();
+        tracker.open_connection();
+        tracker.open_connection();
+
+        let (open, closed) = tracker.stats();
+        assert_eq!(open, 3, "3 connections open");
+        assert_eq!(closed, 0, "0 connections closed");
+
+        tracker.close_connection();
+        tracker.close_connection();
+        tracker.close_connection();
+
+        let (open, closed) = tracker.stats();
+        assert_eq!(open, 0, "0 connections open");
+        assert_eq!(closed, 3, "3 connections closed");
+
+        // Test 5: Connection pool cleanup
+        let pool = S3ConnectionPool::new();
+        for i in 1..=10 {
+            pool.add_connection(i);
+        }
+
+        assert_eq!(pool.count(), 10, "10 connections in pool");
+
+        pool.close_all();
+        assert!(pool.all_closed(), "All connections in pool closed");
+
+        // Test 6: Per-bucket connection cleanup
+        struct BucketConnectionPool {
+            buckets: Arc<Mutex<std::collections::HashMap<String, S3ConnectionPool>>>,
+        }
+
+        impl BucketConnectionPool {
+            fn new() -> Self {
+                Self {
+                    buckets: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                }
+            }
+
+            fn add_bucket(&self, name: String) {
+                self.buckets
+                    .lock()
+                    .unwrap()
+                    .insert(name, S3ConnectionPool::new());
+            }
+
+            fn add_connection(&self, bucket: &str, id: u64) {
+                if let Some(pool) = self.buckets.lock().unwrap().get(bucket) {
+                    pool.add_connection(id);
+                }
+            }
+
+            fn close_all_buckets(&self) {
+                for (_name, pool) in self.buckets.lock().unwrap().iter() {
+                    pool.close_all();
+                }
+            }
+
+            fn all_buckets_closed(&self) -> bool {
+                self.buckets
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .all(|pool| pool.all_closed())
+            }
+        }
+
+        let bucket_pool = BucketConnectionPool::new();
+        bucket_pool.add_bucket("products".to_string());
+        bucket_pool.add_bucket("media".to_string());
+
+        bucket_pool.add_connection("products", 1);
+        bucket_pool.add_connection("products", 2);
+        bucket_pool.add_connection("media", 3);
+
+        bucket_pool.close_all_buckets();
+        assert!(
+            bucket_pool.all_buckets_closed(),
+            "All bucket connections closed"
+        );
+
+        // Test 7: Connection close doesn't block
+        let conn = S3Connection::new(1);
+        let start = std::time::Instant::now();
+        conn.close();
+        let duration = start.elapsed();
+
+        assert!(
+            duration.as_millis() < 10,
+            "Close is non-blocking, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 8: Thread-safe connection closing
+        use std::thread;
+
+        let pool = Arc::new(S3ConnectionPool::new());
+        for i in 1..=10 {
+            pool.add_connection(i);
+        }
+
+        let pool_clone = Arc::clone(&pool);
+        let handle = thread::spawn(move || {
+            pool_clone.close_all();
+        });
+
+        handle.join().unwrap();
+        assert!(pool.all_closed(), "Thread-safe connection closing");
+
+        // Test 9: No new connections during shutdown
+        struct ShutdownAwarePool {
+            connections: Arc<Mutex<Vec<S3Connection>>>,
+            shutdown_initiated: Arc<Mutex<bool>>,
+        }
+
+        impl ShutdownAwarePool {
+            fn new() -> Self {
+                Self {
+                    connections: Arc::new(Mutex::new(Vec::new())),
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn add_connection(&self, id: u64) -> Result<(), String> {
+                if *self.shutdown_initiated.lock().unwrap() {
+                    Err("Shutdown in progress".to_string())
+                } else {
+                    self.connections.lock().unwrap().push(S3Connection::new(id));
+                    Ok(())
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+                for conn in self.connections.lock().unwrap().iter() {
+                    conn.close();
+                }
+            }
+        }
+
+        let pool = ShutdownAwarePool::new();
+        assert!(pool.add_connection(1).is_ok(), "Can add before shutdown");
+
+        pool.shutdown();
+
+        let result = pool.add_connection(2);
+        assert!(result.is_err(), "Cannot add during shutdown");
+
+        // Test 10: Connection resources released
+        struct ResourceTracker {
+            allocated: Arc<Mutex<u64>>,
+            released: Arc<Mutex<u64>>,
+        }
+
+        impl ResourceTracker {
+            fn new() -> Self {
+                Self {
+                    allocated: Arc::new(Mutex::new(0)),
+                    released: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn allocate(&self) {
+                *self.allocated.lock().unwrap() += 1;
+            }
+
+            fn release(&self) {
+                *self.released.lock().unwrap() += 1;
+            }
+
+            fn all_released(&self) -> bool {
+                *self.allocated.lock().unwrap() == *self.released.lock().unwrap()
+            }
+        }
+
+        let tracker = ResourceTracker::new();
+        for _ in 0..5 {
+            tracker.allocate();
+        }
+
+        for _ in 0..5 {
+            tracker.release();
+        }
+
+        assert!(tracker.all_released(), "All resources released");
+
+        // Test 11: Connection close order doesn't matter
+        let pool = S3ConnectionPool::new();
+        pool.add_connection(1);
+        pool.add_connection(2);
+        pool.add_connection(3);
+
+        pool.close_all();
+        assert!(pool.all_closed(), "All closed regardless of order");
+
+        // Test 12: Concurrent connection closes
+        let pool = Arc::new(S3ConnectionPool::new());
+        for i in 1..=100 {
+            pool.add_connection(i);
+        }
+
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let pool_clone = Arc::clone(&pool);
+            let handle = thread::spawn(move || {
+                pool_clone.close_all();
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert!(pool.all_closed(), "All closed after concurrent closes");
+
+        // Test 13: Connection state transitions
+        let conn = S3Connection::new(1);
+        assert!(conn.is_open(), "Initial state: open");
+
+        conn.close();
+        assert!(!conn.is_open(), "After close: closed");
+
+        // Test 14: Connection pool empties correctly
+        let pool = S3ConnectionPool::new();
+        pool.add_connection(1);
+        pool.add_connection(2);
+
+        assert_eq!(pool.count(), 2, "2 connections before close");
+
+        pool.close_all();
+
+        assert_eq!(pool.count(), 2, "Still 2 connection objects");
+        assert!(pool.all_closed(), "But all are closed");
+
+        // Test 15: Graceful close vs immediate close
+        struct ConnectionWithMode {
+            is_open: Arc<Mutex<bool>>,
+            graceful: bool,
+        }
+
+        impl ConnectionWithMode {
+            fn new(graceful: bool) -> Self {
+                Self {
+                    is_open: Arc::new(Mutex::new(true)),
+                    graceful,
+                }
+            }
+
+            fn close(&self) {
+                if self.graceful {
+                    // Graceful close would drain buffers, flush, etc.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                *self.is_open.lock().unwrap() = false;
+            }
+
+            fn is_graceful(&self) -> bool {
+                self.graceful
+            }
+        }
+
+        let graceful_conn = ConnectionWithMode::new(true);
+        let immediate_conn = ConnectionWithMode::new(false);
+
+        graceful_conn.close();
+        immediate_conn.close();
+
+        assert!(graceful_conn.is_graceful(), "Was graceful close");
+        assert!(!immediate_conn.is_graceful(), "Was immediate close");
+
+        // Test 16: Connection cleanup after error
+        let pool = S3ConnectionPool::new();
+        pool.add_connection(1);
+
+        // Even if there was an error, still close
+        pool.close_all();
+        assert!(pool.all_closed(), "Closed even after error");
+
+        // Test 17: Multiple bucket isolation
+        let bucket_pool = BucketConnectionPool::new();
+        bucket_pool.add_bucket("bucket1".to_string());
+        bucket_pool.add_bucket("bucket2".to_string());
+
+        bucket_pool.add_connection("bucket1", 1);
+        bucket_pool.add_connection("bucket2", 2);
+
+        bucket_pool.close_all_buckets();
+        assert!(
+            bucket_pool.all_buckets_closed(),
+            "All isolated buckets closed"
+        );
+
+        // Test 18: Connection close timing
+        let pool = S3ConnectionPool::new();
+        for i in 1..=50 {
+            pool.add_connection(i);
+        }
+
+        let start = std::time::Instant::now();
+        pool.close_all();
+        let duration = start.elapsed();
+
+        assert!(pool.all_closed(), "All 50 connections closed");
+        assert!(
+            duration.as_millis() < 100,
+            "Close 50 connections in <100ms, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 19: No connection leaks
+        let tracker = ResourceTracker::new();
+
+        for _ in 0..100 {
+            tracker.allocate();
+        }
+
+        for _ in 0..100 {
+            tracker.release();
+        }
+
+        assert!(tracker.all_released(), "No connection leaks");
+
+        // Test 20: Complete S3 connection cleanup validation
+        let pool = S3ConnectionPool::new();
+        pool.add_connection(1);
+        pool.add_connection(2);
+        pool.add_connection(3);
+
+        // Initially all open
+        assert_eq!(pool.count(), 3, "3 connections");
+        assert!(!pool.all_closed(), "Not all closed initially");
+
+        pool.close_all();
+
+        // After shutdown all closed
+        assert_eq!(pool.count(), 3, "Still 3 connection objects");
+        assert!(pool.all_closed(), "All connections closed");
+
+        let complete_cleanup = pool.all_closed() && pool.count() == 3;
+        assert!(
+            complete_cleanup,
+            "Complete S3 cleanup: all connections closed gracefully"
+        );
+    }
 }

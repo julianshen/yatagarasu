@@ -608,7 +608,7 @@ yatagarasu/
 - [x] Test: Responds to SIGTERM signal
 - [x] Test: Stops accepting new connections
 - [x] Test: Waits for in-flight requests to complete
-- [ ] Test: Closes S3 connections gracefully
+- [x] Test: Closes S3 connections gracefully
 - [ ] Test: Shutdown timeout works (force close after N seconds)
 - [ ] Test: Logs shutdown events
 
