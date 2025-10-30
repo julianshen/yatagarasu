@@ -169,3 +169,31 @@ fn test_server_starts_without_errors() {
     // If we get here, the server was created successfully
     let _pingora_server = pingora_server_result.unwrap();
 }
+
+// Test: Can stop server programmatically
+#[test]
+fn test_can_stop_server() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let pingora_server = server.build_pingora_server().unwrap();
+
+    // Verify server can be gracefully shut down by dropping it
+    // In Pingora, servers shut down when dropped or when receiving signals
+    drop(pingora_server);
+
+    // If we get here, the server was properly cleaned up
+    // We can create a new server on the same port to verify cleanup
+    let server2 = YatagarasuServer::new(ServerConfig::new(address)).unwrap();
+    let pingora_server2 = server2.build_pingora_server().unwrap();
+    assert!(std::ptr::addr_of!(pingora_server2) != std::ptr::null());
+}

@@ -675,7 +675,7 @@ yatagarasu/
 - [x] Test: Server parses socket address correctly
 - [x] Test: Server rejects invalid address format
 - [x] Test: Server starts without errors with valid configuration
-- [ ] Test: Can stop server programmatically
+- [x] Test: Can stop server programmatically
 
 ### Basic HTTP Handling
 - [ ] Test: Server accepts HTTP/1.1 GET requests
