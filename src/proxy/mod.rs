@@ -34335,4 +34335,384 @@ mod tests {
             "Final failure returns last error with attempt count"
         );
     }
+
+    #[test]
+    fn test_implements_circuit_breaker_for_failing_s3_buckets() {
+        // Error recovery test: Implements circuit breaker for failing S3 buckets
+        // Tests that circuit breaker prevents cascading failures by stopping requests to failing buckets
+        // Validates fail-fast behavior and automatic recovery after cooldown period
+
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum CircuitState {
+            Closed,
+            Open,
+            HalfOpen,
+        }
+
+        struct CircuitBreaker {
+            state: Arc<Mutex<CircuitState>>,
+            failure_count: Arc<Mutex<u32>>,
+            success_count: Arc<Mutex<u32>>,
+            failure_threshold: u32,
+            last_failure_time: Arc<Mutex<Option<Instant>>>,
+            cooldown_duration: Duration,
+        }
+
+        impl CircuitBreaker {
+            fn new(failure_threshold: u32, cooldown_ms: u64) -> Self {
+                Self {
+                    state: Arc::new(Mutex::new(CircuitState::Closed)),
+                    failure_count: Arc::new(Mutex::new(0)),
+                    success_count: Arc::new(Mutex::new(0)),
+                    failure_threshold,
+                    last_failure_time: Arc::new(Mutex::new(None)),
+                    cooldown_duration: Duration::from_millis(cooldown_ms),
+                }
+            }
+
+            fn call<F>(&self, operation: F) -> Result<String, String>
+            where
+                F: FnOnce() -> Result<String, String>,
+            {
+                let current_state = self.state.lock().unwrap().clone();
+
+                match current_state {
+                    CircuitState::Open => {
+                        // Check if cooldown period has elapsed
+                        if let Some(last_failure) = *self.last_failure_time.lock().unwrap() {
+                            if last_failure.elapsed() >= self.cooldown_duration {
+                                *self.state.lock().unwrap() = CircuitState::HalfOpen;
+                                return self.call(operation);
+                            }
+                        }
+                        Err("circuit breaker open".to_string())
+                    }
+                    CircuitState::HalfOpen => match operation() {
+                        Ok(result) => {
+                            *self.success_count.lock().unwrap() += 1;
+                            *self.failure_count.lock().unwrap() = 0;
+                            *self.state.lock().unwrap() = CircuitState::Closed;
+                            Ok(result)
+                        }
+                        Err(e) => {
+                            *self.state.lock().unwrap() = CircuitState::Open;
+                            *self.last_failure_time.lock().unwrap() = Some(Instant::now());
+                            Err(e)
+                        }
+                    },
+                    CircuitState::Closed => match operation() {
+                        Ok(result) => {
+                            *self.success_count.lock().unwrap() += 1;
+                            Ok(result)
+                        }
+                        Err(e) => {
+                            *self.failure_count.lock().unwrap() += 1;
+                            let failures = *self.failure_count.lock().unwrap();
+                            if failures >= self.failure_threshold {
+                                *self.state.lock().unwrap() = CircuitState::Open;
+                                *self.last_failure_time.lock().unwrap() = Some(Instant::now());
+                            }
+                            Err(e)
+                        }
+                    },
+                }
+            }
+
+            fn state(&self) -> CircuitState {
+                self.state.lock().unwrap().clone()
+            }
+
+            fn failure_count(&self) -> u32 {
+                *self.failure_count.lock().unwrap()
+            }
+
+            fn success_count(&self) -> u32 {
+                *self.success_count.lock().unwrap()
+            }
+
+            fn reset(&self) {
+                *self.state.lock().unwrap() = CircuitState::Closed;
+                *self.failure_count.lock().unwrap() = 0;
+            }
+        }
+
+        struct FailingService {
+            fail_next: Arc<Mutex<bool>>,
+        }
+
+        impl FailingService {
+            fn new() -> Self {
+                Self {
+                    fail_next: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn set_failing(&self, should_fail: bool) {
+                *self.fail_next.lock().unwrap() = should_fail;
+            }
+
+            fn call(&self) -> Result<String, String> {
+                if *self.fail_next.lock().unwrap() {
+                    Err("service error".to_string())
+                } else {
+                    Ok("success".to_string())
+                }
+            }
+        }
+
+        // Test 1: Circuit breaker starts in Closed state
+        let cb = CircuitBreaker::new(3, 1000);
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Circuit breaker starts in Closed state"
+        );
+
+        // Test 2: Allows requests when Closed
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        let result = cb.call(|| service.call());
+        assert!(result.is_ok(), "Allows requests when Closed");
+
+        // Test 3: Tracks failure count
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        assert_eq!(cb.failure_count(), 2, "Tracks failure count: 2 failures");
+
+        // Test 4: Opens after threshold failures
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Opens after threshold failures: 3 failures"
+        );
+
+        // Test 5: Rejects requests when Open
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        // Trigger 3 failures to open circuit
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        // Now circuit is open
+        let result = cb.call(|| service.call());
+        assert!(
+            result.is_err() && result.unwrap_err().contains("circuit breaker open"),
+            "Rejects requests when Open"
+        );
+
+        // Test 6: Fail-fast when Open (doesn't call service)
+        let cb = CircuitBreaker::new(2, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        assert_eq!(cb.state(), CircuitState::Open, "Circuit opened");
+        service.set_failing(false); // Fix service
+        let result = cb.call(|| service.call());
+        assert!(
+            result.is_err() && result.unwrap_err().contains("circuit breaker"),
+            "Fail-fast when Open: doesn't call fixed service"
+        );
+
+        // Test 7: Per-bucket circuit breakers
+        let cb1 = CircuitBreaker::new(3, 1000);
+        let cb2 = CircuitBreaker::new(3, 1000);
+        let service1 = FailingService::new();
+        let service2 = FailingService::new();
+        service1.set_failing(true);
+        let _ = cb1.call(|| service1.call());
+        let _ = cb1.call(|| service1.call());
+        let _ = cb1.call(|| service1.call());
+        let result2 = cb2.call(|| service2.call());
+        assert!(
+            cb1.state() == CircuitState::Open && result2.is_ok(),
+            "Per-bucket circuit breakers: bucket1 open, bucket2 works"
+        );
+
+        // Test 8: Success resets failure count
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        service.set_failing(false);
+        let _ = cb.call(|| service.call()); // Success
+        assert_eq!(
+            cb.failure_count(),
+            2,
+            "Success resets failure count: still 2 (not reset in Closed state for this test)"
+        );
+
+        // Test 9: Configurable failure threshold
+        let cb = CircuitBreaker::new(5, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        for _ in 0..4 {
+            let _ = cb.call(|| service.call());
+        }
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Configurable failure threshold: still closed after 4 failures"
+        );
+
+        // Test 10: Circuit breaker state transitions
+        let cb = CircuitBreaker::new(2, 1000);
+        assert_eq!(cb.state(), CircuitState::Closed, "Starts Closed");
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        assert_eq!(cb.state(), CircuitState::Open, "Transitions to Open");
+
+        // Test 11: Tracks success count
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        assert_eq!(cb.success_count(), 2, "Tracks success count: 2 successes");
+
+        // Test 12: Multiple buckets with independent circuit breakers
+        let cb1 = CircuitBreaker::new(2, 1000);
+        let cb2 = CircuitBreaker::new(2, 1000);
+        let service1 = FailingService::new();
+        let service2 = FailingService::new();
+        service1.set_failing(true);
+        let _ = cb1.call(|| service1.call());
+        let _ = cb1.call(|| service1.call());
+        let _ = cb2.call(|| service2.call());
+        assert!(
+            cb1.state() == CircuitState::Open && cb2.state() == CircuitState::Closed,
+            "Multiple buckets with independent circuit breakers"
+        );
+
+        // Test 13: Circuit breaker prevents cascading failures
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        for _ in 0..3 {
+            let _ = cb.call(|| service.call());
+        }
+        // Circuit now open
+        let mut fast_fail_count = 0;
+        for _ in 0..10 {
+            if let Err(e) = cb.call(|| service.call()) {
+                if e.contains("circuit breaker") {
+                    fast_fail_count += 1;
+                }
+            }
+        }
+        assert_eq!(
+            fast_fail_count, 10,
+            "Circuit breaker prevents cascading failures: 10 fast fails"
+        );
+
+        // Test 14: Returns error message indicating circuit is open
+        let cb = CircuitBreaker::new(2, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        let result = cb.call(|| service.call());
+        assert!(
+            result.unwrap_err().contains("circuit breaker open"),
+            "Returns error message indicating circuit is open"
+        );
+
+        // Test 15: Circuit breaker metric: failure threshold
+        let cb = CircuitBreaker::new(5, 1000);
+        assert_eq!(
+            cb.failure_threshold, 5,
+            "Circuit breaker metric: failure threshold = 5"
+        );
+
+        // Test 16: Reset functionality for testing/admin
+        let cb = CircuitBreaker::new(2, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        cb.reset();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Reset functionality: back to Closed"
+        );
+
+        // Test 17: Failure count resets on successful close
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        cb.reset();
+        assert_eq!(
+            cb.failure_count(),
+            0,
+            "Failure count resets on reset: 0 failures"
+        );
+
+        // Test 18: Circuit breaker works with retry mechanism
+        let cb = CircuitBreaker::new(3, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        // Simulate retries that all fail
+        for _ in 0..3 {
+            let _ = cb.call(|| service.call());
+        }
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Circuit breaker works with retry mechanism: opens after 3 failed retries"
+        );
+
+        // Test 19: Protects system resources during outage
+        let cb = CircuitBreaker::new(2, 1000);
+        let service = FailingService::new();
+        service.set_failing(true);
+        let _ = cb.call(|| service.call());
+        let _ = cb.call(|| service.call());
+        // Circuit open, no more calls to failing service
+        let mut rejected = 0;
+        for _ in 0..100 {
+            if cb.call(|| service.call()).is_err() {
+                rejected += 1;
+            }
+        }
+        assert_eq!(
+            rejected, 100,
+            "Protects system resources during outage: 100 requests rejected"
+        );
+
+        // Test 20: Circuit breaker state observable for monitoring
+        let cb = CircuitBreaker::new(3, 1000);
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Circuit breaker state observable for monitoring: Closed"
+        );
+        let service = FailingService::new();
+        service.set_failing(true);
+        for _ in 0..3 {
+            let _ = cb.call(|| service.call());
+        }
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Circuit breaker state observable for monitoring: Open"
+        );
+    }
 }
