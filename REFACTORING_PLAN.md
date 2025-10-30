@@ -108,15 +108,15 @@ tests/
 
 **Note**: Used simplified single-file approach instead of splitting by feature for faster execution.
 
-### Phase 3: Extract S3 Tests (src/s3/mod.rs - 8,500 lines → ~500 lines)
-- [ ] Extract S3 client setup tests to `tests/unit/s3_client_tests.rs`
-- [ ] Extract signature tests to `tests/unit/s3_signature_tests.rs`
-- [ ] Extract operations tests to `tests/unit/s3_operations_tests.rs`
-- [ ] Extract streaming tests to `tests/unit/s3_streaming_tests.rs`
-- [ ] Extract range request tests to `tests/unit/s3_range_tests.rs`
-- [ ] Remove test module from `src/s3/mod.rs`
-- [ ] Run `cargo test` - verify all tests pass
-- [ ] Commit: `[STRUCTURAL] Extract S3 tests to tests/unit/ directory`
+### Phase 3: Extract S3 Tests (src/s3/mod.rs - 8,500 lines → 450 lines) ✅ COMPLETE
+- [x] Extract all S3 tests to `tests/unit/s3_tests.rs` (simplified approach)
+- [x] Make internal functions public for testing (hmac_sha256, sha256_hex, etc.)
+- [x] Make S3Client.config field public for test access
+- [x] Remove test module from `src/s3/mod.rs`
+- [x] Run `cargo test` - verify all tests pass (373 tests passing)
+- [x] Commit: `[STRUCTURAL] Extract S3 tests to tests/unit/ directory`
+
+**Note**: Used simplified single-file approach. Made some internal functions public for testing.
 
 ### Phase 4: Extract Auth Tests (src/auth/mod.rs - 3,276 lines → ~200 lines)
 - [ ] Extract token extraction tests to `tests/unit/auth_extraction_tests.rs`
