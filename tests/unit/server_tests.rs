@@ -222,3 +222,28 @@ fn test_server_accepts_get_requests() {
     let svc = service.unwrap();
     assert!(svc.supports_method("GET"));
 }
+
+// Test: Server accepts HTTP/1.1 HEAD requests
+#[test]
+fn test_server_accepts_head_requests() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Should be able to create a service that handles HEAD requests
+    let service = server.create_http_service();
+    assert!(service.is_ok());
+
+    // Verify the service is configured to accept HEAD requests
+    let svc = service.unwrap();
+    assert!(svc.supports_method("HEAD"));
+}
