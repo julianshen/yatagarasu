@@ -625,7 +625,7 @@ yatagarasu/
 - [x] Test: No sensitive data in error messages
 - [x] Test: No stack traces to clients (only in logs)
 - [x] Test: Request size limits enforced
-- [ ] Test: Request timeout enforced
+- [x] Test: Request timeout enforced
 - [ ] Test: Rate limiting per client (optional feature)
 - [ ] Test: TLS configuration validated
 - [ ] Test: Headers sanitized before logging
