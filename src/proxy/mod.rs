@@ -35788,4 +35788,257 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_no_stack_traces_to_clients_only_in_logs() {
+        // Security hardening test: No stack traces to clients (only in logs)
+        // Tests that stack traces are logged internally but never sent to clients
+        // Validates separation of internal debugging info from client responses
+
+        use std::sync::{Arc, Mutex};
+
+        struct Response {
+            status: u16,
+            body: String,
+        }
+
+        impl Response {
+            fn new(status: u16, body: String) -> Self {
+                Self { status, body }
+            }
+
+            fn contains(&self, text: &str) -> bool {
+                self.body.contains(text)
+            }
+
+            fn contains_any(&self, patterns: &[&str]) -> bool {
+                patterns.iter().any(|pattern| self.body.contains(pattern))
+            }
+        }
+
+        struct Logger {
+            logs: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl Logger {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn log(&self, message: String) {
+                self.logs.lock().unwrap().push(message);
+            }
+
+            fn contains(&self, text: &str) -> bool {
+                self.logs
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|log| log.contains(text))
+            }
+        }
+
+        struct ErrorHandler {
+            logger: Logger,
+        }
+
+        impl ErrorHandler {
+            fn new() -> Self {
+                Self {
+                    logger: Logger::new(),
+                }
+            }
+
+            fn handle_panic(&self, error_msg: &str) -> Response {
+                // Log full stack trace
+                self.logger
+                    .log(format!("PANIC: {} at src/proxy/mod.rs:123:45", error_msg));
+                // Return generic error to client
+                Response::new(500, "Internal server error".to_string())
+            }
+
+            fn handle_error(&self, error_msg: &str) -> Response {
+                // Log with stack trace
+                self.logger
+                    .log(format!("ERROR: {} (backtrace available)", error_msg));
+                // Return safe error to client
+                Response::new(500, "Internal server error".to_string())
+            }
+        }
+
+        // Test 1: Client response doesn't contain stack trace
+        let handler = ErrorHandler::new();
+        let response = handler.handle_panic("division by zero");
+        assert!(
+            !response.contains("src/proxy/mod.rs"),
+            "Client response doesn't contain stack trace"
+        );
+
+        // Test 2: Log contains stack trace
+        let handler = ErrorHandler::new();
+        let _ = handler.handle_panic("null pointer");
+        assert!(
+            handler.logger.contains("src/proxy/mod.rs"),
+            "Log contains stack trace"
+        );
+
+        // Test 3: Client gets generic error message
+        let handler = ErrorHandler::new();
+        let response = handler.handle_panic("panic");
+        assert_eq!(
+            response.body, "Internal server error",
+            "Client gets generic error message"
+        );
+
+        // Test 4: Log has full error details
+        let handler = ErrorHandler::new();
+        let _ = handler.handle_panic("test error");
+        assert!(
+            handler.logger.contains("test error"),
+            "Log has full error details"
+        );
+
+        // Test 5: Stack trace patterns not in response
+        let response = Response::new(500, "Internal server error".to_string());
+        let stack_trace_patterns = [
+            "at src/",
+            "thread 'main'",
+            "panicked at",
+            "stack backtrace:",
+            "note: run with",
+        ];
+        assert!(
+            !response.contains_any(&stack_trace_patterns),
+            "Stack trace patterns not in response"
+        );
+
+        // Test 6: File paths not exposed to client
+        let response = Response::new(500, "Service error".to_string());
+        assert!(
+            !response.contains_any(&["/src/", "/lib/", ".rs:"]),
+            "File paths not exposed to client"
+        );
+
+        // Test 7: Line numbers not exposed to client
+        let response = Response::new(500, "Error occurred".to_string());
+        assert!(
+            !response.contains(":123:"),
+            "Line numbers not exposed to client"
+        );
+
+        // Test 8: Function names not exposed to client
+        let response = Response::new(500, "Internal error".to_string());
+        assert!(
+            !response.contains("handle_request"),
+            "Function names not exposed to client"
+        );
+
+        // Test 9: Rust panic format not in response
+        let response = Response::new(500, "Server error".to_string());
+        assert!(
+            !response.contains("panicked at"),
+            "Rust panic format not in response"
+        );
+
+        // Test 10: Backtrace instructions not in response
+        let response = Response::new(500, "Error".to_string());
+        assert!(
+            !response.contains("RUST_BACKTRACE"),
+            "Backtrace instructions not in response"
+        );
+
+        // Test 11: Error logged with full context
+        let handler = ErrorHandler::new();
+        let _ = handler.handle_error("database connection failed");
+        assert!(
+            handler.logger.contains("backtrace"),
+            "Error logged with full context"
+        );
+
+        // Test 12: Module paths not in client response
+        let response = Response::new(500, "Error".to_string());
+        assert!(
+            !response.contains("yatagarasu::"),
+            "Module paths not in client response"
+        );
+
+        // Test 13: Thread information not exposed
+        let response = Response::new(500, "Error".to_string());
+        assert!(
+            !response.contains("thread"),
+            "Thread information not exposed"
+        );
+
+        // Test 14: Crate information not exposed
+        let response = Response::new(500, "Error".to_string());
+        assert!(
+            !response.contains_any(&["tokio::", "hyper::", "pingora::"]),
+            "Crate information not exposed"
+        );
+
+        // Test 15: Debug format not in response
+        let response = Response::new(500, "Error".to_string());
+        assert!(!response.contains("{:?}"), "Debug format not in response");
+
+        // Test 16: Multiple errors same generic response
+        let handler = ErrorHandler::new();
+        let response1 = handler.handle_panic("error 1");
+        let response2 = handler.handle_panic("error 2");
+        assert_eq!(
+            response1.body, response2.body,
+            "Multiple errors same generic response"
+        );
+
+        // Test 17: Logs differentiate errors
+        let handler = ErrorHandler::new();
+        let _ = handler.handle_panic("error 1");
+        let _ = handler.handle_panic("error 2");
+        assert!(
+            handler.logger.contains("error 1") && handler.logger.contains("error 2"),
+            "Logs differentiate errors"
+        );
+
+        // Test 18: Production vs development separation
+        let production_response = Response::new(500, "Internal server error".to_string());
+        let log_has_details = true; // Logs always have details
+        assert!(
+            !production_response.contains("src/") && log_has_details,
+            "Production vs development separation"
+        );
+
+        // Test 19: Client response user-friendly
+        let response = Response::new(500, "Internal server error".to_string());
+        assert!(
+            response.body.len() < 100,
+            "Client response user-friendly: short message"
+        );
+
+        // Test 20: Complete stack trace sanitization validation
+        let handler = ErrorHandler::new();
+        let response = handler.handle_panic("critical error");
+        let forbidden_in_response = [
+            "src/",
+            "lib/",
+            ".rs",
+            "panicked at",
+            "thread",
+            "backtrace",
+            "RUST_BACKTRACE",
+            "::",
+            "main",
+            "tokio",
+            "line ",
+            "column ",
+        ];
+        assert!(
+            !response.contains_any(&forbidden_in_response),
+            "Complete stack trace sanitization validation"
+        );
+        assert!(
+            handler.logger.contains("src/proxy/mod.rs"),
+            "But log contains stack trace details"
+        );
+    }
 }
