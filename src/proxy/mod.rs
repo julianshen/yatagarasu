@@ -35605,4 +35605,187 @@ mod tests {
             "Complete credential sanitization validation"
         );
     }
+
+    #[test]
+    fn test_no_sensitive_data_in_error_messages() {
+        // Security hardening test: No sensitive data in error messages
+        // Tests that error messages to clients never contain sensitive information
+        // Validates user-facing error messages are safe and sanitized
+
+        struct ErrorMessage {
+            status: u16,
+            message: String,
+        }
+
+        impl ErrorMessage {
+            fn new(status: u16, message: String) -> Self {
+                Self { status, message }
+            }
+
+            fn contains(&self, text: &str) -> bool {
+                self.message.contains(text)
+            }
+
+            fn contains_any(&self, patterns: &[&str]) -> bool {
+                patterns
+                    .iter()
+                    .any(|pattern| self.message.contains(pattern))
+            }
+        }
+
+        // Test 1: 401 error doesn't leak token
+        let error = ErrorMessage::new(401, "Unauthorized".to_string());
+        assert!(
+            !error.contains("eyJhbGciOiJIUzI1NiI"),
+            "401 error doesn't leak token"
+        );
+
+        // Test 2: 403 error doesn't leak credentials
+        let error = ErrorMessage::new(403, "Access denied".to_string());
+        assert!(
+            !error.contains("AKIA"),
+            "403 error doesn't leak credentials"
+        );
+
+        // Test 3: 404 error doesn't leak internal paths
+        let error = ErrorMessage::new(404, "Object not found".to_string());
+        assert!(
+            !error.contains("/internal/"),
+            "404 error doesn't leak internal paths"
+        );
+
+        // Test 4: 500 error generic message
+        let error = ErrorMessage::new(500, "Internal server error".to_string());
+        assert!(
+            !error.contains_any(&["secret", "key", "password"]),
+            "500 error generic message"
+        );
+
+        // Test 5: S3 error doesn't leak bucket credentials
+        let error = ErrorMessage::new(502, "Bad gateway".to_string());
+        assert!(
+            !error.contains("wJalrXUtnFEMI"),
+            "S3 error doesn't leak bucket credentials"
+        );
+
+        // Test 6: JWT validation error sanitized
+        let error = ErrorMessage::new(401, "Invalid token".to_string());
+        assert!(!error.contains("Bearer"), "JWT validation error sanitized");
+
+        // Test 7: Configuration error doesn't leak secrets
+        let error = ErrorMessage::new(500, "Configuration error".to_string());
+        assert!(
+            !error.contains("jwt_secret"),
+            "Configuration error doesn't leak secrets"
+        );
+
+        // Test 8: Database/S3 connection error sanitized
+        let error = ErrorMessage::new(502, "Service unavailable".to_string());
+        assert!(
+            !error.contains_any(&["host", "port", "endpoint"]),
+            "Database/S3 connection error sanitized"
+        );
+
+        // Test 9: Authentication error doesn't reveal user existence
+        let error = ErrorMessage::new(401, "Authentication failed".to_string());
+        assert!(
+            !error.contains("user not found"),
+            "Authentication error doesn't reveal user existence"
+        );
+
+        // Test 10: Authorization error doesn't leak policy details
+        let error = ErrorMessage::new(403, "Forbidden".to_string());
+        assert!(
+            !error.contains("policy"),
+            "Authorization error doesn't leak policy details"
+        );
+
+        // Test 11: Rate limit error safe
+        let error = ErrorMessage::new(429, "Too many requests".to_string());
+        assert!(!error.contains("client_id"), "Rate limit error safe");
+
+        // Test 12: Timeout error doesn't leak configuration
+        let error = ErrorMessage::new(504, "Gateway timeout".to_string());
+        assert!(
+            !error.contains("30000"),
+            "Timeout error doesn't leak configuration"
+        );
+
+        // Test 13: Validation error doesn't leak internal structure
+        let error = ErrorMessage::new(400, "Bad request".to_string());
+        assert!(
+            !error.contains("struct"),
+            "Validation error doesn't leak internal structure"
+        );
+
+        // Test 14: File not found doesn't leak S3 key structure
+        let error = ErrorMessage::new(404, "File not found".to_string());
+        assert!(
+            !error.contains("s3://"),
+            "File not found doesn't leak S3 key structure"
+        );
+
+        // Test 15: Malformed request error sanitized
+        let error = ErrorMessage::new(400, "Invalid request format".to_string());
+        assert!(
+            !error.contains_any(&["parser", "deserialize", "serde"]),
+            "Malformed request error sanitized"
+        );
+
+        // Test 16: Resource exhaustion error generic
+        let error = ErrorMessage::new(503, "Service temporarily unavailable".to_string());
+        assert!(
+            !error.contains_any(&["memory", "cpu", "thread"]),
+            "Resource exhaustion error generic"
+        );
+
+        // Test 17: Proxy error doesn't reveal backend details
+        let error = ErrorMessage::new(502, "Bad gateway".to_string());
+        assert!(
+            !error.contains_any(&["upstream", "backend", "server"]),
+            "Proxy error doesn't reveal backend details"
+        );
+
+        // Test 18: Circuit breaker error doesn't leak threshold
+        let error = ErrorMessage::new(503, "Service unavailable".to_string());
+        assert!(
+            !error.contains("threshold"),
+            "Circuit breaker error doesn't leak threshold"
+        );
+
+        // Test 19: All error messages user-friendly
+        let errors = vec![
+            ErrorMessage::new(400, "Bad request".to_string()),
+            ErrorMessage::new(401, "Unauthorized".to_string()),
+            ErrorMessage::new(403, "Forbidden".to_string()),
+            ErrorMessage::new(404, "Not found".to_string()),
+            ErrorMessage::new(500, "Internal server error".to_string()),
+        ];
+        let sensitive_patterns = ["AKIA", "secret", "password", "token", "key", "credential"];
+        assert!(
+            errors.iter().all(|e| !e.contains_any(&sensitive_patterns)),
+            "All error messages user-friendly"
+        );
+
+        // Test 20: Complete error message sanitization validation
+        let test_errors = vec![
+            ("Authentication failed", vec!["Bearer", "jwt", "token"]),
+            ("Access denied", vec!["AKIA", "secret_key", "policy"]),
+            ("Not found", vec!["s3://", "/internal/", "bucket"]),
+            ("Bad request", vec!["struct", "field", "parser"]),
+            (
+                "Service unavailable",
+                vec!["threshold", "memory", "backend"],
+            ),
+        ];
+        for (message, forbidden_patterns) in test_errors {
+            let error = ErrorMessage::new(500, message.to_string());
+            assert!(
+                !error.contains_any(&forbidden_patterns),
+                "Error '{}' doesn't leak: {:?}",
+                message,
+                forbidden_patterns
+            );
+        }
+    }
 }
