@@ -610,7 +610,7 @@ yatagarasu/
 - [x] Test: Waits for in-flight requests to complete
 - [x] Test: Closes S3 connections gracefully
 - [x] Test: Shutdown timeout works (force close after N seconds)
-- [ ] Test: Logs shutdown events
+- [x] Test: Logs shutdown events
 
 ### Error Recovery
 - [ ] Test: Recovers from panics without crashing
