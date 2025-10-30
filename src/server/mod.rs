@@ -130,24 +130,44 @@ impl HttpService {
     pub fn handle_request(&self, method: &str, path: &str) -> Result<HttpResponse, String> {
         // Validate request parameters (return 400 for malformed requests)
         if method.is_empty() {
-            return Ok(HttpResponse::new(400)); // Bad Request - empty method
+            let mut response = HttpResponse::new(400);
+            response.add_header("Content-Type", "application/json");
+            let error_body = r#"{"error":"Bad Request","message":"Method cannot be empty","status":400}"#;
+            response.set_body(error_body.as_bytes().to_vec());
+            return Ok(response);
         }
 
         if path.is_empty() {
-            return Ok(HttpResponse::new(400)); // Bad Request - empty path
+            let mut response = HttpResponse::new(400);
+            response.add_header("Content-Type", "application/json");
+            let error_body = r#"{"error":"Bad Request","message":"Path cannot be empty","status":400}"#;
+            response.set_body(error_body.as_bytes().to_vec());
+            return Ok(response);
         }
 
         if !path.starts_with('/') {
-            return Ok(HttpResponse::new(400)); // Bad Request - path must start with /
+            let mut response = HttpResponse::new(400);
+            response.add_header("Content-Type", "application/json");
+            let error_body = r#"{"error":"Bad Request","message":"Path must start with /","status":400}"#;
+            response.set_body(error_body.as_bytes().to_vec());
+            return Ok(response);
         }
 
         if path.len() > 8192 {
-            return Ok(HttpResponse::new(400)); // Bad Request - path too long
+            let mut response = HttpResponse::new(400);
+            response.add_header("Content-Type", "application/json");
+            let error_body = r#"{"error":"Bad Request","message":"Path too long (max 8192 bytes)","status":400}"#;
+            response.set_body(error_body.as_bytes().to_vec());
+            return Ok(response);
         }
 
         // Check if method is supported
         if !self.supports_method(method) {
-            return Ok(HttpResponse::new(405)); // Method Not Allowed
+            let mut response = HttpResponse::new(405);
+            response.add_header("Content-Type", "application/json");
+            let error_body = r#"{"error":"Method Not Allowed","message":"HTTP method not supported","status":405}"#;
+            response.set_body(error_body.as_bytes().to_vec());
+            return Ok(response);
         }
 
         // Route based on path
@@ -168,7 +188,11 @@ impl HttpService {
             }
             _ => {
                 // Unknown path
-                Ok(HttpResponse::new(404))
+                let mut response = HttpResponse::new(404);
+                response.add_header("Content-Type", "application/json");
+                let error_body = r#"{"error":"Not Found","message":"The requested resource was not found","status":404}"#;
+                response.set_body(error_body.as_bytes().to_vec());
+                Ok(response)
             }
         }
     }

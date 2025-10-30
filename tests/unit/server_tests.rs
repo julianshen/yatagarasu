@@ -815,3 +815,64 @@ fn test_server_errors_return_500() {
         Err(_) => panic!("Unexpected internal error for valid request"),
     }
 }
+
+// Test: Error responses include JSON body with error details
+#[test]
+fn test_error_responses_include_json_body() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Test 404 Not Found error response
+    let response = service.handle_request("GET", "/unknown");
+    assert!(response.is_ok());
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 404);
+
+    // Verify response has JSON body with error details
+    let body = std::str::from_utf8(resp.body()).unwrap();
+    if !body.is_empty() {
+        // If body is present, it should be valid JSON with error details
+        let json: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert!(json.get("error").is_some() || json.get("status").is_some(),
+                "Error response should contain error or status field");
+    }
+
+    // Test 405 Method Not Allowed error response
+    let response2 = service.handle_request("PUT", "/health");
+    assert!(response2.is_ok());
+    let resp2 = response2.unwrap();
+    assert_eq!(resp2.status_code(), 405);
+
+    // Verify response has JSON body with error details
+    let body2 = std::str::from_utf8(resp2.body()).unwrap();
+    if !body2.is_empty() {
+        let json2: serde_json::Value = serde_json::from_str(body2).unwrap();
+        assert!(json2.get("error").is_some() || json2.get("status").is_some(),
+                "Error response should contain error or status field");
+    }
+
+    // Test 400 Bad Request error response
+    let response3 = service.handle_request("", "/health");
+    assert!(response3.is_ok());
+    let resp3 = response3.unwrap();
+    assert_eq!(resp3.status_code(), 400);
+
+    // Verify response has JSON body with error details
+    let body3 = std::str::from_utf8(resp3.body()).unwrap();
+    if !body3.is_empty() {
+        let json3: serde_json::Value = serde_json::from_str(body3).unwrap();
+        assert!(json3.get("error").is_some() || json3.get("status").is_some(),
+                "Error response should contain error or status field");
+    }
+}

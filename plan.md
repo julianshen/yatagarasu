@@ -699,7 +699,7 @@ yatagarasu/
 - [x] Test: Invalid HTTP methods return 405 Method Not Allowed
 - [x] Test: Malformed requests return 400 Bad Request
 - [x] Test: Server errors return 500 Internal Server Error
-- [ ] Test: Error responses include JSON body with error details
+- [x] Test: Error responses include JSON body with error details
 
 **Expected Outcome**: Running HTTP server that responds to /health and returns 404 for other paths.
 
