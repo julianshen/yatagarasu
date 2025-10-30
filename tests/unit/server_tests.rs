@@ -279,3 +279,39 @@ fn test_server_returns_response_with_status_code() {
     let response_500 = service.create_response(500).unwrap();
     assert_eq!(response_500.status_code(), 500);
 }
+
+// Test: Server returns proper HTTP response with headers
+#[test]
+fn test_server_returns_response_with_headers() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Create a response
+    let mut response = service.create_response(200).unwrap();
+
+    // Should be able to add headers to the response
+    response.add_header("Content-Type", "application/json");
+    response.add_header("X-Custom-Header", "custom-value");
+
+    // Should be able to retrieve headers
+    assert_eq!(response.get_header("Content-Type"), Some("application/json"));
+    assert_eq!(response.get_header("X-Custom-Header"), Some("custom-value"));
+    assert_eq!(response.get_header("Non-Existent"), None);
+
+    // Should be able to get all headers
+    let headers = response.headers();
+    assert_eq!(headers.len(), 2);
+    assert!(headers.contains_key("Content-Type"));
+    assert!(headers.contains_key("X-Custom-Header"));
+}

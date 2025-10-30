@@ -23,6 +23,7 @@ pub struct HttpService {
 #[derive(Debug)]
 pub struct HttpResponse {
     status_code: u16,
+    headers: std::collections::HashMap<String, String>,
 }
 
 /// Yatagarasu HTTP Server wrapper around Pingora
@@ -128,12 +129,30 @@ impl HttpService {
 impl HttpResponse {
     /// Create a new HTTP response with the given status code
     pub fn new(status_code: u16) -> Self {
-        Self { status_code }
+        Self {
+            status_code,
+            headers: std::collections::HashMap::new(),
+        }
     }
 
     /// Get the status code of the response
     pub fn status_code(&self) -> u16 {
         self.status_code
+    }
+
+    /// Add a header to the response
+    pub fn add_header(&mut self, name: &str, value: &str) {
+        self.headers.insert(name.to_string(), value.to_string());
+    }
+
+    /// Get a header value by name
+    pub fn get_header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).map(|s| s.as_str())
+    }
+
+    /// Get all headers
+    pub fn headers(&self) -> &std::collections::HashMap<String, String> {
+        &self.headers
     }
 }
 
