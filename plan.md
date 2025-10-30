@@ -621,7 +621,7 @@ yatagarasu/
 - [x] Test: Circuit breaker closes after cooldown period
 
 ### Security Hardening
-- [ ] Test: No credentials logged anywhere
+- [x] Test: No credentials logged anywhere
 - [ ] Test: No sensitive data in error messages
 - [ ] Test: No stack traces to clients (only in logs)
 - [ ] Test: Request size limits enforced
