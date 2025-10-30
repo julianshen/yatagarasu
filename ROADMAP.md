@@ -265,11 +265,122 @@ let s3_request = build_get_object_request(&bucket, &key, &region);
 
 ---
 
+## v0.4.0 - Docker & CI/CD 🐳 **PLANNED**
+
+**Goal**: Production deployment automation and continuous integration
+
+### Phase 21: Docker Image Creation
+
+**Tasks**:
+- [ ] Create multi-stage Dockerfile for minimal image size
+- [ ] Use rust:1.70-slim as builder, distroless/cc as runtime
+- [ ] Copy only binary and necessary runtime dependencies
+- [ ] Set up proper signal handling for container lifecycle
+- [ ] Configure logging to stdout for container environments
+- [ ] Add health check configuration in Dockerfile
+- [ ] Build and tag image (yatagarasu:latest, yatagarasu:v0.4.0)
+- [ ] Optimize image size (<50MB if possible)
+- [ ] Test: Docker image builds successfully
+- [ ] Test: Container starts with config volume mount
+- [ ] Test: Container responds to health checks
+- [ ] Test: Container handles SIGTERM gracefully
+- [ ] Test: Container logs to stdout in JSON format
+- [ ] Test: Environment variables override config values
+
+**Expected Duration**: 2-3 days
+
+### Phase 22: Docker Compose for Testing
+
+**Tasks**:
+- [ ] Create docker-compose.yml with yatagarasu + MinIO
+- [ ] Configure MinIO service with test buckets
+- [ ] Pre-populate MinIO with test data on startup
+- [ ] Configure yatagarasu to connect to MinIO
+- [ ] Add volume mounts for config and test data
+- [ ] Add network configuration for service communication
+- [ ] Create example .env file for credentials
+- [ ] Add healthcheck configuration for both services
+- [ ] Test: docker-compose up brings up both services
+- [ ] Test: Can access MinIO console at localhost:9001
+- [ ] Test: Can send requests to proxy at localhost:8080
+- [ ] Test: Proxy successfully fetches from MinIO
+- [ ] Test: docker-compose down cleans up properly
+
+**Deliverables**:
+- `Dockerfile` - Multi-stage production image
+- `docker-compose.yml` - Full testing environment
+- `docker-compose.test.yml` - Minimal test setup
+- `.env.example` - Example environment variables
+- `docs/DOCKER.md` - Docker deployment guide
+
+**Expected Duration**: 2 days
+
+### Phase 23: GitHub Actions CI/CD
+
+**Tasks**:
+- [ ] Create .github/workflows/ci.yml
+- [ ] Add job: cargo test (run all tests)
+- [ ] Add job: cargo clippy (lint checks)
+- [ ] Add job: cargo fmt --check (format checks)
+- [ ] Add job: cargo tarpaulin (coverage report)
+- [ ] Add job: cargo build --release (ensure builds)
+- [ ] Upload coverage reports to Codecov
+- [ ] Add job: Docker image build
+- [ ] Add job: Integration tests with MinIO (docker-compose)
+- [ ] Add job: Security audit (cargo audit)
+- [ ] Configure caching for Cargo dependencies
+- [ ] Run CI on push to main and pull requests
+- [ ] Test: CI pipeline runs successfully on push
+- [ ] Test: Failed tests block merge
+- [ ] Test: Clippy warnings block merge
+- [ ] Test: Coverage threshold enforced (>90%)
+
+**Expected Duration**: 2-3 days
+
+### Phase 24: Container Registry & Release
+
+**Tasks**:
+- [ ] Create .github/workflows/release.yml
+- [ ] Trigger on git tags (v*.*.*)
+- [ ] Build Docker images for multiple platforms (amd64, arm64)
+- [ ] Push images to GitHub Container Registry (ghcr.io)
+- [ ] Tag images with version and latest
+- [ ] Create GitHub Release with changelog
+- [ ] Attach compiled binaries to release (Linux, macOS)
+- [ ] Generate and attach SBOM (Software Bill of Materials)
+- [ ] Add release notes template
+- [ ] Test: Release workflow on tag push
+- [ ] Test: Images available on ghcr.io
+- [ ] Test: Binaries download and run
+
+**Expected Duration**: 2 days
+
+### v0.4.0 Release Criteria
+
+**Must Have**:
+- ✅ Dockerfile builds production image (<100MB)
+- ✅ docker-compose.yml provides full test environment
+- ✅ CI pipeline runs all tests and checks
+- ✅ CI enforces code quality (tests, clippy, fmt)
+- ✅ Docker images pushed to container registry
+- ✅ Automated releases on git tags
+- ✅ Docker deployment documentation
+
+**Nice to Have**:
+- Multi-architecture builds (amd64, arm64)
+- Security scanning in CI (trivy, snyk)
+- Automated dependency updates (dependabot)
+- Performance regression testing in CI
+
+**Timeline**: 1-2 weeks after v0.3.0
+
+---
+
 ## v1.0.0 - First Stable Release 🎯 **FUTURE**
 
 **Goal**: Production-ready S3 proxy with caching
 
-### Phase 21: Memory Caching
+### Phase 25: Memory Caching
 
 **Tasks**:
 - [ ] Implement LRU cache for small files (<10MB)
@@ -283,7 +394,7 @@ let s3_request = build_get_object_request(&bucket, &key, &region);
 
 **Expected Duration**: 4-5 days
 
-### Phase 22: Cache Management
+### Phase 26: Cache Management
 
 **Tasks**:
 - [ ] Add cache invalidation API
@@ -295,7 +406,7 @@ let s3_request = build_get_object_request(&bucket, &key, &region);
 
 **Expected Duration**: 3-4 days
 
-### Phase 23: Advanced Features
+### Phase 27: Advanced Features
 
 **Optional enhancements based on user feedback**:
 - [ ] RS256/ES256 JWT algorithms

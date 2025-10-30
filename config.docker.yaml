@@ -1,0 +1,63 @@
+# Yatagarasu configuration for Docker Compose with MinIO
+# This configuration assumes MinIO is running in docker-compose
+
+server:
+  address: "0.0.0.0:8080"
+
+buckets:
+  # Public bucket - no authentication required
+  - name: "public-assets"
+    path_prefix: "/public"
+    s3:
+      bucket: "public-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"  # MinIO service name in docker-compose
+      access_key: "${AWS_ACCESS_KEY_PUBLIC}"
+      secret_key: "${AWS_SECRET_KEY_PUBLIC}"
+    auth:
+      enabled: false
+
+  # Private bucket - requires JWT authentication
+  - name: "private-data"
+    path_prefix: "/private"
+    s3:
+      bucket: "private-data"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY_PRIVATE}"
+      secret_key: "${AWS_SECRET_KEY_PRIVATE}"
+    auth:
+      enabled: true
+      jwt:
+        token_sources:
+          - type: "header"
+            name: "Authorization"
+            prefix: "Bearer "
+          - type: "query"
+            name: "token"
+        secret: "${JWT_SECRET}"
+        algorithm: "HS256"
+        claims_verification:
+          - claim: "role"
+            operator: "equals"
+            value: "admin"
+
+  # Products bucket - mixed public/private
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "products"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY_PUBLIC}"
+      secret_key: "${AWS_SECRET_KEY_PUBLIC}"
+    auth:
+      enabled: false
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

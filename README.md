@@ -21,13 +21,11 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 - ✅ S3 client with AWS Signature v4
 - ✅ 373 passing tests with 98.43% coverage
 
-**What's Coming Next** (Phase 12+):
-- 🚧 Pingora HTTP server integration
-- 🚧 Request handling pipeline
-- 🚧 Response streaming over HTTP
-- 🚧 Prometheus metrics endpoint
-- 🚧 Configuration hot reload
-- 🚧 Graceful shutdown
+**What's Coming Next**:
+- 🚧 **Phase 12-16** (v0.2.0): HTTP server integration (3-4 weeks)
+- 🚧 **Phase 17-20** (v0.3.0): Production features (metrics, hot reload, graceful shutdown)
+- 🚧 **Phase 21-24** (v0.4.0): Docker images and CI/CD automation
+- 🎯 **Phase 25-27** (v1.0.0): Caching layer and advanced features
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed analysis and [ROADMAP.md](ROADMAP.md) for implementation plan.
 
@@ -221,6 +219,14 @@ yatagarasu/
 - [ ] **Advanced Auth**: RS256/ES256 algorithms, token introspection
 - [ ] **Rate Limiting**: Per-client request throttling
 - [ ] **Multi-Region**: S3 failover across regions
+
+### 🐳 Docker & CI/CD (v0.4.0)
+
+- [ ] **Docker Image**: Multi-stage Dockerfile with minimal image size
+- [ ] **Docker Compose**: Full testing environment with MinIO
+- [ ] **GitHub Actions CI**: Automated testing, linting, coverage
+- [ ] **Automated Releases**: Multi-platform Docker images and binaries
+- [ ] **Container Registry**: Images published to ghcr.io
 
 ## Use Cases
 

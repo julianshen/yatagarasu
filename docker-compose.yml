@@ -1,0 +1,105 @@
+# Docker Compose setup for local testing with MinIO
+# Usage: docker-compose up
+
+version: '3.8'
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: yatagarasu-minio
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # MinIO Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+      - ./test-data:/test-data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-net
+
+  # MinIO setup - creates buckets and uploads test data
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to be ready...';
+      sleep 5;
+
+      echo 'Configuring MinIO client...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+
+      echo 'Creating test buckets...';
+      mc mb --ignore-existing myminio/public-assets;
+      mc mb --ignore-existing myminio/private-data;
+      mc mb --ignore-existing myminio/products;
+
+      echo 'Setting bucket policies...';
+      mc anonymous set public myminio/public-assets;
+
+      echo 'Uploading test files...';
+      echo 'Hello from public bucket!' | mc pipe myminio/public-assets/hello.txt;
+      echo 'Private data content' | mc pipe myminio/private-data/secret.txt;
+      echo 'Product information' | mc pipe myminio/products/info.json;
+
+      echo 'Creating large test file (10MB)...';
+      dd if=/dev/urandom of=/tmp/large.bin bs=1M count=10;
+      mc cp /tmp/large.bin myminio/public-assets/large.bin;
+
+      echo 'MinIO setup complete!';
+      echo 'MinIO Console: http://localhost:9001';
+      echo 'Username: minioadmin';
+      echo 'Password: minioadmin';
+      "
+    networks:
+      - yatagarasu-net
+
+  # Yatagarasu S3 Proxy (will be enabled once implemented)
+  # yatagarasu:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: yatagarasu-proxy
+  #   ports:
+  #     - "8080:8080"  # Proxy HTTP
+  #     - "9090:9090"  # Prometheus metrics
+  #   environment:
+  #     # Override config with environment variables
+  #     AWS_ACCESS_KEY_PUBLIC: minioadmin
+  #     AWS_SECRET_KEY_PUBLIC: minioadmin
+  #     AWS_ACCESS_KEY_PRIVATE: minioadmin
+  #     AWS_SECRET_KEY_PRIVATE: minioadmin
+  #     JWT_SECRET: your-secret-key-here
+  #     RUST_LOG: info
+  #   volumes:
+  #     - ./config.docker.yaml:/etc/yatagarasu/config.yaml:ro
+  #   depends_on:
+  #     minio:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   networks:
+  #     - yatagarasu-net
+
+networks:
+  yatagarasu-net:
+    driver: bridge
+
+volumes:
+  minio-data:
+    driver: local
