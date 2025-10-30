@@ -574,3 +574,36 @@ fn test_health_endpoint_response_time() {
         "Health endpoint took {}ms, expected < 10ms",
         duration.as_millis());
 }
+
+// Test: /health works before other endpoints are ready
+#[test]
+fn test_health_endpoint_works_early() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Create service immediately after server creation
+    // This simulates accessing health before other endpoints are initialized
+    let service = server.create_http_service().unwrap();
+
+    // Health endpoint should work immediately
+    let response = service.handle_request("GET", "/health");
+    assert!(response.is_ok());
+
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 200);
+
+    // Verify it returns proper JSON
+    let body = std::str::from_utf8(resp.body()).unwrap();
+    let json: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(json["status"], "ok");
+}

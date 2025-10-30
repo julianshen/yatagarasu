@@ -691,7 +691,7 @@ yatagarasu/
 - [x] Test: /health response includes JSON body with status
 - [x] Test: /health checks configuration is loaded
 - [x] Test: /health response time < 10ms
-- [ ] Test: /health works before other endpoints are ready
+- [x] Test: /health works before other endpoints are ready
 - [ ] Test: HEAD /health returns 200 without body
 
 ### Error Handling
