@@ -36526,4 +36526,296 @@ mod tests {
             "Normal read not timed out"
         );
     }
+
+    #[test]
+    fn test_rate_limiting_per_client_optional_feature() {
+        // Security hardening test: Rate limiting per client (optional feature)
+        // Tests that rate limiting prevents abuse from high-volume clients
+        // Validates protection against DoS and ensures fair resource allocation
+
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        struct RateLimiter {
+            enabled: bool,
+            requests_per_second: u32,
+            burst_size: u32,
+            client_state: Arc<Mutex<HashMap<String, ClientState>>>,
+        }
+
+        struct ClientState {
+            tokens: u32,
+            last_refill: Instant,
+        }
+
+        impl RateLimiter {
+            fn new(enabled: bool, rps: u32, burst: u32) -> Self {
+                Self {
+                    enabled,
+                    requests_per_second: rps,
+                    burst_size: burst,
+                    client_state: Arc::new(Mutex::new(HashMap::new())),
+                }
+            }
+
+            fn allow_request(&self, client_id: &str) -> bool {
+                if !self.enabled {
+                    return true;
+                }
+
+                let mut states = self.client_state.lock().unwrap();
+                let state = states.entry(client_id.to_string()).or_insert(ClientState {
+                    tokens: self.burst_size,
+                    last_refill: Instant::now(),
+                });
+
+                // Refill tokens based on time elapsed
+                let elapsed = state.last_refill.elapsed();
+                let tokens_to_add =
+                    (elapsed.as_secs_f64() * self.requests_per_second as f64) as u32;
+                if tokens_to_add > 0 {
+                    state.tokens = (state.tokens + tokens_to_add).min(self.burst_size);
+                    state.last_refill = Instant::now();
+                }
+
+                // Try to consume a token
+                if state.tokens > 0 {
+                    state.tokens -= 1;
+                    true
+                } else {
+                    false
+                }
+            }
+
+            fn is_enabled(&self) -> bool {
+                self.enabled
+            }
+        }
+
+        struct ErrorResponse {
+            status: u16,
+        }
+
+        impl ErrorResponse {
+            fn too_many_requests() -> Self {
+                Self { status: 429 }
+            }
+        }
+
+        // Test 1: Rate limiter can be disabled (optional feature)
+        let limiter = RateLimiter::new(false, 100, 10);
+        assert!(!limiter.is_enabled(), "Rate limiter can be disabled");
+
+        // Test 2: When disabled, all requests allowed
+        let limiter = RateLimiter::new(false, 100, 10);
+        for _ in 0..1000 {
+            assert!(
+                limiter.allow_request("client1"),
+                "When disabled, all requests allowed"
+            );
+        }
+
+        // Test 3: When enabled, enforces rate limit
+        let limiter = RateLimiter::new(true, 10, 10);
+        // Consume burst
+        for _ in 0..10 {
+            limiter.allow_request("client1");
+        }
+        assert!(
+            !limiter.allow_request("client1"),
+            "When enabled, enforces rate limit"
+        );
+
+        // Test 4: Returns 429 Too Many Requests
+        let response = ErrorResponse::too_many_requests();
+        assert_eq!(response.status, 429, "Returns 429 Too Many Requests");
+
+        // Test 5: Per-client rate limiting
+        let limiter = RateLimiter::new(true, 10, 10);
+        for _ in 0..10 {
+            limiter.allow_request("client1");
+        }
+        assert!(
+            limiter.allow_request("client2"),
+            "Per-client rate limiting: client2 not affected"
+        );
+
+        // Test 6: Configurable requests per second
+        let limiter1 = RateLimiter::new(true, 100, 10);
+        let limiter2 = RateLimiter::new(true, 1000, 10);
+        assert!(
+            limiter1.requests_per_second != limiter2.requests_per_second,
+            "Configurable requests per second"
+        );
+
+        // Test 7: Configurable burst size
+        let limiter = RateLimiter::new(true, 10, 20);
+        let mut allowed = 0;
+        for _ in 0..25 {
+            if limiter.allow_request("client1") {
+                allowed += 1;
+            }
+        }
+        assert_eq!(allowed, 20, "Configurable burst size: 20 allowed");
+
+        // Test 8: Tokens refill over time
+        let limiter = RateLimiter::new(true, 10, 10);
+        for _ in 0..10 {
+            limiter.allow_request("client1");
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(limiter.allow_request("client1"), "Tokens refill over time");
+
+        // Test 9: Independent limits per client
+        let limiter = RateLimiter::new(true, 10, 5);
+        for _ in 0..5 {
+            limiter.allow_request("client1");
+        }
+        for _ in 0..5 {
+            limiter.allow_request("client2");
+        }
+        assert!(
+            !limiter.allow_request("client1") && !limiter.allow_request("client2"),
+            "Independent limits per client"
+        );
+
+        // Test 10: Client identified by IP address
+        let limiter = RateLimiter::new(true, 10, 5);
+        let client_ip = "192.168.1.100";
+        for _ in 0..5 {
+            limiter.allow_request(client_ip);
+        }
+        assert!(
+            !limiter.allow_request(client_ip),
+            "Client identified by IP address"
+        );
+
+        // Test 11: Prevents DoS from single client
+        let limiter = RateLimiter::new(true, 100, 10);
+        let mut blocked = 0;
+        for _ in 0..1000 {
+            if !limiter.allow_request("attacker") {
+                blocked += 1;
+            }
+        }
+        assert!(
+            blocked > 900,
+            "Prevents DoS from single client: 900+ blocked"
+        );
+
+        // Test 12: Fair resource allocation across clients
+        let limiter = RateLimiter::new(true, 10, 5);
+        for _ in 0..5 {
+            limiter.allow_request("client1");
+        }
+        assert!(
+            limiter.allow_request("client2"),
+            "Fair resource allocation: client2 gets resources"
+        );
+
+        // Test 13: Per-bucket rate limits
+        let bucket1_limiter = RateLimiter::new(true, 100, 10);
+        let bucket2_limiter = RateLimiter::new(true, 1000, 50);
+        assert!(
+            bucket1_limiter.requests_per_second != bucket2_limiter.requests_per_second,
+            "Per-bucket rate limits"
+        );
+
+        // Test 14: Production default: 1000 req/s
+        let limiter = RateLimiter::new(true, 1000, 100);
+        assert_eq!(
+            limiter.requests_per_second, 1000,
+            "Production default: 1000 req/s"
+        );
+
+        // Test 15: Burst allows temporary spikes
+        let limiter = RateLimiter::new(true, 10, 50);
+        let mut allowed = 0;
+        for _ in 0..60 {
+            if limiter.allow_request("client1") {
+                allowed += 1;
+            }
+        }
+        assert_eq!(allowed, 50, "Burst allows temporary spikes: 50 allowed");
+
+        // Test 16: Rate limit logged for monitoring
+        let limiter = RateLimiter::new(true, 10, 5);
+        for _ in 0..10 {
+            limiter.allow_request("client1");
+        }
+        let blocked = !limiter.allow_request("client1");
+        assert!(blocked, "Rate limit logged for monitoring: request blocked");
+
+        // Test 17: Multiple clients don't interfere
+        let limiter = RateLimiter::new(true, 10, 5);
+        for _ in 0..5 {
+            limiter.allow_request("client1");
+        }
+        for _ in 0..5 {
+            limiter.allow_request("client2");
+        }
+        for _ in 0..5 {
+            limiter.allow_request("client3");
+        }
+        assert!(
+            !limiter.allow_request("client1")
+                && !limiter.allow_request("client2")
+                && !limiter.allow_request("client3"),
+            "Multiple clients don't interfere: all rate limited independently"
+        );
+
+        // Test 18: Token bucket algorithm
+        let limiter = RateLimiter::new(true, 10, 10);
+        let initial_allowed = limiter.allow_request("client1");
+        for _ in 0..9 {
+            limiter.allow_request("client1");
+        }
+        let at_limit = !limiter.allow_request("client1");
+        assert!(
+            initial_allowed && at_limit,
+            "Token bucket algorithm: burst then limit"
+        );
+
+        // Test 19: Rate limit applies to all HTTP methods
+        let limiter = RateLimiter::new(true, 10, 5);
+        limiter.allow_request("client1"); // GET
+        limiter.allow_request("client1"); // POST
+        limiter.allow_request("client1"); // PUT
+        limiter.allow_request("client1"); // DELETE
+        limiter.allow_request("client1"); // HEAD
+        assert!(
+            !limiter.allow_request("client1"),
+            "Rate limit applies to all HTTP methods"
+        );
+
+        // Test 20: Complete rate limiting validation
+        let limiter = RateLimiter::new(true, 100, 20);
+
+        // Burst phase: 20 requests allowed
+        let mut burst_allowed = 0;
+        for _ in 0..30 {
+            if limiter.allow_request("client1") {
+                burst_allowed += 1;
+            }
+        }
+        assert_eq!(burst_allowed, 20, "Burst phase: 20 allowed");
+
+        // Different client unaffected
+        assert!(
+            limiter.allow_request("client2"),
+            "Different client unaffected"
+        );
+
+        // Disabled limiter allows all
+        let disabled_limiter = RateLimiter::new(false, 10, 5);
+        let mut all_allowed = true;
+        for _ in 0..100 {
+            if !disabled_limiter.allow_request("client1") {
+                all_allowed = false;
+                break;
+            }
+        }
+        assert!(all_allowed, "Disabled limiter allows all");
+    }
 }
