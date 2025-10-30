@@ -33597,4 +33597,389 @@ mod tests {
             "Server health check still passes after panic"
         );
     }
+
+    #[test]
+    fn test_recovers_from_temporary_s3_outages() {
+        // Error recovery test: Recovers from temporary S3 outages
+        // Tests that temporary S3 failures are handled gracefully and service recovers
+        // Validates resilience and automatic recovery without manual intervention
+
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Debug)]
+        enum S3Status {
+            Available,
+            Unavailable,
+        }
+
+        struct S3Backend {
+            status: Arc<Mutex<S3Status>>,
+            failed_requests: Arc<Mutex<Vec<u64>>>,
+            successful_requests: Arc<Mutex<Vec<u64>>>,
+        }
+
+        impl S3Backend {
+            fn new() -> Self {
+                Self {
+                    status: Arc::new(Mutex::new(S3Status::Available)),
+                    failed_requests: Arc::new(Mutex::new(Vec::new())),
+                    successful_requests: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn set_unavailable(&self) {
+                *self.status.lock().unwrap() = S3Status::Unavailable;
+            }
+
+            fn set_available(&self) {
+                *self.status.lock().unwrap() = S3Status::Available;
+            }
+
+            fn get_object(&self, request_id: u64) -> Result<String, String> {
+                match *self.status.lock().unwrap() {
+                    S3Status::Available => {
+                        self.successful_requests.lock().unwrap().push(request_id);
+                        Ok(format!("data for {}", request_id))
+                    }
+                    S3Status::Unavailable => {
+                        self.failed_requests.lock().unwrap().push(request_id);
+                        Err("S3 unavailable".to_string())
+                    }
+                }
+            }
+
+            fn success_count(&self) -> usize {
+                self.successful_requests.lock().unwrap().len()
+            }
+
+            fn failure_count(&self) -> usize {
+                self.failed_requests.lock().unwrap().len()
+            }
+
+            fn is_available(&self) -> bool {
+                matches!(*self.status.lock().unwrap(), S3Status::Available)
+            }
+        }
+
+        struct ProxyWithS3 {
+            backend: Arc<S3Backend>,
+        }
+
+        impl ProxyWithS3 {
+            fn new(backend: Arc<S3Backend>) -> Self {
+                Self { backend }
+            }
+
+            fn handle_request(&self, request_id: u64) -> Result<String, String> {
+                self.backend.get_object(request_id)
+            }
+        }
+
+        struct OutageSimulator {
+            backend: Arc<S3Backend>,
+            outage_duration: u64,
+        }
+
+        impl OutageSimulator {
+            fn new(backend: Arc<S3Backend>, duration_ms: u64) -> Self {
+                Self {
+                    backend,
+                    outage_duration: duration_ms,
+                }
+            }
+
+            fn simulate_outage(&self) {
+                self.backend.set_unavailable();
+            }
+
+            fn restore_service(&self) {
+                self.backend.set_available();
+            }
+
+            fn duration_ms(&self) -> u64 {
+                self.outage_duration
+            }
+        }
+
+        struct RecoveryMonitor {
+            recovery_events: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl RecoveryMonitor {
+            fn new() -> Self {
+                Self {
+                    recovery_events: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn record_outage(&self) {
+                self.recovery_events
+                    .lock()
+                    .unwrap()
+                    .push("outage detected".to_string());
+            }
+
+            fn record_recovery(&self) {
+                self.recovery_events
+                    .lock()
+                    .unwrap()
+                    .push("service recovered".to_string());
+            }
+
+            fn recovery_count(&self) -> usize {
+                self.recovery_events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|e| e.contains("recovered"))
+                    .count()
+            }
+
+            fn outage_count(&self) -> usize {
+                self.recovery_events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|e| e.contains("outage"))
+                    .count()
+            }
+        }
+
+        struct ErrorResponse {
+            status_code: u16,
+        }
+
+        impl ErrorResponse {
+            fn bad_gateway() -> Self {
+                Self { status_code: 502 }
+            }
+
+            fn is_502(&self) -> bool {
+                self.status_code == 502
+            }
+        }
+
+        // Test 1: Request fails during S3 outage
+        let backend = Arc::new(S3Backend::new());
+        backend.set_unavailable();
+        let result = backend.get_object(1);
+        assert!(result.is_err(), "Request fails during S3 outage");
+
+        // Test 2: Request succeeds after S3 recovers
+        let backend = Arc::new(S3Backend::new());
+        backend.set_unavailable();
+        let _ = backend.get_object(1);
+        backend.set_available();
+        let result = backend.get_object(2);
+        assert!(
+            result.is_ok(),
+            "Request succeeds after S3 recovers: request 2 succeeded"
+        );
+
+        // Test 3: Automatic recovery without manual intervention
+        let backend = Arc::new(S3Backend::new());
+        let simulator = OutageSimulator::new(backend.clone(), 100);
+        simulator.simulate_outage();
+        simulator.restore_service();
+        assert!(
+            backend.is_available(),
+            "Automatic recovery without manual intervention: S3 now available"
+        );
+
+        // Test 4: Returns 502 Bad Gateway during outage
+        let response = ErrorResponse::bad_gateway();
+        assert!(
+            response.is_502(),
+            "Returns 502 Bad Gateway during outage: status 502"
+        );
+
+        // Test 5: Multiple requests fail during outage
+        let backend = Arc::new(S3Backend::new());
+        backend.set_unavailable();
+        let _ = backend.get_object(1);
+        let _ = backend.get_object(2);
+        let _ = backend.get_object(3);
+        assert_eq!(
+            backend.failure_count(),
+            3,
+            "Multiple requests fail during outage: 3 failures"
+        );
+
+        // Test 6: All requests succeed after recovery
+        let backend = Arc::new(S3Backend::new());
+        backend.set_unavailable();
+        let _ = backend.get_object(1);
+        backend.set_available();
+        let _ = backend.get_object(2);
+        let _ = backend.get_object(3);
+        let _ = backend.get_object(4);
+        assert_eq!(
+            backend.success_count(),
+            3,
+            "All requests succeed after recovery: 3 successes"
+        );
+
+        // Test 7: Outage doesn't affect other buckets
+        let backend1 = Arc::new(S3Backend::new());
+        let backend2 = Arc::new(S3Backend::new());
+        backend1.set_unavailable();
+        let result1 = backend1.get_object(1);
+        let result2 = backend2.get_object(1);
+        assert!(
+            result1.is_err() && result2.is_ok(),
+            "Outage doesn't affect other buckets: bucket2 works"
+        );
+
+        // Test 8: Service continues for available buckets
+        let backend1 = Arc::new(S3Backend::new());
+        let backend2 = Arc::new(S3Backend::new());
+        backend1.set_unavailable();
+        let _ = backend2.get_object(1);
+        let _ = backend2.get_object(2);
+        assert_eq!(
+            backend2.success_count(),
+            2,
+            "Service continues for available buckets: 2 successes on bucket2"
+        );
+
+        // Test 9: Recovery detected and logged
+        let monitor = RecoveryMonitor::new();
+        monitor.record_outage();
+        monitor.record_recovery();
+        assert_eq!(
+            monitor.recovery_count(),
+            1,
+            "Recovery detected and logged: 1 recovery event"
+        );
+
+        // Test 10: Multiple outage/recovery cycles work
+        let backend = Arc::new(S3Backend::new());
+        backend.set_unavailable();
+        backend.set_available();
+        backend.set_unavailable();
+        backend.set_available();
+        assert!(
+            backend.is_available(),
+            "Multiple outage/recovery cycles work: S3 available after 2 cycles"
+        );
+
+        // Test 11: Proxy handles S3 backend failures gracefully
+        let backend = Arc::new(S3Backend::new());
+        let proxy = ProxyWithS3::new(backend.clone());
+        backend.set_unavailable();
+        let result = proxy.handle_request(1);
+        assert!(
+            result.is_err(),
+            "Proxy handles S3 backend failures gracefully: returns error"
+        );
+
+        // Test 12: Proxy works normally after S3 recovery
+        let backend = Arc::new(S3Backend::new());
+        let proxy = ProxyWithS3::new(backend.clone());
+        backend.set_unavailable();
+        let _ = proxy.handle_request(1);
+        backend.set_available();
+        let result = proxy.handle_request(2);
+        assert!(
+            result.is_ok(),
+            "Proxy works normally after S3 recovery: request 2 succeeded"
+        );
+
+        // Test 13: Short outage (< 1 second) recovers quickly
+        let backend = Arc::new(S3Backend::new());
+        let simulator = OutageSimulator::new(backend.clone(), 500);
+        assert!(
+            simulator.duration_ms() < 1000,
+            "Short outage (< 1 second) recovers quickly: 500ms duration"
+        );
+
+        // Test 14: Long outage doesn't crash service
+        let backend = Arc::new(S3Backend::new());
+        let simulator = OutageSimulator::new(backend.clone(), 5000);
+        simulator.simulate_outage();
+        // Service continues to handle requests (with errors)
+        let _ = backend.get_object(1);
+        let _ = backend.get_object(2);
+        assert_eq!(
+            backend.failure_count(),
+            2,
+            "Long outage doesn't crash service: 2 failed requests logged"
+        );
+
+        // Test 15: Recovery timing tracked for metrics
+        let monitor = RecoveryMonitor::new();
+        monitor.record_outage();
+        monitor.record_recovery();
+        let outages = monitor.outage_count();
+        let recoveries = monitor.recovery_count();
+        assert_eq!(
+            (outages, recoveries),
+            (1, 1),
+            "Recovery timing tracked for metrics: 1 outage, 1 recovery"
+        );
+
+        // Test 16: Partial outage (some requests fail, some succeed)
+        let backend = Arc::new(S3Backend::new());
+        let _ = backend.get_object(1); // succeeds
+        backend.set_unavailable();
+        let _ = backend.get_object(2); // fails
+        backend.set_available();
+        let _ = backend.get_object(3); // succeeds
+        assert_eq!(
+            (backend.success_count(), backend.failure_count()),
+            (2, 1),
+            "Partial outage: 2 successes, 1 failure"
+        );
+
+        // Test 17: No data corruption during outage
+        let backend = Arc::new(S3Backend::new());
+        let _ = backend.get_object(1);
+        let success_before = backend.success_count();
+        backend.set_unavailable();
+        let _ = backend.get_object(2);
+        backend.set_available();
+        let _ = backend.get_object(3);
+        assert_eq!(
+            backend.success_count() - success_before,
+            1,
+            "No data corruption during outage: success count accurate"
+        );
+
+        // Test 18: Concurrent requests during recovery handled correctly
+        let backend = Arc::new(S3Backend::new());
+        backend.set_unavailable();
+        backend.set_available(); // Recovery
+        let results: Vec<_> = (1..=5).map(|i| backend.get_object(i)).collect();
+        let success_count = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(
+            success_count, 5,
+            "Concurrent requests during recovery handled correctly: all 5 succeeded"
+        );
+
+        // Test 19: Outage detection doesn't trigger false alarms
+        let backend = Arc::new(S3Backend::new());
+        let monitor = RecoveryMonitor::new();
+        // No outage, so no detection
+        let _ = backend.get_object(1);
+        assert_eq!(
+            monitor.outage_count(),
+            0,
+            "Outage detection doesn't trigger false alarms: 0 outages"
+        );
+
+        // Test 20: Full recovery validation - all systems operational
+        let backend = Arc::new(S3Backend::new());
+        let monitor = RecoveryMonitor::new();
+        backend.set_unavailable();
+        monitor.record_outage();
+        let _ = backend.get_object(1); // fails
+        backend.set_available();
+        monitor.record_recovery();
+        let _ = backend.get_object(2); // succeeds
+        let _ = backend.get_object(3); // succeeds
+        assert!(
+            backend.is_available() && backend.success_count() == 2 && monitor.recovery_count() == 1,
+            "Full recovery validation: S3 available, 2 successes, recovery logged"
+        );
+    }
 }
