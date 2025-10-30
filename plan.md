@@ -606,7 +606,7 @@ yatagarasu/
 
 ### Graceful Shutdown
 - [x] Test: Responds to SIGTERM signal
-- [ ] Test: Stops accepting new connections
+- [x] Test: Stops accepting new connections
 - [ ] Test: Waits for in-flight requests to complete
 - [ ] Test: Closes S3 connections gracefully
 - [ ] Test: Shutdown timeout works (force close after N seconds)

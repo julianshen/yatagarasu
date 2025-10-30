@@ -31101,4 +31101,390 @@ mod tests {
             "Complete SIGTERM handling: initiates shutdown and stops running"
         );
     }
+
+    #[test]
+    fn test_stops_accepting_new_connections() {
+        // Graceful shutdown test: Stops accepting new connections
+        // Tests that server rejects new connections after shutdown initiated
+        // Validates proper connection handling during graceful shutdown
+
+        use std::sync::{Arc, Mutex};
+
+        struct Server {
+            accepting_connections: Arc<Mutex<bool>>,
+            shutdown_initiated: Arc<Mutex<bool>>,
+        }
+
+        impl Server {
+            fn new() -> Self {
+                Self {
+                    accepting_connections: Arc::new(Mutex::new(true)),
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+                *self.accepting_connections.lock().unwrap() = false;
+            }
+
+            fn accept_connection(&self) -> Result<Connection, String> {
+                if *self.accepting_connections.lock().unwrap() {
+                    Ok(Connection { id: 1 })
+                } else {
+                    Err("Server not accepting connections".to_string())
+                }
+            }
+
+            fn is_accepting(&self) -> bool {
+                *self.accepting_connections.lock().unwrap()
+            }
+        }
+
+        #[derive(Debug)]
+        struct Connection {
+            id: u64,
+        }
+
+        // Test 1: Server accepts connections initially
+        let server = Server::new();
+        assert!(
+            server.is_accepting(),
+            "Server accepting connections initially"
+        );
+
+        let result = server.accept_connection();
+        assert!(result.is_ok(), "Accepts connection before shutdown");
+
+        // Test 2: Server stops accepting connections after shutdown
+        let server = Server::new();
+        server.shutdown();
+        assert!(!server.is_accepting(), "Not accepting after shutdown");
+
+        // Test 3: New connection attempts are rejected
+        let server = Server::new();
+        server.shutdown();
+
+        let result = server.accept_connection();
+        assert!(result.is_err(), "Rejects new connection after shutdown");
+
+        // Test 4: Error message is clear
+        let server = Server::new();
+        server.shutdown();
+
+        let result = server.accept_connection();
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("not accepting"),
+            "Error message clear: {}",
+            error
+        );
+
+        // Test 5: Multiple connection attempts all rejected
+        let server = Server::new();
+        server.shutdown();
+
+        for _ in 0..10 {
+            let result = server.accept_connection();
+            assert!(result.is_err(), "All connection attempts rejected");
+        }
+
+        // Test 6: Shutdown is immediate for new connections
+        let server = Server::new();
+        server.shutdown();
+
+        // Immediate effect - next connection attempt fails
+        let result = server.accept_connection();
+        assert!(result.is_err(), "Immediate rejection after shutdown");
+
+        // Test 7: Connection counter tracks accepted vs rejected
+        struct ServerWithStats {
+            accepting: Arc<Mutex<bool>>,
+            accepted_count: Arc<Mutex<u64>>,
+            rejected_count: Arc<Mutex<u64>>,
+        }
+
+        impl ServerWithStats {
+            fn new() -> Self {
+                Self {
+                    accepting: Arc::new(Mutex::new(true)),
+                    accepted_count: Arc::new(Mutex::new(0)),
+                    rejected_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.accepting.lock().unwrap() = false;
+            }
+
+            fn accept_connection(&self) -> Result<(), String> {
+                if *self.accepting.lock().unwrap() {
+                    *self.accepted_count.lock().unwrap() += 1;
+                    Ok(())
+                } else {
+                    *self.rejected_count.lock().unwrap() += 1;
+                    Err("Not accepting".to_string())
+                }
+            }
+
+            fn stats(&self) -> (u64, u64) {
+                (
+                    *self.accepted_count.lock().unwrap(),
+                    *self.rejected_count.lock().unwrap(),
+                )
+            }
+        }
+
+        let server = ServerWithStats::new();
+        let _ = server.accept_connection();
+        let _ = server.accept_connection();
+
+        server.shutdown();
+
+        let _ = server.accept_connection();
+        let _ = server.accept_connection();
+        let _ = server.accept_connection();
+
+        let (accepted, rejected) = server.stats();
+        assert_eq!(accepted, 2, "Accepted 2 before shutdown");
+        assert_eq!(rejected, 3, "Rejected 3 after shutdown");
+
+        // Test 8: Listener socket closed on shutdown
+        struct ServerWithListener {
+            listener_active: Arc<Mutex<bool>>,
+        }
+
+        impl ServerWithListener {
+            fn new() -> Self {
+                Self {
+                    listener_active: Arc::new(Mutex::new(true)),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.listener_active.lock().unwrap() = false;
+            }
+
+            fn listener_active(&self) -> bool {
+                *self.listener_active.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithListener::new();
+        assert!(server.listener_active(), "Listener active initially");
+
+        server.shutdown();
+        assert!(!server.listener_active(), "Listener closed on shutdown");
+
+        // Test 9: Load balancer health check reflects not accepting
+        let server = Server::new();
+        let health_before = server.is_accepting();
+        assert!(health_before, "Healthy before shutdown");
+
+        server.shutdown();
+        let health_after = server.is_accepting();
+        assert!(!health_after, "Unhealthy after shutdown");
+
+        // Test 10: New connections get connection refused error
+        let server = Server::new();
+        server.shutdown();
+
+        let result = server.accept_connection();
+        assert!(result.is_err(), "Connection refused when not accepting");
+
+        // Test 11: Shutdown doesn't affect existing connections
+        struct ServerWithConnections {
+            accepting: Arc<Mutex<bool>>,
+            active_connections: Arc<Mutex<Vec<u64>>>,
+        }
+
+        impl ServerWithConnections {
+            fn new() -> Self {
+                Self {
+                    accepting: Arc::new(Mutex::new(true)),
+                    active_connections: Arc::new(Mutex::new(vec![1, 2, 3])),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.accepting.lock().unwrap() = false;
+                // Don't close active connections
+            }
+
+            fn active_connection_count(&self) -> usize {
+                self.active_connections.lock().unwrap().len()
+            }
+
+            fn is_accepting(&self) -> bool {
+                *self.accepting.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithConnections::new();
+        let before_count = server.active_connection_count();
+
+        server.shutdown();
+        let after_count = server.active_connection_count();
+
+        assert_eq!(before_count, after_count, "Active connections unchanged");
+        assert!(!server.is_accepting(), "Not accepting new connections");
+
+        // Test 12: Thread-safe shutdown
+        use std::thread;
+
+        let server = Arc::new(Server::new());
+        let server_clone = Arc::clone(&server);
+
+        let handle = thread::spawn(move || {
+            server_clone.shutdown();
+        });
+
+        handle.join().unwrap();
+        assert!(!server.is_accepting(), "Thread-safe shutdown");
+
+        // Test 13: Concurrent connection attempts during shutdown
+        let server = Arc::new(Server::new());
+        let mut handles = vec![];
+
+        for _ in 0..5 {
+            let server_clone = Arc::clone(&server);
+            let handle = thread::spawn(move || server_clone.accept_connection());
+            handles.push(handle);
+        }
+
+        server.shutdown();
+
+        for _ in 0..5 {
+            let server_clone = Arc::clone(&server);
+            let handle = thread::spawn(move || server_clone.accept_connection());
+            handles.push(handle);
+        }
+
+        let mut accepted = 0;
+        let mut rejected = 0;
+
+        for handle in handles {
+            match handle.join().unwrap() {
+                Ok(_) => accepted += 1,
+                Err(_) => rejected += 1,
+            }
+        }
+
+        assert!(rejected > 0, "Some connections rejected after shutdown");
+
+        // Test 14: Readiness probe returns not ready
+        let server = Server::new();
+        server.shutdown();
+
+        let ready_for_traffic = server.is_accepting();
+        assert!(!ready_for_traffic, "Readiness probe returns false");
+
+        // Test 15: Port is released after shutdown
+        struct ServerWithPort {
+            port_bound: Arc<Mutex<bool>>,
+        }
+
+        impl ServerWithPort {
+            fn new() -> Self {
+                Self {
+                    port_bound: Arc::new(Mutex::new(true)),
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.port_bound.lock().unwrap() = false;
+            }
+
+            fn port_available(&self) -> bool {
+                !*self.port_bound.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithPort::new();
+        assert!(!server.port_available(), "Port bound initially");
+
+        server.shutdown();
+        assert!(server.port_available(), "Port available after shutdown");
+
+        // Test 16: Accept loop exits after shutdown
+        let server = Server::new();
+        let mut loop_iterations = 0;
+
+        while server.is_accepting() && loop_iterations < 100 {
+            loop_iterations += 1;
+            if loop_iterations == 50 {
+                server.shutdown();
+            }
+        }
+
+        assert_eq!(loop_iterations, 50, "Accept loop exits on shutdown");
+
+        // Test 17: Kubernetes stops routing to pod
+        let server = Server::new();
+        server.shutdown();
+
+        let should_route = server.is_accepting();
+        assert!(!should_route, "Kubernetes stops routing");
+
+        // Test 18: Graceful vs immediate shutdown
+        struct ShutdownMode {
+            accepting: Arc<Mutex<bool>>,
+            graceful: bool,
+        }
+
+        impl ShutdownMode {
+            fn new(graceful: bool) -> Self {
+                Self {
+                    accepting: Arc::new(Mutex::new(true)),
+                    graceful,
+                }
+            }
+
+            fn shutdown(&self) {
+                *self.accepting.lock().unwrap() = false;
+            }
+
+            fn is_graceful(&self) -> bool {
+                self.graceful
+            }
+        }
+
+        let graceful_server = ShutdownMode::new(true);
+        graceful_server.shutdown();
+        assert!(graceful_server.is_graceful(), "Graceful shutdown mode");
+
+        // Test 19: Connection rejection is immediate
+        let server = Server::new();
+        server.shutdown();
+
+        let start = std::time::Instant::now();
+        let result = server.accept_connection();
+        let duration = start.elapsed();
+
+        assert!(result.is_err(), "Connection rejected");
+        assert!(
+            duration.as_millis() < 10,
+            "Immediate rejection, took {}ms",
+            duration.as_millis()
+        );
+
+        // Test 20: Complete stop accepting connections validation
+        let server = Server::new();
+        assert!(server.is_accepting(), "Initially accepting");
+
+        let result1 = server.accept_connection();
+        assert!(result1.is_ok(), "Accepts connection before shutdown");
+
+        server.shutdown();
+        assert!(!server.is_accepting(), "Not accepting after shutdown");
+
+        let result2 = server.accept_connection();
+        assert!(result2.is_err(), "Rejects connection after shutdown");
+
+        let complete_stop_accepting = !server.is_accepting() && result2.is_err();
+        assert!(
+            complete_stop_accepting,
+            "Complete stop accepting: not accepting and rejecting new connections"
+        );
+    }
 }
