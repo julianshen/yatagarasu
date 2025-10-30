@@ -540,3 +540,37 @@ fn test_health_endpoint_checks_configuration() {
     assert!(json.get("config_loaded").is_some());
     assert_eq!(json["config_loaded"], true);
 }
+
+// Test: /health response time < 10ms
+#[test]
+fn test_health_endpoint_response_time() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+    use std::time::Instant;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Measure response time
+    let start = Instant::now();
+    let response = service.handle_request("GET", "/health");
+    let duration = start.elapsed();
+
+    // Verify response succeeded
+    assert!(response.is_ok());
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 200);
+
+    // Response time should be less than 10ms
+    assert!(duration.as_millis() < 10,
+        "Health endpoint took {}ms, expected < 10ms",
+        duration.as_millis());
+}
