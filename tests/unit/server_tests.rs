@@ -58,3 +58,36 @@ buckets: []
     assert_eq!(server_config.address, "127.0.0.1:8080");
     assert_eq!(server_config.threads, 4); // Default value
 }
+
+// Test: Can initialize Pingora Server instance
+#[test]
+fn test_can_initialize_pingora_server() {
+    use yatagarasu::server::YatagarasuServer;
+
+    // Create server configuration
+    let config = ServerConfig::new("127.0.0.1:0".to_string()); // Port 0 = auto-assign
+
+    // Initialize server
+    let server_result = YatagarasuServer::new(config);
+
+    // Should successfully create server
+    assert!(server_result.is_ok());
+
+    let server = server_result.unwrap();
+    assert!(server.config().address.contains("127.0.0.1"));
+}
+
+// Test: Server configuration is accessible after creation
+#[test]
+fn test_server_config_accessible() {
+    use yatagarasu::server::YatagarasuServer;
+
+    let config = ServerConfig::new("0.0.0.0:8080".to_string());
+    let address = config.address.clone();
+
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Should be able to access configuration
+    assert_eq!(server.config().address, address);
+    assert_eq!(server.config().threads, 4);
+}

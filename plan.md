@@ -670,7 +670,7 @@ yatagarasu/
 ### Server Initialization
 - [x] Test: Can add Pingora dependency to Cargo.toml
 - [x] Test: Can create ServerConfig struct
-- [ ] Test: Can initialize Pingora Server instance
+- [x] Test: Can initialize Pingora Server instance
 - [ ] Test: Server binds to configured address (from config.yaml)
 - [ ] Test: Server starts without errors with valid configuration
 - [ ] Test: Server fails with clear error on invalid address (e.g., port in use)

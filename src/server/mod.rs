@@ -1,6 +1,8 @@
 // Server module - Pingora HTTP server setup and configuration
 
 use crate::config::Config;
+use pingora::server::configuration::Opt as ServerOpt;
+use std::sync::Arc;
 
 /// Configuration for the HTTP server
 #[derive(Debug, Clone)]
@@ -9,6 +11,12 @@ pub struct ServerConfig {
     pub address: String,
     /// Number of worker threads
     pub threads: usize,
+}
+
+/// Yatagarasu HTTP Server wrapper around Pingora
+pub struct YatagarasuServer {
+    config: ServerConfig,
+    server_opt: ServerOpt,
 }
 
 impl ServerConfig {
@@ -29,6 +37,34 @@ impl ServerConfig {
             address,
             threads: 4, // TODO: Add threads configuration to Config
         }
+    }
+}
+
+impl YatagarasuServer {
+    /// Create a new YatagarasuServer instance
+    pub fn new(config: ServerConfig) -> Result<Self, String> {
+        // Create Pingora server options
+        let mut server_opt = ServerOpt::default();
+        server_opt.upgrade = false; // Disable graceful upgrade for now
+        server_opt.daemon = false; // Don't daemonize
+        server_opt.nocapture = false; // Don't capture stdout/stderr
+        server_opt.test = false; // Not in test mode
+        server_opt.conf = None; // No config file for now
+
+        Ok(Self {
+            config,
+            server_opt,
+        })
+    }
+
+    /// Get the server configuration
+    pub fn config(&self) -> &ServerConfig {
+        &self.config
+    }
+
+    /// Get the Pingora server options
+    pub fn server_opt(&self) -> &ServerOpt {
+        &self.server_opt
     }
 }
 
