@@ -732,3 +732,46 @@ fn test_invalid_http_methods_return_405() {
         );
     }
 }
+
+// Test: Malformed requests return 400 Bad Request
+#[test]
+fn test_malformed_requests_return_400() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Test empty method
+    let response = service.handle_request("", "/health");
+    assert!(response.is_ok());
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 400, "Empty method should return 400 Bad Request");
+
+    // Test empty path
+    let response2 = service.handle_request("GET", "");
+    assert!(response2.is_ok());
+    let resp2 = response2.unwrap();
+    assert_eq!(resp2.status_code(), 400, "Empty path should return 400 Bad Request");
+
+    // Test path without leading slash
+    let response3 = service.handle_request("GET", "health");
+    assert!(response3.is_ok());
+    let resp3 = response3.unwrap();
+    assert_eq!(resp3.status_code(), 400, "Path without leading slash should return 400 Bad Request");
+
+    // Test excessively long path (> 8192 bytes)
+    let long_path = format!("/{}", "a".repeat(8200));
+    let response4 = service.handle_request("GET", &long_path);
+    assert!(response4.is_ok());
+    let resp4 = response4.unwrap();
+    assert_eq!(resp4.status_code(), 400, "Excessively long path should return 400 Bad Request");
+}

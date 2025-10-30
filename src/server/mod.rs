@@ -128,6 +128,23 @@ impl HttpService {
 
     /// Handle an HTTP request and return a response
     pub fn handle_request(&self, method: &str, path: &str) -> Result<HttpResponse, String> {
+        // Validate request parameters (return 400 for malformed requests)
+        if method.is_empty() {
+            return Ok(HttpResponse::new(400)); // Bad Request - empty method
+        }
+
+        if path.is_empty() {
+            return Ok(HttpResponse::new(400)); // Bad Request - empty path
+        }
+
+        if !path.starts_with('/') {
+            return Ok(HttpResponse::new(400)); // Bad Request - path must start with /
+        }
+
+        if path.len() > 8192 {
+            return Ok(HttpResponse::new(400)); // Bad Request - path too long
+        }
+
         // Check if method is supported
         if !self.supports_method(method) {
             return Ok(HttpResponse::new(405)); // Method Not Allowed
