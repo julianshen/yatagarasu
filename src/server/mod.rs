@@ -24,6 +24,7 @@ pub struct HttpService {
 pub struct HttpResponse {
     status_code: u16,
     headers: std::collections::HashMap<String, String>,
+    body: Vec<u8>,
 }
 
 /// Yatagarasu HTTP Server wrapper around Pingora
@@ -132,6 +133,7 @@ impl HttpResponse {
         Self {
             status_code,
             headers: std::collections::HashMap::new(),
+            body: Vec::new(),
         }
     }
 
@@ -153,6 +155,16 @@ impl HttpResponse {
     /// Get all headers
     pub fn headers(&self) -> &std::collections::HashMap<String, String> {
         &self.headers
+    }
+
+    /// Set the response body
+    pub fn set_body(&mut self, body: Vec<u8>) {
+        self.body = body;
+    }
+
+    /// Get the response body
+    pub fn body(&self) -> &[u8] {
+        &self.body
     }
 }
 

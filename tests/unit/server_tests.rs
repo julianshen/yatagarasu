@@ -315,3 +315,40 @@ fn test_server_returns_response_with_headers() {
     assert!(headers.contains_key("Content-Type"));
     assert!(headers.contains_key("X-Custom-Header"));
 }
+
+// Test: Server returns proper HTTP response with body
+#[test]
+fn test_server_returns_response_with_body() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Create a response
+    let mut response = service.create_response(200).unwrap();
+
+    // Should be able to set a body
+    let body_content = b"Hello, World!";
+    response.set_body(body_content.to_vec());
+
+    // Should be able to retrieve the body
+    assert_eq!(response.body(), body_content);
+
+    // Should be able to set a different body
+    let json_body = b"{\"status\":\"ok\"}";
+    response.set_body(json_body.to_vec());
+    assert_eq!(response.body(), json_body);
+
+    // Body should be empty by default
+    let empty_response = service.create_response(204).unwrap();
+    assert_eq!(empty_response.body(), b"");
+}
