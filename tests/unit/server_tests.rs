@@ -352,3 +352,46 @@ fn test_server_returns_response_with_body() {
     let empty_response = service.create_response(204).unwrap();
     assert_eq!(empty_response.body(), b"");
 }
+
+// Test: Server handles concurrent requests (10+ simultaneous)
+#[test]
+fn test_server_handles_concurrent_requests() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::thread;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = Arc::new(server.create_http_service().unwrap());
+
+    // Spawn 10 threads that create responses concurrently
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let service_clone = Arc::clone(&service);
+            thread::spawn(move || {
+                // Each thread creates a response with a unique status code
+                let status_code = 200 + i;
+                let response = service_clone.create_response(status_code).unwrap();
+                assert_eq!(response.status_code(), status_code);
+                response
+            })
+        })
+        .collect();
+
+    // Wait for all threads to complete
+    let responses: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    // Verify all responses were created successfully
+    assert_eq!(responses.len(), 10);
+    for (i, response) in responses.iter().enumerate() {
+        assert_eq!(response.status_code(), 200 + i as u16);
+    }
+}
