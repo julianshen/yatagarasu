@@ -4,9 +4,32 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-TDD-green.svg)](plan.md)
+[![Tests](https://img.shields.io/badge/tests-373%20passing-green.svg)](plan.md)
+[![Coverage](https://img.shields.io/badge/coverage-98.43%25-brightgreen.svg)](coverage/)
+[![Status](https://img.shields.io/badge/status-library%20complete%20%7C%20server%20in%20progress-yellow.svg)](IMPLEMENTATION_STATUS.md)
 
 A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, providing intelligent routing, multi-bucket support, and flexible JWT authentication.
+
+## ⚠️ DEVELOPMENT STATUS
+
+**Current State**: Core library modules are complete and well-tested. HTTP server integration is in progress.
+
+**What Works Now**:
+- ✅ Configuration parsing (YAML + environment variables)
+- ✅ Multi-bucket routing with longest prefix matching
+- ✅ JWT authentication and claims verification
+- ✅ S3 client with AWS Signature v4
+- ✅ 373 passing tests with 98.43% coverage
+
+**What's Coming Next** (Phase 12+):
+- 🚧 Pingora HTTP server integration
+- 🚧 Request handling pipeline
+- 🚧 Response streaming over HTTP
+- 🚧 Prometheus metrics endpoint
+- 🚧 Configuration hot reload
+- 🚧 Graceful shutdown
+
+See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed analysis and [ROADMAP.md](ROADMAP.md) for implementation plan.
 
 ## What is Yatagarasu?
 
@@ -30,21 +53,36 @@ Yatagarasu is a reimplementation of [s3-envoy-proxy](https://github.com/juliansh
 - S3-compatible storage (AWS S3, MinIO, LocalStack, etc.)
 - (Optional) JWT token issuer for authentication
 
-### Installation
+### Current Status (v0.1.0)
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/yatagarasu.git
 cd yatagarasu
 
-# Build
+# Build the library
 cargo build --release
 
-# Run tests
+# Run comprehensive test suite (373 tests)
 cargo test
 
-# Run the proxy
-./target/release/yatagarasu --config config.yaml
+# Check test coverage
+cargo tarpaulin --out Html --output-dir coverage
+```
+
+⚠️ **Note**: HTTP server is not yet implemented. The current release provides well-tested library modules for configuration, routing, authentication, and S3 client functionality. Server integration is in progress (Phase 12+).
+
+To use the library components in your own Rust project:
+
+```rust
+use yatagarasu::config::load_config;
+use yatagarasu::router::Router;
+use yatagarasu::auth::authenticate_request;
+use yatagarasu::s3::create_s3_client;
+
+let config = load_config("config.yaml")?;
+let router = Router::new(config.buckets.clone());
+// ... integrate into your HTTP server
 ```
 
 ### Basic Configuration
@@ -94,7 +132,9 @@ metrics:
   port: 9090
 ```
 
-### Example Requests
+### Example Requests (Coming in v0.2.0)
+
+Once the HTTP server is implemented, you'll be able to:
 
 ```bash
 # Access public bucket
@@ -107,9 +147,14 @@ curl -H "Authorization: Bearer eyJhbGc..." \
 # Or with query parameter
 curl http://localhost:8080/private/data.json?token=eyJhbGc...
 
-# Check metrics
+# Check health
+curl http://localhost:8080/health
+
+# Check metrics (v0.3.0)
 curl http://localhost:9090/metrics
 ```
+
+⚠️ **Status**: HTTP endpoints not yet available. Server implementation starts in Phase 12.
 
 ## Project Structure
 
@@ -139,28 +184,43 @@ yatagarasu/
 
 ## Features
 
-### ✅ Core Features (v1.0)
+### ✅ Implemented: Library Layer (v0.1.0 - Complete)
 
-- [x] **Multi-Bucket Routing**: Map S3 buckets to URL path prefixes
-- [x] **Credential Isolation**: Each bucket uses independent AWS credentials
-- [x] **JWT Authentication**: Optional, per-bucket authentication
-- [x] **Multiple Token Sources**: Extract JWT from header, query param, or custom header
-- [x] **Custom Claims Verification**: Flexible rules engine for JWT claims
-- [x] **S3 Operations**: GET and HEAD object support
-- [x] **Response Streaming**: Efficient streaming of large S3 objects
-- [x] **Configuration Hot Reload**: Update config without downtime
-- [x] **Prometheus Metrics**: Request counts, latencies, error rates
-- [x] **Structured Logging**: JSON logs for aggregation systems
-- [x] **Health Checks**: Liveness and readiness endpoints
-- [x] **Graceful Shutdown**: Clean shutdown without dropping requests
+- [x] **Configuration Management**: YAML parsing with environment variable substitution
+- [x] **Multi-Bucket Routing**: Longest prefix matching with path normalization
+- [x] **JWT Authentication**: Token extraction from multiple sources (header/query/custom)
+- [x] **Claims Verification**: Flexible rules engine for JWT claims (equals operator)
+- [x] **S3 Client**: AWS Signature Version 4 implementation
+- [x] **S3 Operations**: GET and HEAD request building with signed headers
+- [x] **Range Request Support**: HTTP Range header parsing (single/multiple/suffix ranges)
+- [x] **Error Mapping**: S3 error codes to HTTP status codes
+- [x] **Comprehensive Testing**: 373 tests with 98.43% coverage
 
-### 🚧 Planned Features (v1.1+)
+### 🚧 In Progress: Server Layer (v0.2.0 - Phase 12+)
 
-- [ ] Advanced caching (mmap, disk layers)
-- [ ] Cache invalidation API
-- [ ] Request/response transformation
-- [ ] Rate limiting per client
-- [ ] Multi-region S3 failover
+- [ ] **Pingora HTTP Server**: Initialize and configure Pingora server
+- [ ] **Request Pipeline**: Integrate router → auth → S3 client
+- [ ] **Response Streaming**: Stream S3 objects to HTTP clients
+- [ ] **Error Handling**: User-friendly error responses
+- [ ] **Health Endpoints**: `/health` liveness and readiness checks
+- [ ] **Logging**: Structured JSON logging with tracing
+- [ ] **Request Context**: Track request ID, bucket, user claims
+
+### 📋 Planned: Production Features (v0.3.0)
+
+- [ ] **Prometheus Metrics**: Request counts, latencies, error rates
+- [ ] **Configuration Hot Reload**: SIGHUP signal handling
+- [ ] **Graceful Shutdown**: SIGTERM with connection draining
+- [ ] **Observability**: Request tracing and structured logs
+- [ ] **Performance Tuning**: Connection pooling, keep-alive
+
+### 🎯 Future: Advanced Features (v1.0+)
+
+- [ ] **Caching Layer**: Memory cache for small files (<10MB)
+- [ ] **Cache Management**: Invalidation API, conditional requests
+- [ ] **Advanced Auth**: RS256/ES256 algorithms, token introspection
+- [ ] **Rate Limiting**: Per-client request throttling
+- [ ] **Multi-Region**: S3 failover across regions
 
 ## Use Cases
 
@@ -637,17 +697,35 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 
 ## Project Status
 
-**Current Phase**: Phase 1 - Foundation and Project Setup
+**Current Phase**: Phase 12 - Pingora Server Integration (In Progress)
 
 **Progress**:
 
-- Tests written: 0
-- Tests passing: 0
-- Test coverage: 0%
+- **Tests written**: 400+ (373 behavioral, 27 meta tests)
+- **Tests passing**: 373 (100%)
+- **Test coverage**: 98.43% (314/319 lines)
+- **Phases complete**: 11/16 phases (Phases 1-11 ✅)
 
-**Next Milestone**: Complete Phase 1 project setup and configuration management
+**Completed Milestones**:
+- ✅ Phase 1-2: Foundation and Configuration (50 tests)
+- ✅ Phase 3: Path Routing (26 tests)
+- ✅ Phase 4: JWT Authentication (49 tests)
+- ✅ Phase 5: S3 Client & Signature (73 tests)
+- ✅ Phase 6-11: Test implementation (175 proxy tests written, awaiting integration)
 
-See [plan.md](plan.md) for detailed implementation status.
+**Current Sprint**: Phase 12 - Pingora Server Setup
+- Initialize Pingora HTTP server
+- Configure server address and threading
+- Implement basic HTTP request/response handling
+- Add health check endpoint
+
+**Next Milestones**:
+- Phase 13: Request Pipeline Integration
+- Phase 14: S3 Proxying Implementation
+- Phase 15: Error Handling & Logging
+- Phase 16: Final Integration & Testing
+
+See [plan.md](plan.md) for detailed test checklist and [ROADMAP.md](ROADMAP.md) for implementation roadmap.
 
 ## Resources
 

@@ -651,6 +651,313 @@ yatagarasu/
 
 ---
 
+## PHASE 12-16: SERVER IMPLEMENTATION (v0.2.0)
+
+**Status**: 🚧 **IN PROGRESS** - Transforming library into working HTTP proxy
+
+**Goal**: Implement Pingora HTTP server and integrate existing library modules to create a functional S3 proxy that handles real HTTP requests.
+
+**Context**: Phases 1-11 delivered well-tested library modules (config, router, auth, S3) with 373 passing tests. Phases 12-16 focus on HTTP server integration to create the actual proxy server that users can run and send requests to.
+
+---
+
+## Phase 12: Pingora Server Setup
+
+**Objective**: Initialize Pingora HTTP server and handle basic HTTP requests
+
+**Goal**: Create a running HTTP server that can accept connections and respond to basic requests.
+
+### Server Initialization
+- [ ] Test: Can add Pingora dependency to Cargo.toml
+- [ ] Test: Can create ServerConfig struct
+- [ ] Test: Can initialize Pingora Server instance
+- [ ] Test: Server binds to configured address (from config.yaml)
+- [ ] Test: Server starts without errors with valid configuration
+- [ ] Test: Server fails with clear error on invalid address (e.g., port in use)
+- [ ] Test: Can stop server programmatically
+
+### Basic HTTP Handling
+- [ ] Test: Server accepts HTTP/1.1 GET requests
+- [ ] Test: Server accepts HTTP/1.1 HEAD requests
+- [ ] Test: Server returns proper HTTP response with status code
+- [ ] Test: Server returns proper HTTP response with headers
+- [ ] Test: Server returns proper HTTP response with body
+- [ ] Test: Server handles concurrent requests (10+ simultaneous)
+- [ ] Test: Server handles request pipeline (keep-alive)
+
+### Health Check Endpoint
+- [ ] Test: GET /health returns 200 OK
+- [ ] Test: /health response includes JSON body with status
+- [ ] Test: /health checks configuration is loaded
+- [ ] Test: /health response time < 10ms
+- [ ] Test: /health works before other endpoints are ready
+- [ ] Test: HEAD /health returns 200 without body
+
+### Error Handling
+- [ ] Test: Unknown paths return 404 Not Found
+- [ ] Test: Invalid HTTP methods return 405 Method Not Allowed
+- [ ] Test: Malformed requests return 400 Bad Request
+- [ ] Test: Server errors return 500 Internal Server Error
+- [ ] Test: Error responses include JSON body with error details
+
+**Expected Outcome**: Running HTTP server that responds to /health and returns 404 for other paths.
+
+---
+
+## Phase 13: Request Pipeline Integration
+
+**Objective**: Connect router and authentication to HTTP request handling
+
+**Goal**: Route incoming HTTP requests to correct bucket and validate JWT tokens.
+
+### Request Context
+- [ ] Test: Can create RequestContext from HTTP request
+- [ ] Test: RequestContext includes request ID (UUID)
+- [ ] Test: RequestContext includes request method
+- [ ] Test: RequestContext includes request path
+- [ ] Test: RequestContext includes request headers as HashMap
+- [ ] Test: RequestContext includes query parameters as HashMap
+- [ ] Test: RequestContext includes timestamp
+- [ ] Test: Request ID is logged with every log message
+
+### Router Integration
+- [ ] Test: Router middleware extracts bucket from request path
+- [ ] Test: Requests to /products/* route to products bucket
+- [ ] Test: Requests to /private/* route to private bucket
+- [ ] Test: Longest prefix matching works (e.g., /products/foo matches /products not /prod)
+- [ ] Test: Unmapped paths return 404 with appropriate message
+- [ ] Test: S3 key is extracted from path (e.g., /products/image.png → image.png)
+- [ ] Test: Router middleware adds bucket config to request context
+
+### Authentication Integration
+- [ ] Test: Auth middleware skips validation for public buckets (auth.enabled=false)
+- [ ] Test: Auth middleware validates JWT for private buckets (auth.enabled=true)
+- [ ] Test: JWT extracted from Authorization header (Bearer token)
+- [ ] Test: JWT extracted from query parameter (if configured)
+- [ ] Test: JWT extracted from custom header (if configured)
+- [ ] Test: Valid JWT adds claims to request context
+- [ ] Test: Missing JWT on private bucket returns 401 Unauthorized
+- [ ] Test: Invalid JWT signature returns 401 Unauthorized
+- [ ] Test: Expired JWT returns 401 Unauthorized
+- [ ] Test: JWT with wrong claims returns 403 Forbidden
+- [ ] Test: Multiple token sources checked in configured order
+
+### Middleware Chain
+- [ ] Test: Request passes through middleware in correct order (router → auth → handler)
+- [ ] Test: Middleware can short-circuit request (e.g., 401 stops pipeline)
+- [ ] Test: Middleware can modify request context
+- [ ] Test: Errors in middleware return appropriate HTTP status
+
+**Expected Outcome**: HTTP server that routes requests and validates JWT tokens before reaching S3 handler.
+
+---
+
+## Phase 14: S3 Proxying Implementation
+
+**Objective**: Fetch objects from S3 and stream responses to HTTP clients
+
+**Goal**: Proxy GET and HEAD requests to S3 with proper authentication and streaming.
+
+### S3 Client Integration
+- [ ] Test: Can create S3 HTTP client from bucket config
+- [ ] Test: S3 client uses bucket-specific credentials
+- [ ] Test: S3 client connects to configured endpoint (or AWS default)
+- [ ] Test: S3 client generates valid AWS Signature v4
+- [ ] Test: Each bucket has isolated S3 client (no credential mixing)
+
+### GET Request Proxying
+- [ ] Test: GET request to /products/image.png fetches from S3
+- [ ] Test: S3 response body streams to HTTP client
+- [ ] Test: S3 response headers are preserved (Content-Type, ETag, Last-Modified, Content-Length)
+- [ ] Test: S3 200 OK returns HTTP 200 OK
+- [ ] Test: Large files (>100MB) stream without buffering entire file
+- [ ] Test: Memory usage stays constant during large file streaming
+- [ ] Test: Multiple concurrent requests work correctly
+- [ ] Test: Requests to different buckets use correct credentials
+
+### HEAD Request Proxying
+- [ ] Test: HEAD request to /products/image.png fetches metadata from S3
+- [ ] Test: HEAD response includes all headers but no body
+- [ ] Test: HEAD response includes Content-Length from S3
+- [ ] Test: HEAD request doesn't download object body from S3
+
+### Range Request Support
+- [ ] Test: Client Range header is forwarded to S3
+- [ ] Test: S3 206 Partial Content returns HTTP 206
+- [ ] Test: Content-Range header is preserved
+- [ ] Test: Range requests stream only requested bytes
+- [ ] Test: Multiple range requests (bytes=0-100,200-300) work
+- [ ] Test: Open-ended ranges (bytes=1000-) work
+- [ ] Test: Suffix ranges (bytes=-1000) work
+- [ ] Test: Invalid ranges return 416 Range Not Satisfiable
+
+### Error Handling
+- [ ] Test: S3 404 NoSuchKey returns HTTP 404 Not Found
+- [ ] Test: S3 403 AccessDenied returns HTTP 403 Forbidden
+- [ ] Test: S3 400 InvalidRequest returns HTTP 400 Bad Request
+- [ ] Test: S3 500 InternalError returns HTTP 502 Bad Gateway
+- [ ] Test: S3 503 SlowDown returns HTTP 503 Service Unavailable
+- [ ] Test: Network timeout to S3 returns HTTP 504 Gateway Timeout
+- [ ] Test: S3 error messages are parsed and returned to client
+- [ ] Test: Error responses include JSON body with error code and message
+
+### Connection Management
+- [ ] Test: Client disconnect cancels S3 request
+- [ ] Test: S3 connection is closed after response completes
+- [ ] Test: Connection pool reuses connections for same bucket
+- [ ] Test: No connection leaks after many requests
+
+**Expected Outcome**: Working S3 proxy that handles GET/HEAD requests and streams responses.
+
+---
+
+## Phase 15: Error Handling & Logging
+
+**Objective**: Production-ready error handling and observability
+
+**Goal**: Comprehensive error handling, structured logging, and request tracing.
+
+### Centralized Error Handling
+- [ ] Test: Can create ProxyError enum with variants (Config, Auth, S3, Internal)
+- [ ] Test: Errors convert to HTTP status codes correctly
+- [ ] Test: Error responses use consistent JSON format
+- [ ] Test: 4xx errors include client-friendly messages
+- [ ] Test: 5xx errors don't leak implementation details
+- [ ] Test: Errors include error code for client parsing
+- [ ] Test: Stack traces only in logs, never in responses
+
+### Structured Logging
+- [ ] Test: Can initialize tracing subscriber
+- [ ] Test: Logs are output in JSON format
+- [ ] Test: Every log includes request ID
+- [ ] Test: Every request is logged with method, path, status, duration
+- [ ] Test: Authentication failures are logged with reason
+- [ ] Test: S3 errors are logged with bucket, key, error code
+- [ ] Test: Successful requests are logged at INFO level
+- [ ] Test: Errors are logged at ERROR level with context
+
+### Security & Privacy
+- [ ] Test: JWT tokens are never logged
+- [ ] Test: AWS credentials are never logged
+- [ ] Test: Authorization headers are redacted in logs
+- [ ] Test: Query parameters with 'token' are redacted in logs
+- [ ] Test: S3 secret keys are never logged
+
+### Request Tracing
+- [ ] Test: Request ID is generated for every request (UUID v4)
+- [ ] Test: Request ID is returned in X-Request-Id response header
+- [ ] Test: Request ID is included in all log messages for that request
+- [ ] Test: Request ID is passed to S3 client for tracing
+
+**Expected Outcome**: Clear, structured logs for debugging and monitoring without leaking sensitive data.
+
+---
+
+## Phase 16: Final Integration & Testing
+
+**Objective**: End-to-end integration tests and production validation
+
+**Goal**: Verify all components work together correctly in real-world scenarios.
+
+### Integration Test Setup
+- [ ] Test: Can start MinIO container for integration tests
+- [ ] Test: Can upload test files to MinIO buckets
+- [ ] Test: Can configure proxy to use MinIO endpoint
+- [ ] Test: Can start proxy server in test mode
+- [ ] Test: Can send HTTP requests to running proxy
+
+### End-to-End Scenarios - Public Bucket
+- [ ] Integration: GET /public/test.txt returns file content
+- [ ] Integration: HEAD /public/test.txt returns metadata
+- [ ] Integration: GET /public/large.bin (100MB) streams successfully
+- [ ] Integration: GET /public/test.txt with Range: bytes=0-100 returns partial content
+- [ ] Integration: GET /public/nonexistent.txt returns 404
+- [ ] Integration: Concurrent GETs to same file work correctly
+
+### End-to-End Scenarios - Private Bucket
+- [ ] Integration: GET /private/data.json without JWT returns 401
+- [ ] Integration: GET /private/data.json with invalid JWT returns 401
+- [ ] Integration: GET /private/data.json with expired JWT returns 401
+- [ ] Integration: GET /private/data.json with wrong claims returns 403
+- [ ] Integration: GET /private/data.json with valid JWT returns file content
+- [ ] Integration: JWT from Authorization header works
+- [ ] Integration: JWT from query parameter works
+- [ ] Integration: JWT from custom header works
+
+### End-to-End Scenarios - Multi-Bucket
+- [ ] Integration: GET /bucket-a/file.txt uses bucket-a credentials
+- [ ] Integration: GET /bucket-b/file.txt uses bucket-b credentials
+- [ ] Integration: Concurrent requests to different buckets work
+- [ ] Integration: Each bucket uses isolated credentials (no mixing)
+- [ ] Integration: Public and private buckets in same proxy work
+
+### Error Scenarios
+- [ ] Integration: Invalid S3 credentials return 502
+- [ ] Integration: S3 bucket doesn't exist returns 404
+- [ ] Integration: S3 endpoint unreachable returns 504
+- [ ] Integration: Malformed request returns 400
+- [ ] Integration: Unknown path returns 404
+
+### Performance & Stability
+- [ ] Performance: Baseline throughput > 1,000 req/s (single core)
+- [ ] Performance: JWT validation < 1ms (P95)
+- [ ] Performance: Path routing < 10μs (P95)
+- [ ] Performance: Small file (1KB) end-to-end < 10ms (P95)
+- [ ] Performance: Streaming latency < 100ms (TTFB)
+- [ ] Memory: Usage stays constant during streaming (no memory leaks)
+- [ ] Memory: Baseline usage < 50MB (idle proxy)
+- [ ] Load: Handles 100 concurrent connections
+- [ ] Load: Handles 1,000 requests without errors
+- [ ] Stability: Runs for 1 hour under load without crashes
+
+### Documentation Updates
+- [ ] Update README with working examples (curl commands that actually work)
+- [ ] Update GETTING_STARTED.md with real setup instructions
+- [ ] Add example config.yaml that works with examples
+- [ ] Add Docker deployment example
+- [ ] Add systemd service file example
+- [ ] Update IMPLEMENTATION_STATUS.md to show v0.2.0 complete
+
+**Expected Outcome**: Fully working S3 proxy ready for production evaluation.
+
+---
+
+## v0.2.0 Release Criteria
+
+Before releasing v0.2.0, verify:
+
+**Must Have** ✅:
+- [ ] HTTP server accepts requests on configured port
+- [ ] Routing works for multiple buckets
+- [ ] JWT authentication works for private buckets
+- [ ] Public buckets accessible without JWT
+- [ ] GET requests proxy to S3 and stream responses
+- [ ] HEAD requests proxy to S3 and return metadata
+- [ ] Range requests work correctly
+- [ ] All 373 existing library tests still pass
+- [ ] 50+ new integration tests passing
+- [ ] /health endpoint works
+- [ ] Structured JSON logging works
+- [ ] No credentials or tokens in logs
+- [ ] Error responses are user-friendly
+- [ ] Memory usage stays constant during streaming
+- [ ] Documentation updated with working examples
+- [ ] Can run proxy with real S3 or MinIO
+
+**Performance Baseline** ✅:
+- [ ] Throughput > 1,000 req/s
+- [ ] JWT validation < 1ms
+- [ ] Path routing < 10μs
+- [ ] Streaming TTFB < 100ms
+- [ ] Memory < 100MB under load
+
+**Nice to Have** (defer if needed):
+- Connection pooling optimization
+- Request timeout configuration
+- Retry logic with backoff
+
+---
+
 ## Notes and Decisions
 
 ### Design Decisions
