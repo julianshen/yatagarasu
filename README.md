@@ -1,6 +1,6 @@
 # Yatagarasu (八咫烏)
 
-> *"The three-legged crow that guides the way to secure S3 access"*
+> _"The three-legged crow that guides the way to secure S3 access"_
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -62,7 +62,7 @@ buckets:
       access_key: "${AWS_ACCESS_KEY_PRODUCTS}"
       secret_key: "${AWS_SECRET_KEY_PRODUCTS}"
     auth:
-      enabled: false  # Public access
+      enabled: false # Public access
 
   - name: "private-data"
     path_prefix: "/private"
@@ -156,7 +156,6 @@ yatagarasu/
 
 ### 🚧 Planned Features (v1.1+)
 
-- [ ] S3 write operations (PUT, DELETE)
 - [ ] Advanced caching (mmap, disk layers)
 - [ ] Cache invalidation API
 - [ ] Request/response transformation
@@ -175,7 +174,7 @@ buckets:
   - name: "team-a"
     path_prefix: "/team-a"
     s3: { bucket: "team-a-bucket", ... }
-  
+
   - name: "team-b"
     path_prefix: "/team-b"
     s3: { bucket: "team-b-bucket", ... }
@@ -189,11 +188,11 @@ Mix public and authenticated content in one proxy:
 buckets:
   - name: "public-assets"
     path_prefix: "/assets"
-    auth: { enabled: false }  # Public
-  
+    auth: { enabled: false } # Public
+
   - name: "user-data"
     path_prefix: "/users"
-    auth: { enabled: true }   # Requires JWT
+    auth: { enabled: true } # Requires JWT
 ```
 
 ### 3. Fine-Grained Authorization
@@ -227,21 +226,27 @@ curl http://yatagarasu-proxy/data/file.txt
 ### For Developers
 
 1. **Read the methodology guide first:**
+
    ```bash
    cat CLAUDE.md
    ```
+
    Understand the TDD and "Tidy First" approach.
 
 2. **Review the specification:**
+
    ```bash
    cat spec.md
    ```
+
    Learn about features, architecture, and requirements.
 
 3. **Check the implementation plan:**
+
    ```bash
    cat plan.md
    ```
+
    See what tests are implemented and what's next.
 
 4. **Start developing:**
@@ -258,11 +263,12 @@ This project is designed to work seamlessly with Claude (AI assistant) using the
 To start a development session:
 
 ```
-Claude, I'm working on Yatagarasu. Please read CLAUDE.md and plan.md, 
+Claude, I'm working on Yatagarasu. Please read CLAUDE.md and plan.md,
 then let's implement the next test.
 ```
 
 Or simply say:
+
 ```
 go
 ```
@@ -274,17 +280,20 @@ Claude will find the next unmarked test in plan.md and guide you through impleme
 ### The TDD Cycle
 
 1. **🔴 Red** - Write a failing test
+
    - Choose the next test from plan.md
    - Write the test code
    - Run tests and confirm it fails
    - Commit: `[BEHAVIORAL] Add test for [feature]`
 
 2. **🟢 Green** - Make it pass
+
    - Write minimum code to pass the test
    - Run tests and confirm all pass
    - Commit: `[BEHAVIORAL] Implement [feature]`
 
 3. **🔵 Refactor** - Clean up
+
    - Improve code structure
    - Run tests after each change
    - Commit: `[STRUCTURAL] [refactoring description]`
@@ -294,10 +303,12 @@ Claude will find the next unmarked test in plan.md and guide you through impleme
 ### Commit Guidelines
 
 All commits must have one of these prefixes:
+
 - `[BEHAVIORAL]` - Changes that add or modify functionality
 - `[STRUCTURAL]` - Changes that improve code structure without changing behavior
 
 Examples:
+
 ```bash
 git commit -m "[BEHAVIORAL] Add JWT validation from Authorization header"
 git commit -m "[STRUCTURAL] Extract token parsing to separate function"
@@ -307,11 +318,13 @@ git commit -m "[BEHAVIORAL] Fix credential isolation bug in multi-bucket routing
 ### Rules for Commits
 
 ✅ **DO commit when:**
+
 - All tests are passing
 - No compiler/linter warnings
 - The change is a single logical unit
 
 ❌ **DON'T commit when:**
+
 - Any test is failing
 - There are compiler/linter warnings
 - Mixing structural and behavioral changes
@@ -372,6 +385,7 @@ docker stop minio && docker rm minio
 - **End-to-end tests**: All main user workflows
 
 Current coverage can be viewed by running:
+
 ```bash
 cargo tarpaulin --out Html && open tarpaulin-report.html
 ```
@@ -422,8 +436,8 @@ hey -n 100000 -c 100 http://localhost:8080/products/test.txt
 
 ```yaml
 server:
-  address: "0.0.0.0:8080"  # Listen address
-  https:                    # Optional TLS
+  address: "0.0.0.0:8080" # Listen address
+  https: # Optional TLS
     enabled: true
     cert_path: "/path/to/cert.pem"
     key_path: "/path/to/key.pem"
@@ -433,18 +447,18 @@ server:
 
 ```yaml
 buckets:
-  - name: "bucket-name"           # Unique identifier
-    path_prefix: "/prefix"         # URL path prefix
+  - name: "bucket-name" # Unique identifier
+    path_prefix: "/prefix" # URL path prefix
     s3:
-      bucket: "s3-bucket-name"     # S3 bucket name
-      region: "us-east-1"          # AWS region
-      endpoint: "https://..."      # Optional: custom endpoint (MinIO, etc.)
-      access_key: "${ENV_VAR}"     # Access key (env var substitution)
-      secret_key: "${ENV_VAR}"     # Secret key (env var substitution)
-    auth:                          # Optional authentication
+      bucket: "s3-bucket-name" # S3 bucket name
+      region: "us-east-1" # AWS region
+      endpoint: "https://..." # Optional: custom endpoint (MinIO, etc.)
+      access_key: "${ENV_VAR}" # Access key (env var substitution)
+      secret_key: "${ENV_VAR}" # Secret key (env var substitution)
+    auth: # Optional authentication
       enabled: true
       jwt:
-        token_sources:             # Where to look for JWT
+        token_sources: # Where to look for JWT
           - type: "header"
             name: "Authorization"
             prefix: "Bearer "
@@ -452,24 +466,24 @@ buckets:
             name: "token"
           - type: "header"
             name: "X-Auth-Token"
-        secret: "${JWT_SECRET}"    # JWT signing secret
-        algorithm: "HS256"         # Algorithm: HS256, RS256, ES256
-        claims_verification:       # Custom claim rules
+        secret: "${JWT_SECRET}" # JWT signing secret
+        algorithm: "HS256" # Algorithm: HS256, RS256, ES256
+        claims_verification: # Custom claim rules
           - claim: "role"
-            operator: "equals"     # equals, contains, in, gt, lt
+            operator: "equals" # equals, contains, in, gt, lt
             value: "admin"
-    cache:                         # Optional caching
+    cache: # Optional caching
       enabled: true
-      ttl: 3600                    # Time to live in seconds
-      max_size: "1GB"              # Maximum cache size
+      ttl: 3600 # Time to live in seconds
+      max_size: "1GB" # Maximum cache size
 ```
 
 ### Logging Configuration
 
 ```yaml
 logging:
-  level: "info"      # trace, debug, info, warn, error
-  format: "json"     # json or text
+  level: "info" # trace, debug, info, warn, error
+  format: "json" # json or text
 ```
 
 ### Metrics Configuration
@@ -477,7 +491,7 @@ logging:
 ```yaml
 metrics:
   enabled: true
-  port: 9090         # Prometheus metrics port
+  port: 9090 # Prometheus metrics port
 ```
 
 ## Technology Stack
@@ -518,10 +532,11 @@ Following Kent Beck's principles:
 - 💡 **Use the simplest solution** that works
 
 All code must pass:
+
 - `cargo test` (all tests passing)
 - `cargo clippy` (no warnings)
 - `cargo fmt --check` (properly formatted)
-- >90% test coverage
+- > 90% test coverage
 
 ## Operations
 
@@ -574,21 +589,25 @@ kill -TERM $(pgrep yatagarasu)
 ### Common Issues
 
 **Problem**: "JWT token is invalid"
+
 - Check that JWT secret matches between issuer and proxy
 - Verify JWT hasn't expired (check `exp` claim)
 - Ensure algorithm matches (HS256, RS256, etc.)
 
 **Problem**: "Access denied to S3"
+
 - Verify AWS credentials are correct
 - Check IAM permissions on the S3 bucket
 - Ensure bucket region matches configuration
 
 **Problem**: "Path not found (404)"
+
 - Verify path prefix is configured in `buckets`
 - Check that path starts with configured prefix
 - Ensure path_prefix includes leading slash
 
 **Problem**: "High memory usage"
+
 - Check for large file streaming (should be constant memory)
 - Review cache configuration and size limits
 - Monitor metrics for connection leaks
@@ -608,7 +627,7 @@ kill -TERM $(pgrep yatagarasu)
 This project follows strict TDD methodology:
 
 1. All changes must start with a test
-2. Tests must fail before implementation  
+2. Tests must fail before implementation
 3. Implement minimum code to pass
 4. Refactor only when tests are green
 5. Separate structural and behavioral commits
@@ -621,6 +640,7 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 **Current Phase**: Phase 1 - Foundation and Project Setup
 
 **Progress**:
+
 - Tests written: 0
 - Tests passing: 0
 - Test coverage: 0%
@@ -632,18 +652,21 @@ See [plan.md](plan.md) for detailed implementation status.
 ## Resources
 
 ### Project Resources
+
 - **Original MVP**: https://github.com/julianshen/s3-envoy-proxy
 - **Development Guide**: [CLAUDE.md](CLAUDE.md)
 - **Specification**: [spec.md](spec.md)
 - **Implementation Plan**: [plan.md](plan.md)
 
 ### Technology Documentation
+
 - **Pingora**: https://github.com/cloudflare/pingora
 - **AWS SDK for Rust**: https://aws.amazon.com/sdk-for-rust/
 - **Tokio**: https://tokio.rs/
 - **JWT in Rust**: https://docs.rs/jsonwebtoken/
 
 ### Methodology
+
 - [Test-Driven Development](https://www.amazon.com/Test-Driven-Development-Kent-Beck/dp/0321146530) by Kent Beck
 - [Tidy First?](https://www.amazon.com/Tidy-First-Personal-Exercise-Empirical/dp/1098151240) by Kent Beck
 
