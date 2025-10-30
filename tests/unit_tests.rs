@@ -6,4 +6,5 @@ mod unit {
     mod config_tests;
     mod proxy_tests;
     mod s3_tests;
+    mod auth_tests;
 }
