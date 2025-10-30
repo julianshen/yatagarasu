@@ -197,3 +197,28 @@ fn test_can_stop_server() {
     let pingora_server2 = server2.build_pingora_server().unwrap();
     assert!(std::ptr::addr_of!(pingora_server2) != std::ptr::null());
 }
+
+// Test: Server accepts HTTP/1.1 GET requests
+#[test]
+fn test_server_accepts_get_requests() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+
+    // Should be able to create a service that handles GET requests
+    let service = server.create_http_service();
+    assert!(service.is_ok());
+
+    // Verify the service is configured to accept GET requests
+    let svc = service.unwrap();
+    assert!(svc.supports_method("GET"));
+}

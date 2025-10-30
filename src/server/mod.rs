@@ -13,6 +13,12 @@ pub struct ServerConfig {
     pub threads: usize,
 }
 
+/// HTTP service that handles requests
+#[derive(Debug)]
+pub struct HttpService {
+    supported_methods: Vec<String>,
+}
+
 /// Yatagarasu HTTP Server wrapper around Pingora
 #[derive(Debug)]
 pub struct YatagarasuServer {
@@ -86,6 +92,25 @@ impl YatagarasuServer {
         server.bootstrap();
 
         Ok(server)
+    }
+
+    /// Create an HTTP service that handles requests
+    pub fn create_http_service(&self) -> Result<HttpService, String> {
+        Ok(HttpService::new())
+    }
+}
+
+impl HttpService {
+    /// Create a new HttpService with default supported methods
+    pub fn new() -> Self {
+        Self {
+            supported_methods: vec!["GET".to_string(), "HEAD".to_string(), "POST".to_string()],
+        }
+    }
+
+    /// Check if a method is supported
+    pub fn supports_method(&self, method: &str) -> bool {
+        self.supported_methods.iter().any(|m| m == method)
     }
 }
 

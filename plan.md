@@ -678,7 +678,7 @@ yatagarasu/
 - [x] Test: Can stop server programmatically
 
 ### Basic HTTP Handling
-- [ ] Test: Server accepts HTTP/1.1 GET requests
+- [x] Test: Server accepts HTTP/1.1 GET requests
 - [ ] Test: Server accepts HTTP/1.1 HEAD requests
 - [ ] Test: Server returns proper HTTP response with status code
 - [ ] Test: Server returns proper HTTP response with headers

@@ -63,6 +63,7 @@ rstest = "0.18"
 mockall = "0.12"
 testcontainers = "0.15"
 tempfile = "3.8"
+reqwest = "0.11"
 
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
