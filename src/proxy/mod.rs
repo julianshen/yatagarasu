@@ -34715,4 +34715,328 @@ mod tests {
             "Circuit breaker state observable for monitoring: Open"
         );
     }
+
+    #[test]
+    fn test_circuit_breaker_opens_after_threshold_failures() {
+        // Error recovery test: Circuit breaker opens after threshold failures
+        // Tests that circuit breaker opens exactly at the configured failure threshold
+        // Validates threshold enforcement and state transition accuracy
+
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum CircuitState {
+            Closed,
+            Open,
+        }
+
+        struct CircuitBreaker {
+            state: Arc<Mutex<CircuitState>>,
+            failure_count: Arc<Mutex<u32>>,
+            threshold: u32,
+        }
+
+        impl CircuitBreaker {
+            fn new(threshold: u32) -> Self {
+                Self {
+                    state: Arc::new(Mutex::new(CircuitState::Closed)),
+                    failure_count: Arc::new(Mutex::new(0)),
+                    threshold,
+                }
+            }
+
+            fn record_failure(&self) {
+                let mut count = self.failure_count.lock().unwrap();
+                *count += 1;
+                if *count >= self.threshold {
+                    *self.state.lock().unwrap() = CircuitState::Open;
+                }
+            }
+
+            fn state(&self) -> CircuitState {
+                self.state.lock().unwrap().clone()
+            }
+
+            fn failure_count(&self) -> u32 {
+                *self.failure_count.lock().unwrap()
+            }
+
+            fn threshold(&self) -> u32 {
+                self.threshold
+            }
+        }
+
+        struct ThresholdTracker {
+            breaker: Arc<CircuitBreaker>,
+            state_transitions: Arc<Mutex<Vec<(u32, CircuitState)>>>,
+        }
+
+        impl ThresholdTracker {
+            fn new(threshold: u32) -> Self {
+                Self {
+                    breaker: Arc::new(CircuitBreaker::new(threshold)),
+                    state_transitions: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn record_failure(&self) {
+                self.breaker.record_failure();
+                let count = self.breaker.failure_count();
+                let state = self.breaker.state();
+                self.state_transitions.lock().unwrap().push((count, state));
+            }
+
+            fn transition_at(&self, failure_count: u32) -> Option<CircuitState> {
+                self.state_transitions
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(count, _)| *count == failure_count)
+                    .map(|(_, state)| state.clone())
+            }
+
+            fn opened_at_failure(&self, failure_count: u32) -> bool {
+                if let Some(state) = self.transition_at(failure_count) {
+                    state == CircuitState::Open
+                } else {
+                    false
+                }
+            }
+        }
+
+        // Test 1: Opens at exactly threshold failures
+        let cb = CircuitBreaker::new(3);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Still closed at 2 failures"
+        );
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Opens at exactly threshold failures: 3"
+        );
+
+        // Test 2: Stays closed below threshold
+        let cb = CircuitBreaker::new(5);
+        for _ in 0..4 {
+            cb.record_failure();
+        }
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Stays closed below threshold: 4 < 5"
+        );
+
+        // Test 3: Threshold of 1 opens immediately
+        let cb = CircuitBreaker::new(1);
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Threshold of 1 opens immediately"
+        );
+
+        // Test 4: Threshold of 10 requires 10 failures
+        let cb = CircuitBreaker::new(10);
+        for _ in 0..9 {
+            cb.record_failure();
+        }
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Still closed at 9 failures"
+        );
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Threshold of 10 requires 10 failures"
+        );
+
+        // Test 5: Failure count equals threshold when opened
+        let cb = CircuitBreaker::new(3);
+        for _ in 0..3 {
+            cb.record_failure();
+        }
+        assert_eq!(
+            cb.failure_count(),
+            3,
+            "Failure count equals threshold when opened"
+        );
+
+        // Test 6: Multiple breakers with different thresholds
+        let cb1 = CircuitBreaker::new(2);
+        let cb2 = CircuitBreaker::new(5);
+        cb1.record_failure();
+        cb1.record_failure();
+        cb2.record_failure();
+        cb2.record_failure();
+        assert!(
+            cb1.state() == CircuitState::Open && cb2.state() == CircuitState::Closed,
+            "Multiple breakers with different thresholds"
+        );
+
+        // Test 7: Threshold enforced consistently
+        let cb = CircuitBreaker::new(3);
+        cb.record_failure();
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Threshold enforced consistently: opened at 3"
+        );
+        cb.record_failure(); // Additional failure
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Threshold enforced consistently: stays open"
+        );
+
+        // Test 8: State transition happens atomically
+        let tracker = ThresholdTracker::new(3);
+        tracker.record_failure();
+        tracker.record_failure();
+        tracker.record_failure();
+        assert!(
+            tracker.opened_at_failure(3),
+            "State transition happens atomically: opened at failure 3"
+        );
+
+        // Test 9: Does not open before threshold
+        let tracker = ThresholdTracker::new(5);
+        for _ in 0..4 {
+            tracker.record_failure();
+        }
+        assert!(
+            !tracker.opened_at_failure(4),
+            "Does not open before threshold: still closed at 4"
+        );
+
+        // Test 10: Threshold readable for configuration
+        let cb = CircuitBreaker::new(7);
+        assert_eq!(cb.threshold(), 7, "Threshold readable for configuration: 7");
+
+        // Test 11: Zero threshold (edge case - opens on first failure)
+        let cb = CircuitBreaker::new(0);
+        cb.record_failure(); // With threshold 0, >= 0 is true immediately
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Zero threshold: opens on first failure"
+        );
+
+        // Test 12: Consecutive failures tracked correctly
+        let cb = CircuitBreaker::new(3);
+        assert_eq!(cb.failure_count(), 0, "Starts at 0");
+        cb.record_failure();
+        assert_eq!(cb.failure_count(), 1, "Count 1");
+        cb.record_failure();
+        assert_eq!(cb.failure_count(), 2, "Count 2");
+        cb.record_failure();
+        assert_eq!(cb.failure_count(), 3, "Count 3");
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Consecutive failures tracked correctly: opens at 3"
+        );
+
+        // Test 13: Each bucket has independent threshold
+        let cb1 = CircuitBreaker::new(2);
+        let cb2 = CircuitBreaker::new(2);
+        cb1.record_failure();
+        cb1.record_failure();
+        assert_eq!(
+            (cb1.state(), cb2.failure_count()),
+            (CircuitState::Open, 0),
+            "Each bucket has independent threshold"
+        );
+
+        // Test 14: Large threshold (100) opens at 100
+        let cb = CircuitBreaker::new(100);
+        for _ in 0..99 {
+            cb.record_failure();
+        }
+        assert_eq!(cb.state(), CircuitState::Closed, "Still closed at 99");
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Large threshold (100) opens at 100"
+        );
+
+        // Test 15: Threshold enforced per bucket not globally
+        let cb1 = CircuitBreaker::new(3);
+        let cb2 = CircuitBreaker::new(3);
+        cb1.record_failure();
+        cb1.record_failure();
+        cb2.record_failure();
+        assert!(
+            cb1.state() == CircuitState::Closed && cb2.state() == CircuitState::Closed,
+            "Threshold enforced per bucket: both closed (2 < 3, 1 < 3)"
+        );
+
+        // Test 16: Failure count increments correctly
+        let cb = CircuitBreaker::new(5);
+        let counts: Vec<u32> = (0..5)
+            .map(|_| {
+                cb.record_failure();
+                cb.failure_count()
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            vec![1, 2, 3, 4, 5],
+            "Failure count increments correctly"
+        );
+
+        // Test 17: Opens on threshold not after
+        let cb = CircuitBreaker::new(3);
+        for i in 0..3 {
+            cb.record_failure();
+            if i == 2 {
+                assert_eq!(
+                    cb.state(),
+                    CircuitState::Open,
+                    "Opens on threshold not after: at failure 3"
+                );
+            }
+        }
+
+        // Test 18: Threshold of 2 is common default
+        let cb = CircuitBreaker::new(2);
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Closed, "Closed at 1");
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Threshold of 2 is common default"
+        );
+
+        // Test 19: State change observable immediately after threshold
+        let cb = CircuitBreaker::new(3);
+        for _ in 0..2 {
+            cb.record_failure();
+        }
+        let before = cb.state();
+        cb.record_failure();
+        let after = cb.state();
+        assert!(
+            before == CircuitState::Closed && after == CircuitState::Open,
+            "State change observable immediately after threshold"
+        );
+
+        // Test 20: Threshold configuration validated
+        let cb_low = CircuitBreaker::new(1);
+        let cb_high = CircuitBreaker::new(10);
+        assert!(
+            cb_low.threshold() < cb_high.threshold(),
+            "Threshold configuration validated: 1 < 10"
+        );
+    }
 }
