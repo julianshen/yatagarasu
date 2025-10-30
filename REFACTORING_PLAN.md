@@ -1,0 +1,277 @@
+# Refactoring Plan: Improve Code Readability
+
+## Problem Statement
+
+Current source files are extremely large and difficult to read:
+- `src/proxy/mod.rs`: **37,370 lines** (176 tests embedded)
+- `src/s3/mod.rs`: **8,500 lines** (tests embedded)
+- `src/auth/mod.rs`: **3,276 lines** (tests embedded)
+- `src/config/mod.rs`: **1,441 lines** (tests embedded)
+- `src/router/mod.rs`: **1,112 lines** (tests embedded)
+
+**Root Cause**: All unit tests are embedded within implementation files using `#[cfg(test)] mod tests { ... }`. This follows Rust conventions but creates massive files for well-tested code.
+
+## Refactoring Strategy
+
+Following Kent Beck's "Tidy First" principles, we will perform **STRUCTURAL changes only** to separate tests from implementation while maintaining 100% test coverage.
+
+### Goals
+1. ✅ **Reduce file sizes** to <500 lines per implementation file
+2. ✅ **Separate tests from implementation** for better readability
+3. ✅ **Maintain 98.43% test coverage** - no coverage loss
+4. ✅ **Keep all 375 tests passing** - no behavioral changes
+5. ✅ **Follow Rust testing conventions** - use `tests/` directory for unit tests
+6. ✅ **Improve navigation** - easier to find and read implementation code
+
+### Non-Goals
+- ❌ No behavioral changes to implementation code
+- ❌ No changes to test logic or assertions
+- ❌ No new features or bug fixes
+- ❌ No performance optimizations
+
+## Proposed Structure
+
+### Current Structure
+```
+src/
+├── proxy/
+│   └── mod.rs          (37,370 lines: ~200 lines impl + 37,170 lines tests)
+├── s3/
+│   └── mod.rs          (8,500 lines: ~500 lines impl + 8,000 lines tests)
+├── auth/
+│   └── mod.rs          (3,276 lines: ~200 lines impl + 3,076 lines tests)
+├── config/
+│   └── mod.rs          (1,441 lines: ~200 lines impl + 1,241 lines tests)
+└── router/
+    └── mod.rs          (1,112 lines: ~100 lines impl + 1,012 lines tests)
+```
+
+### Proposed Structure
+```
+src/
+├── proxy/
+│   └── mod.rs          (~200 lines: implementation only)
+├── s3/
+│   └── mod.rs          (~500 lines: implementation only)
+├── auth/
+│   └── mod.rs          (~200 lines: implementation only)
+├── config/
+│   └── mod.rs          (~200 lines: implementation only)
+├── router/
+│   └── mod.rs          (~100 lines: implementation only)
+├── lib.rs
+├── main.rs
+└── error.rs
+
+tests/
+├── unit/                           (new directory)
+│   ├── proxy_tests.rs              (Phase 6: Pingora Proxy tests)
+│   ├── proxy_middleware_tests.rs   (Middleware chain tests)
+│   ├── proxy_error_tests.rs        (Error response tests)
+│   ├── s3_client_tests.rs          (Phase 5: S3 client tests)
+│   ├── s3_signature_tests.rs       (S3 Signature v4 tests)
+│   ├── s3_operations_tests.rs      (GET/HEAD operations)
+│   ├── s3_streaming_tests.rs       (Streaming tests)
+│   ├── s3_range_tests.rs           (Range request tests)
+│   ├── auth_extraction_tests.rs    (Phase 4: Token extraction)
+│   ├── auth_validation_tests.rs    (JWT validation tests)
+│   ├── auth_claims_tests.rs        (Claims verification)
+│   ├── config_basic_tests.rs       (Phase 2: Basic config)
+│   ├── config_bucket_tests.rs      (Bucket configuration)
+│   ├── config_env_tests.rs         (Env var substitution)
+│   ├── config_auth_tests.rs        (Auth configuration)
+│   ├── router_basic_tests.rs       (Phase 3: Path routing)
+│   ├── router_normalization_tests.rs (Path normalization)
+│   └── router_extraction_tests.rs  (S3 key extraction)
+├── integration/                    (existing)
+│   └── ... (integration tests)
+├── e2e/                            (future)
+│   └── ... (end-to-end tests)
+└── fixtures/                       (existing)
+    └── ... (test data)
+```
+
+## Refactoring Steps (TDD Structural Approach)
+
+### Phase 1: Preparation
+- [x] Analyze current file structure
+- [x] Create refactoring plan document
+- [ ] Create `tests/unit/` directory structure
+- [ ] Verify all tests pass before refactoring
+- [ ] Create git branch for refactoring work
+
+### Phase 2: Extract Proxy Tests (src/proxy/mod.rs - 37,370 lines → ~200 lines)
+- [ ] Extract Phase 6 tests to `tests/unit/proxy_tests.rs`
+- [ ] Extract middleware tests to `tests/unit/proxy_middleware_tests.rs`
+- [ ] Extract error tests to `tests/unit/proxy_error_tests.rs`
+- [ ] Extract Phase 7 integration tests to `tests/unit/proxy_integration_tests.rs`
+- [ ] Extract Phase 8 performance tests to `tests/unit/proxy_performance_tests.rs`
+- [ ] Extract Phase 9 hot reload tests to `tests/unit/proxy_reload_tests.rs`
+- [ ] Extract Phase 10 observability tests to `tests/unit/proxy_observability_tests.rs`
+- [ ] Extract Phase 11 production tests to `tests/unit/proxy_production_tests.rs`
+- [ ] Remove test module from `src/proxy/mod.rs`
+- [ ] Run `cargo test` - verify all tests pass
+- [ ] Commit: `[STRUCTURAL] Extract proxy tests to tests/unit/ directory`
+
+### Phase 3: Extract S3 Tests (src/s3/mod.rs - 8,500 lines → ~500 lines)
+- [ ] Extract S3 client setup tests to `tests/unit/s3_client_tests.rs`
+- [ ] Extract signature tests to `tests/unit/s3_signature_tests.rs`
+- [ ] Extract operations tests to `tests/unit/s3_operations_tests.rs`
+- [ ] Extract streaming tests to `tests/unit/s3_streaming_tests.rs`
+- [ ] Extract range request tests to `tests/unit/s3_range_tests.rs`
+- [ ] Remove test module from `src/s3/mod.rs`
+- [ ] Run `cargo test` - verify all tests pass
+- [ ] Commit: `[STRUCTURAL] Extract S3 tests to tests/unit/ directory`
+
+### Phase 4: Extract Auth Tests (src/auth/mod.rs - 3,276 lines → ~200 lines)
+- [ ] Extract token extraction tests to `tests/unit/auth_extraction_tests.rs`
+- [ ] Extract JWT validation tests to `tests/unit/auth_validation_tests.rs`
+- [ ] Extract claims verification tests to `tests/unit/auth_claims_tests.rs`
+- [ ] Extract middleware tests to `tests/unit/auth_middleware_tests.rs`
+- [ ] Remove test module from `src/auth/mod.rs`
+- [ ] Run `cargo test` - verify all tests pass
+- [ ] Commit: `[STRUCTURAL] Extract auth tests to tests/unit/ directory`
+
+### Phase 5: Extract Config Tests (src/config/mod.rs - 1,441 lines → ~200 lines)
+- [ ] Extract basic config tests to `tests/unit/config_basic_tests.rs`
+- [ ] Extract bucket config tests to `tests/unit/config_bucket_tests.rs`
+- [ ] Extract env var tests to `tests/unit/config_env_tests.rs`
+- [ ] Extract auth config tests to `tests/unit/config_auth_tests.rs`
+- [ ] Extract validation tests to `tests/unit/config_validation_tests.rs`
+- [ ] Remove test module from `src/config/mod.rs`
+- [ ] Run `cargo test` - verify all tests pass
+- [ ] Commit: `[STRUCTURAL] Extract config tests to tests/unit/ directory`
+
+### Phase 6: Extract Router Tests (src/router/mod.rs - 1,112 lines → ~100 lines)
+- [ ] Extract basic routing tests to `tests/unit/router_basic_tests.rs`
+- [ ] Extract normalization tests to `tests/unit/router_normalization_tests.rs`
+- [ ] Extract S3 key extraction tests to `tests/unit/router_extraction_tests.rs`
+- [ ] Extract performance tests to `tests/unit/router_performance_tests.rs`
+- [ ] Remove test module from `src/router/mod.rs`
+- [ ] Run `cargo test` - verify all tests pass
+- [ ] Commit: `[STRUCTURAL] Extract router tests to tests/unit/ directory`
+
+### Phase 7: Final Validation
+- [ ] Run full test suite: `cargo test`
+- [ ] Verify all 375 tests still pass
+- [ ] Run coverage analysis: `cargo tarpaulin --lib`
+- [ ] Verify coverage remains at 98.43%
+- [ ] Run clippy: `cargo clippy -- -D warnings`
+- [ ] Run formatter: `cargo fmt --check`
+- [ ] Update documentation with new structure
+- [ ] Commit: `[STRUCTURAL] Update documentation for new test structure`
+
+## Implementation Guidelines
+
+### Test File Template
+```rust
+// tests/unit/module_feature_tests.rs
+
+// Import the module under test
+use yatagarasu::module_name::*;
+
+// Test group 1: Basic functionality
+#[test]
+fn test_basic_case_1() {
+    // Test implementation
+}
+
+#[test]
+fn test_basic_case_2() {
+    // Test implementation
+}
+
+// Test group 2: Edge cases
+#[test]
+fn test_edge_case_1() {
+    // Test implementation
+}
+
+// etc.
+```
+
+### Moving Tests - Checklist per File
+1. ✅ Copy entire `#[cfg(test)] mod tests { ... }` block
+2. ✅ Remove `#[cfg(test)]` and `mod tests {` wrapper
+3. ✅ Add proper imports for the module under test
+4. ✅ Save to new file in `tests/unit/`
+5. ✅ Remove test block from original source file
+6. ✅ Run `cargo test --test module_feature_tests` to verify
+7. ✅ Run `cargo test` to verify all tests still pass
+8. ✅ Commit structural change
+
+### Test Naming Convention
+- Use descriptive names: `{module}_{feature}_tests.rs`
+- Group related tests in same file
+- Keep test files under 1,000 lines each
+- Use comments to separate test groups
+
+## Benefits After Refactoring
+
+### Before
+- **37,370 lines** in single file - impossible to navigate
+- Tests buried within implementation
+- Difficult to find actual implementation logic
+- Long compile times when editing implementation
+- Hard to understand module structure
+
+### After
+- **~200 lines** per implementation file - easy to read
+- Tests clearly separated in `tests/unit/`
+- Implementation logic immediately visible
+- Faster incremental compilation
+- Clear module organization
+- Same test coverage (98.43%)
+- Same test count (375 tests)
+- All tests still passing
+
+## Risk Mitigation
+
+### Low Risk (This is Pure Structural Change)
+- ✅ No implementation logic changes
+- ✅ No test logic changes
+- ✅ Only moving code between files
+- ✅ Rust compiler enforces correctness
+- ✅ Test suite validates no breakage
+
+### Safety Measures
+1. ✅ Create git branch for refactoring
+2. ✅ Run tests after each file extraction
+3. ✅ Commit after each successful extraction
+4. ✅ Can rollback at any point
+5. ✅ Final validation before merging
+
+## Timeline Estimate
+
+With automation and careful execution:
+- **Phase 1 (Preparation)**: 30 minutes
+- **Phase 2 (Proxy tests)**: 2 hours (largest file)
+- **Phase 3 (S3 tests)**: 1 hour
+- **Phase 4 (Auth tests)**: 45 minutes
+- **Phase 5 (Config tests)**: 30 minutes
+- **Phase 6 (Router tests)**: 30 minutes
+- **Phase 7 (Validation)**: 30 minutes
+
+**Total**: ~5-6 hours of careful refactoring work
+
+## Success Criteria
+
+✅ All 375 tests passing after refactoring
+✅ Test coverage remains at 98.43%
+✅ No clippy warnings
+✅ No compiler warnings
+✅ All implementation files <500 lines
+✅ All test files <2,000 lines
+✅ Clear separation of implementation and tests
+✅ Documentation updated
+
+## References
+
+- Kent Beck: "Tidy First" - Structural changes before behavioral changes
+- Rust Book: Testing chapter on integration tests
+- Cargo Book: Package layout and test organization
+- Project: CLAUDE.md - Development methodology
+
+---
+
+**Ready to start refactoring? Reply with "start refactoring" to begin Phase 1.**
