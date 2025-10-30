@@ -688,7 +688,7 @@ yatagarasu/
 
 ### Health Check Endpoint
 - [x] Test: GET /health returns 200 OK
-- [ ] Test: /health response includes JSON body with status
+- [x] Test: /health response includes JSON body with status
 - [ ] Test: /health checks configuration is loaded
 - [ ] Test: /health response time < 10ms
 - [ ] Test: /health works before other endpoints are ready

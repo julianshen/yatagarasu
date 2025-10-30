@@ -469,3 +469,40 @@ fn test_health_endpoint_returns_200() {
     let resp = response.unwrap();
     assert_eq!(resp.status_code(), 200);
 }
+
+// Test: /health response includes JSON body with status
+#[test]
+fn test_health_endpoint_returns_json_body() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Request to /health endpoint
+    let response = service.handle_request("GET", "/health");
+    assert!(response.is_ok());
+
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 200);
+
+    // Check Content-Type header
+    assert_eq!(resp.get_header("Content-Type"), Some("application/json"));
+
+    // Check body contains JSON with status
+    let body = std::str::from_utf8(resp.body()).unwrap();
+    assert!(body.contains("\"status\""));
+    assert!(body.contains("\"ok\""));
+
+    // Verify it's valid JSON
+    let json: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(json["status"], "ok");
+}
