@@ -668,7 +668,7 @@ yatagarasu/
 **Goal**: Create a running HTTP server that can accept connections and respond to basic requests.
 
 ### Server Initialization
-- [ ] Test: Can add Pingora dependency to Cargo.toml
+- [x] Test: Can add Pingora dependency to Cargo.toml
 - [ ] Test: Can create ServerConfig struct
 - [ ] Test: Can initialize Pingora Server instance
 - [ ] Test: Server binds to configured address (from config.yaml)

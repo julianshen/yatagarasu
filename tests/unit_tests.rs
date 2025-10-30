@@ -7,4 +7,5 @@ mod unit {
     mod proxy_tests;
     mod s3_tests;
     mod auth_tests;
+    mod server_tests;  // Phase 12: Pingora Server Setup
 }
