@@ -19,6 +19,12 @@ pub struct HttpService {
     supported_methods: Vec<String>,
 }
 
+/// HTTP response
+#[derive(Debug)]
+pub struct HttpResponse {
+    status_code: u16,
+}
+
 /// Yatagarasu HTTP Server wrapper around Pingora
 #[derive(Debug)]
 pub struct YatagarasuServer {
@@ -111,6 +117,23 @@ impl HttpService {
     /// Check if a method is supported
     pub fn supports_method(&self, method: &str) -> bool {
         self.supported_methods.iter().any(|m| m == method)
+    }
+
+    /// Create an HTTP response with the given status code
+    pub fn create_response(&self, status_code: u16) -> Result<HttpResponse, String> {
+        Ok(HttpResponse::new(status_code))
+    }
+}
+
+impl HttpResponse {
+    /// Create a new HTTP response with the given status code
+    pub fn new(status_code: u16) -> Self {
+        Self { status_code }
+    }
+
+    /// Get the status code of the response
+    pub fn status_code(&self) -> u16 {
+        self.status_code
     }
 }
 

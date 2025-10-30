@@ -680,7 +680,7 @@ yatagarasu/
 ### Basic HTTP Handling
 - [x] Test: Server accepts HTTP/1.1 GET requests
 - [x] Test: Server accepts HTTP/1.1 HEAD requests
-- [ ] Test: Server returns proper HTTP response with status code
+- [x] Test: Server returns proper HTTP response with status code
 - [ ] Test: Server returns proper HTTP response with headers
 - [ ] Test: Server returns proper HTTP response with body
 - [ ] Test: Server handles concurrent requests (10+ simultaneous)

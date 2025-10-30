@@ -247,3 +247,35 @@ fn test_server_accepts_head_requests() {
     let svc = service.unwrap();
     assert!(svc.supports_method("HEAD"));
 }
+
+// Test: Server returns proper HTTP response with status code
+#[test]
+fn test_server_returns_response_with_status_code() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Should be able to create a response with status code 200
+    let response = service.create_response(200);
+    assert!(response.is_ok());
+
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 200);
+
+    // Should be able to create responses with different status codes
+    let response_404 = service.create_response(404).unwrap();
+    assert_eq!(response_404.status_code(), 404);
+
+    let response_500 = service.create_response(500).unwrap();
+    assert_eq!(response_500.status_code(), 500);
+}
