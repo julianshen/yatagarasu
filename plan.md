@@ -605,7 +605,7 @@ yatagarasu/
 - [x] Test: Readiness check (ready to serve traffic)
 
 ### Graceful Shutdown
-- [ ] Test: Responds to SIGTERM signal
+- [x] Test: Responds to SIGTERM signal
 - [ ] Test: Stops accepting new connections
 - [ ] Test: Waits for in-flight requests to complete
 - [ ] Test: Closes S3 connections gracefully

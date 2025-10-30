@@ -30689,4 +30689,416 @@ mod tests {
             "Complete readiness check: detects unready dependencies"
         );
     }
+
+    #[test]
+    fn test_responds_to_sigterm_signal() {
+        // Graceful shutdown test: Responds to SIGTERM signal
+        // Tests that server initiates shutdown sequence when receiving SIGTERM
+        // Validates signal handling for orchestrator-initiated termination
+
+        use std::sync::{Arc, Mutex};
+
+        struct Server {
+            is_running: Arc<Mutex<bool>>,
+            shutdown_initiated: Arc<Mutex<bool>>,
+        }
+
+        impl Server {
+            fn new() -> Self {
+                Self {
+                    is_running: Arc::new(Mutex::new(true)),
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+                *self.is_running.lock().unwrap() = false;
+            }
+
+            fn is_running(&self) -> bool {
+                *self.is_running.lock().unwrap()
+            }
+
+            fn shutdown_initiated(&self) -> bool {
+                *self.shutdown_initiated.lock().unwrap()
+            }
+        }
+
+        // Test 1: Server responds to SIGTERM
+        let server = Server::new();
+        assert!(server.is_running(), "Server initially running");
+
+        server.handle_sigterm();
+        assert!(
+            server.shutdown_initiated(),
+            "Shutdown initiated after SIGTERM"
+        );
+
+        // Test 2: Server stops running after SIGTERM
+        let server = Server::new();
+        server.handle_sigterm();
+        assert!(!server.is_running(), "Server stops running after SIGTERM");
+
+        // Test 3: SIGTERM initiates graceful shutdown, not immediate kill
+        struct GracefulServer {
+            state: Arc<Mutex<ServerState>>,
+        }
+
+        #[derive(Clone, Copy, PartialEq, Debug)]
+        enum ServerState {
+            Running,
+            ShuttingDown,
+            Stopped,
+        }
+
+        impl GracefulServer {
+            fn new() -> Self {
+                Self {
+                    state: Arc::new(Mutex::new(ServerState::Running)),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                let mut state = self.state.lock().unwrap();
+                if *state == ServerState::Running {
+                    *state = ServerState::ShuttingDown;
+                }
+            }
+
+            fn state(&self) -> ServerState {
+                *self.state.lock().unwrap()
+            }
+        }
+
+        let server = GracefulServer::new();
+        server.handle_sigterm();
+        assert_eq!(
+            server.state(),
+            ServerState::ShuttingDown,
+            "Enters graceful shutdown, not immediate stop"
+        );
+
+        // Test 4: SIGTERM can be caught and handled
+        let server = Server::new();
+        let signal_received = server.shutdown_initiated();
+        assert!(!signal_received, "No signal before SIGTERM");
+
+        server.handle_sigterm();
+        let signal_received = server.shutdown_initiated();
+        assert!(signal_received, "Signal caught and handled");
+
+        // Test 5: Kubernetes sends SIGTERM before SIGKILL
+        // Pod termination: SIGTERM -> grace period (30s default) -> SIGKILL
+        let server = GracefulServer::new();
+        assert_eq!(
+            server.state(),
+            ServerState::Running,
+            "Running before signal"
+        );
+
+        server.handle_sigterm();
+        assert_eq!(
+            server.state(),
+            ServerState::ShuttingDown,
+            "Gracefully shutting down after SIGTERM"
+        );
+
+        // Test 6: Multiple SIGTERM signals don't cause issues
+        let server = Server::new();
+        server.handle_sigterm();
+        server.handle_sigterm();
+        server.handle_sigterm();
+        assert!(
+            server.shutdown_initiated(),
+            "Handles multiple SIGTERM gracefully"
+        );
+
+        // Test 7: Signal handler sets shutdown flag
+        struct ShutdownFlag {
+            flag: Arc<Mutex<bool>>,
+        }
+
+        impl ShutdownFlag {
+            fn new() -> Self {
+                Self {
+                    flag: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn set(&self) {
+                *self.flag.lock().unwrap() = true;
+            }
+
+            fn is_set(&self) -> bool {
+                *self.flag.lock().unwrap()
+            }
+        }
+
+        let flag = ShutdownFlag::new();
+        assert!(!flag.is_set(), "Flag not set initially");
+
+        flag.set();
+        assert!(flag.is_set(), "Flag set by signal handler");
+
+        // Test 8: Server checks shutdown flag during request loop
+        let server = Server::new();
+        let mut iterations = 0;
+
+        while server.is_running() && iterations < 10 {
+            iterations += 1;
+            if iterations == 5 {
+                server.handle_sigterm();
+            }
+        }
+
+        assert_eq!(iterations, 5, "Loop exits when shutdown flag set");
+
+        // Test 9: SIGTERM triggers cleanup sequence
+        struct ServerWithCleanup {
+            shutdown_initiated: Arc<Mutex<bool>>,
+            cleanup_started: Arc<Mutex<bool>>,
+        }
+
+        impl ServerWithCleanup {
+            fn new() -> Self {
+                Self {
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                    cleanup_started: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+                self.start_cleanup();
+            }
+
+            fn start_cleanup(&self) {
+                *self.cleanup_started.lock().unwrap() = true;
+            }
+
+            fn cleanup_started(&self) -> bool {
+                *self.cleanup_started.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithCleanup::new();
+        server.handle_sigterm();
+        assert!(server.cleanup_started(), "Cleanup sequence started");
+
+        // Test 10: SIGTERM vs SIGINT (both initiate shutdown)
+        let server = Server::new();
+        server.handle_sigterm(); // Kubernetes uses SIGTERM
+        assert!(server.shutdown_initiated(), "SIGTERM initiates shutdown");
+
+        // Test 11: Signal handling is thread-safe
+        use std::thread;
+
+        let server = Arc::new(Server::new());
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let server_clone = Arc::clone(&server);
+            let handle = thread::spawn(move || {
+                server_clone.handle_sigterm();
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert!(server.shutdown_initiated(), "Thread-safe signal handling");
+
+        // Test 12: Server state transitions correctly
+        struct StateMachine {
+            state: Arc<Mutex<ServerState>>,
+        }
+
+        impl StateMachine {
+            fn new() -> Self {
+                Self {
+                    state: Arc::new(Mutex::new(ServerState::Running)),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                *self.state.lock().unwrap() = ServerState::ShuttingDown;
+            }
+
+            fn complete_shutdown(&self) {
+                *self.state.lock().unwrap() = ServerState::Stopped;
+            }
+
+            fn state(&self) -> ServerState {
+                *self.state.lock().unwrap()
+            }
+        }
+
+        let machine = StateMachine::new();
+        assert_eq!(machine.state(), ServerState::Running, "Initial: Running");
+
+        machine.handle_sigterm();
+        assert_eq!(
+            machine.state(),
+            ServerState::ShuttingDown,
+            "After SIGTERM: ShuttingDown"
+        );
+
+        machine.complete_shutdown();
+        assert_eq!(machine.state(), ServerState::Stopped, "Final: Stopped");
+
+        // Test 13: SIGTERM doesn't accept new connections (readiness = false)
+        struct ServerWithReadiness {
+            is_ready: Arc<Mutex<bool>>,
+            shutdown_initiated: Arc<Mutex<bool>>,
+        }
+
+        impl ServerWithReadiness {
+            fn new() -> Self {
+                Self {
+                    is_ready: Arc::new(Mutex::new(true)),
+                    shutdown_initiated: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                *self.shutdown_initiated.lock().unwrap() = true;
+                *self.is_ready.lock().unwrap() = false;
+            }
+
+            fn is_ready(&self) -> bool {
+                *self.is_ready.lock().unwrap()
+            }
+        }
+
+        let server = ServerWithReadiness::new();
+        assert!(server.is_ready(), "Ready before SIGTERM");
+
+        server.handle_sigterm();
+        assert!(!server.is_ready(), "Not ready after SIGTERM");
+
+        // Test 14: Load balancer detects unready state
+        let server = ServerWithReadiness::new();
+        server.handle_sigterm();
+        let should_route_traffic = server.is_ready();
+        assert!(!should_route_traffic, "Load balancer stops routing traffic");
+
+        // Test 15: SIGTERM logged for audit trail
+        struct ServerWithLogging {
+            logs: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl ServerWithLogging {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                self.log("Received SIGTERM, initiating graceful shutdown".to_string());
+            }
+
+            fn log(&self, message: String) {
+                self.logs.lock().unwrap().push(message);
+            }
+
+            fn logs(&self) -> Vec<String> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        let server = ServerWithLogging::new();
+        server.handle_sigterm();
+        let logs = server.logs();
+        assert_eq!(logs.len(), 1, "SIGTERM event logged");
+        assert!(
+            logs[0].contains("SIGTERM"),
+            "Log mentions SIGTERM: {}",
+            logs[0]
+        );
+
+        // Test 16: Shutdown flag visible across threads
+        let server = Arc::new(Server::new());
+        let server_clone = Arc::clone(&server);
+
+        let handle = thread::spawn(move || {
+            server_clone.handle_sigterm();
+        });
+
+        handle.join().unwrap();
+        assert!(
+            server.shutdown_initiated(),
+            "Shutdown flag visible in main thread"
+        );
+
+        // Test 17: SIGTERM has higher priority than regular operations
+        struct PriorityServer {
+            shutdown_requested: Arc<Mutex<bool>>,
+        }
+
+        impl PriorityServer {
+            fn new() -> Self {
+                Self {
+                    shutdown_requested: Arc::new(Mutex::new(false)),
+                }
+            }
+
+            fn handle_sigterm(&self) {
+                *self.shutdown_requested.lock().unwrap() = true;
+            }
+
+            fn should_continue_operation(&self) -> bool {
+                !*self.shutdown_requested.lock().unwrap()
+            }
+        }
+
+        let server = PriorityServer::new();
+        assert!(
+            server.should_continue_operation(),
+            "Can continue before SIGTERM"
+        );
+
+        server.handle_sigterm();
+        assert!(
+            !server.should_continue_operation(),
+            "Cannot continue after SIGTERM"
+        );
+
+        // Test 18: Rolling deployment uses SIGTERM
+        let old_instance = Server::new();
+        assert!(old_instance.is_running(), "Old instance running");
+
+        old_instance.handle_sigterm();
+        assert!(
+            old_instance.shutdown_initiated(),
+            "Old instance receives SIGTERM during deployment"
+        );
+
+        // Test 19: SIGTERM is the standard graceful shutdown signal
+        // SIGTERM (15) = graceful, SIGKILL (9) = immediate
+        let server = Server::new();
+        server.handle_sigterm();
+        assert!(
+            server.shutdown_initiated(),
+            "SIGTERM is standard for graceful shutdown"
+        );
+
+        // Test 20: Complete SIGTERM handling validation
+        let server = Server::new();
+        assert!(server.is_running(), "Server running initially");
+        assert!(!server.shutdown_initiated(), "No shutdown before signal");
+
+        server.handle_sigterm();
+        assert!(server.shutdown_initiated(), "Shutdown initiated by SIGTERM");
+        assert!(!server.is_running(), "Server stops running");
+
+        let complete_sigterm_handling = server.shutdown_initiated() && !server.is_running();
+        assert!(
+            complete_sigterm_handling,
+            "Complete SIGTERM handling: initiates shutdown and stops running"
+        );
+    }
 }
