@@ -125,6 +125,26 @@ impl HttpService {
     pub fn create_response(&self, status_code: u16) -> Result<HttpResponse, String> {
         Ok(HttpResponse::new(status_code))
     }
+
+    /// Handle an HTTP request and return a response
+    pub fn handle_request(&self, method: &str, path: &str) -> Result<HttpResponse, String> {
+        // Check if method is supported
+        if !self.supports_method(method) {
+            return Ok(HttpResponse::new(405)); // Method Not Allowed
+        }
+
+        // Route based on path
+        match path {
+            "/health" => {
+                // Health check endpoint
+                Ok(HttpResponse::new(200))
+            }
+            _ => {
+                // Unknown path
+                Ok(HttpResponse::new(404))
+            }
+        }
+    }
 }
 
 impl HttpResponse {

@@ -444,3 +444,28 @@ fn test_server_handles_request_pipeline() {
     assert_eq!(response2.status_code(), 200);
     assert_eq!(response3.status_code(), 200);
 }
+
+// Test: GET /health returns 200 OK
+#[test]
+fn test_health_endpoint_returns_200() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Request to /health endpoint
+    let response = service.handle_request("GET", "/health");
+    assert!(response.is_ok());
+
+    let resp = response.unwrap();
+    assert_eq!(resp.status_code(), 200);
+}
