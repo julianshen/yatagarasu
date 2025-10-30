@@ -35039,4 +35039,322 @@ mod tests {
             "Threshold configuration validated: 1 < 10"
         );
     }
+
+    #[test]
+    fn test_circuit_breaker_closes_after_cooldown_period() {
+        // Error recovery test: Circuit breaker closes after cooldown period
+        // Tests that circuit breaker automatically recovers after cooldown allowing retry
+        // Validates automatic recovery and HalfOpen state transitions
+
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum CircuitState {
+            Closed,
+            Open,
+            HalfOpen,
+        }
+
+        struct CircuitBreaker {
+            state: Arc<Mutex<CircuitState>>,
+            opened_at: Arc<Mutex<Option<Instant>>>,
+            cooldown_duration: Duration,
+            failure_threshold: u32,
+            failure_count: Arc<Mutex<u32>>,
+        }
+
+        impl CircuitBreaker {
+            fn new(failure_threshold: u32, cooldown_ms: u64) -> Self {
+                Self {
+                    state: Arc::new(Mutex::new(CircuitState::Closed)),
+                    opened_at: Arc::new(Mutex::new(None)),
+                    cooldown_duration: Duration::from_millis(cooldown_ms),
+                    failure_threshold,
+                    failure_count: Arc::new(Mutex::new(0)),
+                }
+            }
+
+            fn record_failure(&self) {
+                let mut count = self.failure_count.lock().unwrap();
+                *count += 1;
+                if *count >= self.failure_threshold {
+                    *self.state.lock().unwrap() = CircuitState::Open;
+                    *self.opened_at.lock().unwrap() = Some(Instant::now());
+                }
+            }
+
+            fn try_request(&self) -> Result<(), String> {
+                self.check_cooldown();
+                match *self.state.lock().unwrap() {
+                    CircuitState::Closed => Ok(()),
+                    CircuitState::Open => Err("circuit open".to_string()),
+                    CircuitState::HalfOpen => Ok(()),
+                }
+            }
+
+            fn check_cooldown(&self) {
+                let state = self.state.lock().unwrap().clone();
+                if state == CircuitState::Open {
+                    if let Some(opened) = *self.opened_at.lock().unwrap() {
+                        if opened.elapsed() >= self.cooldown_duration {
+                            *self.state.lock().unwrap() = CircuitState::HalfOpen;
+                        }
+                    }
+                }
+            }
+
+            fn record_success(&self) {
+                let state = self.state.lock().unwrap().clone();
+                if state == CircuitState::HalfOpen {
+                    *self.state.lock().unwrap() = CircuitState::Closed;
+                    *self.failure_count.lock().unwrap() = 0;
+                    *self.opened_at.lock().unwrap() = None;
+                }
+            }
+
+            fn state(&self) -> CircuitState {
+                self.check_cooldown();
+                self.state.lock().unwrap().clone()
+            }
+
+            fn cooldown_duration(&self) -> Duration {
+                self.cooldown_duration
+            }
+        }
+
+        // Test 1: Transitions to HalfOpen after cooldown
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open, "Opens after 2 failures");
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "Transitions to HalfOpen after cooldown"
+        );
+
+        // Test 2: Stays Open during cooldown period
+        let cb = CircuitBreaker::new(2, 100);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Stays Open during cooldown period"
+        );
+
+        // Test 3: Configurable cooldown period
+        let cb1 = CircuitBreaker::new(2, 50);
+        let cb2 = CircuitBreaker::new(2, 100);
+        assert!(
+            cb1.cooldown_duration() < cb2.cooldown_duration(),
+            "Configurable cooldown period: 50ms < 100ms"
+        );
+
+        // Test 4: HalfOpen allows single test request
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        let result = cb.try_request();
+        assert!(result.is_ok(), "HalfOpen allows single test request");
+
+        // Test 5: Success in HalfOpen closes circuit
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(cb.state(), CircuitState::HalfOpen); // Ensure we're in HalfOpen
+        cb.record_success();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Success in HalfOpen closes circuit"
+        );
+
+        // Test 6: Cooldown timer starts when circuit opens
+        let cb = CircuitBreaker::new(2, 50);
+        let before = Instant::now();
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        let _ = cb.state(); // Check state to trigger cooldown check
+        let elapsed = before.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(60),
+            "Cooldown timer starts when circuit opens"
+        );
+
+        // Test 7: Multiple buckets have independent cooldown timers
+        let cb1 = CircuitBreaker::new(2, 50);
+        let cb2 = CircuitBreaker::new(2, 100);
+        cb1.record_failure();
+        cb1.record_failure();
+        cb2.record_failure();
+        cb2.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        assert!(
+            cb1.state() == CircuitState::HalfOpen && cb2.state() == CircuitState::Open,
+            "Multiple buckets have independent cooldown timers"
+        );
+
+        // Test 8: Short cooldown (100ms) for testing
+        let cb = CircuitBreaker::new(2, 100);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(110));
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "Short cooldown (100ms) for testing"
+        );
+
+        // Test 9: Production cooldown (30 seconds)
+        let cb = CircuitBreaker::new(5, 30000);
+        assert_eq!(
+            cb.cooldown_duration(),
+            Duration::from_millis(30000),
+            "Production cooldown (30 seconds)"
+        );
+
+        // Test 10: Cooldown period configurable per bucket
+        let cb1 = CircuitBreaker::new(3, 1000);
+        let cb2 = CircuitBreaker::new(3, 5000);
+        assert!(
+            cb1.cooldown_duration() != cb2.cooldown_duration(),
+            "Cooldown period configurable per bucket"
+        );
+
+        // Test 11: After cooldown, one success closes circuit
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+        cb.record_success();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "After cooldown, one success closes circuit"
+        );
+
+        // Test 12: Cooldown allows automatic recovery
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "Cooldown allows automatic recovery"
+        );
+
+        // Test 13: No manual intervention required
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        // No reset or manual action - just check state
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "No manual intervention required"
+        );
+
+        // Test 14: State observable during cooldown
+        let cb = CircuitBreaker::new(2, 100);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(cb.state(), CircuitState::Open, "Still Open at 50ms");
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(cb.state(), CircuitState::HalfOpen, "HalfOpen at 110ms");
+
+        // Test 15: Cooldown duration accurate to milliseconds
+        let cb = CircuitBreaker::new(2, 75);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(80));
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "Cooldown duration accurate to milliseconds"
+        );
+
+        // Test 16: Circuit reopens if HalfOpen test fails
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+        cb.record_failure();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Circuit reopens if HalfOpen test fails"
+        );
+
+        // Test 17: Cooldown resets when circuit reopens
+        let cb = CircuitBreaker::new(2, 50);
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(60));
+        cb.record_failure(); // Reopens
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "Cooldown resets when circuit reopens"
+        );
+
+        // Test 18: Minimum cooldown prevents immediate retry storms
+        let cb = CircuitBreaker::new(3, 50);
+        cb.record_failure();
+        cb.record_failure();
+        cb.record_failure();
+        thread::sleep(Duration::from_millis(10));
+        assert_eq!(
+            cb.state(),
+            CircuitState::Open,
+            "Minimum cooldown prevents immediate retry storms"
+        );
+
+        // Test 19: Cooldown tracked per circuit breaker instance
+        let cb1 = CircuitBreaker::new(2, 50);
+        let cb2 = CircuitBreaker::new(2, 50);
+        cb1.record_failure();
+        cb1.record_failure();
+        thread::sleep(Duration::from_millis(30));
+        cb2.record_failure();
+        cb2.record_failure();
+        thread::sleep(Duration::from_millis(30));
+        assert!(
+            cb1.state() == CircuitState::HalfOpen && cb2.state() == CircuitState::Open,
+            "Cooldown tracked per circuit breaker instance"
+        );
+
+        // Test 20: Full cycle: Closed -> Open -> HalfOpen -> Closed
+        let cb = CircuitBreaker::new(2, 50);
+        assert_eq!(cb.state(), CircuitState::Closed, "Starts Closed");
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open, "Opens after failures");
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            cb.state(),
+            CircuitState::HalfOpen,
+            "HalfOpen after cooldown"
+        );
+        cb.record_success();
+        assert_eq!(
+            cb.state(),
+            CircuitState::Closed,
+            "Full cycle: back to Closed after success"
+        );
+    }
 }

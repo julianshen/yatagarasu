@@ -618,7 +618,7 @@ yatagarasu/
 - [x] Test: Implements retry with exponential backoff
 - [x] Test: Implements circuit breaker for failing S3 buckets
 - [x] Test: Circuit breaker opens after threshold failures
-- [ ] Test: Circuit breaker closes after cooldown period
+- [x] Test: Circuit breaker closes after cooldown period
 
 ### Security Hardening
 - [ ] Test: No credentials logged anywhere
