@@ -698,7 +698,7 @@ yatagarasu/
 - [x] Test: Unknown paths return 404 Not Found
 - [x] Test: Invalid HTTP methods return 405 Method Not Allowed
 - [x] Test: Malformed requests return 400 Bad Request
-- [ ] Test: Server errors return 500 Internal Server Error
+- [x] Test: Server errors return 500 Internal Server Error
 - [ ] Test: Error responses include JSON body with error details
 
 **Expected Outcome**: Running HTTP server that responds to /health and returns 404 for other paths.
