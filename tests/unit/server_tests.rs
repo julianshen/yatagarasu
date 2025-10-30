@@ -638,3 +638,43 @@ fn test_health_endpoint_head_request() {
     // Body should be empty for HEAD request
     assert_eq!(resp.body(), b"");
 }
+
+// Test: Unknown paths return 404 Not Found
+#[test]
+fn test_unknown_paths_return_404() {
+    use yatagarasu::server::YatagarasuServer;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let address = format!("127.0.0.1:{}", port);
+    let config = ServerConfig::new(address.clone());
+
+    let server = YatagarasuServer::new(config).unwrap();
+    let service = server.create_http_service().unwrap();
+
+    // Test various unknown paths
+    let unknown_paths = vec![
+        "/",
+        "/unknown",
+        "/api/v1/data",
+        "/health/metrics",  // Similar to /health but not exact match
+        "/favicon.ico",
+    ];
+
+    for path in unknown_paths {
+        let response = service.handle_request("GET", path);
+        assert!(response.is_ok(), "Request to {} should succeed", path);
+
+        let resp = response.unwrap();
+        assert_eq!(
+            resp.status_code(),
+            404,
+            "Path {} should return 404 Not Found",
+            path
+        );
+    }
+}

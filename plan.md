@@ -695,7 +695,7 @@ yatagarasu/
 - [x] Test: HEAD /health returns 200 without body
 
 ### Error Handling
-- [ ] Test: Unknown paths return 404 Not Found
+- [x] Test: Unknown paths return 404 Not Found
 - [ ] Test: Invalid HTTP methods return 405 Method Not Allowed
 - [ ] Test: Malformed requests return 400 Bad Request
 - [ ] Test: Server errors return 500 Internal Server Error
