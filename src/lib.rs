@@ -8,3 +8,4 @@ pub mod error;
 pub mod proxy;
 pub mod router;
 pub mod s3;
+pub mod server;  // Phase 12: Pingora Server Setup
