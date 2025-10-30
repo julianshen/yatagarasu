@@ -3,4 +3,5 @@
 
 mod unit {
     mod router_tests;
+    mod config_tests;
 }
