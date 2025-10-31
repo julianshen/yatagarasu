@@ -715,7 +715,7 @@ yatagarasu/
 - [x] Test: Can create RequestContext from HTTP request
 - [x] Test: RequestContext includes request ID (UUID)
 - [x] Test: RequestContext includes request method
-- [ ] Test: RequestContext includes request path
+- [x] Test: RequestContext includes request path
 - [ ] Test: RequestContext includes request headers as HashMap
 - [ ] Test: RequestContext includes query parameters as HashMap
 - [ ] Test: RequestContext includes timestamp

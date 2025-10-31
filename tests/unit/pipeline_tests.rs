@@ -55,3 +55,21 @@ fn test_request_context_includes_request_method() {
     assert_eq!(put_context.method(), "PUT");
     assert_eq!(delete_context.method(), "DELETE");
 }
+
+// Test: RequestContext includes request path
+#[test]
+fn test_request_context_includes_request_path() {
+    // Create contexts with different request paths
+    let simple_path = RequestContext::new("GET".to_string(), "/".to_string());
+    let api_path = RequestContext::new("GET".to_string(), "/api/v1/users".to_string());
+    let resource_path = RequestContext::new("GET".to_string(), "/products/123/details".to_string());
+    let file_path = RequestContext::new("GET".to_string(), "/images/logo.png".to_string());
+    let query_path = RequestContext::new("GET".to_string(), "/search?q=test&page=1".to_string());
+
+    // Verify each context stores and returns the correct path
+    assert_eq!(simple_path.path(), "/");
+    assert_eq!(api_path.path(), "/api/v1/users");
+    assert_eq!(resource_path.path(), "/products/123/details");
+    assert_eq!(file_path.path(), "/images/logo.png");
+    assert_eq!(query_path.path(), "/search?q=test&page=1");
+}
