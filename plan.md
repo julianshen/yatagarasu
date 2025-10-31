@@ -712,7 +712,7 @@ yatagarasu/
 **Goal**: Route incoming HTTP requests to correct bucket and validate JWT tokens.
 
 ### Request Context
-- [ ] Test: Can create RequestContext from HTTP request
+- [x] Test: Can create RequestContext from HTTP request
 - [ ] Test: RequestContext includes request ID (UUID)
 - [ ] Test: RequestContext includes request method
 - [ ] Test: RequestContext includes request path

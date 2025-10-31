@@ -8,4 +8,5 @@ mod unit {
     mod s3_tests;
     mod auth_tests;
     mod server_tests;  // Phase 12: Pingora Server Setup
+    mod pipeline_tests;  // Phase 13: Request Pipeline Integration
 }
