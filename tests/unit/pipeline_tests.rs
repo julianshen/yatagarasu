@@ -101,3 +101,31 @@ fn test_request_context_includes_request_headers() {
     // Verify missing header returns None
     assert_eq!(stored_headers.get("X-Custom-Header"), None);
 }
+
+// Test: RequestContext includes query parameters as HashMap
+#[test]
+fn test_request_context_includes_query_parameters() {
+    use std::collections::HashMap;
+
+    // Create a query parameters map
+    let mut query_params = HashMap::new();
+    query_params.insert("q".to_string(), "search term".to_string());
+    query_params.insert("page".to_string(), "2".to_string());
+    query_params.insert("limit".to_string(), "50".to_string());
+
+    // Create context with query parameters
+    let context = RequestContext::with_query_params(
+        "GET".to_string(),
+        "/search".to_string(),
+        query_params.clone(),
+    );
+
+    // Verify query parameters are stored and accessible
+    let stored_params = context.query_params();
+    assert_eq!(stored_params.get("q"), Some(&"search term".to_string()));
+    assert_eq!(stored_params.get("page"), Some(&"2".to_string()));
+    assert_eq!(stored_params.get("limit"), Some(&"50".to_string()));
+
+    // Verify missing parameter returns None
+    assert_eq!(stored_params.get("sort"), None);
+}

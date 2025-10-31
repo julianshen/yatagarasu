@@ -12,6 +12,7 @@ pub struct RequestContext {
     method: String,
     path: String,
     headers: HashMap<String, String>,
+    query_params: HashMap<String, String>,
 }
 
 impl RequestContext {
@@ -23,6 +24,7 @@ impl RequestContext {
             method,
             path,
             headers: HashMap::new(),
+            query_params: HashMap::new(),
         }
     }
 
@@ -34,6 +36,19 @@ impl RequestContext {
             method,
             path,
             headers,
+            query_params: HashMap::new(),
+        }
+    }
+
+    /// Create a new RequestContext with query parameters
+    /// Automatically generates a unique request ID (UUID v4)
+    pub fn with_query_params(method: String, path: String, query_params: HashMap<String, String>) -> Self {
+        Self {
+            request_id: Uuid::new_v4().to_string(),
+            method,
+            path,
+            headers: HashMap::new(),
+            query_params,
         }
     }
 
@@ -55,6 +70,11 @@ impl RequestContext {
     /// Get the request headers
     pub fn headers(&self) -> &HashMap<String, String> {
         &self.headers
+    }
+
+    /// Get the query parameters
+    pub fn query_params(&self) -> &HashMap<String, String> {
+        &self.query_params
     }
 }
 
