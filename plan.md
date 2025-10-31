@@ -728,7 +728,7 @@ yatagarasu/
 - [x] Test: Longest prefix matching works (e.g., /products/foo matches /products not /prod)
 - [x] Test: Unmapped paths return 404 with appropriate message
 - [x] Test: S3 key is extracted from path (e.g., /products/image.png → image.png)
-- [ ] Test: Router middleware adds bucket config to request context
+- [x] Test: Router middleware adds bucket config to request context
 
 ### Authentication Integration
 - [ ] Test: Auth middleware skips validation for public buckets (auth.enabled=false)

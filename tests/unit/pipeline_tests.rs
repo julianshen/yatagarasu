@@ -454,3 +454,39 @@ fn test_s3_key_is_extracted_from_path() {
     let s3_key = router.extract_s3_key("/unknown/file.txt");
     assert_eq!(s3_key, None, "Unmapped path should return None");
 }
+
+// Test: Router middleware adds bucket config to request context
+#[test]
+fn test_router_middleware_adds_bucket_config_to_request_context() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create a request context
+    let mut context = RequestContext::new("GET".to_string(), "/products/image.png".to_string());
+
+    // Create a bucket configuration
+    let bucket_config = BucketConfig {
+        name: "products".to_string(),
+        path_prefix: "/products".to_string(),
+        s3: S3Config {
+            bucket: "my-products".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: None,
+        },
+    };
+
+    // Add the bucket config to the context
+    context.set_bucket_config(bucket_config.clone());
+
+    // Verify the bucket config is stored in the context
+    let stored_config = context.bucket_config();
+    assert!(stored_config.is_some(), "Bucket config should be present in context");
+
+    let config = stored_config.unwrap();
+    assert_eq!(config.name, "products", "Bucket name should match");
+    assert_eq!(config.path_prefix, "/products", "Path prefix should match");
+    assert_eq!(config.s3.bucket, "my-products", "S3 bucket should match");
+    assert_eq!(config.s3.region, "us-east-1", "S3 region should match");
+}

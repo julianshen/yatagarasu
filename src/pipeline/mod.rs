@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+use crate::config::BucketConfig;
 
 /// Request context that holds all information about an HTTP request
 /// as it flows through the middleware pipeline
@@ -15,6 +16,7 @@ pub struct RequestContext {
     headers: HashMap<String, String>,
     query_params: HashMap<String, String>,
     timestamp: u64,
+    bucket_config: Option<BucketConfig>,
 }
 
 impl RequestContext {
@@ -31,6 +33,7 @@ impl RequestContext {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            bucket_config: None,
         }
     }
 
@@ -47,6 +50,7 @@ impl RequestContext {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            bucket_config: None,
         }
     }
 
@@ -63,6 +67,7 @@ impl RequestContext {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            bucket_config: None,
         }
     }
 
@@ -94,6 +99,16 @@ impl RequestContext {
     /// Get the request timestamp (Unix epoch seconds)
     pub fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    /// Set the bucket configuration for this request
+    pub fn set_bucket_config(&mut self, bucket_config: BucketConfig) {
+        self.bucket_config = Some(bucket_config);
+    }
+
+    /// Get the bucket configuration for this request
+    pub fn bucket_config(&self) -> Option<&BucketConfig> {
+        self.bucket_config.as_ref()
     }
 }
 
