@@ -370,3 +370,44 @@ fn test_longest_prefix_matching_works() {
     assert_eq!(bucket.unwrap().name, "products",
                "/products should match /products");
 }
+
+// Test: Unmapped paths return None (which translates to 404)
+#[test]
+fn test_unmapped_paths_return_none() {
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create router with limited bucket configs
+    let buckets = vec![
+        BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+    ];
+
+    let router = Router::new(buckets);
+
+    // Test paths that don't match any bucket
+    let unmapped_paths = vec![
+        "/",
+        "/unknown",
+        "/api/v1/users",
+        "/static/css/style.css",
+        "/product",  // Similar but not matching /products
+        "/prod",     // Prefix of products but not matching
+    ];
+
+    for path in unmapped_paths {
+        let bucket = router.route(path);
+        assert!(bucket.is_none(),
+                "Path {} should not match any bucket (return None for 404)",
+                path);
+    }
+}
