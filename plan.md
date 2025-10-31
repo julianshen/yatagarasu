@@ -722,7 +722,7 @@ yatagarasu/
 - [x] Test: Request ID is logged with every log message
 
 ### Router Integration
-- [ ] Test: Router middleware extracts bucket from request path
+- [x] Test: Router middleware extracts bucket from request path
 - [ ] Test: Requests to /products/* route to products bucket
 - [ ] Test: Requests to /private/* route to private bucket
 - [ ] Test: Longest prefix matching works (e.g., /products/foo matches /products not /prod)

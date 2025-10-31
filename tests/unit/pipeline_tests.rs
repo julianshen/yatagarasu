@@ -193,3 +193,49 @@ fn test_request_id_is_logged_with_every_log_message() {
     assert!(log_message2.contains(&request_id),
             "All log messages should contain the same request ID");
 }
+
+// Test: Router middleware extracts bucket from request path
+#[test]
+fn test_router_middleware_extracts_bucket_from_request_path() {
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create bucket configs
+    let buckets = vec![
+        BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+        BucketConfig {
+            name: "private".to_string(),
+            path_prefix: "/private".to_string(),
+            s3: S3Config {
+                bucket: "my-private".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+    ];
+
+    // Create router from buckets
+    let router = Router::new(buckets);
+
+    // Test routing to products bucket
+    let bucket = router.route("/products/image.png");
+    assert!(bucket.is_some(), "Should find bucket for /products path");
+    assert_eq!(bucket.unwrap().name, "products");
+
+    // Test routing to private bucket
+    let bucket = router.route("/private/document.pdf");
+    assert!(bucket.is_some(), "Should find bucket for /private path");
+    assert_eq!(bucket.unwrap().name, "private");
+}
