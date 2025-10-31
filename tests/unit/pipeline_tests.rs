@@ -317,3 +317,56 @@ fn test_requests_to_private_route_to_private_bucket() {
                    "Path {} should route to private bucket", path);
     }
 }
+
+// Test: Longest prefix matching works
+#[test]
+fn test_longest_prefix_matching_works() {
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create buckets with overlapping prefixes
+    let buckets = vec![
+        BucketConfig {
+            name: "prod".to_string(),
+            path_prefix: "/prod".to_string(),
+            s3: S3Config {
+                bucket: "my-prod".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+        BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+    ];
+
+    let router = Router::new(buckets);
+
+    // /products/foo should match /products (longer prefix), not /prod
+    let bucket = router.route("/products/foo");
+    assert!(bucket.is_some(), "Should find bucket for /products/foo");
+    assert_eq!(bucket.unwrap().name, "products",
+               "/products/foo should match /products (longest prefix), not /prod");
+
+    // /prod/bar should match /prod exactly
+    let bucket = router.route("/prod/bar");
+    assert!(bucket.is_some(), "Should find bucket for /prod/bar");
+    assert_eq!(bucket.unwrap().name, "prod",
+               "/prod/bar should match /prod");
+
+    // /products should match /products exactly
+    let bucket = router.route("/products");
+    assert!(bucket.is_some(), "Should find bucket for /products");
+    assert_eq!(bucket.unwrap().name, "products",
+               "/products should match /products");
+}
