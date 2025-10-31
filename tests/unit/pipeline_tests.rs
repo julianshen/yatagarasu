@@ -278,3 +278,42 @@ fn test_requests_to_products_route_to_products_bucket() {
                    "Path {} should route to products bucket", path);
     }
 }
+
+// Test: Requests to /private/* route to private bucket
+#[test]
+fn test_requests_to_private_route_to_private_bucket() {
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create bucket configs
+    let buckets = vec![
+        BucketConfig {
+            name: "private".to_string(),
+            path_prefix: "/private".to_string(),
+            s3: S3Config {
+                bucket: "my-private-files".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+    ];
+
+    let router = Router::new(buckets);
+
+    // Test various paths under /private
+    let test_paths = vec![
+        "/private/secret.txt",
+        "/private/docs/confidential.pdf",
+        "/private/users/123/data.json",
+        "/private/keys/api-key.pem",
+    ];
+
+    for path in test_paths {
+        let bucket = router.route(path);
+        assert!(bucket.is_some(), "Should find bucket for path: {}", path);
+        assert_eq!(bucket.unwrap().name, "private",
+                   "Path {} should route to private bucket", path);
+    }
+}

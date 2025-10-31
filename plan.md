@@ -724,7 +724,7 @@ yatagarasu/
 ### Router Integration
 - [x] Test: Router middleware extracts bucket from request path
 - [x] Test: Requests to /products/* route to products bucket
-- [ ] Test: Requests to /private/* route to private bucket
+- [x] Test: Requests to /private/* route to private bucket
 - [ ] Test: Longest prefix matching works (e.g., /products/foo matches /products not /prod)
 - [ ] Test: Unmapped paths return 404 with appropriate message
 - [ ] Test: S3 key is extracted from path (e.g., /products/image.png → image.png)
