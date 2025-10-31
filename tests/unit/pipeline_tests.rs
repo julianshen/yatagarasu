@@ -411,3 +411,46 @@ fn test_unmapped_paths_return_none() {
                 path);
     }
 }
+
+// Test: S3 key is extracted from path
+#[test]
+fn test_s3_key_is_extracted_from_path() {
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create bucket configs
+    let buckets = vec![
+        BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+    ];
+
+    let router = Router::new(buckets);
+
+    // Test extracting S3 keys from various paths
+    let test_cases = vec![
+        ("/products/image.png", "image.png"),
+        ("/products/subdir/file.jpg", "subdir/file.jpg"),
+        ("/products/a/b/c/deep.txt", "a/b/c/deep.txt"),
+        ("/products/", ""),
+        ("/products", ""),
+    ];
+
+    for (path, expected_key) in test_cases {
+        let s3_key = router.extract_s3_key(path);
+        assert_eq!(s3_key, Some(expected_key.to_string()),
+                   "Path {} should extract S3 key '{}'", path, expected_key);
+    }
+
+    // Test path that doesn't match any bucket
+    let s3_key = router.extract_s3_key("/unknown/file.txt");
+    assert_eq!(s3_key, None, "Unmapped path should return None");
+}
