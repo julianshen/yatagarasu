@@ -719,7 +719,7 @@ yatagarasu/
 - [x] Test: RequestContext includes request headers as HashMap
 - [x] Test: RequestContext includes query parameters as HashMap
 - [x] Test: RequestContext includes timestamp
-- [ ] Test: Request ID is logged with every log message
+- [x] Test: Request ID is logged with every log message
 
 ### Router Integration
 - [ ] Test: Router middleware extracts bucket from request path

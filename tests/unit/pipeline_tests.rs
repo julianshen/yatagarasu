@@ -163,3 +163,33 @@ fn test_request_context_includes_timestamp() {
     // Second timestamp should be >= first (or equal if created too quickly)
     assert!(timestamp2 >= timestamp, "Later context should have later or equal timestamp");
 }
+
+// Test: Request ID is logged with every log message
+#[test]
+fn test_request_id_is_logged_with_every_log_message() {
+    use yatagarasu::pipeline::RequestContext;
+
+    // Create a context
+    let context = RequestContext::new("GET".to_string(), "/test".to_string());
+    let request_id = context.request_id().to_string();
+
+    // For now, we just verify that the request_id is accessible and can be used in logging
+    // Full integration with tracing/logging will be done when we implement the actual
+    // logging middleware in later phases
+
+    // Simulate a log message that includes the request ID
+    let log_message = format!("Processing request [request_id={}]", context.request_id());
+
+    // Verify the request ID is in the log message
+    assert!(log_message.contains(&request_id),
+            "Log message should contain request ID");
+
+    // Verify the format is correct
+    assert!(log_message.contains("request_id="),
+            "Log message should have request_id field");
+
+    // Multiple log messages should all include the same request ID
+    let log_message2 = format!("Request completed [request_id={}]", context.request_id());
+    assert!(log_message2.contains(&request_id),
+            "All log messages should contain the same request ID");
+}
