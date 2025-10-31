@@ -239,3 +239,42 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
     assert!(bucket.is_some(), "Should find bucket for /private path");
     assert_eq!(bucket.unwrap().name, "private");
 }
+
+// Test: Requests to /products/* route to products bucket
+#[test]
+fn test_requests_to_products_route_to_products_bucket() {
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config};
+
+    // Create bucket configs
+    let buckets = vec![
+        BucketConfig {
+            name: "products".to_string(),
+            path_prefix: "/products".to_string(),
+            s3: S3Config {
+                bucket: "my-products".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+        },
+    ];
+
+    let router = Router::new(buckets);
+
+    // Test various paths under /products
+    let test_paths = vec![
+        "/products/image.png",
+        "/products/subdir/file.jpg",
+        "/products/a/b/c/deep.txt",
+        "/products/logo.svg",
+    ];
+
+    for path in test_paths {
+        let bucket = router.route(path);
+        assert!(bucket.is_some(), "Should find bucket for path: {}", path);
+        assert_eq!(bucket.unwrap().name, "products",
+                   "Path {} should route to products bucket", path);
+    }
+}

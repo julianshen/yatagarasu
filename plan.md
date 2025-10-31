@@ -723,7 +723,7 @@ yatagarasu/
 
 ### Router Integration
 - [x] Test: Router middleware extracts bucket from request path
-- [ ] Test: Requests to /products/* route to products bucket
+- [x] Test: Requests to /products/* route to products bucket
 - [ ] Test: Requests to /private/* route to private bucket
 - [ ] Test: Longest prefix matching works (e.g., /products/foo matches /products not /prod)
 - [ ] Test: Unmapped paths return 404 with appropriate message
