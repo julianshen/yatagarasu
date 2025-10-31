@@ -1,6 +1,7 @@
 // Request pipeline module - handles request context and middleware chain
 // Phase 13: Request Pipeline Integration
 
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Request context that holds all information about an HTTP request
@@ -10,6 +11,7 @@ pub struct RequestContext {
     request_id: String,
     method: String,
     path: String,
+    headers: HashMap<String, String>,
 }
 
 impl RequestContext {
@@ -20,6 +22,18 @@ impl RequestContext {
             request_id: Uuid::new_v4().to_string(),
             method,
             path,
+            headers: HashMap::new(),
+        }
+    }
+
+    /// Create a new RequestContext with headers
+    /// Automatically generates a unique request ID (UUID v4)
+    pub fn with_headers(method: String, path: String, headers: HashMap<String, String>) -> Self {
+        Self {
+            request_id: Uuid::new_v4().to_string(),
+            method,
+            path,
+            headers,
         }
     }
 
@@ -36,6 +50,11 @@ impl RequestContext {
     /// Get the request path
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Get the request headers
+    pub fn headers(&self) -> &HashMap<String, String> {
+        &self.headers
     }
 }
 

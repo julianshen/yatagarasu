@@ -73,3 +73,31 @@ fn test_request_context_includes_request_path() {
     assert_eq!(file_path.path(), "/images/logo.png");
     assert_eq!(query_path.path(), "/search?q=test&page=1");
 }
+
+// Test: RequestContext includes request headers as HashMap
+#[test]
+fn test_request_context_includes_request_headers() {
+    use std::collections::HashMap;
+
+    // Create a headers map
+    let mut headers = HashMap::new();
+    headers.insert("Content-Type".to_string(), "application/json".to_string());
+    headers.insert("Authorization".to_string(), "Bearer token123".to_string());
+    headers.insert("User-Agent".to_string(), "Mozilla/5.0".to_string());
+
+    // Create context with headers
+    let context = RequestContext::with_headers(
+        "POST".to_string(),
+        "/api/data".to_string(),
+        headers.clone(),
+    );
+
+    // Verify headers are stored and accessible
+    let stored_headers = context.headers();
+    assert_eq!(stored_headers.get("Content-Type"), Some(&"application/json".to_string()));
+    assert_eq!(stored_headers.get("Authorization"), Some(&"Bearer token123".to_string()));
+    assert_eq!(stored_headers.get("User-Agent"), Some(&"Mozilla/5.0".to_string()));
+
+    // Verify missing header returns None
+    assert_eq!(stored_headers.get("X-Custom-Header"), None);
+}
