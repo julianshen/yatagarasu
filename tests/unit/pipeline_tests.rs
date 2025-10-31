@@ -39,3 +39,19 @@ fn test_request_context_includes_request_id() {
     assert!(id1.contains('-'), "Request ID should be in UUID format");
     assert_eq!(id1.len(), 36, "UUID should be 36 characters long");
 }
+
+// Test: RequestContext includes request method
+#[test]
+fn test_request_context_includes_request_method() {
+    // Create contexts with different HTTP methods
+    let get_context = RequestContext::new("GET".to_string(), "/test".to_string());
+    let post_context = RequestContext::new("POST".to_string(), "/api/data".to_string());
+    let put_context = RequestContext::new("PUT".to_string(), "/resource/123".to_string());
+    let delete_context = RequestContext::new("DELETE".to_string(), "/item/456".to_string());
+
+    // Verify each context stores and returns the correct method
+    assert_eq!(get_context.method(), "GET");
+    assert_eq!(post_context.method(), "POST");
+    assert_eq!(put_context.method(), "PUT");
+    assert_eq!(delete_context.method(), "DELETE");
+}
