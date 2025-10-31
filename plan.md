@@ -718,7 +718,7 @@ yatagarasu/
 - [x] Test: RequestContext includes request path
 - [x] Test: RequestContext includes request headers as HashMap
 - [x] Test: RequestContext includes query parameters as HashMap
-- [ ] Test: RequestContext includes timestamp
+- [x] Test: RequestContext includes timestamp
 - [ ] Test: Request ID is logged with every log message
 
 ### Router Integration

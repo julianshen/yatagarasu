@@ -129,3 +129,37 @@ fn test_request_context_includes_query_parameters() {
     // Verify missing parameter returns None
     assert_eq!(stored_params.get("sort"), None);
 }
+
+// Test: RequestContext includes timestamp
+#[test]
+fn test_request_context_includes_timestamp() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Record time before creating context
+    let before = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Create context
+    let context = RequestContext::new("GET".to_string(), "/test".to_string());
+
+    // Record time after creating context
+    let after = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Verify timestamp is within the expected range
+    let timestamp = context.timestamp();
+    assert!(timestamp >= before, "Timestamp should be >= time before creation");
+    assert!(timestamp <= after, "Timestamp should be <= time after creation");
+
+    // Create another context and verify it has a different timestamp
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    let context2 = RequestContext::new("GET".to_string(), "/test2".to_string());
+    let timestamp2 = context2.timestamp();
+
+    // Second timestamp should be >= first (or equal if created too quickly)
+    assert!(timestamp2 >= timestamp, "Later context should have later or equal timestamp");
+}
