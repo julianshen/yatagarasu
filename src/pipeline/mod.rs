@@ -1,21 +1,31 @@
 // Request pipeline module - handles request context and middleware chain
 // Phase 13: Request Pipeline Integration
 
+use uuid::Uuid;
+
 /// Request context that holds all information about an HTTP request
 /// as it flows through the middleware pipeline
 #[derive(Debug, Clone)]
 pub struct RequestContext {
+    request_id: String,
     method: String,
     path: String,
 }
 
 impl RequestContext {
     /// Create a new RequestContext from HTTP request information
+    /// Automatically generates a unique request ID (UUID v4)
     pub fn new(method: String, path: String) -> Self {
         Self {
+            request_id: Uuid::new_v4().to_string(),
             method,
             path,
         }
+    }
+
+    /// Get the unique request ID
+    pub fn request_id(&self) -> &str {
+        &self.request_id
     }
 
     /// Get the HTTP method

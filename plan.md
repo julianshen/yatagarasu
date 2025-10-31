@@ -713,7 +713,7 @@ yatagarasu/
 
 ### Request Context
 - [x] Test: Can create RequestContext from HTTP request
-- [ ] Test: RequestContext includes request ID (UUID)
+- [x] Test: RequestContext includes request ID (UUID)
 - [ ] Test: RequestContext includes request method
 - [ ] Test: RequestContext includes request path
 - [ ] Test: RequestContext includes request headers as HashMap

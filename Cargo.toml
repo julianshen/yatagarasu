@@ -51,6 +51,7 @@ thiserror = "1.0"
 bytes = "1.5"
 futures = "0.3"
 regex = "1.10"
+uuid = { version = "1.6", features = ["v4"] }
 
 # Cryptography
 sha2 = "0.10"
