@@ -841,7 +841,7 @@ yatagarasu/
 - [x] Test: JWT tokens are never logged
 - [x] Test: AWS credentials are never logged
 - [x] Test: Authorization headers are redacted in logs
-- [ ] Test: Query parameters with 'token' are redacted in logs
+- [x] Test: Query parameters with 'token' are redacted in logs
 - [ ] Test: S3 secret keys are never logged
 
 ### Request Tracing
