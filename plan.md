@@ -733,7 +733,7 @@ yatagarasu/
 ### Authentication Integration
 - [x] Test: Auth middleware skips validation for public buckets (auth.enabled=false)
 - [x] Test: Auth middleware validates JWT for private buckets (auth.enabled=true)
-- [ ] Test: JWT extracted from Authorization header (Bearer token)
+- [x] Test: JWT extracted from Authorization header (Bearer token)
 - [ ] Test: JWT extracted from query parameter (if configured)
 - [ ] Test: JWT extracted from custom header (if configured)
 - [ ] Test: Valid JWT adds claims to request context

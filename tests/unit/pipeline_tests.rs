@@ -611,3 +611,108 @@ fn test_auth_middleware_validates_jwt_for_private_buckets() {
     // 5. Add validated claims to request context
     // 6. Return 401 if validation fails
 }
+
+// Test: JWT extracted from Authorization header (Bearer token)
+#[test]
+fn test_jwt_extracted_from_authorization_header() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Create a request context with Authorization header containing a Bearer token
+    let mut headers = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    headers.insert(
+        "Authorization".to_string(),
+        format!("Bearer {}", expected_token),
+    );
+
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        headers,
+    );
+
+    // Auth middleware should extract the token from the Authorization header
+    let extracted_token = extract_bearer_token(context.headers());
+
+    // Verify the token was successfully extracted
+    assert!(extracted_token.is_some(), "Token should be extracted from Authorization header");
+    assert_eq!(
+        extracted_token.unwrap(),
+        expected_token,
+        "Extracted token should match the original token"
+    );
+}
+
+// Test: JWT extracted from Authorization header with different casing
+#[test]
+fn test_jwt_extracted_from_authorization_header_case_insensitive() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Test with lowercase "authorization" header
+    let mut headers = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    headers.insert(
+        "authorization".to_string(), // lowercase
+        format!("Bearer {}", expected_token),
+    );
+
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers,
+    );
+
+    // Token extraction should be case-insensitive
+    let extracted_token = extract_bearer_token(context.headers());
+    assert!(extracted_token.is_some(), "Token should be extracted despite lowercase header name");
+    assert_eq!(extracted_token.unwrap(), expected_token);
+}
+
+// Test: JWT extraction returns None when Authorization header is missing
+#[test]
+fn test_jwt_extraction_returns_none_when_header_missing() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Create request without Authorization header
+    let headers = HashMap::new();
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers,
+    );
+
+    // Token extraction should return None
+    let extracted_token = extract_bearer_token(context.headers());
+    assert!(extracted_token.is_none(), "Should return None when Authorization header is missing");
+}
+
+// Test: JWT extraction returns None when Bearer prefix is missing
+#[test]
+fn test_jwt_extraction_returns_none_when_bearer_prefix_missing() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Create request with Authorization header but without "Bearer " prefix
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U".to_string(),
+    );
+
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers,
+    );
+
+    // Token extraction should return None without Bearer prefix
+    let extracted_token = extract_bearer_token(context.headers());
+    assert!(extracted_token.is_none(), "Should return None when Bearer prefix is missing");
+}
