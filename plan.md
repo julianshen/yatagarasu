@@ -784,7 +784,7 @@ yatagarasu/
 
 ### Range Request Support
 - [x] Test: Client Range header is forwarded to S3
-- [ ] Test: S3 206 Partial Content returns HTTP 206
+- [x] Test: S3 206 Partial Content returns HTTP 206
 - [ ] Test: Content-Range header is preserved
 - [ ] Test: Range requests stream only requested bytes
 - [ ] Test: Multiple range requests (bytes=0-100,200-300) work

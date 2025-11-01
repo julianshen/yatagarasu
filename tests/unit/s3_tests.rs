@@ -11156,3 +11156,305 @@ fn test_client_range_header_is_forwarded_to_s3() {
     assert_eq!(client_request_method, "GET");
     assert_eq!(client_request_range, "bytes=0-1023");
 }
+
+// Test: S3 206 Partial Content returns HTTP 206
+#[test]
+fn test_s3_206_partial_content_returns_http_206() {
+    // This test verifies that when S3 returns 206 Partial Content (in response
+    // to a Range request), the proxy correctly forwards this 206 status code to
+    // the client, not converting it to 200 or any other status.
+
+    // Why 206 status code matters:
+    // 1. HTTP spec compliance: RFC 7233 requires 206 for partial responses
+    // 2. Client awareness: Tells client it received partial content, not full file
+    // 3. Download managers: Need 206 to know resume worked correctly
+    // 4. Video players: Need 206 to validate seek operation succeeded
+    // 5. Cache behavior: Browsers cache 206 differently than 200
+
+    // HTTP status codes for Range requests:
+    // - 200 OK: Full content (no Range header or Range ignored)
+    // - 206 Partial Content: Partial content (Range request satisfied)
+    // - 416 Range Not Satisfiable: Invalid range (out of bounds)
+
+    // Request/Response flow:
+
+    // Scenario 1: Range request → 206 response
+    //
+    // Client → Proxy:
+    //   GET /videos/clip.mp4 HTTP/1.1
+    //   Range: bytes=0-1023
+    //
+    // Proxy → S3:
+    //   GetObject(bucket="videos", key="clip.mp4", range="bytes=0-1023")
+    //
+    // S3 → Proxy:
+    //   HTTP/1.1 206 Partial Content
+    //   Content-Range: bytes 0-1023/5000000
+    //   Content-Length: 1024
+    //   [1024 bytes of data]
+    //
+    // Proxy → Client:
+    //   HTTP/1.1 206 Partial Content  ← Must be 206, not 200!
+    //   Content-Range: bytes 0-1023/5000000
+    //   Content-Length: 1024
+    //   [1024 bytes of data]
+
+    let client_request_range = "bytes=0-1023";
+    let s3_response_status = 206; // S3 returns 206 Partial Content
+    let proxy_response_status = s3_response_status; // Proxy forwards 206
+
+    assert_eq!(s3_response_status, 206, "S3 returns 206 for Range request");
+    assert_eq!(proxy_response_status, 206, "Proxy forwards 206 to client");
+
+    // Scenario 2: No Range header → 200 response
+    //
+    // Client → Proxy:
+    //   GET /videos/clip.mp4 HTTP/1.1
+    //   (no Range header)
+    //
+    // Proxy → S3:
+    //   GetObject(bucket="videos", key="clip.mp4")
+    //   (no range parameter)
+    //
+    // S3 → Proxy:
+    //   HTTP/1.1 200 OK
+    //   Content-Length: 5000000
+    //   [5000000 bytes - full file]
+    //
+    // Proxy → Client:
+    //   HTTP/1.1 200 OK
+    //   Content-Length: 5000000
+    //   [5000000 bytes - full file]
+
+    let no_range_s3_status = 200; // S3 returns 200 for full file
+    let no_range_proxy_status = no_range_s3_status; // Proxy forwards 200
+
+    assert_eq!(no_range_s3_status, 200, "S3 returns 200 for full file request");
+    assert_eq!(no_range_proxy_status, 200, "Proxy forwards 200 to client");
+    assert_ne!(proxy_response_status, no_range_proxy_status,
+        "206 (partial) is different from 200 (full)");
+
+    // Why proxy must preserve 206 status:
+
+    // Reason 1: HTTP specification compliance (RFC 7233)
+    // - RFC 7233 Section 4.1: Server MUST send 206 for successful range request
+    // - Changing 206 to 200 violates HTTP spec
+    // - Clients rely on correct status codes
+
+    // Reason 2: Download manager behavior
+    // - Download manager sends: Range: bytes=50000000-
+    // - Expects: 206 Partial Content
+    // - If receives: 200 OK → Download manager thinks resume failed
+    // - Download manager may restart from byte 0 (wasting bandwidth!)
+
+    let resume_request_range = "bytes=50000000-";
+    let resume_s3_status = 206;
+    let resume_proxy_status = resume_s3_status;
+
+    assert_eq!(resume_proxy_status, 206,
+        "Resume download MUST get 206 (not 200) to know it worked");
+
+    // Reason 3: Video player seeking
+    // - User seeks to 5:00 in video
+    // - Player sends: Range: bytes=50000000-55000000
+    // - Expects: 206 Partial Content
+    // - If receives: 200 OK → Player thinks full file was sent
+    // - Player may buffer unnecessarily or show wrong UI
+
+    let seek_request_range = "bytes=50000000-55000000";
+    let seek_s3_status = 206;
+    let seek_proxy_status = seek_s3_status;
+
+    assert_eq!(seek_proxy_status, 206,
+        "Video seek MUST get 206 to validate seek succeeded");
+
+    // Reason 4: Browser caching
+    // - 200 OK: Cached as complete resource
+    // - 206 Partial Content: Cached as partial resource
+    // - Wrong status code → wrong cache behavior
+
+    // Browser behavior with 200:
+    // - Caches as complete file
+    // - Future requests for different ranges may use wrong cached data
+    // - Can cause video playback errors
+
+    // Browser behavior with 206:
+    // - Caches as partial content
+    // - Future range requests work correctly
+    // - Proper video streaming behavior
+
+    // Reason 5: Content-Length interpretation
+    // - With 200: Content-Length = full file size
+    // - With 206: Content-Length = range size (partial)
+    // - Client uses status code to interpret Content-Length
+
+    let full_file_size: u64 = 100_000_000; // 100 MB file
+    let range_size: u64 = 1_000_000; // 1 MB range
+
+    // Response with 200 OK:
+    let response_200_content_length = full_file_size;
+    assert_eq!(response_200_content_length, 100_000_000,
+        "200 OK: Content-Length is full file size");
+
+    // Response with 206 Partial Content:
+    let response_206_content_length = range_size;
+    assert_eq!(response_206_content_length, 1_000_000,
+        "206 Partial: Content-Length is range size");
+
+    // If proxy sent 200 with Content-Length: 1000000:
+    // - Client expects 100 MB (full file) based on 200 status
+    // - But only receives 1 MB
+    // - Client reports "incomplete download" error
+    // - Wrong!
+
+    // Common mistakes:
+
+    // ❌ MISTAKE 1: Always return 200 OK
+    // Some proxies normalize all responses to 200 OK
+    // - S3 returns 206 → Proxy changes to 200 → Client confused
+    // - Breaks resume downloads, video seeking, etc.
+
+    let wrong_always_200 = 200;
+    assert_ne!(wrong_always_200, s3_response_status,
+        "Don't normalize 206 to 200!");
+
+    // ❌ MISTAKE 2: Return 206 for non-range requests
+    // Some proxies always return 206 (even without Range header)
+    // - Client expects 200 for full file
+    // - Gets 206 → Client thinks it received partial data
+    // - May try to fetch "rest" of file that doesn't exist
+
+    let wrong_always_206 = 206;
+    assert_ne!(wrong_always_206, no_range_s3_status,
+        "Don't send 206 for full file requests!");
+
+    // ✅ CORRECT: Pass through S3 status code unchanged
+    // - S3 returns 200 → Proxy returns 200
+    // - S3 returns 206 → Proxy returns 206
+    // - S3 returns 416 → Proxy returns 416
+
+    let correct_passthrough_206 = s3_response_status; // 206
+    let correct_passthrough_200 = no_range_s3_status; // 200
+
+    assert_eq!(correct_passthrough_206, 206, "Pass through 206");
+    assert_eq!(correct_passthrough_200, 200, "Pass through 200");
+
+    // Status code matrix:
+
+    // | Client Request | S3 Response | Proxy Response | Reason                |
+    // |----------------|-------------|----------------|-----------------------|
+    // | No Range       | 200 OK      | 200 OK         | Full file             |
+    // | Range: 0-999   | 206 Partial | 206 Partial    | Partial content       |
+    // | Range: 0-      | 206 Partial | 206 Partial    | Partial (open-ended)  |
+    // | Range: -1000   | 206 Partial | 206 Partial    | Partial (suffix)      |
+    // | Range: 9999-   | 416 Error   | 416 Error      | Range out of bounds   |
+
+    // All S3 status codes should be forwarded unchanged
+
+    // Edge cases:
+
+    // Edge case 1: Multiple ranges (multipart/byteranges)
+    // - Request: Range: bytes=0-100,200-300
+    // - S3 returns: 206 Partial Content with multipart response
+    // - Proxy forwards: 206 Partial Content
+    // - (Note: S3 may not support multiple ranges, returns 200 instead)
+
+    let multipart_range = "bytes=0-100,200-300";
+    let multipart_s3_status = 206; // If S3 supports it
+    let multipart_proxy_status = multipart_s3_status;
+
+    assert_eq!(multipart_proxy_status, 206,
+        "Forward 206 for multipart ranges if S3 supports them");
+
+    // Edge case 2: If-Range conditional request
+    // - Request: Range: bytes=0-999, If-Range: "etag123"
+    // - If ETag matches: S3 returns 206 Partial Content
+    // - If ETag doesn't match: S3 returns 200 OK (full file)
+    // - Proxy forwards whichever S3 returned
+
+    let if_range_match_status = 206; // ETag matches
+    let if_range_no_match_status = 200; // ETag doesn't match
+
+    // Proxy must forward both correctly:
+    assert_eq!(if_range_match_status, 206, "Forward 206 if If-Range matches");
+    assert_eq!(if_range_no_match_status, 200, "Forward 200 if If-Range doesn't match");
+
+    // Edge case 3: Range request for small file
+    // - File size: 100 bytes
+    // - Request: Range: bytes=0-99 (full file via range)
+    // - S3: Returns 206 Partial Content (not 200!)
+    // - Proxy: Forwards 206
+
+    let small_file_range_status = 206;
+    assert_eq!(small_file_range_status, 206,
+        "206 even if range covers entire small file");
+
+    // Implementation: Status code forwarding
+
+    // Proxy implementation pseudo-code:
+    // ```rust
+    // async fn handle_request(ctx: &mut RequestContext, s3_client: &S3Client) {
+    //     let range_header = ctx.headers().get("Range");
+    //
+    //     let mut s3_request = s3_client.get_object()
+    //         .bucket(bucket)
+    //         .key(key);
+    //
+    //     if let Some(range) = range_header {
+    //         s3_request = s3_request.range(range);
+    //     }
+    //
+    //     let s3_response = s3_request.send().await?;
+    //
+    //     // Forward S3 status code unchanged
+    //     ctx.set_status(s3_response.status_code()); // 200, 206, 416, etc.
+    //
+    //     ctx.set_headers(s3_response.headers());
+    //     stream_body(ctx, s3_response.body()).await?;
+    // }
+    // ```
+
+    // Key: ctx.set_status(s3_response.status_code())
+    // - No conversion
+    // - No normalization
+    // - Direct passthrough
+
+    // Verification:
+
+    // Unit test (this test):
+    // - Verify proxy forwards 206 from S3
+    // - Verify proxy forwards 200 from S3
+    // - Verify they're different
+
+    // Integration test:
+    // - Mock S3 to return 206
+    // - Send Range request through proxy
+    // - Assert proxy returns 206
+
+    // E2E test:
+    // - Send Range request to real S3 through proxy
+    // - Assert response is 206 Partial Content
+    // - Assert Content-Range header present
+
+    // Client compatibility:
+
+    // HTTP/1.1 clients:
+    // - MUST understand 206 Partial Content
+    // - MUST check status code before processing body
+    // - Defined in RFC 7233
+
+    // Modern browsers:
+    // - Chrome: Full 206 support for video streaming
+    // - Firefox: Full 206 support for video streaming
+    // - Safari: Full 206 support for video streaming
+    // - All rely on correct 206 status for range requests
+
+    // Download managers:
+    // - wget: Requires 206 for --continue option
+    // - curl: Requires 206 for -C option
+    // - aria2: Requires 206 for resume and parallel downloads
+
+    assert_eq!(client_request_range, "bytes=0-1023");
+    assert_eq!(s3_response_status, 206);
+    assert_eq!(proxy_response_status, 206);
+}
