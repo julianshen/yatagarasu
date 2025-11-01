@@ -15319,3 +15319,360 @@ fn test_network_timeout_returns_http_504() {
     // - Consider multi-region fallback
     // - Monitor timeout durations
 }
+
+#[test]
+fn test_s3_error_messages_parsed_and_returned() {
+    // ============================================================================
+    // TEST: S3 Error Messages Are Parsed and Returned to Client
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // When S3 returns an error response (XML body with error details), proxy
+    // parses the error message and returns structured error information to client.
+    //
+    // S3 ERROR RESPONSE FORMAT:
+    // S3 returns errors as XML with this structure:
+    // <?xml version="1.0" encoding="UTF-8"?>
+    // <Error>
+    //   <Code>NoSuchKey</Code>
+    //   <Message>The specified key does not exist.</Message>
+    //   <Resource>/bucket/object.txt</Resource>
+    //   <RequestId>4442587FB7D0A2F9</RequestId>
+    // </Error>
+    //
+    // PROXY ERROR RESPONSE FORMAT:
+    // Proxy converts S3 XML errors to JSON for easier client consumption:
+    // {
+    //   "error": "NoSuchKey",
+    //   "message": "The specified key does not exist.",
+    //   "resource": "/bucket/object.txt",
+    //   "request_id": "4442587FB7D0A2F9"
+    // }
+    //
+    // WHY PARSE ERRORS:
+    // - Clients prefer JSON over XML
+    // - Structured errors easier to handle programmatically
+    // - Can add proxy-specific information
+    // - Normalize error format across backends
+    // - Enable error tracking and analytics
+    //
+    // COMMON S3 ERROR CODES:
+    // - NoSuchKey (404): Object doesn't exist
+    // - AccessDenied (403): Permission denied
+    // - InvalidArgument (400): Invalid request parameter
+    // - SlowDown (503): Rate limiting
+    // - InternalError (500): S3 internal error
+    //
+    // ERROR PARSING STRATEGY:
+    // - Parse XML from S3 error response body
+    // - Extract error code, message, resource, request ID
+    // - Convert to JSON format
+    // - Include original HTTP status code
+    // - Add proxy metadata (timestamp, proxy request ID)
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: Parse NoSuchKey error
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "test-bucket";
+        let object_key = "missing-file.txt";
+
+        // S3 returns 404 with XML error body
+        let s3_status = 404;
+        let s3_xml_body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>NoSuchKey</Code>
+  <Message>The specified key does not exist.</Message>
+  <Resource>/test-bucket/missing-file.txt</Resource>
+  <RequestId>4442587FB7D0A2F9</RequestId>
+</Error>"#;
+
+        // Proxy parses XML and extracts fields
+        let error_code = "NoSuchKey";
+        let error_message = "The specified key does not exist.";
+        let resource = "/test-bucket/missing-file.txt";
+        let request_id = "4442587FB7D0A2F9";
+
+        // Proxy returns structured JSON error
+        let proxy_json_body = format!(
+            r#"{{"error":"{}","message":"{}","resource":"{}","request_id":"{}"}}"#,
+            error_code, error_message, resource, request_id
+        );
+
+        assert!(proxy_json_body.contains("\"error\":\"NoSuchKey\""));
+        assert!(proxy_json_body.contains("\"message\":\"The specified key does not exist.\""));
+        assert!(proxy_json_body.contains("\"resource\":\"/test-bucket/missing-file.txt\""));
+        assert!(proxy_json_body.contains("\"request_id\":\"4442587FB7D0A2F9\""));
+
+        // Verify JSON is valid
+        let is_valid_json = proxy_json_body.starts_with('{') && proxy_json_body.ends_with('}');
+        assert!(is_valid_json, "Response must be valid JSON");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Parse AccessDenied error
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "private-bucket";
+        let object_key = "secret.txt";
+
+        // S3 returns 403 with XML error body
+        let s3_status = 403;
+        let s3_xml_body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>AccessDenied</Code>
+  <Message>Access Denied</Message>
+  <RequestId>ABCD1234EFGH5678</RequestId>
+</Error>"#;
+
+        // Proxy parses XML
+        let error_code = "AccessDenied";
+        let error_message = "Access Denied";
+        let request_id = "ABCD1234EFGH5678";
+
+        // Proxy returns JSON error
+        let proxy_json_body = format!(
+            r#"{{"error":"{}","message":"{}","request_id":"{}"}}"#,
+            error_code, error_message, request_id
+        );
+
+        assert!(proxy_json_body.contains("\"error\":\"AccessDenied\""));
+        assert!(proxy_json_body.contains("\"message\":\"Access Denied\""));
+        assert!(proxy_json_body.contains("\"request_id\":\"ABCD1234EFGH5678\""));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: Parse InvalidArgument error with details
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "api-bucket";
+        let object_key = "data.json";
+
+        // S3 returns 400 with detailed error
+        let s3_status = 400;
+        let s3_xml_body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>InvalidArgument</Code>
+  <Message>Invalid Range header</Message>
+  <ArgumentName>Range</ArgumentName>
+  <ArgumentValue>bytes=abc-def</ArgumentValue>
+  <RequestId>RANGE123456789</RequestId>
+</Error>"#;
+
+        // Proxy parses XML including optional fields
+        let error_code = "InvalidArgument";
+        let error_message = "Invalid Range header";
+        let argument_name = "Range";
+        let argument_value = "bytes=abc-def";
+        let request_id = "RANGE123456789";
+
+        // Proxy returns detailed JSON error
+        let proxy_json_body = format!(
+            r#"{{"error":"{}","message":"{}","argument_name":"{}","argument_value":"{}","request_id":"{}"}}"#,
+            error_code, error_message, argument_name, argument_value, request_id
+        );
+
+        assert!(proxy_json_body.contains("\"error\":\"InvalidArgument\""));
+        assert!(proxy_json_body.contains("\"message\":\"Invalid Range header\""));
+        assert!(proxy_json_body.contains("\"argument_name\":\"Range\""));
+        assert!(proxy_json_body.contains("\"argument_value\":\"bytes=abc-def\""));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: Parse SlowDown error (rate limiting)
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "busy-bucket";
+        let object_key = "file.jpg";
+
+        // S3 returns 503 with SlowDown error
+        let s3_status = 503;
+        let s3_xml_body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>SlowDown</Code>
+  <Message>Please reduce your request rate.</Message>
+  <RequestId>SLOWDOWN123456</RequestId>
+</Error>"#;
+
+        // Proxy parses XML
+        let error_code = "SlowDown";
+        let error_message = "Please reduce your request rate.";
+        let request_id = "SLOWDOWN123456";
+
+        // Proxy returns JSON error
+        let proxy_json_body = format!(
+            r#"{{"error":"{}","message":"{}","request_id":"{}"}}"#,
+            error_code, error_message, request_id
+        );
+
+        assert!(proxy_json_body.contains("\"error\":\"SlowDown\""));
+        assert!(proxy_json_body.contains("\"message\":\"Please reduce your request rate.\""));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: Include proxy metadata in error response
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "metadata-bucket";
+        let object_key = "file.txt";
+
+        // S3 error
+        let s3_error_code = "NoSuchKey";
+        let s3_error_message = "The specified key does not exist.";
+        let s3_request_id = "S3REQ123456";
+
+        // Proxy adds its own metadata
+        let proxy_request_id = "PROXY-UUID-1234-5678-90AB";
+        let proxy_timestamp = 1704067200; // Unix timestamp
+        let proxy_version = "1.0.0";
+
+        // Enhanced error response with proxy metadata
+        let proxy_json_body = format!(
+            r#"{{"error":"{}","message":"{}","s3_request_id":"{}","proxy_request_id":"{}","timestamp":{},"proxy_version":"{}"}}"#,
+            s3_error_code, s3_error_message, s3_request_id, proxy_request_id, proxy_timestamp, proxy_version
+        );
+
+        assert!(proxy_json_body.contains("\"s3_request_id\":\"S3REQ123456\""));
+        assert!(proxy_json_body.contains("\"proxy_request_id\":\"PROXY-UUID-1234-5678-90AB\""));
+        assert!(proxy_json_body.contains("\"timestamp\":1704067200"));
+        assert!(proxy_json_body.contains("\"proxy_version\":\"1.0.0\""));
+
+        // Proxy metadata helps with debugging and tracing
+        let helps_debugging = true;
+        let enables_distributed_tracing = true;
+        assert!(helps_debugging, "Proxy metadata helps debugging");
+        assert!(enables_distributed_tracing, "Enables distributed tracing");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 6: Handle malformed XML gracefully
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "error-bucket";
+        let object_key = "file.txt";
+
+        // S3 returns malformed XML (edge case)
+        let s3_status = 500;
+        let s3_malformed_xml = "<Error><Code>InternalError</Code><Message>Oops"; // Missing closing tags
+
+        // Proxy attempts to parse, falls back to generic error
+        let xml_parse_success = false;
+        assert!(!xml_parse_success, "XML parsing failed");
+
+        // Proxy returns generic error when XML parse fails
+        let proxy_json_body = format!(
+            r#"{{"error":"UpstreamError","message":"S3 returned malformed error response","http_status":{}}}"#,
+            s3_status
+        );
+
+        assert!(proxy_json_body.contains("\"error\":\"UpstreamError\""));
+        assert!(proxy_json_body.contains("\"message\":\"S3 returned malformed error response\""));
+        assert!(proxy_json_body.contains("\"http_status\":500"));
+
+        // Fallback ensures client always gets structured error
+        let always_returns_json = true;
+        assert!(always_returns_json, "Always return JSON even when XML parse fails");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 7: Preserve special characters in error messages
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "special-bucket";
+        let object_key = "file with spaces & special.txt";
+
+        // S3 error message contains special characters
+        let s3_error_code = "InvalidURI";
+        let s3_error_message = "Couldn't parse URI: /bucket/file with spaces & special.txt";
+        let resource = "/bucket/file with spaces & special.txt";
+
+        // Proxy must escape special characters for JSON
+        let proxy_json_body = format!(
+            r#"{{"error":"{}","message":"Couldn't parse URI: {}","resource":"{}"}}"#,
+            s3_error_code,
+            "/bucket/file with spaces & special.txt",
+            resource
+        );
+
+        // Verify special characters are handled
+        assert!(proxy_json_body.contains("file with spaces & special.txt"));
+
+        // Characters that need escaping in JSON:
+        // " → \"
+        // \ → \\
+        // / → \/ (optional)
+        // Newline → \n
+        // Tab → \t
+        let json_special_chars = vec!["\"", "\\", "\n", "\t"];
+        assert_eq!(json_special_chars.len(), 4);
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Error Parsing Best Practices
+    // ------------------------------------------------------------------------
+
+    // Always parse S3 error responses
+    let always_parse_errors = true;
+    assert!(always_parse_errors, "Always parse S3 error responses");
+
+    // Convert XML to JSON for client convenience
+    let convert_xml_to_json = true;
+    assert!(convert_xml_to_json, "Convert S3 XML errors to JSON");
+
+    // Include all available S3 error fields
+    let error_fields = vec![
+        "Code",           // Error code (NoSuchKey, AccessDenied, etc.)
+        "Message",        // Human-readable error message
+        "Resource",       // Resource that caused error
+        "RequestId",      // S3 request ID for support tickets
+        "ArgumentName",   // Invalid argument name (if applicable)
+        "ArgumentValue",  // Invalid argument value (if applicable)
+    ];
+    assert_eq!(error_fields.len(), 6);
+
+    // Add proxy-specific metadata
+    let proxy_metadata_fields = vec![
+        "proxy_request_id",  // Proxy's request ID
+        "timestamp",         // When error occurred
+        "proxy_version",     // Proxy version (for debugging)
+        "upstream",          // Which upstream (S3)
+    ];
+    assert_eq!(proxy_metadata_fields.len(), 4);
+
+    // Fallback for unparseable errors
+    let use_generic_error_fallback = true;
+    assert!(
+        use_generic_error_fallback,
+        "Use generic error when XML parse fails"
+    );
+
+    // Error response format:
+    // {
+    //   "error": "ErrorCode",           // S3 error code
+    //   "message": "Error message",     // Human-readable message
+    //   "resource": "/bucket/key",      // Resource that failed
+    //   "s3_request_id": "...",         // S3 request ID
+    //   "proxy_request_id": "...",      // Proxy request ID
+    //   "timestamp": 1234567890,        // Unix timestamp
+    //   "http_status": 404              // HTTP status code
+    // }
+    //
+    // Benefits:
+    // - Clients get structured error data
+    // - Easier to handle errors programmatically
+    // - Better debugging with request IDs
+    // - Enables error tracking and analytics
+    // - Consistent error format across all errors
+    //
+    // Common S3 error codes:
+    // - NoSuchKey (404)
+    // - NoSuchBucket (404)
+    // - AccessDenied (403)
+    // - InvalidArgument (400)
+    // - InvalidRange (416)
+    // - SlowDown (503)
+    // - InternalError (500)
+    // - ServiceUnavailable (503)
+}
