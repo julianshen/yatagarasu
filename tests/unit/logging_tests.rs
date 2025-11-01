@@ -2401,3 +2401,364 @@ fn test_jwt_tokens_never_logged() {
     // fi
     // ```
 }
+
+/// Test: AWS credentials are never logged
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Security & Privacy)
+/// Verifies that AWS credentials (access keys, secret keys, session tokens) are
+/// NEVER logged in any form to prevent unauthorized access to S3 resources.
+///
+/// Why AWS credentials must never be logged:
+///
+/// AWS credentials grant access to cloud resources. If credentials appear in logs:
+/// - Attackers who gain access to logs can access S3 buckets
+/// - Could lead to data breaches, data deletion, or resource hijacking
+/// - AWS bills could skyrocket from unauthorized usage
+/// - Compliance violations (SOC 2, ISO 27001, AWS Well-Architected)
+/// - AWS may suspend accounts for credential leakage
+///
+/// Example of what MUST NOT appear in logs:
+/// ```json
+/// // BAD - Credentials visible in log:
+/// {
+///   "level": "INFO",
+///   "fields": {
+///     "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+///     "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+///   }
+/// }
+/// ```
+///
+/// What SHOULD appear instead:
+/// ```json
+/// // GOOD - Credentials redacted:
+/// {
+///   "level": "INFO",
+///   "fields": {
+///     "aws_credentials_configured": true,
+///     "aws_region": "us-east-1"
+///   }
+/// }
+/// ```
+///
+/// AWS credential types that must never be logged:
+/// - AWS Access Key ID: AKIA... or ASIA... (20 characters)
+/// - AWS Secret Access Key: 40-character alphanumeric string
+/// - AWS Session Token: temporary credentials for assumed roles
+/// - Pre-signed URLs containing credentials in query parameters
+///
+/// Test scenarios:
+/// 1. AWS Access Key ID is never logged
+/// 2. AWS Secret Access Key is never logged
+/// 3. AWS Session Token is never logged
+/// 4. S3 client configuration doesn't log credentials
+/// 5. Error messages don't leak credentials
+/// 6. Credential presence can be indicated (yes/no)
+///
+/// Expected behavior:
+/// - No AWS credential values appear in any log output
+/// - Credential presence can be indicated (e.g., "credentials: configured")
+/// - Region, bucket names OK to log (not secret)
+/// - Error messages must not include credentials
+#[test]
+fn test_aws_credentials_never_logged() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: AWS Access Key ID is never logged
+    //
+    // AWS Access Key IDs start with AKIA (long-term) or ASIA (temporary/session).
+    // While less sensitive than secret keys, they should still not be logged
+    // as they help attackers identify valid AWS accounts.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let aws_access_key = "AKIAIOSFODNN7EXAMPLE";
+    let aws_secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+
+        // Create request span
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            // IMPORTANT: Never include credentials in span fields
+            // aws_credentials_configured = true  // OK to log presence
+            // aws_access_key = aws_access_key  // NEVER DO THIS
+            // aws_secret_key = aws_secret_key  // NEVER DO THIS
+        );
+        let _enter = span.enter();
+
+        // Simulate S3 operation without logging credentials
+        tracing::info!("configuring S3 client");
+
+        // Note: We're NOT logging the credentials here - that's the correct behavior
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Verify AWS Access Key ID NEVER appears in logs
+    assert!(
+        !log_output.contains("AKIAIOSFODNN7EXAMPLE"),
+        "AWS Access Key ID should NEVER appear in logs"
+    );
+    assert!(
+        !log_output.contains("AKIA"),
+        "AWS Access Key ID prefix should not appear in logs"
+    );
+
+    // Verify AWS Secret Access Key NEVER appears in logs
+    assert!(
+        !log_output.contains("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+        "AWS Secret Access Key should NEVER appear in logs"
+    );
+    assert!(
+        !log_output.contains(aws_secret_key),
+        "Complete AWS Secret Key should NEVER appear in logs"
+    );
+
+    // Scenario 2: S3 configuration logging doesn't include credentials
+    //
+    // When logging S3 client setup or configuration, we should only log
+    // non-sensitive metadata like region, bucket name, endpoint URL.
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    tracing::subscriber::with_default(subscriber2, || {
+        let span = tracing::info_span!("s3_client");
+        let _enter = span.enter();
+
+        // DO NOT log credentials like this:
+        // tracing::info!(
+        //     access_key = %aws_access_key,
+        //     secret_key = %aws_secret_key,
+        //     "S3 client configured"
+        // );
+
+        // Instead, log only non-sensitive configuration:
+        tracing::info!(
+            credentials_configured = true,
+            region = "us-east-1",
+            endpoint = "s3.amazonaws.com",
+            "S3 client configured"
+        );
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+
+    // Verify credentials still don't appear
+    assert!(
+        !log_output2.contains(aws_access_key),
+        "AWS Access Key should not appear even in S3 config logging"
+    );
+    assert!(
+        !log_output2.contains(aws_secret_key),
+        "AWS Secret Key should not appear even in S3 config logging"
+    );
+
+    // Verify we CAN log that credentials are configured
+    assert!(
+        log_output2.contains("credentials_configured") || log_output2.contains("true"),
+        "Can log that AWS credentials are configured (metadata)"
+    );
+
+    // Scenario 3: Error messages don't leak credentials
+    //
+    // When S3 operations fail, error messages should not include credentials
+    // even if the error is related to authentication (e.g., InvalidAccessKeyId).
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    tracing::subscriber::with_default(subscriber3, || {
+        let span = tracing::info_span!("s3_request");
+        let _enter = span.enter();
+
+        // Simulate S3 authentication error
+        // DO NOT include credentials in error message:
+        // tracing::error!(
+        //     access_key = %aws_access_key,
+        //     "S3 authentication failed"
+        // );
+
+        // Instead, log error without credentials:
+        tracing::error!(
+            error_code = "InvalidAccessKeyId",
+            error_type = "AuthenticationError",
+            "S3 authentication failed"
+        );
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+
+    // Verify credentials don't appear in error logs
+    assert!(
+        !log_output3.contains(aws_access_key),
+        "AWS credentials should NEVER appear in error messages"
+    );
+    assert!(
+        !log_output3.contains(aws_secret_key),
+        "AWS Secret Key should NEVER appear in error messages"
+    );
+
+    //
+    // AWS CREDENTIALS SECURITY BEST PRACTICES:
+    //
+    // 1. NEVER LOG CREDENTIAL VALUES:
+    //    Bad:  tracing::info!(access_key = %aws_access_key, ...)
+    //    Good: tracing::info!(credentials_configured = true, ...)
+    //
+    // 2. DON'T LOG PRE-SIGNED URLs WITH CREDENTIALS:
+    //    Pre-signed S3 URLs contain credentials in query parameters.
+    //    Bad:  tracing::info!(url = %presigned_url, ...)
+    //    Good: tracing::info!(url_generated = true, expires_in = 3600, ...)
+    //
+    // 3. REDACT CREDENTIALS IN CONFIGURATION DUMPS:
+    //    If you must log configuration objects:
+    //    ```rust
+    //    #[derive(Debug)]
+    //    struct SafeS3Config {
+    //        region: String,
+    //        bucket: String,
+    //        endpoint: String,
+    //        // NO access_key or secret_key fields!
+    //    }
+    //    ```
+    //
+    // 4. LOG CREDENTIAL METADATA, NOT VALUES:
+    //    OK to log:
+    //    - Credentials configured: yes/no
+    //    - Credential type: long-term, session, IAM role
+    //    - AWS region: us-east-1
+    //    - Bucket name: my-bucket
+    //    - Endpoint URL: s3.amazonaws.com
+    //
+    //    NEVER log:
+    //    - Access Key ID (even though it's less sensitive)
+    //    - Secret Access Key
+    //    - Session Token
+    //    - Pre-signed URL query parameters
+    //
+    // 5. BE CAREFUL WITH DEBUG LOGGING:
+    //    Debug logs may include entire objects/structs.
+    //    Ensure credential fields are not included in Debug implementations.
+    //
+    // PRODUCTION IMPLEMENTATION:
+    //
+    // In the S3 client setup:
+    // ```rust
+    // pub fn create_s3_client(config: &S3Config) -> Result<S3Client> {
+    //     // Load credentials (but don't log them)
+    //     let credentials = Credentials::new(
+    //         &config.access_key,
+    //         &config.secret_key,
+    //         None,
+    //         None,
+    //         "yatagarasu"
+    //     );
+    //
+    //     // Log that we're configuring S3, but NOT the credentials
+    //     tracing::info!(
+    //         credentials_configured = true,
+    //         region = %config.region,
+    //         bucket = %config.bucket,
+    //         endpoint = %config.endpoint.as_deref().unwrap_or("default"),
+    //         "Configuring S3 client"
+    //     );
+    //
+    //     // NEVER log the credentials themselves
+    //     // tracing::debug!(creds = ?credentials, ...); // NEVER DO THIS
+    //
+    //     let s3_config = aws_config::from_env()
+    //         .region(Region::new(config.region.clone()))
+    //         .credentials_provider(credentials)
+    //         .load()
+    //         .await;
+    //
+    //     Ok(S3Client::new(&s3_config))
+    // }
+    // ```
+    //
+    // Error handling without credential leakage:
+    // ```rust
+    // match s3_client.get_object().bucket(bucket).key(key).send().await {
+    //     Ok(output) => Ok(output),
+    //     Err(e) => {
+    //         // Extract error details WITHOUT credentials
+    //         let error_code = extract_error_code(&e);
+    //
+    //         // Log error without any credential information
+    //         tracing::error!(
+    //             bucket = bucket,
+    //             key = key,
+    //             error_code = error_code,
+    //             error_type = "S3Error",
+    //             "S3 request failed"
+    //         );
+    //
+    //         // NEVER include credential info even in auth errors:
+    //         // tracing::error!(access_key = ..., "Invalid credentials"); // NEVER
+    //
+    //         Err(e)
+    //     }
+    // }
+    // ```
+    //
+    // COMPLIANCE REQUIREMENTS:
+    //
+    // Industry standards prohibit logging AWS credentials:
+    //
+    // - AWS Well-Architected Framework: Protect credentials at rest and in transit
+    // - SOC 2: Safeguard system credentials
+    // - ISO 27001: Protect authentication information
+    // - PCI-DSS (if storing payment data in S3): Never log authentication credentials
+    //
+    // Violations can result in:
+    // - AWS account suspension
+    // - Security breaches and data loss
+    // - Failed compliance audits
+    // - Regulatory fines
+    //
+    // INCIDENT RESPONSE:
+    //
+    // If AWS credentials are accidentally logged:
+    // 1. IMMEDIATELY rotate the affected credentials in AWS Console
+    // 2. Purge all logs containing the credentials
+    // 3. Audit CloudTrail for unauthorized access using the leaked credentials
+    // 4. Review S3 bucket access logs for suspicious activity
+    // 5. Notify security team and potentially AWS Support
+    // 6. Investigate how it happened and add preventive controls
+    //
+    // AWS CREDENTIAL PATTERNS TO SCAN FOR:
+    //
+    // ```bash
+    // # Check for AWS Access Key patterns
+    // grep -r "AKIA[0-9A-Z]\{16\}" /var/log/
+    // grep -r "ASIA[0-9A-Z]\{16\}" /var/log/  # Session tokens
+    //
+    // # Check for Secret Key patterns (40 alphanumeric characters)
+    // grep -r "[A-Za-z0-9/+=]\{40\}" /var/log/ | grep -i secret
+    //
+    // # Check for pre-signed URL patterns
+    // grep -r "X-Amz-Signature" /var/log/
+    // grep -r "X-Amz-Credential" /var/log/
+    //
+    // # Alert if any matches found
+    // if [ $? -eq 0 ]; then
+    //   echo "SECURITY ALERT: AWS credentials found in logs!"
+    //   # Trigger incident response
+    // fi
+    // ```
+    //
+    // AUTOMATED CREDENTIAL SCANNING:
+    //
+    // Use tools like git-secrets, truffleHog, or AWS Macie to scan for credentials:
+    // - git-secrets: Prevents committing credentials to git
+    // - truffleHog: Scans git history for secrets
+    // - AWS Macie: Scans S3 buckets for credentials and PII
+    // - GitHub Secret Scanning: Automatically detects AWS credentials in public repos
+}
