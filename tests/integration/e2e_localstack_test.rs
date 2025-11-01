@@ -743,3 +743,168 @@ buckets:
 
     log::info!("=== Range Request Test PASSED ===");
 }
+
+/// Test 8: Proxy returns 401 Unauthorized when accessing private bucket without JWT
+///
+/// This test verifies that the proxy correctly enforces JWT authentication:
+/// 1. Configure bucket with auth.enabled = true
+/// 2. Client sends request without Authorization header
+/// 3. Proxy returns 401 Unauthorized
+/// 4. Response includes WWW-Authenticate header
+///
+/// This is critical for:
+/// - Security: Prevent unauthorized access to private data
+/// - HTTP compliance: Proper use of 401 status and WWW-Authenticate header
+/// - API clarity: Clear error messages for missing credentials
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_401_without_jwt() {
+    init_logging();
+
+    log::info!("=== Starting JWT 401 Unauthorized Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!("LocalStack S3 running at: {}", s3_endpoint);
+
+    // Step 2: Create S3 bucket and upload test file
+    log::info!("Creating S3 bucket and uploading test file...");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create private bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-private-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+        log::info!("Bucket created: test-private-bucket");
+
+        // Upload test file
+        let test_content = r#"{"secret": "data", "user": "alice"}"#;
+        s3_client
+            .put_object()
+            .bucket("test-private-bucket")
+            .key("data.json")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+        log::info!("Uploaded data.json to private bucket");
+    });
+
+    // Step 3: Create proxy configuration with JWT authentication enabled
+    let proxy_port = 18083; // Different port from other tests
+    let jwt_secret = "test-secret-key-min-32-characters-long";
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+jwt:
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "bearer_header"
+
+buckets:
+  - name: "private"
+    path_prefix: "/private"
+    auth:
+      enabled: true
+    s3:
+      region: "us-east-1"
+      bucket: "test-private-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, jwt_secret, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+    log::info!("Proxy config written to: {:?}", config_file.path());
+
+    // Step 4: Start Yatagarasu proxy in background thread
+    log::info!("Starting Yatagarasu proxy server...");
+    let config_path = config_file.path().to_str().unwrap().to_string();
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        server.add_service(proxy_service);
+        log::info!("Proxy server starting on {}", listen_addr);
+        server.run_forever();
+    });
+
+    // Wait for server to start
+    std::thread::sleep(Duration::from_secs(2));
+    log::info!("Proxy server should be ready");
+
+    // Step 5: Make HTTP request WITHOUT Authorization header
+    log::info!("Making request WITHOUT JWT token...");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/private/data.json", proxy_port);
+
+    let response = client
+        .get(&proxy_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    // Step 6: Verify 401 Unauthorized response
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        401,
+        "Expected 401 Unauthorized for request without JWT, got {}",
+        response.status()
+    );
+
+    // Step 7: Verify WWW-Authenticate header is present
+    let www_authenticate = response.headers().get("www-authenticate");
+    log::info!("WWW-Authenticate header: {:?}", www_authenticate);
+    assert!(
+        www_authenticate.is_some(),
+        "Expected WWW-Authenticate header in 401 response"
+    );
+    assert_eq!(
+        www_authenticate.unwrap().to_str().unwrap(),
+        "Bearer",
+        "Expected 'Bearer' authentication scheme"
+    );
+
+    log::info!("=== JWT 401 Unauthorized Test PASSED ===");
+}
