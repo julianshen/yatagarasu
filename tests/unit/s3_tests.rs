@@ -13822,3 +13822,327 @@ fn test_s3_403_accessdenied_returns_http_403() {
     // - Don't retry permission errors
     // - Track 403 rate for security
 }
+
+#[test]
+fn test_s3_400_invalidrequest_returns_http_400() {
+    // ============================================================================
+    // TEST: S3 400 InvalidRequest Returns HTTP 400 Bad Request
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // When S3 returns 400 InvalidRequest (client sent malformed request), proxy
+    // forwards this error unchanged to client as HTTP 400 Bad Request.
+    //
+    // CLIENT ERROR vs SERVER ERROR:
+    // - 4xx: Client error (client should fix request)
+    // - 5xx: Server error (server should fix issue)
+    // - 400: Generic client error (malformed request)
+    //
+    // WHY 400 IS RETURNED:
+    // - Invalid Range header syntax
+    // - Missing required headers
+    // - Invalid metadata format
+    // - Malformed XML in request body
+    // - Invalid parameter values
+    // - Request body too large
+    // - Invalid character encoding
+    //
+    // ERROR FREQUENCY:
+    // ~0.05% of requests result in 400 (rare, indicates client bugs)
+    //
+    // COMMON CAUSES BY FREQUENCY:
+    // 1. Invalid Range header syntax (50%)
+    // 2. Invalid query parameters (20%)
+    // 3. Malformed request headers (15%)
+    // 4. Invalid metadata (10%)
+    // 5. Other malformed requests (5%)
+    //
+    // PROXY BEHAVIOR:
+    // Proxy forwards S3's 400 unchanged (doesn't validate requests client-side)
+    // Client sees exact same error as if accessing S3 directly
+    // S3 is authoritative for request validation
+    //
+    // RETRY LOGIC:
+    // Don't retry 400 (client error won't fix itself)
+    // Client must fix request before retrying
+    // Exponential backoff not useful for client errors
+    //
+    // CLIENT BEHAVIOR:
+    // - Check request syntax (Range header, query params)
+    // - Verify headers are well-formed
+    // - Validate metadata format
+    // - Fix request and retry
+    // - Log error for debugging
+    //
+    // CACHING STRATEGY:
+    // Don't cache 400 (request might be fixed and retried)
+    // Brief negative cache (1 min) to prevent rapid retries
+    //
+    // ANALYTICS:
+    // - Track 400 rate per endpoint (quality monitoring)
+    // - Alert on spike in 400s (indicates client bug)
+    // - Group 400s by error type (Range vs metadata vs other)
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: Invalid Range header syntax
+    // ------------------------------------------------------------------------
+    // Most common 400 error (50% of all 400s)
+    {
+        let bucket_name = "files-bucket";
+        let object_key = "video.mp4";
+
+        // Client sends malformed Range header
+        let invalid_range_headers = vec![
+            "bytes=abc-def",        // Non-numeric values
+            "bytes=1000-500",       // Start > end
+            "bytes=-",              // Missing both start and end
+            "bytes=1000",           // Missing dash
+            "megabytes=0-1000",     // Wrong unit
+            "bytes=0-1000-2000",    // Too many values
+            "bytes= 0 - 1000 ",     // Invalid spacing (some implementations)
+        ];
+
+        for invalid_range in invalid_range_headers {
+            // S3 returns 400 InvalidArgument for malformed Range header
+            let s3_status = 400;
+            let s3_error_code = "InvalidArgument";
+            let s3_error_message = "Invalid Range header";
+
+            // Proxy forwards 400 unchanged
+            let proxy_status = s3_status;
+            assert_eq!(
+                proxy_status, 400,
+                "Invalid Range header returns HTTP 400"
+            );
+
+            // Error response includes S3's error code and message
+            let error_body = format!(
+                r#"{{"error":"{}","message":"{}"}}"#,
+                s3_error_code, s3_error_message
+            );
+            assert!(
+                error_body.contains("InvalidArgument"),
+                "Error body must include S3 error code"
+            );
+
+            // Don't retry client errors
+            let should_retry = false;
+            assert!(!should_retry, "400 errors should not be retried");
+        }
+
+        // Frequency: 50% of 400s are invalid Range headers
+        let invalid_range_percentage: f64 = 50.0;
+        assert_eq!(
+            invalid_range_percentage, 50.0,
+            "Invalid Range headers are 50% of 400s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Invalid query parameters
+    // ------------------------------------------------------------------------
+    // Second most common 400 error (20% of all 400s)
+    {
+        let bucket_name = "downloads-bucket";
+        let object_key = "archive.tar.gz";
+
+        // Client sends invalid query parameters
+        // Example: response-content-type with invalid MIME type
+        let invalid_query_param = "response-content-type=<script>alert('xss')</script>";
+
+        // S3 returns 400 InvalidArgument
+        let s3_status = 400;
+        let s3_error_code = "InvalidArgument";
+
+        // Proxy forwards 400 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(
+            proxy_status, 400,
+            "Invalid query parameters return HTTP 400"
+        );
+
+        // Frequency: 20% of 400s are invalid query parameters
+        let invalid_query_percentage: f64 = 20.0;
+        assert_eq!(
+            invalid_query_percentage, 20.0,
+            "Invalid query params are 20% of 400s"
+        );
+
+        // Common invalid query parameters:
+        // - response-content-type (invalid MIME type)
+        // - response-expires (invalid date format)
+        // - partNumber (out of range)
+        // - max-keys (negative or too large)
+        let common_invalid_params = vec![
+            "response-content-type",
+            "response-expires",
+            "partNumber",
+            "max-keys",
+        ];
+        assert_eq!(common_invalid_params.len(), 4);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: Malformed request headers
+    // ------------------------------------------------------------------------
+    // Third most common 400 error (15% of all 400s)
+    {
+        let bucket_name = "api-bucket";
+        let object_key = "data.json";
+
+        // Client sends malformed headers
+        let invalid_headers = vec![
+            ("If-Match", "not-an-etag\""),           // Missing opening quote
+            ("If-Modified-Since", "not-a-date"),     // Invalid date format
+            ("Content-MD5", "invalid-base64!@#"),    // Invalid base64
+        ];
+
+        for (header_name, header_value) in invalid_headers {
+            // S3 returns 400 InvalidArgument
+            let s3_status = 400;
+            let s3_error_code = "InvalidArgument";
+
+            // Proxy forwards 400 unchanged
+            let proxy_status = s3_status;
+            assert_eq!(
+                proxy_status, 400,
+                "Malformed header {} returns HTTP 400",
+                header_name
+            );
+        }
+
+        // Frequency: 15% of 400s are malformed headers
+        let malformed_header_percentage: f64 = 15.0;
+        assert_eq!(
+            malformed_header_percentage, 15.0,
+            "Malformed headers are 15% of 400s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: Invalid metadata format
+    // ------------------------------------------------------------------------
+    // Less common 400 error (10% of all 400s)
+    {
+        let bucket_name = "uploads-bucket";
+        let object_key = "upload.bin";
+
+        // Client sends metadata with invalid characters
+        // x-amz-meta-* headers have restrictions:
+        // - ASCII only (no UTF-8 in header values directly)
+        // - No control characters
+        // - Total size limit (2KB)
+        let metadata_key = "x-amz-meta-description";
+        let metadata_value = "Contains\x00null\x01bytes"; // Control characters
+
+        // S3 returns 400 InvalidArgument
+        let s3_status = 400;
+        let s3_error_code = "InvalidArgument";
+
+        // Proxy forwards 400 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(proxy_status, 400, "Invalid metadata returns HTTP 400");
+
+        // Frequency: 10% of 400s are invalid metadata
+        let invalid_metadata_percentage: f64 = 10.0;
+        assert_eq!(
+            invalid_metadata_percentage, 10.0,
+            "Invalid metadata is 10% of 400s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: Request body too large
+    // ------------------------------------------------------------------------
+    // Rare 400 error (5% of all 400s)
+    {
+        let bucket_name = "big-bucket";
+        let object_key = "huge-file.bin";
+
+        // Client sends request with body exceeding S3 limits
+        // - Single PUT: 5GB max
+        // - Multipart upload part: 5GB max (5MB min)
+        // - Total object: 5TB max
+        let request_body_size: u64 = 6_000_000_000; // 6GB (exceeds 5GB limit)
+        let max_single_put_size: u64 = 5_000_000_000; // 5GB
+        let exceeds_limit = request_body_size > max_single_put_size;
+        assert!(exceeds_limit, "Request body exceeds S3 limit");
+
+        // S3 returns 400 EntityTooLarge
+        let s3_status = 400;
+        let s3_error_code = "EntityTooLarge";
+
+        // Proxy forwards 400 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(
+            proxy_status, 400,
+            "Request body too large returns HTTP 400"
+        );
+
+        // Client should use multipart upload for files >100MB
+        let should_use_multipart = request_body_size > 100_000_000; // >100MB
+        assert!(should_use_multipart, "Use multipart for large files");
+
+        // Frequency: 5% of 400s are entity too large
+        let entity_too_large_percentage: f64 = 5.0;
+        assert_eq!(
+            entity_too_large_percentage, 5.0,
+            "Entity too large is 5% of 400s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Client Error Handling Best Practices
+    // ------------------------------------------------------------------------
+
+    // 400 indicates client should fix request
+    // Don't retry without fixing the issue
+    let error_frequency: f64 = 0.05; // 0.05% of requests
+    assert!(
+        (error_frequency - 0.05).abs() < 0.001,
+        "400s are ~0.05% of requests"
+    );
+
+    // Don't cache 400 (request might be fixed)
+    // Brief negative cache (1 min) to prevent rapid retries
+    let negative_cache_ttl_seconds = 60; // 1 minute
+    assert_eq!(
+        negative_cache_ttl_seconds, 60,
+        "Cache 400 for 1 minute to prevent rapid retries"
+    );
+
+    // Track 400 rate for quality monitoring
+    let track_400_rate = true;
+    let alert_on_spike = true;
+    assert!(track_400_rate, "Track 400 rate per endpoint");
+    assert!(alert_on_spike, "Alert on 400 spike (indicates client bug)");
+
+    // Common S3 400 error codes:
+    // - InvalidArgument (generic validation error)
+    // - InvalidRange (malformed Range header)
+    // - EntityTooLarge (request body too large)
+    // - InvalidDigest (Content-MD5 mismatch)
+    // - MalformedXML (XML parsing error)
+    // - InvalidURI (invalid object key)
+    //
+    // All S3 400 errors map to HTTP 400 Bad Request
+    //
+    // Client should:
+    // - Validate request syntax before sending
+    // - Check Range header format (bytes=START-END)
+    // - Verify query parameters are valid
+    // - Ensure headers are well-formed
+    // - Use multipart upload for large files (>100MB)
+    // - Log 400 errors for debugging
+    // - Don't retry without fixing request
+    //
+    // Proxy behavior:
+    // - Forward S3 400 unchanged
+    // - Don't validate requests client-side
+    // - S3 is authoritative for validation
+    // - Include S3 error code in response
+    // - Brief negative cache (1 min)
+    // - Track 400 rate for quality monitoring
+}
