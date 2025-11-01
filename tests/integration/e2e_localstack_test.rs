@@ -1,0 +1,562 @@
+// End-to-end integration tests with LocalStack
+// Phase 16: Real S3 integration testing using testcontainers
+
+use std::sync::Once;
+use std::time::Duration;
+use testcontainers::{clients::Cli, RunnableImage};
+use testcontainers_modules::localstack::LocalStack;
+
+static INIT: Once = Once::new();
+
+fn init_logging() {
+    INIT.call_once(|| {
+        let _ = env_logger::builder()
+            .is_test(true)
+            .filter_level(log::LevelFilter::Debug)
+            .try_init();
+    });
+}
+
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_can_start_localstack_container() {
+    init_logging();
+
+    // Create Docker client
+    let docker = Cli::default();
+
+    // Create LocalStack container with S3 service
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    // Start container
+    let container = docker.run(localstack_image);
+
+    // Get the port that S3 is exposed on
+    let port = container.get_host_port_ipv4(4566);
+
+    // Verify we can connect
+    let endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!("LocalStack S3 endpoint: {}", endpoint);
+
+    // Simple connectivity test
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let response = client
+        .get(&endpoint)
+        .send()
+        .expect("Failed to connect to LocalStack");
+
+    log::info!("LocalStack response status: {}", response.status());
+    assert!(
+        response.status().is_success() || response.status().is_client_error(),
+        "LocalStack should respond (got {})",
+        response.status()
+    );
+}
+
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_can_create_s3_bucket_in_localstack() {
+    init_logging();
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("Creating S3 bucket in LocalStack at {}", endpoint);
+
+    // Use AWS SDK to create bucket
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket
+        let create_result = s3_client.create_bucket().bucket("test-bucket").send().await;
+
+        log::info!("Create bucket result: {:?}", create_result);
+        assert!(
+            create_result.is_ok(),
+            "Should be able to create bucket: {:?}",
+            create_result.err()
+        );
+
+        // List buckets to verify
+        let list_result = s3_client.list_buckets().send().await;
+        assert!(list_result.is_ok(), "Should be able to list buckets");
+
+        let list_output = list_result.unwrap();
+        let buckets = list_output.buckets();
+        log::info!("Buckets: {:?}", buckets);
+        assert!(buckets.iter().any(|b| b.name() == Some("test-bucket")));
+    });
+}
+
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_can_upload_and_download_file_from_localstack() {
+    init_logging();
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let endpoint = format!("http://127.0.0.1:{}", port);
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        // Upload test file
+        let test_content = "Hello from Yatagarasu integration test!";
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("test.txt")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+
+        log::info!("Uploaded test file to S3");
+
+        // Download file
+        let get_result = s3_client
+            .get_object()
+            .bucket("test-bucket")
+            .key("test.txt")
+            .send()
+            .await
+            .expect("Failed to download file");
+
+        let body = get_result
+            .body
+            .collect()
+            .await
+            .expect("Failed to read body");
+        let content = String::from_utf8(body.to_vec()).expect("Invalid UTF-8");
+
+        log::info!("Downloaded content: {}", content);
+        assert_eq!(content, test_content);
+    });
+}
+
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_proxy_get_from_localstack_public_bucket() {
+    init_logging();
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 running at {}", s3_endpoint);
+
+    // Setup: Create bucket and upload test file to LocalStack
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-public-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        // Upload test file
+        let test_content = "Hello from Yatagarasu E2E test!";
+        s3_client
+            .put_object()
+            .bucket("test-public-bucket")
+            .key("test.txt")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+
+        log::info!("Uploaded test.txt to LocalStack S3");
+    });
+
+    // Create proxy configuration file pointing to LocalStack
+    // Use a high port number unlikely to conflict
+    let proxy_port = 18080;
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      region: "us-east-1"
+      bucket: "test-public-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+
+    log::info!("Created proxy config at {:?}", config_file.path());
+
+    // Start proxy server in background thread
+    let config_path = config_file.path().to_str().unwrap().to_string();
+
+    std::thread::spawn(move || {
+        // Load configuration
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+
+        log::info!("Proxy config loaded");
+
+        // Create Pingora server
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        // Create YatagarasuProxy instance
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+
+        // Create HTTP proxy service
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        // Add TCP listener
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+
+        log::info!("Starting proxy server at {}", listen_addr);
+
+        // Register service with server
+        server.add_service(proxy_service);
+
+        // Run server (blocks until shutdown)
+        server.run_forever();
+    });
+
+    // Give server time to start up and bind to port
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Test: Make GET request to proxy
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/public/test.txt", proxy_port);
+    log::info!("Requesting: {}", proxy_url);
+
+    let response = client
+        .get(&proxy_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        200,
+        "Expected 200 OK, got {}",
+        response.status()
+    );
+
+    let body = response.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body);
+    assert_eq!(body, "Hello from Yatagarasu E2E test!");
+}
+
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_proxy_head_from_localstack() {
+    init_logging();
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 running at {}", s3_endpoint);
+
+    // Setup: Create bucket and upload test file
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        s3_client
+            .create_bucket()
+            .bucket("test-public-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        let test_content = "Hello from HEAD test!";
+        s3_client
+            .put_object()
+            .bucket("test-public-bucket")
+            .key("test.txt")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+
+        log::info!("Uploaded test.txt to LocalStack S3");
+    });
+
+    // Create and start proxy
+    let proxy_port = 18081; // Different port from GET test
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      region: "us-east-1"
+      bucket: "test-public-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+
+    let config_path = config_file.path().to_str().unwrap().to_string();
+
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        log::info!("Starting proxy server at {}", listen_addr);
+        server.add_service(proxy_service);
+        server.run_forever();
+    });
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Test: Make HEAD request to proxy
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/public/test.txt", proxy_port);
+    log::info!("HEAD request: {}", proxy_url);
+
+    let response = client
+        .head(&proxy_url)
+        .send()
+        .expect("Failed to HEAD from proxy");
+
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        200,
+        "Expected 200 OK for HEAD, got {}",
+        response.status()
+    );
+
+    // HEAD should not return a body
+    let content_length = response
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok());
+
+    log::info!("Content-Length: {:?}", content_length);
+    // Content-Length header should be present (indicates file size)
+    assert!(content_length.is_some(), "HEAD response should include Content-Length");
+}
+
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_proxy_404_from_localstack() {
+    init_logging();
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 running at {}", s3_endpoint);
+
+    // Setup: Create bucket but don't upload any files
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        s3_client
+            .create_bucket()
+            .bucket("test-public-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        log::info!("Created empty bucket in LocalStack S3");
+    });
+
+    // Create and start proxy
+    let proxy_port = 18082; // Different port
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      region: "us-east-1"
+      bucket: "test-public-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+
+    let config_path = config_file.path().to_str().unwrap().to_string();
+
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        log::info!("Starting proxy server at {}", listen_addr);
+        server.add_service(proxy_service);
+        server.run_forever();
+    });
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Test: Request non-existent file
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/public/nonexistent.txt", proxy_port);
+    log::info!("GET request for non-existent file: {}", proxy_url);
+
+    let response = client
+        .get(&proxy_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        404,
+        "Expected 404 Not Found, got {}",
+        response.status()
+    );
+}

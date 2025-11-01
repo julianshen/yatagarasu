@@ -69,8 +69,12 @@ hex = "0.4"
 rstest = "0.18"
 mockall = "0.12"
 testcontainers = "0.15"
+testcontainers-modules = { version = "0.3", features = ["localstack"] }
 tempfile = "3.8"
-reqwest = "0.11"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+tokio-test = "0.4"
+log = "0.4"
+env_logger = "0.11"
 
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }

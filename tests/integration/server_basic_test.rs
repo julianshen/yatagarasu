@@ -34,8 +34,8 @@ jwt:
 "#;
 
     // Parse config
-    let config: Config = serde_yaml::from_str(config_yaml)
-        .expect("Should parse valid YAML configuration");
+    let config: Config =
+        serde_yaml::from_str(config_yaml).expect("Should parse valid YAML configuration");
 
     // Try to create proxy service - this will fail until ProxyHttp is implemented
     // For now, just verify we can import the proxy module
