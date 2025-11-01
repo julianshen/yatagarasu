@@ -835,7 +835,7 @@ yatagarasu/
 - [x] Test: Authentication failures are logged with reason
 - [x] Test: S3 errors are logged with bucket, key, error code
 - [x] Test: Successful requests are logged at INFO level
-- [ ] Test: Errors are logged at ERROR level with context
+- [x] Test: Errors are logged at ERROR level with context
 
 ### Security & Privacy
 - [ ] Test: JWT tokens are never logged

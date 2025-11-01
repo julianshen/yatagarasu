@@ -1706,3 +1706,385 @@ fn test_successful_requests_logged_at_info_level() {
     //   - Keep all ERROR logs forever (very low volume)
     //   - Total cost: Much lower than keeping everything
 }
+
+/// Test: Errors are logged at ERROR level with context
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that server errors (5xx status codes) are logged at ERROR level
+/// with sufficient context to enable debugging and incident response.
+///
+/// Why ERROR level for server errors:
+///
+/// Server errors (5xx) represent unexpected failures in our system that require
+/// investigation and fixing. Using ERROR level enables:
+/// - Automated alerting: Trigger alerts when ERROR logs occur
+/// - SLA monitoring: Track service reliability (5xx = downtime)
+/// - Incident investigation: ERROR logs are preserved longer
+/// - Priority: ERROR logs get immediate attention from operators
+///
+/// Example server error log (should be ERROR):
+/// ```json
+/// {
+///   "timestamp": "2025-11-01T12:00:00.000Z",
+///   "level": "ERROR",
+///   "fields": {
+///     "message": "request completed with server error",
+///     "error": "S3 connection timeout",
+///     "error_type": "GatewayTimeout"
+///   },
+///   "span": {
+///     "request_id": "550e8400-e29b-41d4-a716-446655440000",
+///     "method": "GET",
+///     "path": "/products/image.png",
+///     "status": 504,
+///     "duration_ms": 30000
+///   }
+/// }
+/// ```
+///
+/// Server error status codes (5xx):
+/// - 500 Internal Server Error: Unexpected proxy error
+/// - 502 Bad Gateway: S3 returned an error
+/// - 503 Service Unavailable: Proxy overloaded or S3 slow down
+/// - 504 Gateway Timeout: S3 didn't respond in time
+///
+/// Context fields to include:
+/// - error: Human-readable error message
+/// - error_type: Error classification (for grouping similar errors)
+/// - stack_trace: Full stack trace (in logs only, not in response)
+/// - component: Which component failed (router, auth, s3, cache)
+/// - retryable: Whether the client should retry
+///
+/// Test scenarios:
+/// 1. Request with 500 status is logged at ERROR level
+/// 2. Request with 502 status is logged at ERROR level
+/// 3. Request with 503 status is logged at ERROR level
+/// 4. Request with 504 status is logged at ERROR level
+/// 5. Error logs include context fields (error message, type)
+/// 6. All 5xx responses use ERROR level (not INFO or WARN)
+///
+/// Expected behavior:
+/// - All server errors (5xx) logged at ERROR level
+/// - Error logs include descriptive context
+/// - Can filter logs to find all errors: level = ERROR
+/// - Error logs enable root cause analysis
+#[test]
+fn test_errors_logged_at_error_level_with_context() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: Request with 500 Internal Server Error is logged at ERROR level
+    //
+    // 500 errors represent unexpected failures in the proxy itself.
+    // These should always be logged at ERROR level for investigation.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/products/image.png";
+        let status = 500;
+        let duration_ms = 150;
+
+        // Create request span
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path,
+            status = status,
+            duration_ms = duration_ms
+        );
+        let _enter = span.enter();
+
+        // Log server error at ERROR level with context
+        let error_message = "Failed to read configuration";
+        let error_type = "ConfigError";
+
+        tracing::error!(
+            error = error_message,
+            error_type = error_type,
+            "request completed with server error"
+        );
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Find the error log entry
+    let log_lines: Vec<&str> = log_output.lines().collect();
+    let error_log = log_lines
+        .iter()
+        .find(|line| line.contains("request completed with server error"))
+        .expect("Should find 'request completed with server error' log entry");
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(error_log).expect("Log output should be valid JSON");
+
+    // Verify log level is ERROR for 500 Internal Server Error
+    assert_eq!(
+        parsed["level"].as_str().unwrap(),
+        "ERROR",
+        "500 Internal Server Error should be logged at ERROR level"
+    );
+
+    // Verify status code is included in span
+    assert!(
+        parsed.get("span").is_some(),
+        "Log should include span fields"
+    );
+    assert_eq!(
+        parsed["span"]["status"].as_u64().unwrap(),
+        500,
+        "Status should be 500"
+    );
+
+    // Verify error context fields are present
+    assert!(
+        parsed.get("fields").is_some(),
+        "Log should include fields object"
+    );
+    assert!(
+        parsed["fields"].get("error").is_some(),
+        "Error log should include 'error' field with message"
+    );
+    assert_eq!(
+        parsed["fields"]["error"].as_str().unwrap(),
+        "Failed to read configuration",
+        "Error message should be descriptive"
+    );
+    assert!(
+        parsed["fields"].get("error_type").is_some(),
+        "Error log should include 'error_type' field for classification"
+    );
+    assert_eq!(
+        parsed["fields"]["error_type"].as_str().unwrap(),
+        "ConfigError",
+        "Error type should classify the error"
+    );
+
+    // Scenario 2: Test other 5xx status codes are also ERROR level
+    //
+    // All 5xx status codes indicate server-side failures and should use ERROR level.
+    // Test common ones: 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout
+    let test_cases = vec![
+        (502, "Bad Gateway", "S3 returned error"),
+        (503, "Service Unavailable", "Proxy overloaded"),
+        (504, "Gateway Timeout", "S3 connection timeout"),
+    ];
+
+    for (status_code, error_type, error_message) in test_cases {
+        let buffer2 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber2 = create_test_subscriber(buffer2.clone());
+
+        tracing::subscriber::with_default(subscriber2, || {
+            let span = tracing::info_span!("request", status = status_code);
+            let _enter = span.enter();
+
+            tracing::error!(
+                error = error_message,
+                error_type = error_type,
+                "request completed with server error"
+            );
+        });
+
+        let output2 = buffer2.lock().unwrap();
+        let log_output2 = String::from_utf8_lossy(&output2);
+        let log_lines2: Vec<&str> = log_output2.lines().collect();
+        let error_log2 = log_lines2
+            .iter()
+            .find(|line| line.contains("request completed with server error"))
+            .expect("Should find error log entry");
+
+        let parsed2: serde_json::Value = serde_json::from_str(error_log2).unwrap();
+
+        assert_eq!(
+            parsed2["level"].as_str().unwrap(),
+            "ERROR",
+            "{} ({}) should be logged at ERROR level",
+            status_code,
+            error_type
+        );
+
+        // Verify error context is included
+        assert!(
+            parsed2["fields"].get("error").is_some(),
+            "Error log should include error message"
+        );
+        assert_eq!(
+            parsed2["fields"]["error"].as_str().unwrap(),
+            error_message,
+            "Error message should match"
+        );
+    }
+
+    //
+    // ERROR LOGGING BEST PRACTICES:
+    //
+    // 1. USE ERROR LEVEL FOR SERVER FAILURES (5xx):
+    //    - Unexpected failures that require investigation
+    //    - Triggers alerts in production monitoring
+    //    - Indicates service degradation or outage
+    //
+    // 2. ALWAYS INCLUDE CONTEXT FIELDS:
+    //    Required:
+    //    - error: Human-readable error message
+    //    - error_type: Classification for grouping (ConfigError, S3Error, etc.)
+    //
+    //    Optional but recommended:
+    //    - component: Which part failed (router, auth, s3, cache)
+    //    - retryable: Should client retry? (true/false)
+    //    - upstream_status: If proxying, what did upstream return?
+    //    - attempt: Retry attempt number (if retrying)
+    //
+    // 3. NEVER LOG SENSITIVE DATA IN ERROR MESSAGES:
+    //    Don't include:
+    //    - Passwords, tokens, API keys
+    //    - PII (email, phone, SSN)
+    //    - Full request/response bodies (may contain secrets)
+    //
+    //    Do include:
+    //    - Error type and category
+    //    - Request ID for correlation
+    //    - Non-sensitive parameters (file size, timeout duration, etc.)
+    //
+    // 4. LOG ONCE PER ERROR:
+    //    - Don't log the same error at multiple layers
+    //    - Log at the layer where you have the most context
+    //    - Use request_id to correlate related logs
+    //
+    // PRODUCTION IMPLEMENTATION:
+    //
+    // In the request handler:
+    // ```rust
+    // async fn handle_request(req: Request) -> Result<Response> {
+    //     let span = tracing::info_span!("request",
+    //         request_id = %req.id(),
+    //         method = %req.method(),
+    //         path = %req.path(),
+    //         status = tracing::field::Empty,
+    //         duration_ms = tracing::field::Empty
+    //     );
+    //     let _enter = span.enter();
+    //     let start = Instant::now();
+    //
+    //     // Handle request
+    //     let result = proxy_to_s3(req).await;
+    //
+    //     // Record outcome
+    //     let (status, error_context) = match &result {
+    //         Ok(resp) => (resp.status(), None),
+    //         Err(e) => (e.status_code(), Some(e))
+    //     };
+    //
+    //     let duration_ms = start.elapsed().as_millis() as u64;
+    //     span.record("status", status);
+    //     span.record("duration_ms", duration_ms);
+    //
+    //     // Log at appropriate level based on status code
+    //     match status {
+    //         200..=399 => {
+    //             tracing::info!("request completed");
+    //         }
+    //         400..=499 => {
+    //             tracing::warn!("request completed with client error");
+    //         }
+    //         _ => {
+    //             // Server error - log with context
+    //             if let Some(err) = error_context {
+    //                 tracing::error!(
+    //                     error = %err,
+    //                     error_type = err.error_type(),
+    //                     component = err.component(),
+    //                     retryable = err.is_retryable(),
+    //                     "request completed with server error"
+    //                 );
+    //             } else {
+    //                 tracing::error!("request completed with server error");
+    //             }
+    //         }
+    //     }
+    //
+    //     result
+    // }
+    // ```
+    //
+    // ALERTING AND INCIDENT RESPONSE:
+    //
+    // With ERROR-level logging, you can set up effective alerts:
+    //
+    // 1. Alert on ERROR spike:
+    //    ```
+    //    Alert if: count(level = 'ERROR') > 10 in 5 minutes
+    //    Severity: Critical
+    //    Action: Page on-call engineer
+    //    ```
+    //
+    // 2. Alert on specific error types:
+    //    ```
+    //    Alert if: count(error_type = 'S3Error') > 5 in 5 minutes
+    //    Severity: High
+    //    Action: Check S3 connectivity and credentials
+    //    ```
+    //
+    // 3. Alert on elevated error rate:
+    //    ```
+    //    Alert if: (errors / total_requests) > 0.05  # 5% error rate
+    //    Severity: High
+    //    Action: Investigate service health
+    //    ```
+    //
+    // 4. Alert on timeout errors:
+    //    ```
+    //    Alert if: count(error_type = 'Timeout') > 3 in 1 minute
+    //    Severity: High
+    //    Action: Check upstream services (S3)
+    //    ```
+    //
+    // ERROR ANALYSIS QUERIES:
+    //
+    // 1. Group errors by type:
+    //    ```
+    //    SELECT fields.error_type, count(*) as count
+    //    FROM logs
+    //    WHERE level = 'ERROR'
+    //      AND timestamp > now() - interval '1 hour'
+    //    GROUP BY fields.error_type
+    //    ORDER BY count DESC
+    //    ```
+    //
+    // 2. Find errors for specific request:
+    //    ```
+    //    SELECT *
+    //    FROM logs
+    //    WHERE level = 'ERROR'
+    //      AND span.request_id = '550e8400-e29b-41d4-a716-446655440000'
+    //    ORDER BY timestamp ASC
+    //    ```
+    //
+    // 3. Error rate by endpoint:
+    //    ```
+    //    SELECT
+    //      span.path,
+    //      count(*) FILTER (WHERE level = 'ERROR') as errors,
+    //      count(*) as total,
+    //      (errors::float / total) * 100 as error_rate_pct
+    //    FROM logs
+    //    WHERE timestamp > now() - interval '1 hour'
+    //    GROUP BY span.path
+    //    ORDER BY error_rate_pct DESC
+    //    ```
+    //
+    // 4. Recent unique error messages:
+    //    ```
+    //    SELECT DISTINCT fields.error, count(*) as occurrences
+    //    FROM logs
+    //    WHERE level = 'ERROR'
+    //      AND timestamp > now() - interval '1 hour'
+    //    GROUP BY fields.error
+    //    ORDER BY occurrences DESC
+    //    LIMIT 10
+    //    ```
+}
