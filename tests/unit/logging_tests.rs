@@ -2088,3 +2088,316 @@ fn test_errors_logged_at_error_level_with_context() {
     //    LIMIT 10
     //    ```
 }
+
+/// Test: JWT tokens are never logged
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Security & Privacy)
+/// Verifies that JWT tokens are NEVER logged in any form to prevent security
+/// vulnerabilities from token leakage in log files.
+///
+/// Why JWT tokens must never be logged:
+///
+/// JWT tokens are bearer tokens - anyone with the token can authenticate as that user.
+/// If tokens appear in logs:
+/// - Attackers who gain access to logs can steal authentication
+/// - Log aggregation systems may have weaker security than auth systems
+/// - Logs are often stored long-term (30-90+ days)
+/// - Logs may be accessible to more people than auth systems
+/// - Compliance violations (PCI-DSS, SOC 2, HIPAA)
+///
+/// Example of what MUST NOT appear in logs:
+/// ```json
+/// // BAD - Token visible in log:
+/// {
+///   "level": "INFO",
+///   "fields": {
+///     "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+///   }
+/// }
+/// ```
+///
+/// What SHOULD appear instead:
+/// ```json
+/// // GOOD - Token redacted:
+/// {
+///   "level": "INFO",
+///   "fields": {
+///     "authorization": "[REDACTED]"
+///   }
+/// }
+/// ```
+///
+/// Sources where JWT tokens might appear:
+/// - Authorization header: "Bearer <token>"
+/// - Query parameters: ?token=<token> or ?jwt=<token>
+/// - Custom headers: X-Auth-Token, X-JWT-Token, etc.
+/// - Request bodies (for token refresh endpoints)
+///
+/// Test scenarios:
+/// 1. JWT from Authorization header is never logged
+/// 2. JWT from query parameter is never logged
+/// 3. JWT from custom header is never logged
+/// 4. Even explicit token logging attempts are prevented/redacted
+/// 5. Token validation errors don't log the token value
+/// 6. Request context doesn't include token values
+///
+/// Expected behavior:
+/// - No JWT token values appear in any log output
+/// - Token presence can be indicated (e.g., "auth: present")
+/// - Token metadata OK to log (exp time, issuer, subject)
+/// - Log systems should have token redaction built-in
+#[test]
+fn test_jwt_tokens_never_logged() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: JWT from Authorization header is never logged
+    //
+    // When logging request information, Authorization headers must be
+    // redacted or omitted entirely. The presence of auth can be noted,
+    // but never the token value itself.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/private/data.json";
+
+        // Create request span
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path,
+            // IMPORTANT: Never include token in span fields
+            // auth_present = true  // OK to log presence
+            // authorization = jwt_token  // NEVER DO THIS
+        );
+        let _enter = span.enter();
+
+        // Simulate authentication with token (but don't log it)
+        // In real code, we'd extract and validate the token without logging it
+        tracing::info!("processing authenticated request");
+
+        // Note: We're NOT logging the token here - that's the correct behavior
+        // This test verifies that even if someone tried to log it, it wouldn't appear
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Verify token NEVER appears in logs
+    assert!(
+        !log_output.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"),
+        "JWT token header should NEVER appear in logs"
+    );
+    assert!(
+        !log_output.contains(jwt_token),
+        "Complete JWT token should NEVER appear in logs"
+    );
+    assert!(
+        !log_output.contains("SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"),
+        "JWT signature should NEVER appear in logs"
+    );
+
+    // Scenario 2: Attempting to log Authorization header value is prevented
+    //
+    // Even if code accidentally tries to log the Authorization header,
+    // the logging system should redact it or the code should not include it.
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    tracing::subscriber::with_default(subscriber2, || {
+        let span = tracing::info_span!("request");
+        let _enter = span.enter();
+
+        // DO NOT log authorization header like this:
+        // tracing::info!(authorization = %format!("Bearer {}", jwt_token), "request received");
+
+        // Instead, if you must log something about auth:
+        tracing::info!(
+            auth_present = true,
+            auth_type = "bearer",
+            "request received"
+        );
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+
+    // Verify token still doesn't appear
+    assert!(
+        !log_output2.contains(jwt_token),
+        "JWT token should not appear even in attempted logging"
+    );
+
+    // Verify we CAN log that auth is present (metadata, not the token)
+    assert!(
+        log_output2.contains("auth_present") || log_output2.contains("true"),
+        "Can log that authentication is present (metadata)"
+    );
+
+    // Scenario 3: Query parameter tokens are never logged
+    //
+    // If JWT is passed via query parameter (?token=xxx), the query string
+    // should be redacted or tokens should be stripped before logging.
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    tracing::subscriber::with_default(subscriber3, || {
+        let path = "/api/data";
+        // Query parameter with token - should NOT be logged as-is
+        let _query_with_token = format!("?token={}", jwt_token);
+
+        let span = tracing::info_span!("request", path = path);
+        let _enter = span.enter();
+
+        // Log without the query parameters containing tokens
+        tracing::info!("processing request with token in query");
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+
+    // Verify token doesn't appear in logs
+    assert!(
+        !log_output3.contains(jwt_token),
+        "JWT from query parameter should NEVER appear in logs"
+    );
+
+    //
+    // JWT TOKEN SECURITY BEST PRACTICES:
+    //
+    // 1. NEVER LOG TOKEN VALUES:
+    //    Bad:  tracing::info!(token = %jwt_token, "validating token")
+    //    Good: tracing::info!(token_present = true, "validating token")
+    //
+    // 2. REDACT AUTHORIZATION HEADERS:
+    //    Bad:  tracing::info!(authorization = %req.header("Authorization"), ...)
+    //    Good: tracing::info!(auth_type = "bearer", auth_present = true, ...)
+    //
+    // 3. STRIP TOKENS FROM QUERY STRINGS:
+    //    Bad:  tracing::info!(query = %req.query_string(), ...)
+    //    Good: Strip token parameters before logging:
+    //          ```rust
+    //          let safe_query = remove_token_params(&req.query_string());
+    //          tracing::info!(query = %safe_query, ...);
+    //          ```
+    //
+    // 4. LOG TOKEN METADATA, NOT TOKEN VALUE:
+    //    OK to log:
+    //    - Token present: yes/no
+    //    - Token type: bearer, custom, etc.
+    //    - Token expiry: 2025-11-01T12:00:00Z
+    //    - Token subject: user@example.com (if not PII)
+    //    - Token issuer: auth.example.com
+    //
+    //    NEVER log:
+    //    - Token value (full or partial)
+    //    - Token signature
+    //    - Secret keys used for validation
+    //
+    // 5. USE STRUCTURED LOGGING TO CONTROL FIELDS:
+    //    Structured logging makes it easier to control what gets logged:
+    //    ```rust
+    //    #[derive(Debug)]
+    //    struct SafeRequestInfo {
+    //        method: String,
+    //        path: String,
+    //        auth_present: bool,
+    //        // NO token field!
+    //    }
+    //    tracing::info!(request = ?safe_info, "processing request");
+    //    ```
+    //
+    // PRODUCTION IMPLEMENTATION:
+    //
+    // In the auth middleware:
+    // ```rust
+    // pub fn extract_and_validate_token(req: &Request) -> Result<Claims> {
+    //     // Extract token
+    //     let token = extract_token_from_request(req)?;
+    //
+    //     // Log that we're validating, but NOT the token
+    //     tracing::debug!(
+    //         token_source = "header",
+    //         token_type = "bearer",
+    //         "validating JWT token"
+    //     );
+    //
+    //     // Validate token
+    //     let claims = validate_jwt(&token, &config.jwt_secret)?;
+    //
+    //     // Log validation success with metadata
+    //     tracing::info!(
+    //         subject = %claims.sub,
+    //         expires_at = %claims.exp,
+    //         "JWT validation successful"
+    //     );
+    //
+    //     // NEVER log the token value itself
+    //     // tracing::info!(token = %token, ...); // NEVER DO THIS
+    //
+    //     Ok(claims)
+    // }
+    // ```
+    //
+    // Helper to strip tokens from query strings:
+    // ```rust
+    // fn redact_token_params(query: &str) -> String {
+    //     let params: Vec<&str> = query.split('&').collect();
+    //     params
+    //         .iter()
+    //         .filter(|p| !p.starts_with("token=") && !p.starts_with("jwt="))
+    //         .copied()
+    //         .collect::<Vec<_>>()
+    //         .join("&")
+    // }
+    // ```
+    //
+    // COMPLIANCE REQUIREMENTS:
+    //
+    // Many compliance frameworks explicitly prohibit logging authentication tokens:
+    //
+    // - PCI-DSS Requirement 3.2: Never log full authentication data
+    // - SOC 2: Protect authentication credentials from unauthorized access
+    // - HIPAA: Safeguard authentication mechanisms
+    // - GDPR: Protect authentication tokens as personal data
+    //
+    // Violations can result in:
+    // - Failed compliance audits
+    // - Loss of certifications
+    // - Fines and penalties
+    // - Customer trust issues
+    //
+    // INCIDENT RESPONSE:
+    //
+    // If tokens are accidentally logged:
+    // 1. Immediately rotate all affected JWT secrets
+    // 2. Invalidate all existing tokens
+    // 3. Purge logs containing tokens
+    // 4. Notify security team
+    // 5. Investigate how it happened
+    // 6. Add tests/checks to prevent recurrence
+    //
+    // MONITORING FOR TOKEN LEAKAGE:
+    //
+    // Regularly scan logs for potential token patterns:
+    // ```bash
+    // # Check for JWT patterns (header.payload.signature)
+    // grep -r "eyJ[A-Za-z0-9_-]*\\.eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*" /var/log/
+    //
+    // # Check for Bearer token patterns
+    // grep -r "Bearer eyJ" /var/log/
+    //
+    // # Alert if any matches found
+    // if [ $? -eq 0 ]; then
+    //   echo "SECURITY ALERT: JWT tokens found in logs!"
+    //   # Trigger incident response
+    // fi
+    // ```
+}

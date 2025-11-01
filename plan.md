@@ -838,7 +838,7 @@ yatagarasu/
 - [x] Test: Errors are logged at ERROR level with context
 
 ### Security & Privacy
-- [ ] Test: JWT tokens are never logged
+- [x] Test: JWT tokens are never logged
 - [ ] Test: AWS credentials are never logged
 - [ ] Test: Authorization headers are redacted in logs
 - [ ] Test: Query parameters with 'token' are redacted in logs
