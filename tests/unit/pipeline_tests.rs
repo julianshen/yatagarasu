@@ -816,3 +816,111 @@ fn test_jwt_extraction_from_query_ignores_other_parameters() {
     assert!(extracted_token.is_some(), "Token should be extracted despite other parameters");
     assert_eq!(extracted_token.unwrap(), expected_token);
 }
+
+// Test: JWT extracted from custom header (if configured)
+#[test]
+fn test_jwt_extracted_from_custom_header() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_header_token;
+    use std::collections::HashMap;
+
+    // Create a request context with JWT token in custom header "X-Auth-Token"
+    let mut headers = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    headers.insert("X-Auth-Token".to_string(), expected_token.to_string());
+
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        headers,
+    );
+
+    // Auth middleware should extract the token from the custom header
+    let extracted_token = extract_header_token(context.headers(), "X-Auth-Token");
+
+    // Verify the token was successfully extracted
+    assert!(extracted_token.is_some(), "Token should be extracted from custom header");
+    assert_eq!(
+        extracted_token.unwrap(),
+        expected_token,
+        "Extracted token should match the original token"
+    );
+}
+
+// Test: JWT extracted from custom header with different header names
+#[test]
+fn test_jwt_extracted_from_custom_header_various_names() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_header_token;
+    use std::collections::HashMap;
+
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
+    // Test with "X-API-Key" header
+    let mut headers1 = HashMap::new();
+    headers1.insert("X-API-Key".to_string(), expected_token.to_string());
+    let context1 = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers1,
+    );
+    let extracted1 = extract_header_token(context1.headers(), "X-API-Key");
+    assert!(extracted1.is_some(), "Token should be extracted from X-API-Key");
+    assert_eq!(extracted1.unwrap(), expected_token);
+
+    // Test with "X-Access-Token" header
+    let mut headers2 = HashMap::new();
+    headers2.insert("X-Access-Token".to_string(), expected_token.to_string());
+    let context2 = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers2,
+    );
+    let extracted2 = extract_header_token(context2.headers(), "X-Access-Token");
+    assert!(extracted2.is_some(), "Token should be extracted from X-Access-Token");
+    assert_eq!(extracted2.unwrap(), expected_token);
+}
+
+// Test: JWT extraction from custom header is case-insensitive
+#[test]
+fn test_jwt_extraction_from_custom_header_case_insensitive() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_header_token;
+    use std::collections::HashMap;
+
+    // Create request with lowercase custom header
+    let mut headers = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    headers.insert("x-auth-token".to_string(), expected_token.to_string()); // lowercase
+
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers,
+    );
+
+    // Should extract with case-insensitive matching
+    let extracted_token = extract_header_token(context.headers(), "X-Auth-Token");
+    assert!(extracted_token.is_some(), "Token should be extracted despite case difference");
+    assert_eq!(extracted_token.unwrap(), expected_token);
+}
+
+// Test: JWT extraction from custom header returns None when header is missing
+#[test]
+fn test_jwt_extraction_from_custom_header_returns_none_when_missing() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_header_token;
+    use std::collections::HashMap;
+
+    // Create request without the custom header
+    let headers = HashMap::new();
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        headers,
+    );
+
+    // Token extraction should return None
+    let extracted_token = extract_header_token(context.headers(), "X-Auth-Token");
+    assert!(extracted_token.is_none(), "Should return None when custom header is missing");
+}
