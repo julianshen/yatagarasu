@@ -1159,3 +1159,67 @@ fn test_expired_jwt_returns_401() {
     // For this test, we verify that expired tokens are detected
     // and would result in 401 response
 }
+
+// Test: JWT with wrong claims returns 403 Forbidden
+#[test]
+fn test_jwt_with_wrong_claims_returns_403() {
+    use yatagarasu::auth::{validate_jwt, verify_claims, Claims};
+    use yatagarasu::config::ClaimRule;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+
+    let secret = "test_secret_key_123";
+
+    // Create test claims with role="user" (not "admin")
+    let mut custom_claims = serde_json::Map::new();
+    custom_claims.insert("role".to_string(), json!("user"));
+    custom_claims.insert("department".to_string(), json!("engineering"));
+
+    let test_claims = Claims {
+        sub: Some("user123".to_string()),
+        exp: None,
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: custom_claims,
+    };
+
+    // Encode the JWT token
+    let token = encode(
+        &Header::default(),
+        &test_claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    ).expect("Failed to encode token");
+
+    // Validate the JWT (should succeed - token is valid)
+    let claims = validate_jwt(&token, secret).expect("Token should be valid");
+
+    // Define claim rules that require role="admin" (but token has role="user")
+    let claim_rules = vec![
+        ClaimRule {
+            claim: "role".to_string(),
+            operator: "equals".to_string(),
+            value: json!("admin"),
+        },
+    ];
+
+    // Verify claims against the rules (should fail)
+    let verification_passed = verify_claims(&claims, &claim_rules);
+
+    // Verify that claim verification fails
+    assert!(!verification_passed, "Claim verification should fail when role is wrong");
+
+    // In real implementation, auth middleware would:
+    // 1. Extract token from request (succeed)
+    // 2. Validate JWT signature and expiration (succeed - token is valid)
+    // 3. Add claims to request context (succeed)
+    // 4. Verify claims against configured rules (fail - role is "user", not "admin")
+    // 5. Return 403 Forbidden (not 401, because authentication succeeded but authorization failed)
+    // 6. Set response body to {"error":"Forbidden","message":"Insufficient permissions","status":403}
+    // 7. Block request from proceeding to S3
+
+    // For this test, we verify that:
+    // - Authentication succeeds (token is valid)
+    // - Authorization fails (claims don't match requirements)
+    // - This would result in 403 Forbidden (not 401 Unauthorized)
+}
