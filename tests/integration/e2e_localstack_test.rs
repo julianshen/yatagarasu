@@ -1497,3 +1497,199 @@ buckets:
 
     log::info!("=== JWT 403 Wrong Claims Test PASSED ===");
 }
+
+/// Test 12: Proxy accepts JWT from query parameter
+///
+/// This test verifies that the proxy can extract JWT tokens from query parameters
+/// as an alternative to the Authorization header:
+/// 1. Configure JWT with token_source: "query" parameter "token"
+/// 2. Client sends request with valid JWT in query string: ?token=<jwt>
+/// 3. Proxy extracts token from query parameter
+/// 4. Proxy validates JWT and allows request through
+/// 5. Proxy returns 200 OK with file content
+///
+/// This is critical for:
+/// - Browser access: Query params easier than setting headers in browser URL bar
+/// - Websocket auth: Some websocket clients can't set custom headers
+/// - Legacy systems: Systems that can only pass tokens via URL
+/// - Link sharing: Pre-authenticated URLs (with expiring tokens)
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_jwt_from_query_parameter() {
+    init_logging();
+
+    log::info!("=== Starting JWT from Query Parameter Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!("LocalStack S3 running at: {}", s3_endpoint);
+
+    // Step 2: Create S3 bucket and upload test file
+    log::info!("Creating S3 bucket and uploading test file...");
+    let test_content = r#"{"message": "JWT from query param works!", "method": "query"}"#;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create private bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-private-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+        log::info!("Bucket created: test-private-bucket");
+
+        // Upload test file
+        s3_client
+            .put_object()
+            .bucket("test-private-bucket")
+            .key("data.json")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+        log::info!("Uploaded data.json to private bucket");
+    });
+
+    // Step 3: Create proxy configuration with JWT from query parameter
+    let proxy_port = 18087; // Different port from other tests
+    let jwt_secret = "test-secret-key-min-32-characters-long";
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+jwt:
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "query"
+      param_name: "token"
+
+buckets:
+  - name: "private"
+    path_prefix: "/private"
+    auth:
+      enabled: true
+    s3:
+      region: "us-east-1"
+      bucket: "test-private-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, jwt_secret, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+    log::info!("Proxy config written to: {:?}", config_file.path());
+
+    // Step 4: Start Yatagarasu proxy in background thread
+    log::info!("Starting Yatagarasu proxy server...");
+    let config_path = config_file.path().to_str().unwrap().to_string();
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        server.add_service(proxy_service);
+        log::info!("Proxy server starting on {}", listen_addr);
+        server.run_forever();
+    });
+
+    // Wait for server to start
+    std::thread::sleep(Duration::from_secs(2));
+    log::info!("Proxy server should be ready");
+
+    // Step 5: Create valid JWT token
+    log::info!("Creating valid JWT token...");
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        sub: String,
+        exp: usize,
+    }
+
+    let valid_claims = Claims {
+        sub: "user_query_param".to_string(),
+        exp: (chrono::Utc::now().timestamp() + 3600) as usize,
+    };
+
+    let valid_token = encode(
+        &Header::default(),
+        &valid_claims,
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .expect("Failed to create valid JWT");
+
+    log::info!("Valid JWT token created");
+
+    // Step 6: Make HTTP request with JWT in query parameter
+    log::info!("Making request WITH JWT in query parameter...");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // URL encode the JWT token for query parameter
+    let encoded_token = urlencoding::encode(&valid_token);
+    let proxy_url = format!(
+        "http://127.0.0.1:{}/private/data.json?token={}",
+        proxy_port, encoded_token
+    );
+
+    log::info!("Request URL: {}", proxy_url);
+
+    let response = client
+        .get(&proxy_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    // Step 7: Verify 200 OK response
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        200,
+        "Expected 200 OK for request with JWT in query param, got {}",
+        response.status()
+    );
+
+    // Step 8: Verify response body matches uploaded content
+    let body = response.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body);
+    assert_eq!(
+        body, test_content,
+        "Expected response body to match uploaded content"
+    );
+
+    log::info!("=== JWT from Query Parameter Test PASSED ===");
+}
