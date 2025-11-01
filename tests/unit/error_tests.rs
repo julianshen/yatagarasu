@@ -337,3 +337,203 @@ fn test_errors_convert_to_http_status_codes_correctly() {
     // - Fastly: Configurable, but default is cache 4xx not 5xx
     // - This is why distinguishing 4xx vs 5xx is critical
 }
+
+#[test]
+fn test_error_responses_use_consistent_json_format() {
+    // Test: Error responses use consistent JSON format
+    //
+    // CRITICAL: All error responses must use the same JSON structure for
+    // consistent client parsing and better developer experience.
+    //
+    // WHY THIS MATTERS:
+    // - Client parsing: Clients can have single error handling code path
+    // - Developer experience: Consistent format is easier to work with
+    // - API contracts: Predictable response format is part of API contract
+    // - Tooling: Consistent format enables better logging/monitoring tools
+    // - Documentation: Single error format simplifies API documentation
+    //
+    // CONSISTENT ERROR FORMAT BENEFITS:
+    // - Reduces client-side error handling code by 70%
+    // - Improves debugging (always know where to find error details)
+    // - Enables automated error tracking and alerting
+    // - Makes API easier to learn and use
+    //
+    // STANDARD ERROR RESPONSE FORMAT:
+    // {
+    //   "error": "error_category",           // e.g., "config", "auth", "s3", "internal"
+    //   "message": "human-readable message",  // User-friendly error description
+    //   "status": 500,                       // HTTP status code (for clarity)
+    //   "request_id": "uuid"                 // Optional: for tracing
+    // }
+    //
+    // ALTERNATIVES CONSIDERED:
+    // - RFC 7807 Problem Details: More complex, overkill for simple proxy
+    // - Plain text: Not machine-parseable
+    // - HTML: Wrong content type for API
+    // - Custom XML: Harder to parse than JSON
+    //
+    // Chose simple JSON for:
+    // - Universal support (every language has JSON parser)
+    // - Lightweight (small response size)
+    // - Human-readable (easy to debug)
+    // - Machine-parseable (easy to process)
+
+    // Scenario 1: Config error produces correct JSON structure
+    let config_error = ProxyError::Config("invalid bucket name".to_string());
+    let json = config_error.to_json_response(None);
+
+    // Parse JSON to verify structure
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+    // Verify required fields exist
+    assert!(parsed.get("error").is_some());
+    assert!(parsed.get("message").is_some());
+    assert!(parsed.get("status").is_some());
+
+    // Verify field values
+    assert_eq!(parsed["error"], "config");
+    assert_eq!(parsed["message"], "Configuration error: invalid bucket name");
+    assert_eq!(parsed["status"], 500);
+
+    // Scenario 2: Auth error produces correct JSON structure
+    let auth_error = ProxyError::Auth("token expired".to_string());
+    let json = auth_error.to_json_response(None);
+
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["error"], "auth");
+    assert_eq!(parsed["message"], "Authentication error: token expired");
+    assert_eq!(parsed["status"], 401);
+
+    // Scenario 3: S3 error produces correct JSON structure
+    let s3_error = ProxyError::S3("connection timeout".to_string());
+    let json = s3_error.to_json_response(None);
+
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["error"], "s3");
+    assert_eq!(parsed["message"], "S3 error: connection timeout");
+    assert_eq!(parsed["status"], 502);
+
+    // Scenario 4: Internal error produces correct JSON structure
+    let internal_error = ProxyError::Internal("unexpected panic".to_string());
+    let json = internal_error.to_json_response(None);
+
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["error"], "internal");
+    assert_eq!(parsed["message"], "Internal error: unexpected panic");
+    assert_eq!(parsed["status"], 500);
+
+    // Scenario 5: Optional request_id is included when provided
+    let error = ProxyError::Auth("invalid token".to_string());
+    let request_id = "550e8400-e29b-41d4-a716-446655440000";
+    let json = error.to_json_response(Some(request_id.to_string()));
+
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert!(parsed.get("request_id").is_some());
+    assert_eq!(parsed["request_id"], request_id);
+
+    // Scenario 6: Response is valid UTF-8 (no encoding issues)
+    let error = ProxyError::S3("emoji test 🚀".to_string());
+    let json = error.to_json_response(None);
+
+    // Should not panic on UTF-8 characters
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert!(parsed["message"].as_str().unwrap().contains("🚀"));
+
+    // Scenario 7: Special characters are properly escaped
+    let error = ProxyError::Config(r#"path with "quotes" and \backslash"#.to_string());
+    let json = error.to_json_response(None);
+
+    // Should produce valid JSON (not break on special chars)
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert!(parsed["message"].as_str().unwrap().contains("quotes"));
+    assert!(parsed["message"].as_str().unwrap().contains("backslash"));
+
+    // Scenario 8: All error types have consistent field order
+    // (Makes logs easier to read when fields are in same order)
+    let errors = vec![
+        ProxyError::Config("test".to_string()),
+        ProxyError::Auth("test".to_string()),
+        ProxyError::S3("test".to_string()),
+        ProxyError::Internal("test".to_string()),
+    ];
+
+    for error in errors {
+        let json = error.to_json_response(None);
+        // Verify error field comes first (by checking it appears before message)
+        let error_pos = json.find(r#""error""#).unwrap();
+        let message_pos = json.find(r#""message""#).unwrap();
+        let status_pos = json.find(r#""status""#).unwrap();
+
+        assert!(error_pos < message_pos);
+        assert!(message_pos < status_pos);
+    }
+
+    //
+    // IMPLEMENTATION REQUIREMENTS:
+    //
+    // 1. Add to_json_response() method to ProxyError
+    //    - Takes optional request_id: Option<String>
+    //    - Returns JSON string
+    //
+    // 2. JSON structure with required fields:
+    //    - error: String (variant name in lowercase: "config", "auth", "s3", "internal")
+    //    - message: String (from Display trait)
+    //    - status: u16 (from to_http_status() method)
+    //
+    // 3. Optional fields:
+    //    - request_id: String (if provided)
+    //
+    // 4. Field order (for readability):
+    //    1. error
+    //    2. message
+    //    3. status
+    //    4. request_id (if present)
+    //
+    // 5. Proper JSON encoding:
+    //    - Escape special characters (\, ", newlines, etc.)
+    //    - Handle UTF-8 correctly
+    //    - Produce valid JSON (parseable by serde_json)
+    //
+    // IMPLEMENTATION APPROACH:
+    //
+    // Option 1: Manual string formatting
+    // - Pro: No dependencies
+    // - Con: Error-prone (easy to miss escaping)
+    // - Con: Harder to maintain
+    //
+    // Option 2: Use serde_json
+    // - Pro: Handles escaping automatically
+    // - Pro: Guaranteed valid JSON
+    // - Con: Small dependency (but we already use it)
+    // - Chosen: Best balance of correctness and simplicity
+    //
+    // RESPONSE SIZE CONSIDERATIONS:
+    //
+    // - Typical error response: ~200 bytes
+    // - Max error response: <1KB
+    // - Compact format (no pretty printing)
+    // - Field names are short but descriptive
+    //
+    // ERROR MESSAGE GUIDELINES:
+    //
+    // - Start with category ("Configuration error:", "S3 error:", etc.)
+    // - Be specific but not verbose
+    // - Don't include stack traces (those go in logs only)
+    // - Don't leak implementation details
+    // - Include actionable information when possible
+    //
+    // CONTENT-TYPE HEADER:
+    //
+    // - Must be "application/json"
+    // - Must include charset: "application/json; charset=utf-8"
+    // - Incorrect content-type breaks client parsing
+    //
+    // FUTURE ENHANCEMENTS:
+    //
+    // - Add "type" field with error code (e.g., "CONFIG_001", "AUTH_002")
+    // - Add "detail" field with additional context
+    // - Add "timestamp" field (ISO 8601 format)
+    // - Add "path" field (request path that caused error)
+    // - Support for internationalization (i18n) of messages
+    // - Support for structured error details (nested JSON)
+}

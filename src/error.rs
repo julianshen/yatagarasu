@@ -50,4 +50,46 @@ impl ProxyError {
             ProxyError::Internal(_) => 500,  // Internal Server Error
         }
     }
+
+    /// Convert error to JSON response string
+    ///
+    /// Produces consistent JSON error response with fields:
+    /// - error: Error category ("config", "auth", "s3", "internal")
+    /// - message: Human-readable error message
+    /// - status: HTTP status code
+    /// - request_id: Optional request ID for tracing
+    ///
+    /// Example output:
+    /// ```json
+    /// {
+    ///   "error": "auth",
+    ///   "message": "Authentication error: invalid token",
+    ///   "status": 401,
+    ///   "request_id": "550e8400-e29b-41d4-a716-446655440000"
+    /// }
+    /// ```
+    pub fn to_json_response(&self, request_id: Option<String>) -> String {
+        use serde_json::json;
+
+        let error_type = match self {
+            ProxyError::Config(_) => "config",
+            ProxyError::Auth(_) => "auth",
+            ProxyError::S3(_) => "s3",
+            ProxyError::Internal(_) => "internal",
+        };
+
+        let mut response = json!({
+            "error": error_type,
+            "message": self.to_string(),
+            "status": self.to_http_status(),
+        });
+
+        // Add request_id if provided
+        if let Some(id) = request_id {
+            response["request_id"] = json!(id);
+        }
+
+        // Use to_string() to get compact JSON (no pretty printing)
+        response.to_string()
+    }
 }
