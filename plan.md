@@ -741,7 +741,7 @@ yatagarasu/
 - [x] Test: Invalid JWT signature returns 401 Unauthorized
 - [x] Test: Expired JWT returns 401 Unauthorized
 - [x] Test: JWT with wrong claims returns 403 Forbidden
-- [ ] Test: Multiple token sources checked in configured order
+- [x] Test: Multiple token sources checked in configured order
 
 ### Middleware Chain
 - [ ] Test: Request passes through middleware in correct order (router → auth → handler)

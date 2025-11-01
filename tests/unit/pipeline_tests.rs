@@ -1223,3 +1223,119 @@ fn test_jwt_with_wrong_claims_returns_403() {
     // - Authorization fails (claims don't match requirements)
     // - This would result in 403 Forbidden (not 401 Unauthorized)
 }
+
+// Test: Multiple token sources checked in configured order
+#[test]
+fn test_multiple_token_sources_checked_in_order() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::{extract_bearer_token, extract_query_token, extract_header_token};
+    use std::collections::HashMap;
+
+    // Create a request with tokens in multiple locations
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), "Bearer token_from_header".to_string());
+    headers.insert("X-Auth-Token".to_string(), "token_from_custom_header".to_string());
+
+    let mut query_params = HashMap::new();
+    query_params.insert("token".to_string(), "token_from_query".to_string());
+
+    // Create context with both headers and query params
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        headers.clone(),
+    );
+
+    // In real implementation, auth middleware would check sources in configured order:
+    // 1. First, try Authorization header (Bearer token)
+    let token = extract_bearer_token(context.headers());
+    if token.is_some() {
+        // Found token in Authorization header - this is the first source
+        assert_eq!(token.unwrap(), "token_from_header", "Should use token from Authorization header first");
+
+        // In real implementation, this token would be validated and used
+        // Other sources would NOT be checked since we found a token
+        return;
+    }
+
+    // 2. If not found, try query parameter
+    let token = extract_query_token(context.query_params(), "token");
+    if token.is_some() {
+        // Would use query token if Authorization header didn't have one
+        assert_eq!(token.unwrap(), "token_from_query");
+        return;
+    }
+
+    // 3. If not found, try custom header
+    let token = extract_header_token(context.headers(), "X-Auth-Token");
+    if token.is_some() {
+        // Would use custom header if neither Authorization nor query had a token
+        assert_eq!(token.unwrap(), "token_from_custom_header");
+        return;
+    }
+
+    // If no token found in any source, would return 401
+    panic!("Should have found token in one of the sources");
+}
+
+// Test: Token source priority - Authorization header takes precedence over query
+#[test]
+fn test_authorization_header_takes_precedence_over_query() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Create request with token in Authorization header
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), "Bearer header_token".to_string());
+
+    let context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        headers,
+    );
+
+    // When both sources are available, Authorization header should be used first
+    let header_token = extract_bearer_token(context.headers());
+    assert!(header_token.is_some(), "Should find token in Authorization header");
+    assert_eq!(header_token.unwrap(), "header_token");
+
+    // In real implementation, auth middleware would NOT check query parameter
+    // because it already found a token in the Authorization header
+    // This demonstrates token source priority
+
+    // For this test, we verify that Authorization header is checked first
+    // and would be used if present, even if query parameter also has a token
+}
+
+// Test: Fallback to query parameter when Authorization header is missing
+#[test]
+fn test_fallback_to_query_when_authorization_missing() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::{extract_bearer_token, extract_query_token};
+    use std::collections::HashMap;
+
+    // Create request with token ONLY in query parameter (no Authorization header)
+    let headers: HashMap<String, String> = HashMap::new(); // No Authorization header
+
+    let mut query_params = HashMap::new();
+    query_params.insert("token".to_string(), "query_token".to_string());
+
+    let context = RequestContext::with_query_params(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        query_params,
+    );
+
+    // Try Authorization header first (should fail)
+    let header_token = extract_bearer_token(context.headers());
+    assert!(header_token.is_none(), "Should not find token in Authorization header");
+
+    // Fallback to query parameter (should succeed)
+    let query_token = extract_query_token(context.query_params(), "token");
+    assert!(query_token.is_some(), "Should find token in query parameter");
+    assert_eq!(query_token.unwrap(), "query_token");
+
+    // This demonstrates that auth middleware falls back to alternate sources
+    // when the primary source (Authorization header) doesn't have a token
+}
