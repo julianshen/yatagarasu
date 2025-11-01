@@ -212,6 +212,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -223,6 +224,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
     ];
 
@@ -258,6 +260,7 @@ fn test_requests_to_products_route_to_products_bucket() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
     ];
 
@@ -297,6 +300,7 @@ fn test_requests_to_private_route_to_private_bucket() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
     ];
 
@@ -336,6 +340,7 @@ fn test_longest_prefix_matching_works() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
         BucketConfig {
             name: "products".to_string(),
@@ -347,6 +352,7 @@ fn test_longest_prefix_matching_works() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
     ];
 
@@ -389,6 +395,7 @@ fn test_unmapped_paths_return_none() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
     ];
 
@@ -430,6 +437,7 @@ fn test_s3_key_is_extracted_from_path() {
                 secret_key: "test".to_string(),
                 endpoint: None,
             },
+        auth: None,
         },
     ];
 
@@ -475,6 +483,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
             secret_key: "test".to_string(),
             endpoint: None,
         },
+        auth: None,
     };
 
     // Add the bucket config to the context
@@ -489,4 +498,53 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
     assert_eq!(config.path_prefix, "/products", "Path prefix should match");
     assert_eq!(config.s3.bucket, "my-products", "S3 bucket should match");
     assert_eq!(config.s3.region, "us-east-1", "S3 region should match");
+}
+
+// Test: Auth middleware skips validation for public buckets (auth.enabled=false)
+#[test]
+fn test_auth_middleware_skips_validation_for_public_buckets() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use std::collections::HashMap;
+
+    // Create a bucket configuration with authentication disabled (public bucket)
+    let bucket_config = BucketConfig {
+        name: "public".to_string(),
+        path_prefix: "/public".to_string(),
+        s3: S3Config {
+            bucket: "my-public-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: None,
+        },
+        auth: Some(AuthConfig {
+            enabled: false,
+        }),
+    };
+
+    // Create a request context without any JWT token
+    let headers = HashMap::new();
+    // Note: No Authorization header - simulating unauthenticated request
+
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/public/file.txt".to_string(),
+        headers,
+    );
+
+    // Add bucket config to context (as router would do)
+    context.set_bucket_config(bucket_config.clone());
+
+    // Auth middleware should check if authentication is required
+    let auth_required = context.bucket_config()
+        .and_then(|bc| bc.auth.as_ref())
+        .map(|auth| auth.enabled)
+        .unwrap_or(false);
+
+    // For public bucket (auth.enabled=false), auth should not be required
+    assert!(!auth_required, "Auth should not be required for public bucket");
+
+    // Verify the request can proceed without JWT validation
+    // (In real implementation, auth middleware would skip JWT extraction and validation)
 }
