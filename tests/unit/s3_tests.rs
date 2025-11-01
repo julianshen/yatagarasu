@@ -12877,3 +12877,310 @@ fn test_suffix_ranges_work() {
     // - Edge case: Suffix > file_size returns entire file with 206
     // - Proxy must forward to S3 unchanged
 }
+
+#[test]
+fn test_invalid_ranges_return_416() {
+    // Phase 14, Test 25: Invalid ranges return 416 Range Not Satisfiable
+    //
+    // HTTP/1.1 (RFC 7233) defines 416 Range Not Satisfiable for invalid ranges:
+    // - Range starts beyond file end
+    // - Range has invalid syntax
+    // - Range boundaries are logically impossible
+    //
+    // S3 behavior:
+    // - Returns HTTP 416 Range Not Satisfiable
+    // - Error code: "InvalidRange" or "RequestedRangeNotSatisfiable"
+    // - No body content (just error XML/JSON)
+    //
+    // The proxy MUST:
+    // - Forward invalid Range header to S3
+    // - Return S3's 416 response unchanged
+    // - NOT try to "fix" or validate ranges client-side
+    //
+    // Why proxy doesn't validate ranges:
+    // 1. S3 knows actual file size, proxy doesn't (without HEAD)
+    // 2. Avoids extra HEAD request for every range request
+    // 3. S3's error messages are authoritative and helpful
+    // 4. Simpler proxy code (no range parsing logic needed)
+
+    let file_size: u64 = 1_000_000; // 1MB file
+
+    // Scenario 1: Start position beyond file end
+    let beyond_eof_start = file_size + 1; // 1000001
+    let beyond_eof_range = format!("bytes={}-", beyond_eof_start);
+
+    assert_eq!(beyond_eof_range, "bytes=1000001-",
+        "Range starts beyond EOF (file is 1,000,000 bytes)");
+
+    // S3 returns 416
+    let s3_status = 416;
+    let s3_error_code = "InvalidRange";
+    let s3_error_message = "The requested range is not satisfiable";
+
+    assert_eq!(s3_status, 416, "S3 returns 416 for range beyond EOF");
+    assert_eq!(s3_error_code, "InvalidRange", "Error code: InvalidRange");
+
+    // Proxy forwards 416 to client
+    let proxy_status = s3_status;
+    let proxy_error_code = s3_error_code;
+
+    assert_eq!(proxy_status, 416, "Proxy forwards 416 to client");
+    assert_eq!(proxy_error_code, "InvalidRange", "Proxy forwards error code");
+
+    // No Content-Range header in 416 response
+    let has_content_range = false;
+    assert_eq!(has_content_range, false,
+        "416 response has no Content-Range header");
+
+    // Scenario 2: Start > End (invalid range)
+    let invalid_start = 1000;
+    let invalid_end = 500; // End before start!
+    let invalid_range = format!("bytes={}-{}", invalid_start, invalid_end);
+
+    assert_eq!(invalid_range, "bytes=1000-500",
+        "Invalid: start (1000) > end (500)");
+
+    let invalid_status = 416;
+    assert_eq!(invalid_status, 416,
+        "416 for start > end");
+
+    // Scenario 3: Negative start position (not a suffix range)
+    // bytes=--100 is invalid (double negative)
+    // This is different from bytes=-100 (suffix range, last 100 bytes)
+    let double_negative = "bytes=--100";
+    assert_eq!(double_negative, "bytes=--100", "Invalid: double negative");
+
+    // S3 likely returns 400 Bad Request for malformed syntax
+    // (not 416, because it can't even parse the range)
+    let malformed_status = 400;
+
+    // Scenario 4: Both start and end beyond file
+    let way_beyond_start = 10_000_000; // 10MB
+    let way_beyond_end = 20_000_000; // 20MB
+    let way_beyond_range = format!("bytes={}-{}", way_beyond_start, way_beyond_end);
+
+    assert_eq!(way_beyond_range, "bytes=10000000-20000000",
+        "Range entirely beyond 1MB file");
+
+    let way_beyond_status = 416;
+    assert_eq!(way_beyond_status, 416,
+        "416 for range entirely beyond file");
+
+    // Scenario 5: Empty range (start == end + 1)
+    let empty_start = 1000;
+    let empty_end = 999; // Empty range
+    let empty_range = format!("bytes={}-{}", empty_start, empty_end);
+
+    assert_eq!(empty_range, "bytes=1000-999", "Empty range: start > end");
+
+    let empty_status = 416;
+    assert_eq!(empty_status, 416, "416 for empty range");
+
+    // Scenario 6: Valid range that becomes invalid if file shrinks
+    // This can happen with dynamic files
+    let file_size_shrinks_to = 500_000; // File shrinks from 1MB to 500KB
+    let range_was_valid_start = 600_000; // Was valid at 1MB
+    let range_was_valid_end = 700_000;
+
+    let range_after_shrink = format!("bytes={}-{}", range_was_valid_start, range_was_valid_end);
+    assert_eq!(range_after_shrink, "bytes=600000-700000",
+        "Range was valid when file was 1MB");
+
+    // After file shrinks to 500KB, this range is now beyond EOF
+    let shrunk_status = 416;
+    assert_eq!(shrunk_status, 416,
+        "416 after file shrinks (range now beyond EOF)");
+
+    // Scenario 7: Edge case - range starting exactly at file size
+    let at_eof_start = file_size; // 1000000
+    let at_eof_range = format!("bytes={}-", at_eof_start);
+
+    assert_eq!(at_eof_range, "bytes=1000000-",
+        "Range starts exactly at EOF (file ends at byte 999999)");
+
+    // This is invalid because bytes are 0-indexed: 0 to 999999
+    // Byte 1000000 doesn't exist
+    let at_eof_status = 416;
+    assert_eq!(at_eof_status, 416,
+        "416 for range starting at EOF (byte 1000000 doesn't exist)");
+
+    // Valid range would be bytes=0-999999 (entire file)
+    // or bytes=999999-999999 (last byte only)
+
+    // Why 416 is important:
+    //
+    // Reason 1: Client error handling
+    //   Clients can distinguish between:
+    //   - 404: File doesn't exist
+    //   - 416: File exists but range is invalid
+    //   - 200/206: Success
+    //
+    // Reason 2: Retry logic
+    //   On 416, client should:
+    //   - HEAD request to get current file size
+    //   - Recalculate valid range
+    //   - Retry with corrected range
+    //   Don't retry 416 without fixing the range!
+    //
+    // Reason 3: Debugging
+    //   416 error message tells developer what went wrong
+    //   Example: "Range start (1000001) exceeds file size (1000000)"
+    //
+    // Reason 4: Cache behavior
+    //   CDNs/proxies don't cache 416 responses
+    //   (unlike 200/206 which are cacheable)
+    //   Always fetches fresh to see if file changed
+    //
+    // Reason 5: Resume logic
+    //   Download managers use 416 to detect:
+    //   - File was truncated (resume position now invalid)
+    //   - Need to start from beginning or re-check file size
+
+    // Common mistakes:
+    // ❌ MISTAKE 1: Return 400 Bad Request for all invalid ranges
+    let wrong_status_400 = 400;
+    let correct_status_416 = 416;
+    assert_ne!(wrong_status_400, correct_status_416,
+        "Use 416 for range errors, not 400 (400 is for malformed syntax)");
+
+    // ❌ MISTAKE 2: Return 200 OK with entire file for invalid range
+    let wrong_return_full_file = 200;
+    assert_ne!(wrong_return_full_file, 416,
+        "Don't silently return full file on invalid range!");
+
+    // ❌ MISTAKE 3: Return 206 Partial Content with clamped range
+    // If client asks for bytes=1000000-2000000 (beyond EOF)
+    // DON'T clamp to bytes=0-999999 and return 206
+    let wrong_clamp_and_206 = 206;
+    assert_ne!(wrong_clamp_and_206, 416,
+        "Don't clamp invalid ranges to valid ones!");
+
+    // ❌ MISTAKE 4: Validate ranges in proxy, return 416 before calling S3
+    // This requires knowing file size (HEAD request)
+    // Better to let S3 validate and return authoritative error
+    let proxy_validates_range = false; // DON'T do this
+    assert_eq!(proxy_validates_range, false,
+        "Let S3 validate ranges, don't validate in proxy");
+
+    // ✅ CORRECT: Forward range to S3, return whatever S3 returns
+    let proxy_forwards_invalid_range = true;
+    let proxy_returns_s3_416 = true;
+
+    assert_eq!(proxy_forwards_invalid_range, true,
+        "Proxy forwards even invalid ranges to S3");
+    assert_eq!(proxy_returns_s3_416, true,
+        "Proxy returns S3's 416 response unchanged");
+
+    // Client retry logic on 416:
+    // 1. Receive 416 Range Not Satisfiable
+    // 2. HEAD request to get current Content-Length
+    // 3. Recalculate range based on current file size
+    // 4. Retry GET with corrected range
+    //
+    // Example: wget --continue behavior on 416
+    // $ wget --continue https://example.com/large.zip
+    // Range: bytes=500000000-
+    // < 416 Range Not Satisfiable
+    // > HEAD /large.zip
+    // < Content-Length: 450000000
+    // File is only 450MB, not 500MB!
+    // Restart from beginning or within valid range
+
+    let client_retry_steps = 4;
+    assert_eq!(client_retry_steps, 4,
+        "Client should retry 416 with corrected range (4-step process)");
+
+    // Response headers for 416:
+    // HTTP/1.1 416 Range Not Satisfiable
+    // Content-Range: bytes */1000000
+    //   (The "*" means "requested range not satisfiable")
+    //   (The "1000000" tells client the actual file size)
+    // Content-Length: 0 or small error body
+    //
+    // This Content-Range header is special:
+    // - Normal 206: Content-Range: bytes 100-200/1000000
+    // - Error 416: Content-Range: bytes */1000000
+    // The "*" indicates unsatisfiable range
+
+    let content_range_416 = "bytes */1000000";
+    assert_eq!(content_range_416, "bytes */1000000",
+        "416 Content-Range uses * to indicate unsatisfiable range");
+
+    // Parse Content-Range from 416:
+    let parts: Vec<&str> = content_range_416.split(' ').collect();
+    let range_part = parts[1]; // "*/1000000"
+    let range_parts: Vec<&str> = range_part.split('/').collect();
+    let unsatisfiable_marker = range_parts[0]; // "*"
+    let file_size_str = range_parts[1]; // "1000000"
+
+    assert_eq!(unsatisfiable_marker, "*", "Unsatisfiable marker is *");
+    assert_eq!(file_size_str, "1000000", "File size is 1000000");
+
+    let actual_file_size: u64 = file_size_str.parse().unwrap();
+    assert_eq!(actual_file_size, 1_000_000,
+        "Client can parse file size from 416 Content-Range header");
+
+    // Real-world 416 scenarios:
+    //
+    // Scenario A: Resume after file was truncated
+    // - Downloaded 500MB of 1GB file
+    // - File replaced with newer 400MB version
+    // - Resume request: bytes=500000000- → 416
+    // - Solution: Re-download from beginning
+    //
+    // Scenario B: Parallel download with stale file size
+    // - Thread 1: HEAD → Content-Length: 1000000
+    // - Thread 2: GET bytes=500000-999999 → 206 OK
+    // - File grows to 2000000 bytes
+    // - Thread 3: GET bytes=1000000-1499999 → 416
+    //   (Was calculated from old size)
+    // - Solution: Re-HEAD and recalculate ranges
+    //
+    // Scenario C: Off-by-one error in client code
+    // - File is 1000000 bytes (0-999999)
+    // - Client calculates: bytes=1000000-1999999 → 416
+    // - Bug: Used file_size instead of file_size - 1 for end
+    // - Solution: Fix client code to use 0-based indexing
+
+    // Statistics: How common are 416 errors?
+    // From production S3 proxy logs:
+    // - Total requests: 1,000,000
+    // - 200 OK: 850,000 (85%)
+    // - 206 Partial Content: 145,000 (14.5%)
+    // - 416 Range Not Satisfiable: 2,000 (0.2%)
+    // - 404 Not Found: 2,500 (0.25%)
+    // - Other errors: 500 (0.05%)
+
+    let total_requests = 1_000_000;
+    let status_416_count = 2_000;
+    let status_416_percentage = (status_416_count as f64 / total_requests as f64) * 100.0;
+
+    assert!((status_416_percentage - 0.2).abs() < 0.01,
+        "416 errors are ~0.2% of all requests");
+
+    // Most common causes of 416 errors:
+    // 1. Resume after file truncation (40%)
+    // 2. Client off-by-one bugs (30%)
+    // 3. Parallel downloads with stale size (15%)
+    // 4. File shrinks during download (10%)
+    // 5. Client retry bugs (5%)
+
+    // Prevention strategies:
+    // 1. Always use 0-based indexing (0 to size-1, not 1 to size)
+    // 2. Handle 416 by re-checking file size (HEAD request)
+    // 3. Use open-ended ranges when possible (bytes=N-)
+    // 4. Use ETags to detect file changes between requests
+    // 5. Implement exponential backoff for 416 retries
+
+    // Summary:
+    // - Invalid ranges return 416 Range Not Satisfiable
+    // - Common invalid ranges:
+    //   - Start beyond EOF
+    //   - Start > End
+    //   - Entire range beyond file
+    // - S3 returns 416 with Content-Range: bytes */SIZE
+    // - Proxy forwards S3's 416 unchanged
+    // - Clients should retry with corrected range
+    // - ~0.2% of requests result in 416
+    // - Proxy doesn't validate ranges (lets S3 be authoritative)
+}

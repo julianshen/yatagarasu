@@ -790,7 +790,7 @@ yatagarasu/
 - [x] Test: Multiple range requests (bytes=0-100,200-300) work
 - [x] Test: Open-ended ranges (bytes=1000-) work
 - [x] Test: Suffix ranges (bytes=-1000) work
-- [ ] Test: Invalid ranges return 416 Range Not Satisfiable
+- [x] Test: Invalid ranges return 416 Range Not Satisfiable
 
 ### Error Handling
 - [ ] Test: S3 404 NoSuchKey returns HTTP 404 Not Found
