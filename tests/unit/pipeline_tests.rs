@@ -1040,3 +1040,59 @@ fn test_missing_jwt_on_private_bucket_returns_401() {
     let should_return_401 = auth_required && token.is_none();
     assert!(should_return_401, "Should return 401 when token is missing on private bucket");
 }
+
+// Test: Invalid JWT signature returns 401 Unauthorized
+#[test]
+fn test_invalid_jwt_signature_returns_401() {
+    use yatagarasu::auth::validate_jwt;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+    use yatagarasu::auth::Claims;
+
+    // Create a JWT token signed with one secret
+    let signing_secret = "correct_secret_key";
+    let validation_secret = "wrong_secret_key"; // Different secret for validation
+
+    // Create test claims
+    let mut custom_claims = serde_json::Map::new();
+    custom_claims.insert("name".to_string(), json!("John Doe"));
+
+    let test_claims = Claims {
+        sub: Some("user123".to_string()),
+        exp: None,
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: custom_claims,
+    };
+
+    // Encode the JWT token with the signing secret
+    let token = encode(
+        &Header::default(),
+        &test_claims,
+        &EncodingKey::from_secret(signing_secret.as_ref()),
+    ).expect("Failed to encode token");
+
+    // Try to validate the token with a different secret
+    let validation_result = validate_jwt(&token, validation_secret);
+
+    // Verify that validation fails
+    assert!(validation_result.is_err(), "Token validation should fail with wrong secret");
+
+    // Verify the error is specifically InvalidSignature
+    let err = validation_result.unwrap_err();
+    assert!(
+        format!("{:?}", err).contains("InvalidSignature"),
+        "Error should be InvalidSignature, got: {:?}", err
+    );
+
+    // In real implementation, auth middleware would:
+    // 1. Extract token from request (succeed)
+    // 2. Validate JWT signature with configured secret (fail with InvalidSignature)
+    // 3. Return 401 Unauthorized
+    // 4. Set response body to {"error":"Unauthorized","message":"Invalid token signature","status":401}
+    // 5. Block request from proceeding to S3
+
+    // For this test, we verify that invalid signatures are detected
+    // and would result in 401 response
+}
