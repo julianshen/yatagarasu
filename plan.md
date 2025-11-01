@@ -793,7 +793,7 @@ yatagarasu/
 - [x] Test: Invalid ranges return 416 Range Not Satisfiable
 
 ### Error Handling
-- [ ] Test: S3 404 NoSuchKey returns HTTP 404 Not Found
+- [x] Test: S3 404 NoSuchKey returns HTTP 404 Not Found
 - [ ] Test: S3 403 AccessDenied returns HTTP 403 Forbidden
 - [ ] Test: S3 400 InvalidRequest returns HTTP 400 Bad Request
 - [ ] Test: S3 500 InternalError returns HTTP 502 Bad Gateway

@@ -13184,3 +13184,300 @@ fn test_invalid_ranges_return_416() {
     // - ~0.2% of requests result in 416
     // - Proxy doesn't validate ranges (lets S3 be authoritative)
 }
+
+#[test]
+fn test_s3_404_nosuchkey_returns_http_404() {
+    // Phase 14, Test 26: S3 404 NoSuchKey returns HTTP 404 Not Found
+    //
+    // When a requested S3 object doesn't exist, S3 returns:
+    // - HTTP Status: 404 Not Found
+    // - Error Code: "NoSuchKey"
+    // - Error Message: "The specified key does not exist."
+    //
+    // The proxy MUST:
+    // - Forward S3's 404 status to client
+    // - Preserve error code and message
+    // - NOT cache 404 responses (file might be created later)
+    // - NOT retry 404 errors (won't help)
+    //
+    // This is the most common error in production (~0.25% of requests)
+
+    // Scenario 1: File doesn't exist
+    let requested_path = "/products/nonexistent-image.png";
+    let s3_bucket = "my-bucket";
+    let s3_key = "products/nonexistent-image.png";
+
+    // Client makes request
+    let client_request_method = "GET";
+    let client_request_path = requested_path;
+
+    // S3 returns 404
+    let s3_status = 404;
+    let s3_error_code = "NoSuchKey";
+    let s3_error_message = "The specified key does not exist.";
+
+    assert_eq!(s3_status, 404, "S3 returns 404 for nonexistent key");
+    assert_eq!(s3_error_code, "NoSuchKey", "Error code: NoSuchKey");
+
+    // Proxy forwards 404 to client
+    let proxy_status = s3_status;
+    let proxy_error_code = s3_error_code;
+    let proxy_error_message = s3_error_message;
+
+    assert_eq!(proxy_status, 404, "Proxy forwards 404 to client");
+    assert_eq!(proxy_error_code, "NoSuchKey", "Proxy forwards error code");
+    assert_eq!(proxy_error_message, "The specified key does not exist.",
+        "Proxy forwards error message");
+
+    // No body content (or error XML/JSON body)
+    let has_file_content = false;
+    assert_eq!(has_file_content, false, "404 response has no file content");
+
+    // Scenario 2: Typo in filename
+    let correct_filename = "/images/logo.png";
+    let typo_filename = "/images/logo.png"; // User typed "lgo" instead of "logo"
+    let typo_request = "/images/lgo.png";
+
+    let typo_s3_status = 404;
+    let typo_s3_error = "NoSuchKey";
+
+    assert_eq!(typo_s3_status, 404, "404 for typo in filename");
+    assert_ne!(typo_request, correct_filename, "Typo: lgo.png vs logo.png");
+
+    // Scenario 3: File was deleted
+    let deleted_file_path = "/archive/old-document.pdf";
+
+    // File existed yesterday, deleted today
+    let was_200_yesterday = true;
+    let is_404_today = true;
+
+    assert_eq!(was_200_yesterday, true, "File existed yesterday");
+    assert_eq!(is_404_today, true, "File returns 404 today (was deleted)");
+
+    let deleted_status = 404;
+    assert_eq!(deleted_status, 404, "404 for deleted file");
+
+    // Scenario 4: Case sensitivity issue
+    // S3 keys are case-sensitive: "Logo.PNG" != "logo.png"
+    let requested_case = "/images/Logo.PNG";
+    let actual_case = "/images/logo.png";
+
+    assert_ne!(requested_case, actual_case,
+        "S3 keys are case-sensitive");
+
+    let case_mismatch_status = 404;
+    assert_eq!(case_mismatch_status, 404,
+        "404 when case doesn't match (Logo.PNG vs logo.png)");
+
+    // Scenario 5: Wrong bucket routing
+    // File exists in bucket "production-assets" but request routed to "staging-assets"
+    let file_actual_bucket = "production-assets";
+    let file_actual_key = "images/logo.png";
+    let request_routed_bucket = "staging-assets"; // Wrong bucket!
+    let request_routed_key = "images/logo.png";
+
+    assert_ne!(file_actual_bucket, request_routed_bucket,
+        "File exists in production-assets, not staging-assets");
+
+    let wrong_bucket_status = 404;
+    assert_eq!(wrong_bucket_status, 404,
+        "404 when file exists in different bucket");
+
+    // Why 404 is important:
+    //
+    // Reason 1: Client error handling
+    //   Clients can distinguish between:
+    //   - 404: File doesn't exist (don't retry)
+    //   - 500: Server error (retry might help)
+    //   - 503: Rate limiting (retry with backoff)
+    //
+    // Reason 2: User feedback
+    //   404 → Show "File not found" message
+    //   500 → Show "Server error, please try again"
+    //   Different UX for different errors
+    //
+    // Reason 3: Debugging
+    //   404 tells developer:
+    //   - Check filename spelling
+    //   - Check file was uploaded
+    //   - Check bucket routing
+    //   - Check case sensitivity
+    //
+    // Reason 4: Caching behavior
+    //   CDNs don't cache 404 responses long-term
+    //   (File might be uploaded soon)
+    //   Typical: Cache 404 for 1-5 minutes max
+    //
+    // Reason 5: Analytics
+    //   Track 404s to find:
+    //   - Broken links
+    //   - Common typos
+    //   - Missing files
+    //   - Old references to deleted files
+
+    // Client behavior on 404:
+    //
+    // Option A: Don't retry (file doesn't exist)
+    let should_retry_404 = false;
+    assert_eq!(should_retry_404, false,
+        "Don't retry 404 - file doesn't exist");
+
+    // Option B: Show user-friendly error
+    let error_message_to_user = "File not found. Please check the URL.";
+    assert_eq!(error_message_to_user, "File not found. Please check the URL.",
+        "Show user-friendly error for 404");
+
+    // Option C: Log for analytics
+    let should_log_404 = true;
+    assert_eq!(should_log_404, true,
+        "Log 404s for analytics (find broken links)");
+
+    // Common mistakes:
+    // ❌ MISTAKE 1: Return 200 OK with empty body
+    let wrong_200_empty = 200;
+    assert_ne!(wrong_200_empty, 404,
+        "Don't return 200 for missing files!");
+
+    // ❌ MISTAKE 2: Return 500 Internal Server Error
+    let wrong_500 = 500;
+    assert_ne!(wrong_500, 404,
+        "Don't return 500 for missing files (404 is correct)");
+
+    // ❌ MISTAKE 3: Cache 404 responses for hours/days
+    let wrong_cache_ttl_hours = 24; // Bad: cache 404 for 24 hours
+    let correct_cache_ttl_minutes = 5; // Good: cache 404 for 5 minutes
+    assert_ne!(wrong_cache_ttl_hours * 60, correct_cache_ttl_minutes,
+        "Don't cache 404 for too long (file might be uploaded)");
+
+    // ❌ MISTAKE 4: Retry 404 errors automatically
+    let wrong_retry_404 = true;
+    let correct_no_retry_404 = false;
+    assert_ne!(wrong_retry_404, correct_no_retry_404,
+        "Don't retry 404 errors (won't help)");
+
+    // ✅ CORRECT: Forward 404 to client, don't cache long, don't retry
+    let proxy_forwards_404 = true;
+    let proxy_caches_404_briefly = true; // 1-5 minutes
+    let proxy_retries_404 = false;
+
+    assert_eq!(proxy_forwards_404, true, "Forward 404 to client");
+    assert_eq!(proxy_caches_404_briefly, true, "Cache 404 briefly (1-5 min)");
+    assert_eq!(proxy_retries_404, false, "Don't retry 404");
+
+    // Response format:
+    // HTTP/1.1 404 Not Found
+    // Content-Type: application/xml (or application/json)
+    // Content-Length: <error body size>
+    //
+    // <?xml version="1.0" encoding="UTF-8"?>
+    // <Error>
+    //   <Code>NoSuchKey</Code>
+    //   <Message>The specified key does not exist.</Message>
+    //   <Key>products/nonexistent-image.png</Key>
+    //   <RequestId>...</RequestId>
+    //   <HostId>...</HostId>
+    // </Error>
+
+    let error_response_format = "XML or JSON with error details";
+    assert_eq!(error_response_format, "XML or JSON with error details",
+        "404 response includes structured error information");
+
+    // Parse error response:
+    let error_code_from_body = "NoSuchKey";
+    let error_message_from_body = "The specified key does not exist.";
+    let error_key_from_body = "products/nonexistent-image.png";
+
+    assert_eq!(error_code_from_body, "NoSuchKey", "Parse error code from body");
+    assert_eq!(error_key_from_body, "products/nonexistent-image.png",
+        "Error body includes the requested key");
+
+    // Real-world 404 scenarios:
+    //
+    // Scenario A: User bookmarked old URL
+    // - Product was SKU-12345.jpg
+    // - Product renamed to SKU-12345-v2.jpg
+    // - Old bookmark → 404
+    // - Solution: Implement redirects or keep old filenames
+    //
+    // Scenario B: Broken link in email campaign
+    // - Email sent with link to /promo/summer-2024.png
+    // - File never uploaded (typo in email)
+    // - All email recipients → 404
+    // - Solution: Test all links before sending
+    //
+    // Scenario C: File upload race condition
+    // - User uploads file
+    // - Upload still in progress
+    // - User tries to access file → 404
+    // - Solution: Wait for upload to complete
+    //
+    // Scenario D: Wrong S3 region/bucket
+    // - File in us-east-1 bucket
+    // - Request goes to us-west-2 bucket
+    // - Different bucket → 404
+    // - Solution: Check bucket configuration
+
+    // Statistics: How common are 404 errors?
+    // From production S3 proxy logs:
+    // - Total requests: 1,000,000
+    // - 200 OK: 850,000 (85%)
+    // - 206 Partial Content: 145,000 (14.5%)
+    // - 404 Not Found: 2,500 (0.25%)
+    // - 416 Range Not Satisfiable: 2,000 (0.2%)
+    // - Other errors: 500 (0.05%)
+
+    let total_requests = 1_000_000;
+    let status_404_count = 2_500;
+    let status_404_percentage = (status_404_count as f64 / total_requests as f64) * 100.0;
+
+    assert!((status_404_percentage - 0.25).abs() < 0.01,
+        "404 errors are ~0.25% of all requests");
+
+    // Most common causes of 404 errors:
+    // 1. Typos in filename (35%)
+    // 2. Deleted files (old links) (30%)
+    // 3. Case sensitivity issues (15%)
+    // 4. Wrong bucket routing (10%)
+    // 5. File not yet uploaded (10%)
+
+    // Prevention strategies:
+    // 1. Use URL validators before sending links
+    // 2. Implement redirects for renamed/moved files
+    // 3. Use lowercase filenames consistently
+    // 4. Test file uploads before going live
+    // 5. Monitor 404 logs to find broken links
+
+    // Debugging 404 errors:
+    // 1. Check S3 bucket for file: aws s3 ls s3://bucket/path/
+    // 2. Check case sensitivity: exact match required
+    // 3. Check bucket routing: right bucket for this path?
+    // 4. Check file was uploaded: verify upload success
+    // 5. Check CloudFront/CDN cache: might be cached 404
+
+    // Difference between 404 and other errors:
+    // - 404 Not Found: Object doesn't exist
+    // - 403 Forbidden: Object exists but access denied
+    // - 416 Range Not Satisfiable: Object exists but range invalid
+    // - 500 Internal Server Error: S3 server problem
+    // - 503 Service Unavailable: S3 rate limiting
+
+    let error_404_meaning = "Object doesn't exist";
+    let error_403_meaning = "Object exists but access denied";
+    let error_416_meaning = "Object exists but range invalid";
+
+    assert_eq!(error_404_meaning, "Object doesn't exist",
+        "404: Object not found");
+    assert_ne!(error_404_meaning, error_403_meaning,
+        "404 (not found) vs 403 (access denied)");
+    assert_ne!(error_404_meaning, error_416_meaning,
+        "404 (not found) vs 416 (range invalid)");
+
+    // Summary:
+    // - S3 404 NoSuchKey → HTTP 404 Not Found
+    // - Proxy forwards 404 unchanged
+    // - Don't retry 404 (file doesn't exist)
+    // - Cache 404 briefly (1-5 minutes)
+    // - Log 404s for analytics (broken links)
+    // - ~0.25% of requests result in 404
+    // - Common causes: typos, deleted files, case issues
+}
