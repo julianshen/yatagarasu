@@ -908,3 +908,214 @@ buckets:
 
     log::info!("=== JWT 401 Unauthorized Test PASSED ===");
 }
+
+/// Test 9: Proxy returns 403 Forbidden for invalid or expired JWT
+///
+/// This test verifies that the proxy correctly rejects invalid JWTs:
+/// 1. Configure bucket with auth.enabled = true
+/// 2. Client sends request with malformed JWT → 403 Forbidden
+/// 3. Client sends request with invalid signature → 403 Forbidden
+/// 4. Client sends request with expired JWT → 403 Forbidden (arguable: could be 401)
+///
+/// This is critical for:
+/// - Security: Prevent access with tampered or compromised tokens
+/// - HTTP compliance: 403 means "authenticated but forbidden" vs 401 "not authenticated"
+/// - Attack prevention: Invalid JWTs indicate potential attack attempts
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_403_invalid_jwt() {
+    init_logging();
+
+    log::info!("=== Starting JWT 403 Forbidden Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!("LocalStack S3 running at: {}", s3_endpoint);
+
+    // Step 2: Create S3 bucket and upload test file
+    log::info!("Creating S3 bucket and uploading test file...");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create private bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-private-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+        log::info!("Bucket created: test-private-bucket");
+
+        // Upload test file
+        let test_content = r#"{"secret": "data", "user": "bob"}"#;
+        s3_client
+            .put_object()
+            .bucket("test-private-bucket")
+            .key("data.json")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+        log::info!("Uploaded data.json to private bucket");
+    });
+
+    // Step 3: Create proxy configuration with JWT authentication enabled
+    let proxy_port = 18084; // Different port from other tests
+    let jwt_secret = "test-secret-key-min-32-characters-long";
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+jwt:
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "bearer_header"
+
+buckets:
+  - name: "private"
+    path_prefix: "/private"
+    auth:
+      enabled: true
+    s3:
+      region: "us-east-1"
+      bucket: "test-private-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, jwt_secret, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+    log::info!("Proxy config written to: {:?}", config_file.path());
+
+    // Step 4: Start Yatagarasu proxy in background thread
+    log::info!("Starting Yatagarasu proxy server...");
+    let config_path = config_file.path().to_str().unwrap().to_string();
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        server.add_service(proxy_service);
+        log::info!("Proxy server starting on {}", listen_addr);
+        server.run_forever();
+    });
+
+    // Wait for server to start
+    std::thread::sleep(Duration::from_secs(2));
+    log::info!("Proxy server should be ready");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/private/data.json", proxy_port);
+
+    // Test Case 1: Malformed JWT (not 3 parts)
+    log::info!("Test Case 1: Malformed JWT (not 3 parts)");
+    let response = client
+        .get(&proxy_url)
+        .header("Authorization", "Bearer invalid-token")
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        403,
+        "Expected 403 Forbidden for malformed JWT, got {}",
+        response.status()
+    );
+
+    // Test Case 2: Invalid signature (tampered token)
+    log::info!("Test Case 2: Invalid signature (tampered JWT)");
+    // This is a JWT with valid structure but wrong signature
+    // Header: {"alg":"HS256","typ":"JWT"}
+    // Payload: {"sub":"user123","exp":9999999999}
+    // Signature: signed with WRONG secret
+    let invalid_jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIiwiZXhwIjo5OTk5OTk5OTk5fQ.WRONG_SIGNATURE_HERE";
+    let response = client
+        .get(&proxy_url)
+        .header("Authorization", format!("Bearer {}", invalid_jwt))
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        403,
+        "Expected 403 Forbidden for JWT with invalid signature, got {}",
+        response.status()
+    );
+
+    // Test Case 3: Expired JWT
+    log::info!("Test Case 3: Expired JWT");
+    // Create a JWT that expired in the past
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        sub: String,
+        exp: usize,
+    }
+
+    let expired_claims = Claims {
+        sub: "user123".to_string(),
+        exp: 1000000000, // January 9, 2001 - definitely expired
+    };
+
+    let expired_token = encode(
+        &Header::default(),
+        &expired_claims,
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .expect("Failed to create expired JWT");
+
+    let response = client
+        .get(&proxy_url)
+        .header("Authorization", format!("Bearer {}", expired_token))
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        403,
+        "Expected 403 Forbidden for expired JWT, got {}",
+        response.status()
+    );
+
+    log::info!("=== JWT 403 Forbidden Test PASSED ===");
+}

@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (911 lines)
-- ✅ 8 tests: 3 infrastructure validation + 5 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (1122 lines)
+- ✅ 9 tests: 3 infrastructure validation + 6 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1044,6 +1044,7 @@ yatagarasu/
 6. `test_proxy_404_from_localstack()` - Proxy 404 error handling
 7. `test_proxy_range_request_from_localstack()` - Proxy Range request returns 206 Partial Content
 8. `test_proxy_401_without_jwt()` - Proxy returns 401 when JWT required but not provided
+9. `test_proxy_403_invalid_jwt()` - Proxy returns 403 for malformed/invalid/expired JWT (3 consolidated cases)
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1072,8 +1073,8 @@ yatagarasu/
 
 ### End-to-End Scenarios - Private Bucket
 - [x] Integration: GET /private/data.json without JWT returns 401
-- [ ] Integration: GET /private/data.json with invalid JWT returns 403
-- [ ] Integration: GET /private/data.json with expired JWT returns 401
+- [x] Integration: GET /private/data.json with invalid JWT returns 403
+- [x] Integration: GET /private/data.json with expired JWT returns 403 (consolidated with invalid JWT test)
 - [ ] Integration: GET /private/data.json with wrong claims returns 403
 - [ ] Integration: GET /private/data.json with valid JWT returns file content
 - [ ] Integration: JWT from Authorization header works
