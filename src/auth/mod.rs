@@ -4,9 +4,6 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[cfg(test)]
-use jsonwebtoken::{encode, EncodingKey, Header};
-
 use crate::config::{ClaimRule, JwtConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -73,13 +73,13 @@ impl YatagarasuServer {
 
     /// Create Pingora server options
     fn create_server_opt(&self) -> ServerOpt {
-        let mut server_opt = ServerOpt::default();
-        server_opt.upgrade = false; // Disable graceful upgrade for now
-        server_opt.daemon = false; // Don't daemonize
-        server_opt.nocapture = false; // Don't capture stdout/stderr
-        server_opt.test = false; // Not in test mode
-        server_opt.conf = None; // No config file for now
-        server_opt
+        ServerOpt {
+            upgrade: false,   // Disable graceful upgrade for now
+            daemon: false,    // Don't daemonize
+            nocapture: false, // Don't capture stdout/stderr
+            test: false,      // Not in test mode
+            conf: None,       // No config file for now
+        }
     }
 
     /// Parse the configured address into a SocketAddr
@@ -106,6 +106,12 @@ impl YatagarasuServer {
     /// Create an HTTP service that handles requests
     pub fn create_http_service(&self) -> Result<HttpService, String> {
         Ok(HttpService::new())
+    }
+}
+
+impl Default for HttpService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
