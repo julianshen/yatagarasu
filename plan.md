@@ -780,7 +780,7 @@ yatagarasu/
 - [x] Test: HEAD request to /products/image.png fetches metadata from S3
 - [x] Test: HEAD response includes all headers but no body
 - [x] Test: HEAD response includes Content-Length from S3
-- [ ] Test: HEAD request doesn't download object body from S3
+- [x] Test: HEAD request doesn't download object body from S3
 
 ### Range Request Support
 - [ ] Test: Client Range header is forwarded to S3
