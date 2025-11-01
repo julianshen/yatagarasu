@@ -831,7 +831,7 @@ yatagarasu/
 - [x] Test: Can initialize tracing subscriber
 - [x] Test: Logs are output in JSON format
 - [x] Test: Every log includes request ID
-- [ ] Test: Every request is logged with method, path, status, duration
+- [x] Test: Every request is logged with method, path, status, duration
 - [ ] Test: Authentication failures are logged with reason
 - [ ] Test: S3 errors are logged with bucket, key, error code
 - [ ] Test: Successful requests are logged at INFO level

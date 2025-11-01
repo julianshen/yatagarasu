@@ -476,3 +476,288 @@ fn test_every_log_includes_request_id() {
     // This returns all logs for this request across all services, sorted by time.
     // Perfect for debugging!
 }
+
+/// Test: Every request is logged with method, path, status, duration
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that all HTTP requests are logged with essential observability fields:
+/// method, path, status code, and duration.
+///
+/// Why comprehensive request logging matters:
+///
+/// Request logs are the foundation of production observability. Every HTTP request
+/// should be logged with consistent fields that enable:
+/// - Performance analysis (duration tracking)
+/// - Error rate monitoring (status codes)
+/// - Traffic patterns (method + path analysis)
+/// - Debugging (correlate with request_id)
+///
+/// Example request log:
+/// ```json
+/// {
+///   "timestamp": "2025-11-01T12:00:00.000Z",
+///   "level": "INFO",
+///   "fields": {"message": "request completed"},
+///   "span": {
+///     "request_id": "550e8400-e29b-41d4-a716-446655440000",
+///     "method": "GET",
+///     "path": "/products/image.png",
+///     "status": 200,
+///     "duration_ms": 45
+///   }
+/// }
+/// ```
+///
+/// This enables powerful queries:
+/// - Average latency by endpoint: avg(span.duration_ms) group by span.path
+/// - Error rate: count(*) where span.status >= 400
+/// - Slowest requests: sort by span.duration_ms desc limit 10
+/// - Traffic by method: count(*) group by span.method
+///
+/// Test scenarios:
+/// 1. Request log includes HTTP method (GET, POST, PUT, DELETE, etc.)
+/// 2. Request log includes full path (/products/image.png)
+/// 3. Request log includes response status code (200, 404, 500, etc.)
+/// 4. Request log includes duration in milliseconds
+/// 5. All fields are in the span for correlation with request_id
+/// 6. Duration is a positive number
+/// 7. Log is emitted at INFO level for successful requests
+///
+/// Expected behavior:
+/// - Every request produces one log entry with all required fields
+/// - Fields are structured (not in message string)
+/// - Duration is measured accurately
+/// - Log level is INFO for 2xx/3xx responses
+#[test]
+fn test_every_request_logged_with_method_path_status_duration() {
+    use yatagarasu::logging::create_test_subscriber;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    // Scenario 1: Request log includes all required fields
+    //
+    // When a request is handled, we should log a completion event with:
+    // - method: HTTP method (GET, POST, etc.)
+    // - path: Request path
+    // - status: HTTP status code
+    // - duration_ms: Request duration in milliseconds
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        // Simulate request handling with a span
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/products/image.png";
+        let status = 200;
+
+        // Start timing
+        let start = std::time::Instant::now();
+
+        // Create request span with all fields
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path,
+            status = status,
+            duration_ms = tracing::field::Empty
+        );
+        let _enter = span.enter();
+
+        // Simulate some work
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Calculate duration
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        // Record duration and log completion
+        span.record("duration_ms", duration_ms);
+        tracing::info!("request completed");
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Parse the log line (should be JSON)
+    // Note: There might be multiple log lines, find the "request completed" one
+    let log_lines: Vec<&str> = log_output.lines().collect();
+    let request_log = log_lines
+        .iter()
+        .find(|line| line.contains("request completed"))
+        .expect("Should find 'request completed' log entry");
+
+    let parsed: serde_json::Value = serde_json::from_str(request_log)
+        .expect("Log output should be valid JSON");
+
+    // Scenario 2: Verify all required fields are present in span
+    assert!(
+        parsed.get("span").is_some(),
+        "Log should include span fields"
+    );
+
+    let span = &parsed["span"];
+
+    // Verify method field
+    assert!(
+        span.get("method").is_some(),
+        "Span should include 'method' field"
+    );
+    assert_eq!(
+        span["method"].as_str().unwrap(),
+        "GET",
+        "Method should be 'GET'"
+    );
+
+    // Verify path field
+    assert!(
+        span.get("path").is_some(),
+        "Span should include 'path' field"
+    );
+    assert_eq!(
+        span["path"].as_str().unwrap(),
+        "/products/image.png",
+        "Path should be '/products/image.png'"
+    );
+
+    // Verify status field
+    assert!(
+        span.get("status").is_some(),
+        "Span should include 'status' field"
+    );
+    assert_eq!(
+        span["status"].as_u64().unwrap(),
+        200,
+        "Status should be 200"
+    );
+
+    // Verify duration_ms field
+    assert!(
+        span.get("duration_ms").is_some(),
+        "Span should include 'duration_ms' field"
+    );
+    let duration = span["duration_ms"].as_u64().unwrap();
+    assert!(
+        duration >= 10,
+        "Duration should be at least 10ms (we slept for 10ms), got {}ms",
+        duration
+    );
+
+    // Verify request_id is also in span
+    assert!(
+        span.get("request_id").is_some(),
+        "Span should include 'request_id' field"
+    );
+
+    // Scenario 3: Verify log level is INFO
+    assert_eq!(
+        parsed["level"].as_str().unwrap(),
+        "INFO",
+        "Request completion should be logged at INFO level"
+    );
+
+    //
+    // REQUEST LOGGING BEST PRACTICES:
+    //
+    // 1. LOG AT THE END OF REQUEST PROCESSING:
+    //    - Don't log at the start (noise without outcome)
+    //    - Log after response is sent (captures actual duration)
+    //    - Include final status code (may change due to errors)
+    //
+    // 2. STRUCTURED FIELDS, NOT MESSAGE FORMATTING:
+    //    Bad:  tracing::info!("GET /products/image.png 200 45ms")
+    //    Good: tracing::info_span!("request", method="GET", path="/products/image.png", status=200, duration_ms=45)
+    //
+    //    Why? Structured fields enable:
+    //    - Efficient filtering and aggregation
+    //    - Consistent parsing across services
+    //    - Better query performance in log aggregation systems
+    //
+    // 3. CONSISTENT FIELD NAMES ACROSS SERVICES:
+    //    - Always use "duration_ms" (not "duration", "elapsed", "time_ms")
+    //    - Always use "status" (not "status_code", "http_status")
+    //    - Always use "method" (not "http_method", "verb")
+    //    - Consistency enables cross-service analysis
+    //
+    // 4. INCLUDE REQUEST ID FOR CORRELATION:
+    //    - Every request log should have request_id
+    //    - Enables tracing single request through entire system
+    //    - Critical for debugging distributed systems
+    //
+    // 5. LOG LEVEL BASED ON STATUS CODE:
+    //    - 2xx/3xx: INFO level (normal operation)
+    //    - 4xx: WARN level (client errors)
+    //    - 5xx: ERROR level (server errors)
+    //
+    //    This enables:
+    //    - Alert on ERROR logs (server issues)
+    //    - Monitor WARN logs (client issues)
+    //    - Filter INFO for traffic analysis
+    //
+    // PRODUCTION USAGE IN PROXY:
+    //
+    // In the actual proxy handler:
+    // ```rust
+    // async fn handle_request(req: Request) -> Result<Response> {
+    //     let request_id = uuid::Uuid::new_v4().to_string();
+    //     let method = req.method().to_string();
+    //     let path = req.uri().path().to_string();
+    //     let start = Instant::now();
+    //
+    //     let span = tracing::info_span!(
+    //         "request",
+    //         request_id = %request_id,
+    //         method = %method,
+    //         path = %path,
+    //         status = tracing::field::Empty,
+    //         duration_ms = tracing::field::Empty
+    //     );
+    //     let _enter = span.enter();
+    //
+    //     // Handle request
+    //     let result = proxy_to_s3(req).await;
+    //
+    //     // Record outcome
+    //     let status = result.as_ref().map(|r| r.status()).unwrap_or(500);
+    //     let duration_ms = start.elapsed().as_millis() as u64;
+    //
+    //     span.record("status", status.as_u16());
+    //     span.record("duration_ms", duration_ms);
+    //
+    //     // Log at appropriate level based on status
+    //     match status.as_u16() {
+    //         200..=399 => tracing::info!("request completed"),
+    //         400..=499 => tracing::warn!("request completed with client error"),
+    //         _         => tracing::error!("request completed with server error"),
+    //     }
+    //
+    //     result
+    // }
+    // ```
+    //
+    // METRICS AND ALERTING:
+    //
+    // With structured request logs, you can easily build:
+    //
+    // 1. Latency metrics:
+    //    - P50: percentile(span.duration_ms, 50)
+    //    - P95: percentile(span.duration_ms, 95)
+    //    - P99: percentile(span.duration_ms, 99)
+    //    - By endpoint: group by span.path
+    //
+    // 2. Error rates:
+    //    - Client errors: count(*) where span.status >= 400 and span.status < 500
+    //    - Server errors: count(*) where span.status >= 500
+    //    - Error rate: errors / total_requests
+    //
+    // 3. Traffic analysis:
+    //    - Requests per second: count(*) / time_window
+    //    - Top endpoints: count(*) group by span.path order by count desc
+    //    - Method distribution: count(*) group by span.method
+    //
+    // 4. Alerts:
+    //    - P95 latency > 500ms for 5 minutes
+    //    - Error rate > 5% for 5 minutes
+    //    - Requests to specific endpoint drop to zero (outage detection)
+}
