@@ -449,7 +449,10 @@ buckets:
 
     log::info!("Content-Length: {:?}", content_length);
     // Content-Length header should be present (indicates file size)
-    assert!(content_length.is_some(), "HEAD response should include Content-Length");
+    assert!(
+        content_length.is_some(),
+        "HEAD response should include Content-Length"
+    );
 }
 
 #[test]
@@ -559,4 +562,184 @@ buckets:
         "Expected 404 Not Found, got {}",
         response.status()
     );
+}
+
+/// Test 7: Proxy forwards Range header to S3 and returns 206 Partial Content
+///
+/// This test verifies that the proxy correctly handles HTTP Range requests:
+/// 1. Client sends Range header (e.g., "bytes=0-99")
+/// 2. Proxy forwards Range header to S3
+/// 3. S3 returns 206 Partial Content with requested byte range
+/// 4. Proxy forwards 206 response to client with Content-Range header
+///
+/// This is critical for:
+/// - Video streaming (seek to timestamp)
+/// - Large file downloads (resume, parallel chunks)
+/// - Bandwidth optimization (request only needed bytes)
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test e2e_localstack_test -- --ignored
+fn test_proxy_range_request_from_localstack() {
+    init_logging();
+
+    log::info!("=== Starting Range Request Integration Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!("LocalStack S3 running at: {}", s3_endpoint);
+
+    // Step 2: Create S3 bucket and upload test file
+    log::info!("Creating S3 bucket and uploading test file...");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-range-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+        log::info!("Bucket created: test-range-bucket");
+
+        // Upload test file with known content
+        // Content: "0123456789" repeated 10 times = 100 bytes
+        let test_content = "0123456789".repeat(10);
+        s3_client
+            .put_object()
+            .bucket("test-range-bucket")
+            .key("test-range.txt")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+        log::info!("Uploaded test-range.txt (100 bytes)");
+    });
+
+    // Step 3: Create proxy configuration
+    let proxy_port = 18082; // Different port from other tests
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      region: "us-east-1"
+      bucket: "test-range-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+    log::info!("Proxy config written to: {:?}", config_file.path());
+
+    // Step 4: Start Yatagarasu proxy in background thread
+    log::info!("Starting Yatagarasu proxy server...");
+    let config_path = config_file.path().to_str().unwrap().to_string();
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        server.add_service(proxy_service);
+        log::info!("Proxy server starting on {}", listen_addr);
+        server.run_forever();
+    });
+
+    // Wait for server to start
+    std::thread::sleep(Duration::from_secs(2));
+    log::info!("Proxy server should be ready");
+
+    // Step 5: Make HTTP request with Range header
+    log::info!("Making Range request to proxy...");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/public/test-range.txt", proxy_port);
+
+    // Request bytes 0-19 (first 20 bytes: "01234567890123456789")
+    let response = client
+        .get(&proxy_url)
+        .header("Range", "bytes=0-19")
+        .send()
+        .expect("Failed to GET from proxy");
+
+    // Step 6: Verify 206 Partial Content response
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        206,
+        "Expected 206 Partial Content for Range request, got {}",
+        response.status()
+    );
+
+    // Step 7: Verify Content-Range header
+    let content_range = response
+        .headers()
+        .get("content-range")
+        .expect("Expected Content-Range header in 206 response");
+    log::info!("Content-Range header: {:?}", content_range);
+    assert!(
+        content_range
+            .to_str()
+            .unwrap()
+            .starts_with("bytes 0-19/100"),
+        "Expected 'bytes 0-19/100', got {:?}",
+        content_range
+    );
+
+    // Step 8: Verify response body contains exactly 20 bytes
+    let body = response.bytes().expect("Failed to read response body");
+    log::info!("Response body length: {} bytes", body.len());
+    assert_eq!(
+        body.len(),
+        20,
+        "Expected 20 bytes (bytes 0-19), got {}",
+        body.len()
+    );
+
+    // Step 9: Verify response body content matches requested range
+    let expected_content = "01234567890123456789";
+    let actual_content = String::from_utf8_lossy(&body);
+    log::info!("Response body: {}", actual_content);
+    assert_eq!(
+        actual_content, expected_content,
+        "Expected '{}', got '{}'",
+        expected_content, actual_content
+    );
+
+    log::info!("=== Range Request Test PASSED ===");
 }

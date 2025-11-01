@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (563 lines)
-- ✅ 6 tests: 3 infrastructure validation + 3 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (742 lines)
+- ✅ 7 tests: 3 infrastructure validation + 4 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1042,6 +1042,7 @@ yatagarasu/
 4. `test_proxy_get_from_localstack_public_bucket()` - Proxy GET request end-to-end
 5. `test_proxy_head_from_localstack()` - Proxy HEAD request with metadata
 6. `test_proxy_404_from_localstack()` - Proxy 404 error handling
+7. `test_proxy_range_request_from_localstack()` - Proxy Range request returns 206 Partial Content
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1064,7 +1065,7 @@ yatagarasu/
 - [x] Integration: GET /public/test.txt returns file content
 - [x] Integration: HEAD /public/test.txt returns metadata
 - [ ] Integration: GET /public/large.bin (100MB) streams successfully
-- [ ] Integration: GET /public/test.txt with Range: bytes=0-100 returns partial content
+- [x] Integration: GET /public/test.txt with Range: bytes=0-100 returns partial content
 - [x] Integration: GET /public/nonexistent.txt returns 404
 - [ ] Integration: Concurrent GETs to same file work correctly
 
