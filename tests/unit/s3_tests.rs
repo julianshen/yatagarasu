@@ -8058,3 +8058,65 @@ use yatagarasu::config::S3Config;
             "Different buckets can have different regions"
         );
     }
+
+// ============================================================================
+// Phase 14: S3 Proxying Implementation
+// ============================================================================
+// Integration tests showing full request flow: HTTP → Router → Auth → S3 Client → S3
+
+// Test: Can create S3 HTTP client from bucket config
+#[test]
+fn test_can_create_s3_http_client_from_bucket_config() {
+    use yatagarasu::config::BucketConfig;
+
+    // Setup: Create a BucketConfig (higher-level config that includes S3Config)
+    let bucket_config = BucketConfig {
+        name: "products".to_string(),
+        path_prefix: "/products".to_string(),
+        s3: S3Config {
+            bucket: "products-bucket-s3".to_string(),
+            region: "us-west-2".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
+        },
+        auth: None, // Public bucket
+    };
+
+    // Action: Create S3 client from BucketConfig
+    // In real implementation, this extracts the s3 field from BucketConfig
+    let s3_client_result = create_s3_client(&bucket_config.s3);
+
+    // Verification: Client is created successfully
+    assert!(
+        s3_client_result.is_ok(),
+        "Should successfully create S3 client from BucketConfig"
+    );
+
+    let s3_client = s3_client_result.unwrap();
+
+    // Verify client has correct configuration from BucketConfig
+    assert_eq!(
+        s3_client.config.bucket, "products-bucket-s3",
+        "S3 client should use bucket name from BucketConfig"
+    );
+    assert_eq!(
+        s3_client.config.region, "us-west-2",
+        "S3 client should use region from BucketConfig"
+    );
+    assert_eq!(
+        s3_client.config.access_key, "AKIAIOSFODNN7EXAMPLE",
+        "S3 client should use access key from BucketConfig"
+    );
+    assert_eq!(
+        s3_client.config.secret_key,
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "S3 client should use secret key from BucketConfig"
+    );
+
+    // This demonstrates the integration path:
+    // 1. Router provides BucketConfig based on request path
+    // 2. Proxy extracts S3Config from BucketConfig
+    // 3. S3 client is created with bucket-specific credentials
+    // 4. Client is ready to make authenticated requests to S3
+}
