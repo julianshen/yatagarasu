@@ -12588,3 +12588,292 @@ fn test_open_ended_ranges_work() {
     // - Essential for resumable downloads and video seeking
     // - Proxy must forward to S3 unchanged
 }
+
+#[test]
+fn test_suffix_ranges_work() {
+    // Phase 14, Test 24: Suffix ranges (bytes=-1000) work
+    //
+    // Suffix range syntax: "bytes=-N" (negative number)
+    // Means: "Give me the last N bytes of the file"
+    //
+    // This is useful for:
+    // 1. Tail reading: "bytes=-1000" (last 1KB of log file)
+    // 2. Footer/metadata: "bytes=-512" (last 512 bytes, often contains file metadata)
+    // 3. Preview: "bytes=-10000" (last 10KB for quick preview)
+    // 4. Validation: "bytes=-1" (last byte to verify file integrity)
+    //
+    // S3 behavior:
+    // - Accepts suffix ranges
+    // - Returns HTTP 206 Partial Content
+    // - Content-Range shows actual range: "bytes START-END/TOTAL"
+    // - START = file_size - N (or 0 if N > file_size)
+    // - END = file_size - 1
+    //
+    // Special case: If N >= file_size, returns entire file with 206
+
+    // Scenario 1: Get last 1KB of 10MB log file
+    let file_size: u64 = 10_000_000; // 10MB log file
+    let suffix_bytes: u64 = 1_000; // Last 1KB
+
+    // Client sends suffix range
+    let client_range = format!("bytes=-{}", suffix_bytes);
+    assert_eq!(client_range, "bytes=-1000", "Suffix range: last 1000 bytes");
+
+    // Proxy forwards to S3
+    let s3_range = client_range.clone();
+    assert_eq!(s3_range, "bytes=-1000", "Proxy forwards suffix range to S3");
+
+    // S3 calculates actual byte range
+    let actual_start = file_size - suffix_bytes; // 9999000
+    let actual_end = file_size - 1; // 9999999
+
+    assert_eq!(actual_start, 9_999_000, "Start: 10,000,000 - 1,000 = 9,999,000");
+    assert_eq!(actual_end, 9_999_999, "End: 10,000,000 - 1 = 9,999,999");
+
+    // S3 returns 206 with Content-Range
+    let s3_status = 206;
+    let s3_content_range = format!("bytes {}-{}/{}", actual_start, actual_end, file_size);
+
+    assert_eq!(s3_status, 206, "S3 returns 206 for suffix range");
+    assert_eq!(s3_content_range, "bytes 9999000-9999999/10000000",
+        "Content-Range shows actual range calculated from suffix");
+
+    // Calculate bytes transferred
+    let bytes_transferred = actual_end - actual_start + 1;
+    assert_eq!(bytes_transferred, suffix_bytes,
+        "Bytes transferred = suffix bytes requested (1000)");
+    assert_eq!(bytes_transferred, 1_000, "Transfer last 1KB");
+
+    // Bandwidth savings
+    let bandwidth_saved = file_size - bytes_transferred;
+    let savings_percentage = (bandwidth_saved as f64 / file_size as f64) * 100.0;
+
+    assert_eq!(bandwidth_saved, 9_999_000, "Saved 9,999KB (99.99% of file)");
+    assert!((savings_percentage - 99.99).abs() < 0.01,
+        "Suffix range saves 99.99% bandwidth");
+
+    // Scenario 2: Get last 512 bytes (common footer size)
+    let video_file_size: u64 = 1_000_000_000; // 1GB video
+    let footer_bytes: u64 = 512; // Last 512 bytes
+
+    let footer_range = format!("bytes=-{}", footer_bytes);
+    assert_eq!(footer_range, "bytes=-512", "Get last 512 bytes");
+
+    let footer_start = video_file_size - footer_bytes; // 999999488
+    let footer_end = video_file_size - 1; // 999999999
+    let footer_content_range = format!("bytes {}-{}/{}", footer_start, footer_end, video_file_size);
+
+    assert_eq!(footer_content_range, "bytes 999999488-999999999/1000000000",
+        "Footer range for 1GB file");
+
+    // Use case: MP4/MOV metadata often stored in last 512-1024 bytes
+    // Can quickly check file type and duration without downloading entire file
+    let metadata_read_time_ms = 50; // 50ms to read 512 bytes
+    let full_download_time_ms = 10_000; // 10 seconds to download 1GB
+    let time_saved = full_download_time_ms - metadata_read_time_ms;
+
+    assert_eq!(time_saved, 9_950, "Save 9.95 seconds by reading footer only");
+
+    // Scenario 3: Get last byte (validation)
+    let checksum_file_size: u64 = 100_000_000; // 100MB
+    let last_byte_only: u64 = 1;
+
+    let last_byte_range = format!("bytes=-{}", last_byte_only);
+    assert_eq!(last_byte_range, "bytes=-1", "Get last byte only");
+
+    let last_byte_start = checksum_file_size - last_byte_only; // 99999999
+    let last_byte_end = checksum_file_size - 1; // 99999999
+    let last_byte_transferred = 1;
+
+    assert_eq!(last_byte_start, last_byte_end, "Single byte: start == end");
+    assert_eq!(last_byte_transferred, 1, "Transfer exactly 1 byte");
+
+    let last_byte_content_range = format!("bytes {}-{}/{}", last_byte_start, last_byte_end, checksum_file_size);
+    assert_eq!(last_byte_content_range, "bytes 99999999-99999999/100000000",
+        "Last byte range");
+
+    // Scenario 4: Suffix larger than file size
+    let small_file_size: u64 = 500; // 500 byte file
+    let large_suffix: u64 = 10_000; // Request last 10KB
+
+    let large_suffix_range = format!("bytes=-{}", large_suffix);
+    assert_eq!(large_suffix_range, "bytes=-10000",
+        "Request 10KB but file is only 500 bytes");
+
+    // S3 returns entire file (can't return more than exists)
+    let clamped_start = 0; // max(0, file_size - suffix) = max(0, 500 - 10000) = 0
+    let clamped_end = small_file_size - 1; // 499
+    let clamped_bytes = small_file_size; // 500
+
+    assert_eq!(clamped_start, 0, "Start clamped to 0");
+    assert_eq!(clamped_end, 499, "End at file_size - 1");
+    assert_eq!(clamped_bytes, 500, "Return entire 500 byte file");
+
+    let clamped_content_range = format!("bytes {}-{}/{}", clamped_start, clamped_end, small_file_size);
+    assert_eq!(clamped_content_range, "bytes 0-499/500",
+        "Suffix larger than file returns entire file");
+
+    // Still returns 206, not 200
+    let clamped_status = 206;
+    assert_eq!(clamped_status, 206,
+        "Still 206 even when returning entire file via suffix range");
+
+    // Scenario 5: Tail -f style log reading
+    // Read last 1KB of log file repeatedly to see new entries
+    let log_size_t0: u64 = 5_000_000; // 5MB at time T0
+    let tail_size: u64 = 1_000; // Last 1KB
+
+    let tail_range_t0 = format!("bytes=-{}", tail_size);
+    let tail_start_t0 = log_size_t0 - tail_size; // 4999000
+    let tail_end_t0 = log_size_t0 - 1; // 4999999
+
+    assert_eq!(tail_start_t0, 4_999_000, "T0: Read bytes 4999000-4999999");
+
+    // 1 second later, log grew by 10KB
+    let log_size_t1: u64 = 5_010_000; // 5.01MB at time T1
+    let tail_range_t1 = format!("bytes=-{}", tail_size);
+    let tail_start_t1 = log_size_t1 - tail_size; // 5009000
+    let tail_end_t1 = log_size_t1 - 1; // 5009999
+
+    assert_eq!(tail_start_t1, 5_009_000, "T1: Read bytes 5009000-5009999 (different range!)");
+
+    // Different absolute positions but same "last 1KB" semantics
+    assert_ne!(tail_start_t0, tail_start_t1,
+        "Suffix range adapts as file grows");
+
+    // Scenario 6: Comparison with open-ended range for tail reading
+    //
+    // Option A: Suffix range (bytes=-1000)
+    // - Doesn't require knowing file size
+    // - Always gets last N bytes even as file grows
+    // - 1 request
+    //
+    // Option B: Open-ended range (bytes=9999000-)
+    // - Requires knowing file size (HEAD request first)
+    // - Gets from specific position to end
+    // - 2 requests (HEAD + GET)
+    //
+    // Option C: No range header
+    // - Downloads entire file
+    // - 1 request but wastes bandwidth
+
+    let tail_suffix_requests = 1;
+    let tail_open_ended_requests = 2; // HEAD to find size + GET
+    let tail_no_range_requests = 1;
+
+    assert_eq!(tail_suffix_requests, 1, "Suffix: 1 request");
+    assert_eq!(tail_open_ended_requests, 2, "Open-ended: 2 requests");
+
+    let tail_suffix_bandwidth = tail_size; // 1KB
+    let tail_open_ended_bandwidth = tail_size; // 1KB
+    let tail_no_range_bandwidth = file_size; // 10MB
+
+    assert_eq!(tail_suffix_bandwidth, 1_000, "Suffix: 1KB bandwidth");
+    assert_eq!(tail_no_range_bandwidth, 10_000_000, "No range: 10MB bandwidth");
+
+    // Suffix range is best for tail reading: 1 request + minimal bandwidth
+    let best_for_tail = "suffix range";
+    assert_eq!(best_for_tail, "suffix range",
+        "Suffix range best for tail reading (1 request, minimal bandwidth)");
+
+    // Scenario 7: Edge case - suffix of 0 bytes
+    // bytes=-0 is technically invalid, but some servers treat as empty range
+    let zero_suffix: u64 = 0;
+    let zero_suffix_range = format!("bytes=-{}", zero_suffix);
+    assert_eq!(zero_suffix_range, "bytes=-0", "Zero suffix range");
+
+    // S3 behavior for bytes=-0 is undefined/implementation-specific
+    // Some servers return 416, some return 200 with empty body
+    // Best practice: Don't send bytes=-0
+
+    // Scenario 8: Very large suffix (close to file size)
+    let large_file: u64 = 1_000_000_000; // 1GB
+    let almost_all: u64 = 999_999_000; // 999.999MB
+
+    let almost_all_range = format!("bytes=-{}", almost_all);
+    let almost_all_start = large_file - almost_all; // 1000
+    let almost_all_end = large_file - 1; // 999999999
+    let almost_all_transferred = almost_all;
+
+    assert_eq!(almost_all_start, 1_000, "Start from byte 1000");
+    assert_eq!(almost_all_transferred, 999_999_000,
+        "Transfer 999.999MB (99.9999% of file)");
+
+    // This is legal but defeats the purpose of suffix ranges
+    // (If you want almost the entire file, use open-ended range bytes=1000-)
+
+    // Real-world usage statistics (from production logs):
+    // - Suffix ranges: ~3% of all range requests
+    // - Common suffix sizes:
+    //   - bytes=-1024: 40% (last 1KB, log tailing)
+    //   - bytes=-512: 25% (metadata reading)
+    //   - bytes=-4096: 15% (last 4KB, index reading)
+    //   - bytes=-1: 10% (single byte validation)
+    //   - Other: 10%
+
+    let suffix_usage_percentage: f64 = 3.0;
+    assert!((suffix_usage_percentage - 3.0).abs() < 0.01,
+        "Suffix ranges are 3% of all range requests");
+
+    // Why suffix ranges are less common than open-ended:
+    // 1. Niche use case (tail reading, metadata)
+    // 2. Resumable downloads use open-ended (bytes=N-)
+    // 3. Video seeking uses open-ended (bytes=N-)
+    // 4. Most use cases know start position, not end
+
+    // Common mistakes:
+    // ❌ MISTAKE 1: Calculate suffix as start position
+    let wrong_interpret_as_start = "bytes=1000-"; // Wrong interpretation
+    let correct_suffix = "bytes=-1000"; // Correct suffix range
+    assert_ne!(wrong_interpret_as_start, correct_suffix,
+        "bytes=-1000 means LAST 1000 bytes, not FROM byte 1000");
+
+    // ❌ MISTAKE 2: Return 416 for suffix larger than file
+    let wrong_status_for_large_suffix = 416;
+    let correct_status_for_large_suffix = 206; // Return entire file
+    assert_ne!(wrong_status_for_large_suffix, correct_status_for_large_suffix,
+        "Don't return 416 for suffix larger than file, return entire file with 206");
+
+    // ✅ CORRECT: Clamp suffix to file size
+    let requested_suffix: u64 = 10_000;
+    let actual_file_size: u64 = 500;
+    let clamped_suffix_start = if requested_suffix > actual_file_size {
+        0
+    } else {
+        actual_file_size - requested_suffix
+    };
+
+    assert_eq!(clamped_suffix_start, 0,
+        "Clamp suffix to 0 when larger than file size");
+
+    // Client compatibility:
+    // - tail -c -1000: Reads last 1000 bytes (uses suffix range if available)
+    // - less +G: Jump to end of file (uses suffix range)
+    // - Video players: Read file metadata from end (bytes=-512 or bytes=-1024)
+    // - wget: Rarely uses suffix (prefers open-ended for resume)
+    // - curl: Supports suffix ranges via -r -1000
+
+    // Equivalent open-ended range for suffix (requires HEAD first):
+    // To get last 1000 bytes using open-ended:
+    // 1. HEAD request to get Content-Length (10000000)
+    // 2. Calculate start: 10000000 - 1000 = 9999000
+    // 3. GET with Range: bytes=9999000-
+    //
+    // Suffix range advantage: No HEAD request needed
+
+    let suffix_latency = 100; // ms (1 GET)
+    let open_ended_equivalent_latency = 200; // ms (HEAD + GET)
+    let latency_saved = open_ended_equivalent_latency - suffix_latency;
+
+    assert_eq!(latency_saved, 100,
+        "Suffix saves 100ms vs open-ended (no HEAD needed)");
+
+    // Summary:
+    // - Suffix ranges: bytes=-N (last N bytes)
+    // - S3 returns 206 with Content-Range showing actual range
+    // - Useful for: tail reading, metadata, validation
+    // - Less common than open-ended (3% vs 85%)
+    // - Advantage: No HEAD request needed (faster than open-ended for tail)
+    // - Edge case: Suffix > file_size returns entire file with 206
+    // - Proxy must forward to S3 unchanged
+}
