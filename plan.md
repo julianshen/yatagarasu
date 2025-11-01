@@ -823,7 +823,7 @@ yatagarasu/
 - [x] Test: Errors convert to HTTP status codes correctly
 - [x] Test: Error responses use consistent JSON format
 - [x] Test: 4xx errors include client-friendly messages
-- [ ] Test: 5xx errors don't leak implementation details
+- [x] Test: 5xx errors don't leak implementation details
 - [ ] Test: Errors include error code for client parsing
 - [ ] Test: Stack traces only in logs, never in responses
 

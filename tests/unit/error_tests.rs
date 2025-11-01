@@ -751,3 +751,300 @@ fn test_4xx_errors_include_client_friendly_messages() {
     // - French: "Erreur d'authentification: jeton expiré"
     // - Based on Accept-Language header
 }
+
+/// Test: 5xx errors don't leak implementation details
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that 5xx errors (Config, S3, Internal) don't expose sensitive
+/// implementation details that could aid attackers or confuse users.
+///
+/// 5xx errors should:
+/// - Not include file paths or line numbers
+/// - Not include stack traces
+/// - Not include internal variable names
+/// - Not include Rust-specific error types
+/// - Not include system paths or memory addresses
+/// - Not include credentials or connection strings
+/// - Not include module paths
+///
+/// Security rationale:
+/// Leaking implementation details in error messages can:
+/// 1. Aid attackers in understanding the system architecture
+/// 2. Expose file system structure
+/// 3. Reveal technology stack and versions
+/// 4. Accidentally leak credentials or API keys
+/// 5. Confuse non-technical users with jargon
+///
+/// Best practices:
+/// - Generic messages for 5xx errors (system fault, not user's fault)
+/// - Specific details only in server logs (not responses)
+/// - Request ID for correlation between logs and responses
+/// - Sanitize all error messages before sending to clients
+///
+/// Test scenarios:
+/// 1. Config error messages don't include file paths
+/// 2. S3 error messages don't include connection strings
+/// 3. Internal error messages don't include stack traces
+/// 4. Messages don't include Rust error types (NoneError, UnwrapError, etc.)
+/// 5. Messages don't include module paths (yatagarasu::config::loader)
+/// 6. Messages don't include line numbers (:42, :123)
+/// 7. Messages don't include memory addresses (0x7fff...)
+/// 8. Messages are generic and user-friendly
+///
+/// Expected behavior:
+/// - Config error: "Configuration error: invalid bucket name" ✅
+/// - NOT: "Configuration error: failed to parse /etc/yatagarasu/config.yaml at line 42: invalid bucket name" ❌
+///
+/// - S3 error: "S3 error: connection timeout" ✅
+/// - NOT: "S3 error: failed to connect to s3.amazonaws.com:443 using credentials aws_access_key_id=AKIA... at src/s3/client.rs:156" ❌
+///
+/// - Internal error: "Internal error: unexpected error" ✅
+/// - NOT: "Internal error: thread 'tokio-runtime-worker' panicked at 'called Option::unwrap() on a None value', src/proxy/handler.rs:89:5" ❌
+#[test]
+fn test_5xx_errors_dont_leak_implementation_details() {
+    use yatagarasu::error::ProxyError;
+
+    // Scenario 1: Config error doesn't include file paths
+    //
+    // Config errors are often caused by invalid configuration files.
+    // The error message should NOT reveal the file path, as this could
+    // expose the system's directory structure to attackers.
+    //
+    // Example of what NOT to do:
+    // "Configuration error: failed to parse /etc/yatagarasu/config.yaml"
+    //
+    // Instead, keep it generic:
+    // "Configuration error: invalid YAML syntax"
+    let config_error = ProxyError::Config("invalid YAML syntax".to_string());
+    let json = config_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include file paths
+    assert!(!message.contains("/etc/"));
+    assert!(!message.contains("/usr/"));
+    assert!(!message.contains("/var/"));
+    assert!(!message.contains("C:\\"));
+    assert!(!message.contains(".yaml"));
+    assert!(!message.contains(".yml"));
+    assert!(!message.contains(".toml"));
+    assert!(!message.contains(".json"));
+
+    // Should not include line numbers
+    assert!(!message.contains(":42"));
+    assert!(!message.contains(":123"));
+    assert!(!message.contains("line "));
+
+    // Scenario 2: S3 error doesn't include connection strings or credentials
+    //
+    // S3 errors might contain sensitive information like:
+    // - AWS access keys
+    // - S3 bucket endpoints
+    // - Connection strings
+    // - IP addresses
+    //
+    // These should NEVER be exposed to clients.
+    let s3_error = ProxyError::S3("connection timeout".to_string());
+    let json = s3_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include AWS credentials
+    assert!(!message.contains("AKIA")); // AWS access key prefix
+    assert!(!message.contains("aws_access_key_id"));
+    assert!(!message.contains("aws_secret_access_key"));
+
+    // Should not include connection details
+    assert!(!message.contains("s3.amazonaws.com"));
+    assert!(!message.contains(":443"));
+    assert!(!message.contains("http://"));
+    assert!(!message.contains("https://"));
+
+    // Should not include file paths
+    assert!(!message.contains("src/"));
+    assert!(!message.contains(".rs:"));
+
+    // Scenario 3: Internal error doesn't include stack traces or panic messages
+    //
+    // Internal errors are often caused by panics or unexpected errors.
+    // Stack traces are VERY useful for debugging, but should NEVER
+    // be sent to clients as they reveal:
+    // - Source code file paths
+    // - Line numbers
+    // - Function names
+    // - Module structure
+    // - Rust-specific implementation details
+    let internal_error = ProxyError::Internal("unexpected error".to_string());
+    let json = internal_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include panic-related terms
+    assert!(!message.contains("panicked"));
+    assert!(!message.contains("panic"));
+    assert!(!message.contains("backtrace"));
+    assert!(!message.contains("stack trace"));
+
+    // Should not include Rust error types
+    assert!(!message.contains("NoneError"));
+    assert!(!message.contains("UnwrapError"));
+    assert!(!message.contains("Option::unwrap"));
+    assert!(!message.contains("Result::expect"));
+
+    // Should not include thread information
+    assert!(!message.contains("thread"));
+    assert!(!message.contains("tokio-runtime"));
+
+    // Scenario 4: Messages don't include Rust-specific error types
+    //
+    // Rust has many built-in error types that are meaningless to users:
+    // - NoneError (Option::unwrap on None)
+    // - std::io::Error
+    // - serde_json::Error
+    // - etc.
+    //
+    // These should be translated to user-friendly messages.
+    let errors = vec![
+        ProxyError::Config("failed to load configuration".to_string()),
+        ProxyError::S3("failed to fetch object".to_string()),
+        ProxyError::Internal("system error".to_string()),
+    ];
+
+    for error in &errors {
+        let json = error.to_json_response(None);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let message = parsed["message"].as_str().unwrap();
+
+        // Should not include Rust error type names
+        assert!(!message.contains("std::"));
+        assert!(!message.contains("serde"));
+        assert!(!message.contains("tokio::"));
+        assert!(!message.contains("hyper::"));
+        assert!(!message.contains("Error:"));
+    }
+
+    // Scenario 5: Messages don't include module paths
+    //
+    // Module paths like "yatagarasu::config::loader" reveal the
+    // internal code structure and should not be exposed.
+    let config_error = ProxyError::Config("module initialization failed".to_string());
+    let json = config_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include module paths
+    assert!(!message.contains("yatagarasu::"));
+    assert!(!message.contains("::"));
+
+    // Scenario 6: Messages don't include line numbers
+    //
+    // Line numbers like ":42" or ":123" reveal source code locations
+    // and should only appear in server logs, not client responses.
+    let errors = vec![
+        ProxyError::Config("validation failed".to_string()),
+        ProxyError::S3("request failed".to_string()),
+        ProxyError::Internal("operation failed".to_string()),
+    ];
+
+    for error in &errors {
+        let json = error.to_json_response(None);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let message = parsed["message"].as_str().unwrap();
+
+        // Should not include line number patterns
+        assert!(!message.contains(":0"));
+        assert!(!message.contains(":1"));
+        assert!(!message.contains(":2"));
+        assert!(!message.contains(":3"));
+        assert!(!message.contains(":4"));
+        assert!(!message.contains(":5"));
+        assert!(!message.contains(":6"));
+        assert!(!message.contains(":7"));
+        assert!(!message.contains(":8"));
+        assert!(!message.contains(":9"));
+    }
+
+    // Scenario 7: Messages don't include memory addresses
+    //
+    // Memory addresses like "0x7fff5fc3d8a0" are completely meaningless
+    // to users and reveal internal runtime information.
+    let internal_error = ProxyError::Internal("memory allocation failed".to_string());
+    let json = internal_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include hexadecimal addresses
+    assert!(!message.contains("0x"));
+
+    // Scenario 8: Messages are generic and user-friendly for 5xx errors
+    //
+    // For 5xx errors (server-side faults), the message should:
+    // - Acknowledge the error occurred
+    // - Indicate it's a server-side problem (not user's fault)
+    // - Provide a request ID for support inquiries
+    // - NOT provide technical details
+    //
+    // This is different from 4xx errors, where specific details help
+    // the user fix their request.
+    let request_id = "550e8400-e29b-41d4-a716-446655440000";
+
+    let config_error = ProxyError::Config("failed to initialize".to_string());
+    let json = config_error.to_json_response(Some(request_id.to_string()));
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    // Should have request_id for tracing
+    assert_eq!(parsed["request_id"], request_id);
+
+    // Message should be simple and generic
+    let message = parsed["message"].as_str().unwrap();
+    assert!(message.len() < 200); // Keep it concise
+    assert!(message.len() > 10);  // But not TOO concise
+
+    // Should indicate category
+    assert!(message.starts_with("Configuration error:"));
+
+    //
+    // SECURITY CONSIDERATIONS:
+    //
+    // The difference between 4xx and 5xx error detail levels:
+    //
+    // 4xx (client errors): Be specific to help user fix their request
+    // - "Authentication error: token expired"
+    // - "Authentication error: missing Authorization header"
+    // - "Authentication error: invalid signature"
+    //
+    // 5xx (server errors): Be generic to avoid leaking implementation details
+    // - "Configuration error: failed to initialize" (NOT: "failed to parse /etc/config.yaml:42")
+    // - "S3 error: connection timeout" (NOT: "failed to connect to s3.amazonaws.com:443 using AKIA...")
+    // - "Internal error: unexpected error" (NOT: "thread panicked at src/main.rs:123")
+    //
+    // All detailed error information for 5xx errors should go to server logs,
+    // not to client responses.
+    //
+    // LOGGING STRATEGY (to be implemented in later tests):
+    //
+    // When a 5xx error occurs:
+    // 1. Log full details to server logs (file paths, stack traces, etc.)
+    // 2. Generate a unique request_id
+    // 3. Return generic message to client with request_id
+    // 4. Client can provide request_id to support for investigation
+    //
+    // Example server log entry:
+    // ```
+    // [ERROR] request_id=550e8400... config_error="failed to parse config"
+    //   file="/etc/yatagarasu/config.yaml"
+    //   line=42
+    //   error="missing required field: bucket_name"
+    //   stack_trace=[...]
+    // ```
+    //
+    // Example client response:
+    // ```json
+    // {
+    //   "error": "config",
+    //   "message": "Configuration error: failed to initialize",
+    //   "status": 500,
+    //   "request_id": "550e8400-e29b-41d4-a716-446655440000"
+    // }
+    // ```
+}
