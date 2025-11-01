@@ -824,7 +824,7 @@ yatagarasu/
 - [x] Test: Error responses use consistent JSON format
 - [x] Test: 4xx errors include client-friendly messages
 - [x] Test: 5xx errors don't leak implementation details
-- [ ] Test: Errors include error code for client parsing
+- [x] Test: Errors include error code for client parsing
 - [ ] Test: Stack traces only in logs, never in responses
 
 ### Structured Logging

@@ -1048,3 +1048,291 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     // }
     // ```
 }
+
+/// Test: Errors include error code for client parsing
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that error responses include a machine-parseable error code
+/// that clients can use for programmatic error handling.
+///
+/// Why error codes matter:
+///
+/// Human-readable messages are great for users, but terrible for code:
+/// - They might change over time ("Authentication failed" → "Auth failed")
+/// - They might be localized ("Authentication error" → "Erreur d'authentification")
+/// - They're hard to parse programmatically
+///
+/// Error codes provide a stable, machine-parseable identifier:
+/// - Stable: "auth" will always mean authentication error
+/// - Language-independent: "auth" in English, French, Spanish
+/// - Easy to switch on: `if error.code === "auth" { ... }`
+///
+/// Error code design principles:
+/// 1. Use lowercase strings (easier to type, consistent)
+/// 2. Keep them short but descriptive ("auth" not "authentication_error")
+/// 3. Make them stable (never change existing codes)
+/// 4. Make them specific enough to be actionable
+///
+/// Example client code:
+/// ```javascript
+/// fetch('/api/file.pdf')
+///   .then(res => res.json())
+///   .catch(err => {
+///     switch (err.error) {
+///       case 'auth':
+///         // Redirect to login
+///         window.location = '/login';
+///         break;
+///       case 'config':
+///       case 'internal':
+///         // Show "try again later" message
+///         showRetryMessage();
+///         break;
+///       case 's3':
+///         // Show "service temporarily unavailable" message
+///         showServiceUnavailableMessage();
+///         break;
+///     }
+///   });
+/// ```
+///
+/// Test scenarios:
+/// 1. Config error has code "config"
+/// 2. Auth error has code "auth"
+/// 3. S3 error has code "s3"
+/// 4. Internal error has code "internal"
+/// 5. Error codes are lowercase (consistent)
+/// 6. Error codes are stable (same every time)
+/// 7. Error codes are present in all responses
+/// 8. Error codes are separate from messages
+///
+/// Expected JSON structure:
+/// ```json
+/// {
+///   "error": "auth",           ← Machine-parseable code
+///   "message": "Authentication error: token expired",  ← Human-readable message
+///   "status": 401,
+///   "request_id": "550e8400-..."
+/// }
+/// ```
+#[test]
+fn test_errors_include_error_code_for_client_parsing() {
+    use yatagarasu::error::ProxyError;
+
+    // Scenario 1: Config error has code "config"
+    //
+    // Configuration errors should have a consistent "config" code that clients
+    // can use to identify configuration-related failures.
+    let config_error = ProxyError::Config("invalid bucket name".to_string());
+    let json = config_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    // Must have "error" field
+    assert!(parsed.get("error").is_some(), "JSON response must include 'error' field");
+
+    // Error code must be "config"
+    assert_eq!(parsed["error"], "config", "Config error must have code 'config'");
+
+    // Error code must be lowercase (consistency)
+    let error_code = parsed["error"].as_str().unwrap();
+    assert_eq!(error_code, error_code.to_lowercase(), "Error codes must be lowercase");
+
+    // Scenario 2: Auth error has code "auth"
+    //
+    // Authentication errors should have a consistent "auth" code so clients
+    // can programmatically redirect to login or refresh tokens.
+    let auth_error = ProxyError::Auth("token expired".to_string());
+    let json = auth_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(parsed["error"], "auth", "Auth error must have code 'auth'");
+
+    // Scenario 3: S3 error has code "s3"
+    //
+    // S3 errors should have a consistent "s3" code so clients can distinguish
+    // upstream service failures from proxy failures.
+    let s3_error = ProxyError::S3("connection timeout".to_string());
+    let json = s3_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(parsed["error"], "s3", "S3 error must have code 's3'");
+
+    // Scenario 4: Internal error has code "internal"
+    //
+    // Internal errors should have a consistent "internal" code so clients
+    // know to show a generic "try again later" message.
+    let internal_error = ProxyError::Internal("unexpected error".to_string());
+    let json = internal_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(parsed["error"], "internal", "Internal error must have code 'internal'");
+
+    // Scenario 5: Error codes are lowercase and consistent
+    //
+    // All error codes must be lowercase for consistency and ease of use.
+    // This prevents clients from having to handle "Auth", "AUTH", "auth" differently.
+    let errors = vec![
+        (ProxyError::Config("test".to_string()), "config"),
+        (ProxyError::Auth("test".to_string()), "auth"),
+        (ProxyError::S3("test".to_string()), "s3"),
+        (ProxyError::Internal("test".to_string()), "internal"),
+    ];
+
+    for (error, expected_code) in &errors {
+        let json = error.to_json_response(None);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let code = parsed["error"].as_str().unwrap();
+
+        // Must be lowercase
+        assert_eq!(code, code.to_lowercase(), "Error code '{}' must be lowercase", code);
+
+        // Must match expected
+        assert_eq!(code, *expected_code, "Error code must be '{}'", expected_code);
+    }
+
+    // Scenario 6: Error codes are stable (same every time)
+    //
+    // Error codes must be consistent across multiple calls with the same error type.
+    // Clients depend on this stability for their error handling logic.
+    let auth_error = ProxyError::Auth("first call".to_string());
+    let json1 = auth_error.to_json_response(None);
+    let parsed1: serde_json::Value = serde_json::from_str(&json1).unwrap();
+
+    let auth_error2 = ProxyError::Auth("second call".to_string());
+    let json2 = auth_error2.to_json_response(None);
+    let parsed2: serde_json::Value = serde_json::from_str(&json2).unwrap();
+
+    // Error codes must be identical despite different messages
+    assert_eq!(
+        parsed1["error"], parsed2["error"],
+        "Error codes must be stable across calls"
+    );
+
+    // Scenario 7: Error codes are present in all responses
+    //
+    // Every error response must include the "error" field, even if
+    // no request_id is provided.
+    let error_without_request_id = ProxyError::Config("test".to_string());
+    let json = error_without_request_id.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert!(
+        parsed.get("error").is_some(),
+        "Error code must be present even without request_id"
+    );
+    assert!(
+        parsed["error"].is_string(),
+        "Error code must be a string"
+    );
+
+    let error_with_request_id = ProxyError::Config("test".to_string());
+    let json = error_with_request_id.to_json_response(Some("req-123".to_string()));
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert!(
+        parsed.get("error").is_some(),
+        "Error code must be present with request_id"
+    );
+
+    // Scenario 8: Error codes are separate from messages
+    //
+    // The error code and message serve different purposes:
+    // - Code: For machines (stable, language-independent)
+    // - Message: For humans (descriptive, may change, may be localized)
+    //
+    // They must be separate fields in the JSON response.
+    let auth_error = ProxyError::Auth("invalid token".to_string());
+    let json = auth_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    let error_code = parsed["error"].as_str().unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Code and message must be different
+    assert_ne!(
+        error_code, message,
+        "Error code and message must be separate (code is for machines, message is for humans)"
+    );
+
+    // Code must be short and simple
+    assert!(
+        error_code.len() < 20,
+        "Error code '{}' must be short (< 20 chars) for easy client parsing",
+        error_code
+    );
+
+    // Code must not contain spaces (easier to use in code)
+    assert!(
+        !error_code.contains(' '),
+        "Error code '{}' must not contain spaces",
+        error_code
+    );
+
+    // Message must be longer and more descriptive
+    assert!(
+        message.len() > error_code.len(),
+        "Message should be more descriptive than the error code"
+    );
+
+    //
+    // CLIENT USAGE PATTERNS:
+    //
+    // The error code enables various client-side error handling patterns:
+    //
+    // Pattern 1: Switch statement for different error types
+    // ```javascript
+    // switch (response.error) {
+    //   case 'auth': redirectToLogin(); break;
+    //   case 's3': showServiceUnavailable(); break;
+    //   case 'config':
+    //   case 'internal': showRetryLater(); break;
+    // }
+    // ```
+    //
+    // Pattern 2: Retry logic based on error type
+    // ```javascript
+    // const RETRYABLE_ERRORS = ['s3', 'internal'];
+    // if (RETRYABLE_ERRORS.includes(response.error)) {
+    //   await retryWithBackoff();
+    // }
+    // ```
+    //
+    // Pattern 3: Custom error classes
+    // ```javascript
+    // class ProxyError extends Error {
+    //   constructor(response) {
+    //     super(response.message);
+    //     this.code = response.error;
+    //     this.status = response.status;
+    //     this.requestId = response.request_id;
+    //   }
+    //
+    //   isRetryable() {
+    //     return ['s3', 'internal'].includes(this.code);
+    //   }
+    //
+    //   requiresAuth() {
+    //     return this.code === 'auth';
+    //   }
+    // }
+    // ```
+    //
+    // Pattern 4: Error metrics and monitoring
+    // ```javascript
+    // metrics.increment('proxy.errors', {
+    //   error_code: response.error,
+    //   status: response.status
+    // });
+    // ```
+    //
+    // STABILITY GUARANTEE:
+    //
+    // Once an error code is published, it must NEVER change:
+    // - "auth" will always mean authentication error
+    // - "config" will always mean configuration error
+    // - "s3" will always mean S3/upstream error
+    // - "internal" will always mean internal proxy error
+    //
+    // This stability allows clients to build robust error handling
+    // without worrying about breaking changes.
+}
