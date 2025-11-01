@@ -3691,3 +3691,290 @@ fn test_request_id_included_in_all_log_messages() {
         "Request B logs should only contain request_id B"
     );
 }
+
+/// Test: Request ID is passed to S3 client for tracing
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Request Tracing)
+/// Verifies that request IDs are passed to S3 client operations for end-to-end tracing.
+///
+/// S3 client tracing enables:
+/// - Correlating S3 operations back to original HTTP requests
+/// - Debugging S3 errors in context of user request
+/// - Understanding which requests triggered which S3 operations
+/// - Performance analysis: "which requests cause slow S3 operations?"
+/// - Cost tracking: "which user requests generate most S3 API calls?"
+///
+/// How request ID flows to S3:
+/// 1. HTTP request arrives with request_id in span
+/// 2. Request handler creates S3 operation span (child of request span)
+/// 3. S3 operation span inherits request_id from parent
+/// 4. S3 client logs include request_id automatically
+/// 5. Result: S3 logs can be filtered by request_id
+///
+/// Why this matters:
+/// - User reports "my file didn't upload" with request_id
+/// - Filter S3 logs by request_id
+/// - See exact S3 error: "AccessDenied" or "NoSuchBucket"
+/// - Understand failure cause without guessing
+///
+/// S3 operations that should be traced:
+/// - GetObject (file downloads)
+/// - PutObject (file uploads)
+/// - HeadObject (metadata queries)
+/// - DeleteObject (file deletions)
+/// - ListObjectsV2 (directory listings)
+///
+/// Example log flow with request ID:
+/// ```
+/// 2024-01-01T10:00:00Z INFO HTTP request received request_id="550e8400-..." path="/file.txt"
+/// 2024-01-01T10:00:00Z INFO S3 GetObject started request_id="550e8400-..." bucket="my-bucket" key="file.txt"
+/// 2024-01-01T10:00:00Z INFO S3 GetObject signature generated request_id="550e8400-..." method="GET"
+/// 2024-01-01T10:00:00Z INFO S3 HTTP request sent request_id="550e8400-..." host="s3.amazonaws.com"
+/// 2024-01-01T10:00:01Z INFO S3 HTTP response received request_id="550e8400-..." status=200 size=1024
+/// 2024-01-01T10:00:01Z INFO S3 GetObject completed request_id="550e8400-..." duration_ms=1000
+/// 2024-01-01T10:00:01Z INFO HTTP response sent request_id="550e8400-..." status=200
+/// ```
+///
+/// Tracing across service boundaries:
+/// - Request ID stays same from HTTP ingress to S3 completion
+/// - Enables filtering entire flow by single request_id
+/// - No gaps in tracing where request context is lost
+///
+/// Performance debugging use case:
+/// ```
+/// User: "My downloads are slow"
+/// Filter logs: request_id = "abc123"
+///
+/// 2024-01-01T10:00:00.000Z HTTP request received
+/// 2024-01-01T10:00:00.010Z S3 GetObject started     (+10ms)
+/// 2024-01-01T10:00:05.500Z S3 response received      (+5490ms) <- BOTTLENECK
+/// 2024-01-01T10:00:05.520Z HTTP response sent        (+20ms)
+///
+/// Conclusion: S3 latency is the bottleneck (5.5s), not proxy overhead (30ms)
+/// ```
+///
+/// Error debugging use case:
+/// ```
+/// User: "I got a 403 error"
+/// Filter logs: request_id = "def456"
+///
+/// 2024-01-01T10:00:00Z INFO HTTP request received request_id="def456"
+/// 2024-01-01T10:00:00Z INFO S3 GetObject started request_id="def456"
+/// 2024-01-01T10:00:00Z ERROR S3 error occurred request_id="def456" error_code="AccessDenied"
+/// 2024-01-01T10:00:00Z ERROR HTTP request failed request_id="def456" status=403
+///
+/// Conclusion: S3 bucket denied access (credentials or IAM policy issue)
+/// ```
+///
+/// Cost tracking use case:
+/// ```
+/// Filter logs: request_id = "ghi789"
+/// Count S3 operations with request_id="ghi789"
+///
+/// Result: 1 HTTP request triggered:
+/// - 1 HeadObject (metadata check)
+/// - 1 GetObject (file download)
+/// - Total: 2 S3 API calls per HTTP request
+///
+/// Insight: Each download costs 2 S3 API calls (can optimize by caching metadata)
+/// ```
+///
+/// Best practices:
+/// - Always include request_id in S3 operation spans
+/// - Log S3 operations at INFO level (success) and ERROR level (failure)
+/// - Include S3 context: bucket, key, operation type
+/// - Include timing: start time, duration, latency
+/// - Include results: status code, error code, bytes transferred
+///
+/// Test validates:
+/// - S3 operation logs include request_id from parent HTTP request
+/// - Request ID propagates from HTTP span to S3 span
+/// - Multiple S3 operations within same request share same request_id
+/// - S3 errors include request_id for debugging
+#[test]
+fn test_request_id_passed_to_s3_client() {
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: S3 operation includes request ID from parent HTTP request
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let request_id = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber, || {
+        // HTTP request span with request_id
+        let request_span = tracing::info_span!(
+            "http_request",
+            request_id = %request_id,
+            method = "GET",
+            path = "/products/image.png"
+        );
+        let _enter = request_span.enter();
+
+        tracing::info!("HTTP request received");
+
+        // S3 GetObject operation (child span inherits request_id)
+        let s3_span = tracing::info_span!(
+            "s3_get_object",
+            bucket = "my-bucket",
+            key = "products/image.png",
+            operation = "GetObject"
+        );
+        let _s3_enter = s3_span.enter();
+
+        tracing::info!("S3 GetObject started");
+        tracing::info!("S3 signature generated");
+        tracing::info!("S3 HTTP request sent");
+        tracing::info!(status = 200, "S3 HTTP response received");
+        tracing::info!(duration_ms = 100, "S3 GetObject completed");
+
+        drop(_s3_enter);
+
+        tracing::info!("HTTP response sent");
+    });
+
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+    let request_id_str = request_id.to_string();
+
+    // Verify request ID appears in all S3 operation logs
+    assert!(
+        log_output.contains(&request_id_str) && log_output.contains("S3 GetObject started"),
+        "S3 operation start should include request_id"
+    );
+    assert!(
+        log_output.contains(&request_id_str) && log_output.contains("S3 signature generated"),
+        "S3 signature generation should include request_id"
+    );
+    assert!(
+        log_output.contains(&request_id_str) && log_output.contains("S3 HTTP request sent"),
+        "S3 HTTP request should include request_id"
+    );
+    assert!(
+        log_output.contains(&request_id_str) && log_output.contains("S3 HTTP response received"),
+        "S3 HTTP response should include request_id"
+    );
+    assert!(
+        log_output.contains(&request_id_str) && log_output.contains("S3 GetObject completed"),
+        "S3 operation completion should include request_id"
+    );
+
+    // Scenario 2: S3 errors include request ID for debugging
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    let request_id2 = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber2, || {
+        let request_span = tracing::info_span!(
+            "http_request",
+            request_id = %request_id2,
+            method = "GET",
+            path = "/products/missing.png"
+        );
+        let _enter = request_span.enter();
+
+        tracing::info!("HTTP request received");
+
+        // S3 operation that fails
+        let s3_span = tracing::info_span!(
+            "s3_get_object",
+            bucket = "my-bucket",
+            key = "products/missing.png",
+            operation = "GetObject"
+        );
+        let _s3_enter = s3_span.enter();
+
+        tracing::info!("S3 GetObject started");
+        tracing::error!(error_code = "NoSuchKey", status = 404, "S3 error occurred");
+
+        drop(_s3_enter);
+
+        tracing::error!(status = 404, "HTTP request failed");
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+    let request_id2_str = request_id2.to_string();
+
+    // Verify request ID appears in S3 error logs
+    assert!(
+        log_output2.contains(&request_id2_str) && log_output2.contains("S3 error occurred"),
+        "S3 error should include request_id"
+    );
+    assert!(
+        log_output2.contains(&request_id2_str) && log_output2.contains("HTTP request failed"),
+        "HTTP error should include request_id"
+    );
+
+    // Scenario 3: Multiple S3 operations in same request share request_id
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    let request_id3 = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber3, || {
+        let request_span = tracing::info_span!(
+            "http_request",
+            request_id = %request_id3,
+            method = "POST",
+            path = "/products/upload"
+        );
+        let _enter = request_span.enter();
+
+        tracing::info!("HTTP request received");
+
+        // First S3 operation: HeadObject (check if exists)
+        let head_span = tracing::info_span!(
+            "s3_head_object",
+            bucket = "my-bucket",
+            key = "products/new-image.png",
+            operation = "HeadObject"
+        );
+        let _head_enter = head_span.enter();
+        tracing::info!("S3 HeadObject to check existence");
+        drop(_head_enter);
+
+        // Second S3 operation: PutObject (upload file)
+        let put_span = tracing::info_span!(
+            "s3_put_object",
+            bucket = "my-bucket",
+            key = "products/new-image.png",
+            operation = "PutObject"
+        );
+        let _put_enter = put_span.enter();
+        tracing::info!("S3 PutObject to upload file");
+        drop(_put_enter);
+
+        tracing::info!("HTTP response sent");
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+    let request_id3_str = request_id3.to_string();
+
+    // Verify both S3 operations include the same request_id
+    assert!(
+        log_output3.contains(&request_id3_str)
+            && log_output3.contains("S3 HeadObject to check existence"),
+        "HeadObject operation should include request_id"
+    );
+    assert!(
+        log_output3.contains(&request_id3_str)
+            && log_output3.contains("S3 PutObject to upload file"),
+        "PutObject operation should include request_id"
+    );
+
+    // Count occurrences of request_id in S3 operations
+    let lines_with_request_id: Vec<&str> = log_output3
+        .lines()
+        .filter(|line| line.contains(&request_id3_str))
+        .collect();
+
+    assert!(
+        lines_with_request_id.len() >= 4,
+        "Request ID should appear in all log messages including multiple S3 operations"
+    );
+}

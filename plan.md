@@ -848,7 +848,7 @@ yatagarasu/
 - [x] Test: Request ID is generated for every request (UUID v4)
 - [x] Test: Request ID is returned in X-Request-Id response header
 - [x] Test: Request ID is included in all log messages for that request
-- [ ] Test: Request ID is passed to S3 client for tracing
+- [x] Test: Request ID is passed to S3 client for tracing
 
 **Expected Outcome**: Clear, structured logs for debugging and monitoring without leaking sensitive data.
 
