@@ -13,6 +13,7 @@ repository = "https://github.com/julianshen/yatagarasu"
 pingora = "0.6"
 pingora-core = "0.6"
 pingora-proxy = "0.6"
+pingora-http = "0.6"
 async-trait = "0.1"
 
 # Async Runtime
@@ -56,6 +57,7 @@ futures = "0.3"
 regex = "1.10"
 uuid = { version = "1.6", features = ["v4"] }
 chrono = "0.4"
+urlencoding = "2.1"
 
 # Cryptography
 sha2 = "0.10"

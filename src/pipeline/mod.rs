@@ -90,9 +90,19 @@ impl RequestContext {
         &self.method
     }
 
+    /// Set the HTTP method
+    pub fn set_method(&mut self, method: String) {
+        self.method = method;
+    }
+
     /// Get the request path
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Set the request path
+    pub fn set_path(&mut self, path: String) {
+        self.path = path;
     }
 
     /// Get the request headers
@@ -100,9 +110,19 @@ impl RequestContext {
         &self.headers
     }
 
+    /// Set the request headers
+    pub fn set_headers(&mut self, headers: HashMap<String, String>) {
+        self.headers = headers;
+    }
+
     /// Get the query parameters
     pub fn query_params(&self) -> &HashMap<String, String> {
         &self.query_params
+    }
+
+    /// Set the query parameters
+    pub fn set_query_params(&mut self, query_params: HashMap<String, String>) {
+        self.query_params = query_params;
     }
 
     /// Get the request timestamp (Unix epoch seconds)

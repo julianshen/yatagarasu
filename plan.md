@@ -703,6 +703,23 @@ yatagarasu/
 
 ---
 
+## Phase 11.5: Pingora API Research (COMPLETE - 2025-11-01)
+
+**Objective**: Research Pingora ProxyHttp API to understand implementation requirements
+
+**Research Findings**:
+- ✅ ProxyHttp requires only 2 methods: `new_ctx()` and `upstream_peer()`
+- ✅ 20+ optional methods available (request_filter, upstream_request_filter, etc.)
+- ✅ Server startup pattern documented from Cloudflare examples
+- ✅ HttpPeer creation pattern understood
+- ✅ Implementation strategy: Start minimal, add auth + S3 signing incrementally
+
+**Sources**: Pingora docs, GitHub examples (cloudflare/pingora, tyrchen/simple-proxy)
+
+**Expected Implementation**: ~150-200 lines for complete S3 proxy
+
+---
+
 ## Phase 12: Pingora Server Setup
 
 **Objective**: Initialize Pingora HTTP server and handle basic HTTP requests

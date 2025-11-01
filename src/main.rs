@@ -1,7 +1,9 @@
-use anyhow::Result;
 use clap::Parser;
+use pingora_core::server::configuration::Opt;
+use pingora_core::server::Server;
 use std::path::PathBuf;
 use yatagarasu::config::Config;
+use yatagarasu::proxy::YatagarasuProxy;
 
 /// Yatagarasu S3 Proxy - High-performance S3 proxy built with Cloudflare's Pingora
 #[derive(Parser, Debug)]
@@ -11,42 +13,72 @@ struct Args {
     /// Path to configuration file
     #[arg(short, long, default_value = "config.yaml")]
     config: PathBuf,
+
+    /// Daemon mode
+    #[arg(short = 'd', long)]
+    daemon: bool,
+
+    /// Test configuration and exit
+    #[arg(long)]
+    test: bool,
+
+    /// Upgrade workers gracefully
+    #[arg(long)]
+    upgrade: bool,
 }
 
-fn main() -> Result<()> {
+fn main() {
+    // Initialize logging subsystem
+    yatagarasu::logging::init_subscriber().expect("Failed to initialize logging subsystem");
+
     // Parse command-line arguments
     let args = Args::parse();
 
-    // Initialize logging subsystem
-    yatagarasu::logging::init_subscriber()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize logging: {}", e))?;
-
-    // Load configuration from file
-    let config = Config::from_file(&args.config)
-        .map_err(|e| anyhow::anyhow!("Failed to load configuration: {}", e))?;
+    // Load Yatagarasu configuration from file
+    let config = Config::from_file(&args.config).unwrap_or_else(|e| {
+        eprintln!("Failed to load configuration: {}", e);
+        std::process::exit(1);
+    });
 
     tracing::info!(
         config_file = %args.config.display(),
         server_address = %config.server.address,
         server_port = config.server.port,
+        buckets = config.buckets.len(),
+        jwt_enabled = config.jwt.is_some(),
         "Configuration loaded successfully"
     );
 
-    // Create server instance
-    let server_config = yatagarasu::server::ServerConfig::from_config(&config);
-    let server = yatagarasu::server::YatagarasuServer::new(server_config)
-        .map_err(|e| anyhow::anyhow!("Failed to create server: {}", e))?;
+    // Build Pingora server options
+    let opt = Opt {
+        daemon: args.daemon,
+        test: args.test,
+        upgrade: args.upgrade,
+        ..Default::default()
+    };
 
-    // Log server startup
+    // Create Pingora server
+    let mut server = Server::new(Some(opt)).expect("Failed to create Pingora server");
+    server.bootstrap();
+
+    // Create YatagarasuProxy instance
+    let proxy = YatagarasuProxy::new(config.clone());
+
+    // Create HTTP proxy service
+    let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+    // Add TCP listener for HTTP
+    let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+    proxy_service.add_tcp(&listen_addr);
+
     tracing::info!(
-        address = %server.config().address,
-        threads = server.config().threads,
+        address = %listen_addr,
         "Starting Yatagarasu S3 Proxy"
     );
 
-    // In a real implementation, this would start the Pingora server
-    // For now, we verify the server can be created and configured correctly
-    tracing::info!("Server initialized successfully");
+    // Register service with server
+    server.add_service(proxy_service);
 
-    Ok(())
+    // Run server forever (blocks until shutdown)
+    server.run_forever();
 }
