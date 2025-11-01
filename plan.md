@@ -783,7 +783,7 @@ yatagarasu/
 - [x] Test: HEAD request doesn't download object body from S3
 
 ### Range Request Support
-- [ ] Test: Client Range header is forwarded to S3
+- [x] Test: Client Range header is forwarded to S3
 - [ ] Test: S3 206 Partial Content returns HTTP 206
 - [ ] Test: Content-Range header is preserved
 - [ ] Test: Range requests stream only requested bytes

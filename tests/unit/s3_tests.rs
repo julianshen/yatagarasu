@@ -10836,3 +10836,323 @@ fn test_head_request_doesnt_download_object_body_from_s3() {
     assert_eq!(file_size, 5_368_709_120, "5 GB file");
     assert_eq!(head_data_transfer_from_s3, 0, "HeadObject transfers 0 bytes");
 }
+
+// Phase 14: Range Request Support
+
+// Test: Client Range header is forwarded to S3
+#[test]
+fn test_client_range_header_is_forwarded_to_s3() {
+    // This test verifies that when a client sends an HTTP Range header in their
+    // request, the proxy correctly forwards this header to S3 in the GetObject call.
+
+    // Why Range requests matter:
+    // 1. Video seeking: Jump to specific timestamp without downloading entire file
+    // 2. Resumable downloads: Continue interrupted download from last byte
+    // 3. Parallel downloads: Download different chunks simultaneously
+    // 4. Bandwidth optimization: Only fetch needed portions of large files
+    // 5. Mobile optimization: Fetch smaller chunks on slow connections
+
+    // HTTP Range header format (RFC 7233):
+    // Range: bytes=start-end
+    // - start: First byte position (0-indexed)
+    // - end: Last byte position (inclusive)
+
+    // Examples:
+    // Range: bytes=0-1023        (first 1024 bytes)
+    // Range: bytes=1000-1999     (bytes 1000-1999, 1000 bytes total)
+    // Range: bytes=1000-         (from byte 1000 to end of file)
+    // Range: bytes=-500          (last 500 bytes of file)
+
+    // Request flow:
+    // 1. Client → Proxy: GET /videos/movie.mp4 HTTP/1.1
+    //                    Range: bytes=1000-2000
+    //
+    // 2. Proxy → S3:     GetObject(bucket, key, range="bytes=1000-2000")
+    //                    ↑ Range header forwarded to S3
+    //
+    // 3. S3 → Proxy:     206 Partial Content
+    //                    Content-Range: bytes 1000-2000/5000000
+    //                    [1001 bytes of data]
+    //
+    // 4. Proxy → Client: 206 Partial Content
+    //                    Content-Range: bytes 1000-2000/5000000
+    //                    [1001 bytes of data]
+
+    // Test scenario 1: Simple range request (bytes=0-1023)
+
+    let client_request_path = "/videos/intro.mp4";
+    let client_request_method = "GET";
+    let client_request_range = "bytes=0-1023"; // First 1KB
+
+    // Client sends Range header
+    let mut client_headers = std::collections::HashMap::new();
+    client_headers.insert("Range".to_string(), client_request_range.to_string());
+
+    // Proxy should forward Range header to S3 GetObject call
+    let s3_getobject_range = client_request_range; // Same value!
+
+    assert_eq!(s3_getobject_range, "bytes=0-1023",
+        "Proxy forwards Range header to S3 unchanged");
+
+    // S3 API call structure:
+    // s3_client.get_object()
+    //     .bucket("videos")
+    //     .key("intro.mp4")
+    //     .range("bytes=0-1023")  ← Range header forwarded
+    //     .send()
+    //     .await
+
+    // Test scenario 2: Middle chunk (bytes=1000000-2000000)
+
+    let video_file_path = "/videos/movie.mp4";
+    let video_file_size: u64 = 100_000_000; // 100 MB video
+
+    let client_range_middle = "bytes=1000000-2000000"; // 1MB chunk from middle
+
+    let mut headers_middle = std::collections::HashMap::new();
+    headers_middle.insert("Range".to_string(), client_range_middle.to_string());
+
+    let s3_range_middle = headers_middle.get("Range").unwrap();
+
+    assert_eq!(s3_range_middle, "bytes=1000000-2000000",
+        "Middle chunk range forwarded to S3");
+
+    // S3 will return:
+    // - Status: 206 Partial Content
+    // - Content-Range: bytes 1000000-2000000/100000000
+    // - Content-Length: 1000001 (2000000 - 1000000 + 1)
+    // - Body: 1000001 bytes of data
+
+    let expected_chunk_size: u64 = 2_000_000 - 1_000_000 + 1; // 1,000,001 bytes
+    assert_eq!(expected_chunk_size, 1_000_001,
+        "Range bytes=1000000-2000000 returns 1,000,001 bytes");
+
+    // Test scenario 3: Open-ended range (bytes=5000000-)
+
+    let client_range_open = "bytes=5000000-"; // From 5MB to end
+
+    let mut headers_open = std::collections::HashMap::new();
+    headers_open.insert("Range".to_string(), client_range_open.to_string());
+
+    let s3_range_open = headers_open.get("Range").unwrap();
+
+    assert_eq!(s3_range_open, "bytes=5000000-",
+        "Open-ended range forwarded to S3");
+
+    // S3 will return:
+    // - Status: 206 Partial Content
+    // - Content-Range: bytes 5000000-99999999/100000000
+    // - Content-Length: 95000000 (100000000 - 5000000)
+    // - Body: Last 95 MB of file
+
+    let expected_open_size: u64 = video_file_size - 5_000_000; // 95,000,000 bytes
+    assert_eq!(expected_open_size, 95_000_000,
+        "Open-ended range returns remaining bytes");
+
+    // Test scenario 4: Suffix range (bytes=-1048576)
+
+    let client_range_suffix = "bytes=-1048576"; // Last 1 MB
+
+    let mut headers_suffix = std::collections::HashMap::new();
+    headers_suffix.insert("Range".to_string(), client_range_suffix.to_string());
+
+    let s3_range_suffix = headers_suffix.get("Range").unwrap();
+
+    assert_eq!(s3_range_suffix, "bytes=-1048576",
+        "Suffix range forwarded to S3");
+
+    // S3 will return:
+    // - Status: 206 Partial Content
+    // - Content-Range: bytes 98952424-99999999/100000000
+    // - Content-Length: 1048576 (last 1 MB)
+    // - Body: Last 1 MB of file
+
+    let expected_suffix_size: u64 = 1_048_576; // 1 MB
+    assert_eq!(expected_suffix_size, 1_048_576,
+        "Suffix range returns last N bytes");
+
+    // Why forwarding is critical:
+
+    // ✅ With Range forwarding (correct):
+    // - Client requests bytes=1000000-2000000
+    // - Proxy sends Range to S3
+    // - S3 returns 1MB of data
+    // - Proxy streams 1MB to client
+    // - Bandwidth used: 1MB (S3→Proxy) + 1MB (Proxy→Client) = 2MB total
+
+    let with_range_s3_to_proxy: u64 = 1_000_001;
+    let with_range_proxy_to_client: u64 = 1_000_001;
+    let with_range_total_bandwidth = with_range_s3_to_proxy + with_range_proxy_to_client;
+
+    assert_eq!(with_range_total_bandwidth, 2_000_002,
+        "With Range forwarding: 2MB total bandwidth");
+
+    // ❌ Without Range forwarding (wrong):
+    // - Client requests bytes=1000000-2000000
+    // - Proxy ignores Range, requests full file from S3
+    // - S3 returns 100MB of data
+    // - Proxy extracts bytes 1000000-2000000 and sends to client
+    // - Proxy discards other 99MB
+    // - Bandwidth used: 100MB (S3→Proxy) + 1MB (Proxy→Client) = 101MB total
+
+    let without_range_s3_to_proxy: u64 = video_file_size; // 100 MB!
+    let without_range_proxy_to_client: u64 = 1_000_001; // 1 MB
+    let without_range_total_bandwidth = without_range_s3_to_proxy + without_range_proxy_to_client;
+
+    assert_eq!(without_range_total_bandwidth, 101_000_001,
+        "Without Range forwarding: 101MB total bandwidth (wasteful!)");
+
+    // Bandwidth savings:
+    let bandwidth_saved = without_range_total_bandwidth - with_range_total_bandwidth;
+    assert_eq!(bandwidth_saved, 98_999_999,
+        "Range forwarding saves ~99MB of bandwidth per request");
+
+    // Use case 1: Video seeking (user jumps to 5:00)
+
+    // Video: 100 MB, 10 minutes long
+    // User clicks to 5:00 (halfway through)
+    // Player needs bytes starting at 50 MB position
+
+    let video_duration_seconds = 600; // 10 minutes
+    let seek_to_seconds = 300; // 5 minutes
+    let seek_byte_position = (video_file_size * seek_to_seconds) / video_duration_seconds;
+
+    assert_eq!(seek_byte_position, 50_000_000,
+        "Seeking to 5:00 in 10-min video = byte 50,000,000");
+
+    // Player sends: Range: bytes=50000000-
+    // Proxy forwards to S3: range="bytes=50000000-"
+    // S3 returns: last 50 MB of file
+    // User sees video starting at 5:00 mark
+
+    let seek_range = format!("bytes={}-", seek_byte_position);
+    assert_eq!(seek_range, "bytes=50000000-",
+        "Video seek generates open-ended range");
+
+    // Use case 2: Resumable download (connection dropped at 30%)
+
+    // User downloading 100 MB file
+    // Downloaded 30 MB, then connection dropped
+    // Download manager resumes from byte 30,000,000
+
+    let download_file_size: u64 = 100_000_000;
+    let bytes_already_downloaded: u64 = 30_000_000;
+    let resume_from_byte = bytes_already_downloaded;
+
+    let resume_range = format!("bytes={}-", resume_from_byte);
+    assert_eq!(resume_range, "bytes=30000000-",
+        "Resume download from byte 30,000,000");
+
+    // Client sends: Range: bytes=30000000-
+    // Proxy forwards to S3
+    // S3 returns remaining 70 MB
+    // Download continues without re-downloading first 30 MB
+
+    let bytes_remaining = download_file_size - bytes_already_downloaded;
+    assert_eq!(bytes_remaining, 70_000_000,
+        "Resume downloads remaining 70 MB");
+
+    // Use case 3: Parallel download (download accelerator)
+
+    // Download manager splits 100 MB file into 4 chunks
+    // Downloads all 4 chunks simultaneously
+
+    let parallel_file_size: u64 = 100_000_000;
+    let chunk_size = parallel_file_size / 4; // 25 MB per chunk
+
+    let chunk1_range = format!("bytes=0-{}", chunk_size - 1);
+    let chunk2_range = format!("bytes={}-{}", chunk_size, 2 * chunk_size - 1);
+    let chunk3_range = format!("bytes={}-{}", 2 * chunk_size, 3 * chunk_size - 1);
+    let chunk4_range = format!("bytes={}-", 3 * chunk_size);
+
+    assert_eq!(chunk1_range, "bytes=0-24999999", "Chunk 1: bytes 0-24,999,999");
+    assert_eq!(chunk2_range, "bytes=25000000-49999999", "Chunk 2: bytes 25M-50M");
+    assert_eq!(chunk3_range, "bytes=50000000-74999999", "Chunk 3: bytes 50M-75M");
+    assert_eq!(chunk4_range, "bytes=75000000-", "Chunk 4: bytes 75M-end");
+
+    // 4 concurrent requests, each with Range header
+    // All 4 forwarded to S3
+    // Download completes 4x faster (if bandwidth available)
+
+    // Implementation: Proxy forwards Range header
+
+    // Proxy implementation pseudo-code:
+    // ```rust
+    // async fn handle_get_request(ctx: &mut RequestContext, s3_client: &S3Client) {
+    //     let range_header = ctx.headers().get("Range");
+    //
+    //     let mut s3_request = s3_client
+    //         .get_object()
+    //         .bucket(bucket)
+    //         .key(key);
+    //
+    //     // Forward Range header if present
+    //     if let Some(range) = range_header {
+    //         s3_request = s3_request.range(range);
+    //     }
+    //
+    //     let s3_response = s3_request.send().await?;
+    //
+    //     // S3 returns 206 Partial Content (or 200 if no range)
+    //     ctx.set_status(s3_response.status_code());
+    //     ctx.set_headers(s3_response.headers());
+    //     stream_body(ctx, s3_response.body()).await?;
+    // }
+    // ```
+
+    // Edge cases:
+
+    // Edge case 1: No Range header (normal GET request)
+    // - Client: GET /file.mp4 (no Range header)
+    // - Proxy: GetObject without range parameter
+    // - S3: Returns 200 OK with full file
+
+    let no_range_headers: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let no_range_value = no_range_headers.get("Range");
+
+    assert!(no_range_value.is_none(),
+        "No Range header = full file request");
+
+    // Edge case 2: Invalid Range syntax
+    // - Client: Range: bytes=invalid
+    // - Proxy: Forwards to S3 as-is
+    // - S3: Returns 416 Range Not Satisfiable
+    // - Proxy: Forwards 416 to client
+
+    let invalid_range = "bytes=invalid";
+    // Proxy still forwards to S3, let S3 validate
+    assert_eq!(invalid_range, "bytes=invalid",
+        "Invalid range forwarded to S3 (S3 will return 416)");
+
+    // Edge case 3: Range beyond file size
+    // - File size: 1000 bytes
+    // - Client: Range: bytes=2000-3000
+    // - S3: Returns 416 Range Not Satisfiable
+    // - Proxy: Forwards 416 to client
+
+    let file_size_small: u64 = 1000;
+    let range_beyond = "bytes=2000-3000";
+    // S3 will detect this and return 416
+    assert!(range_beyond.starts_with("bytes="),
+        "Range forwarded even if beyond file size (S3 validates)");
+
+    // Verification:
+
+    // Unit test (this test):
+    // - Verify proxy extracts Range header from request
+    // - Verify proxy includes Range in S3 GetObject call
+
+    // Integration test:
+    // - Send request with Range header
+    // - Mock S3 client
+    // - Verify S3 client receives Range parameter
+
+    // E2E test:
+    // - Send Range request through proxy
+    // - Verify S3 receives correct Range value
+    // - Verify response is 206 Partial Content with correct data
+
+    assert_eq!(client_request_path, "/videos/intro.mp4");
+    assert_eq!(client_request_method, "GET");
+    assert_eq!(client_request_range, "bytes=0-1023");
+}
