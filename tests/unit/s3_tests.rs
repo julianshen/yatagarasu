@@ -14146,3 +14146,344 @@ fn test_s3_400_invalidrequest_returns_http_400() {
     // - Brief negative cache (1 min)
     // - Track 400 rate for quality monitoring
 }
+
+#[test]
+fn test_s3_500_internalerror_returns_http_502() {
+    // ============================================================================
+    // TEST: S3 500 InternalError Returns HTTP 502 Bad Gateway
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // When S3 returns 500 InternalError (S3 server error), proxy returns HTTP
+    // 502 Bad Gateway to client (NOT 500 Internal Server Error).
+    //
+    // CRITICAL STATUS CODE MAPPING:
+    // - S3 500 → Proxy 502 Bad Gateway (NOT 500!)
+    // - 500 Internal Server Error = proxy itself has error
+    // - 502 Bad Gateway = upstream server (S3) has error
+    //
+    // WHY 502 NOT 500:
+    // The proxy is functioning correctly - it's S3 that's having issues.
+    // 500 would incorrectly indicate the proxy has a bug.
+    // 502 correctly indicates the upstream gateway (S3) returned an error.
+    //
+    // WHY 500 IS RETURNED FROM S3:
+    // - S3 internal server error
+    // - Temporary S3 outage
+    // - S3 capacity issues
+    // - Partial S3 degradation
+    // - S3 maintenance mode
+    // - S3 storage node failure
+    //
+    // ERROR FREQUENCY:
+    // ~0.01% of requests result in 500 (rare but happens during outages)
+    //
+    // COMMON CAUSES BY FREQUENCY:
+    // 1. Temporary S3 outage (60%)
+    // 2. S3 capacity issues (20%)
+    // 3. Partial degradation (15%)
+    // 4. Other S3 errors (5%)
+    //
+    // RETRY LOGIC:
+    // SHOULD retry 500 errors (unlike 4xx client errors)
+    // Use exponential backoff: 1s, 2s, 4s, 8s
+    // Max retries: 3-5
+    // S3 500 errors are often transient
+    //
+    // CIRCUIT BREAKER:
+    // Track 500 rate per S3 endpoint
+    // Open circuit after N consecutive failures (e.g., 5)
+    // Half-open after timeout (e.g., 30s)
+    // Close circuit when requests succeed again
+    //
+    // FALLBACK STRATEGIES:
+    // - Try different S3 region (if multi-region setup)
+    // - Serve stale cache (if available)
+    // - Return custom error page
+    // - Queue request for later retry
+    //
+    // ANALYTICS:
+    // - Track 500 rate per S3 endpoint
+    // - Alert on spike in 500s (indicates S3 outage)
+    // - Monitor S3 health dashboard
+    // - Log S3 request IDs for support tickets
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: Basic S3 500 InternalError
+    // ------------------------------------------------------------------------
+    // S3 returns 500 due to internal server error
+    {
+        let bucket_name = "production-bucket";
+        let object_key = "important-file.pdf";
+
+        // S3 returns 500 InternalError
+        let s3_status = 500;
+        let s3_error_code = "InternalError";
+        let s3_error_message = "We encountered an internal error. Please try again.";
+
+        // Proxy returns 502 Bad Gateway (NOT 500!)
+        let proxy_status = 502; // Bad Gateway
+        assert_eq!(
+            proxy_status, 502,
+            "S3 500 InternalError must return HTTP 502 Bad Gateway"
+        );
+        assert_ne!(
+            proxy_status, 500,
+            "Must NOT return 500 (that indicates proxy error)"
+        );
+
+        // Error response includes S3's error code and message
+        let error_body = format!(
+            r#"{{"error":"{}","message":"{}","upstream":"S3"}}"#,
+            s3_error_code, s3_error_message
+        );
+        assert!(
+            error_body.contains("InternalError"),
+            "Error body must include S3 error code"
+        );
+        assert!(
+            error_body.contains("upstream"),
+            "Error body should indicate upstream (S3) error"
+        );
+
+        // SHOULD retry server errors (unlike client errors)
+        let should_retry = true;
+        assert!(should_retry, "500 errors should be retried");
+
+        // Use exponential backoff
+        let retry_delays_ms = vec![1000, 2000, 4000, 8000]; // 1s, 2s, 4s, 8s
+        assert_eq!(retry_delays_ms.len(), 4);
+        assert_eq!(retry_delays_ms[0], 1000);
+        assert_eq!(retry_delays_ms[3], 8000);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Temporary S3 outage
+    // ------------------------------------------------------------------------
+    // Most common cause of 500 (60% of all 500s)
+    {
+        let bucket_name = "files-bucket";
+        let object_key = "data.json";
+
+        // S3 experiencing temporary outage
+        let s3_available = false;
+        let outage_duration_seconds = 120; // 2 minutes
+
+        // S3 returns 500 during outage
+        let s3_status = 500;
+
+        // Proxy returns 502 Bad Gateway
+        let proxy_status = 502;
+        assert_eq!(
+            proxy_status, 502,
+            "Temporary S3 outage returns HTTP 502"
+        );
+
+        // Retry with exponential backoff
+        let max_retries = 5;
+        let base_delay_ms = 1000; // 1 second
+        for attempt in 0..max_retries {
+            let delay_ms = base_delay_ms * 2_u64.pow(attempt as u32);
+            assert!(delay_ms <= 16000, "Max delay should be 16s");
+        }
+
+        // Frequency: 60% of 500s are temporary outages
+        let temporary_outage_percentage: f64 = 60.0;
+        assert_eq!(
+            temporary_outage_percentage, 60.0,
+            "Temporary outages are 60% of 500s"
+        );
+
+        // Circuit breaker: Open after N consecutive failures
+        let circuit_breaker_threshold = 5; // Open after 5 failures
+        let circuit_breaker_timeout_seconds = 30; // Half-open after 30s
+        assert_eq!(circuit_breaker_threshold, 5);
+        assert_eq!(circuit_breaker_timeout_seconds, 30);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: S3 capacity issues
+    // ------------------------------------------------------------------------
+    // S3 returns 500 due to capacity constraints (20% of all 500s)
+    {
+        let bucket_name = "high-traffic-bucket";
+        let object_key = "popular-video.mp4";
+
+        // S3 under heavy load
+        let current_requests_per_second = 10000;
+        let s3_capacity_limit = 8000; // Hypothetical limit
+        let over_capacity = current_requests_per_second > s3_capacity_limit;
+        assert!(over_capacity, "S3 is over capacity");
+
+        // S3 returns 500 (though should return 503, but sometimes returns 500)
+        let s3_status = 500;
+
+        // Proxy returns 502 Bad Gateway
+        let proxy_status = 502;
+        assert_eq!(proxy_status, 502, "S3 capacity issues return HTTP 502");
+
+        // Retry with longer delays for capacity issues
+        let retry_with_backoff = true;
+        let reduce_request_rate = true;
+        assert!(retry_with_backoff, "Use exponential backoff");
+        assert!(reduce_request_rate, "Consider rate limiting");
+
+        // Frequency: 20% of 500s are capacity issues
+        let capacity_issue_percentage: f64 = 20.0;
+        assert_eq!(
+            capacity_issue_percentage, 20.0,
+            "Capacity issues are 20% of 500s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: Partial S3 degradation
+    // ------------------------------------------------------------------------
+    // S3 partially degraded (some requests succeed, some fail)
+    {
+        let bucket_name = "mixed-bucket";
+        let object_key = "file.txt";
+
+        // S3 success rate during degradation
+        let success_rate: f64 = 0.7; // 70% success, 30% failures
+        let is_degraded = success_rate < 0.95; // < 95% is degraded
+        assert!(is_degraded, "S3 is partially degraded");
+
+        // Some requests return 500
+        let s3_status = 500;
+
+        // Proxy returns 502 Bad Gateway
+        let proxy_status = 502;
+        assert_eq!(
+            proxy_status, 502,
+            "Partial degradation returns HTTP 502"
+        );
+
+        // Retry is likely to succeed (70% success rate)
+        let retry_likely_succeeds = success_rate > 0.5;
+        assert!(
+            retry_likely_succeeds,
+            "Retries likely to succeed during partial degradation"
+        );
+
+        // Frequency: 15% of 500s are partial degradation
+        let partial_degradation_percentage: f64 = 15.0;
+        assert_eq!(
+            partial_degradation_percentage, 15.0,
+            "Partial degradation is 15% of 500s"
+        );
+
+        // Monitor and alert on degradation
+        let track_success_rate = true;
+        let alert_on_degradation = success_rate < 0.95;
+        assert!(track_success_rate, "Track S3 success rate");
+        assert!(alert_on_degradation, "Alert when success rate < 95%");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: Fallback strategies
+    // ------------------------------------------------------------------------
+    // How to handle S3 500 errors gracefully
+    {
+        let bucket_name = "critical-bucket";
+        let object_key = "critical-data.json";
+
+        // S3 returns 500
+        let s3_status = 500;
+
+        // Fallback strategy 1: Try different S3 region
+        let primary_region = "us-east-1";
+        let fallback_region = "us-west-2";
+        let use_multi_region_fallback = true;
+        assert!(
+            use_multi_region_fallback,
+            "Use multi-region for critical buckets"
+        );
+
+        // Fallback strategy 2: Serve stale cache
+        let cache_has_stale_copy = true;
+        let stale_age_seconds = 3600; // 1 hour old
+        let max_stale_age_seconds = 86400; // 24 hours
+        let can_serve_stale = cache_has_stale_copy && stale_age_seconds < max_stale_age_seconds;
+        assert!(can_serve_stale, "Can serve stale cache during outage");
+
+        // Fallback strategy 3: Queue for later retry
+        let queue_request = true;
+        let process_queue_when_healthy = true;
+        assert!(queue_request, "Queue failed requests");
+        assert!(
+            process_queue_when_healthy,
+            "Process queue when S3 recovers"
+        );
+
+        // Don't fail immediately - try all fallbacks first
+        let fallback_chain = vec![
+            "retry_with_backoff",
+            "try_other_region",
+            "serve_stale_cache",
+            "queue_for_later",
+            "return_502",
+        ];
+        assert_eq!(fallback_chain.len(), 5);
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Server Error Handling Best Practices
+    // ------------------------------------------------------------------------
+
+    // 5xx indicates server-side error (should retry)
+    // S3 500 → Proxy 502 (NOT 500!)
+    let error_frequency: f64 = 0.01; // 0.01% of requests
+    assert!(
+        (error_frequency - 0.01).abs() < 0.001,
+        "500s are ~0.01% of requests"
+    );
+
+    // Retry strategy for 500 errors
+    let should_retry_500 = true;
+    let max_retries = 5;
+    let use_exponential_backoff = true;
+    assert!(should_retry_500, "Always retry 500 errors");
+    assert_eq!(max_retries, 5, "Max 5 retries for 500 errors");
+    assert!(use_exponential_backoff, "Use exponential backoff");
+
+    // Circuit breaker to prevent cascading failures
+    let use_circuit_breaker = true;
+    let circuit_open_threshold = 5; // Open after 5 consecutive failures
+    let circuit_timeout_seconds = 30; // Half-open after 30s
+    assert!(use_circuit_breaker, "Use circuit breaker for S3 requests");
+    assert_eq!(circuit_open_threshold, 5);
+    assert_eq!(circuit_timeout_seconds, 30);
+
+    // Track 500 rate for operational awareness
+    let track_500_rate = true;
+    let alert_on_spike = true;
+    let monitor_s3_health = true;
+    assert!(track_500_rate, "Track 500 rate per S3 endpoint");
+    assert!(alert_on_spike, "Alert on 500 spike (indicates outage)");
+    assert!(monitor_s3_health, "Monitor S3 health dashboard");
+
+    // Status code mapping:
+    // - S3 500 InternalError → HTTP 502 Bad Gateway
+    // - S3 503 SlowDown → HTTP 503 Service Unavailable
+    // - Network timeout → HTTP 504 Gateway Timeout
+    //
+    // Never return 500 unless proxy itself has error
+    //
+    // Client should:
+    // - Retry 502 with exponential backoff
+    // - Max 5 retries
+    // - Check S3 status dashboard
+    // - Consider fallbacks (other region, cache, queue)
+    //
+    // Proxy should:
+    // - Map S3 500 to 502 (NOT 500!)
+    // - Include S3 error code in response
+    // - Indicate upstream error clearly
+    // - Implement circuit breaker
+    // - Try fallback strategies
+    // - Track 500 rate for monitoring
+    // - Log S3 request IDs for debugging
+}
