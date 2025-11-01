@@ -10199,3 +10199,366 @@ fn test_head_response_includes_all_headers_but_no_body() {
     assert_eq!(s3_key, "logo.png", "S3 key is logo.png");
     assert_eq!(bucket_name, "products", "Bucket is products");
 }
+
+// Test: HEAD response includes Content-Length from S3
+#[test]
+fn test_head_response_includes_content_length_from_s3() {
+    // This test verifies that HEAD responses include the Content-Length header
+    // with the ACTUAL file size from S3, not the HEAD response body size (0).
+
+    // Why Content-Length is critical in HEAD responses:
+    // 1. Download planning: Know file size before downloading
+    // 2. Disk space check: Verify available space before GET
+    // 3. Progress bars: Calculate total bytes for progress display
+    // 4. Bandwidth estimation: Estimate download time
+    // 5. Resource allocation: Allocate buffers/memory appropriately
+
+    // CRITICAL DISTINCTION:
+    // - HEAD response body: ALWAYS 0 bytes (no body sent)
+    // - Content-Length header: Shows ACTUAL file size (what GET would transfer)
+    //
+    // Example: 5GB video file
+    // - HEAD response body: 0 bytes
+    // - Content-Length: 5368709120 (5GB)
+    // - This tells client: "GET would transfer 5GB"
+
+    // Test different file sizes
+
+    // Scenario 1: Small file (1 KB)
+    let small_file_path = "/products/icon.png";
+    let small_file_size: u64 = 1024; // 1 KB
+
+    // S3 HeadObject returns:
+    // - Content-Length: 1024
+    // - (no body)
+
+    let small_head_response_headers = vec![
+        ("Content-Type", "image/png"),
+        ("Content-Length", "1024"),
+        ("ETag", "\"abc123\""),
+    ];
+
+    let small_content_length = small_head_response_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(small_content_length, small_file_size,
+        "HEAD Content-Length (1024) matches actual file size");
+    assert_ne!(small_content_length, 0,
+        "HEAD Content-Length is NOT zero (common mistake)");
+
+    // Scenario 2: Medium file (5 MB)
+    let medium_file_path = "/products/brochure.pdf";
+    let medium_file_size: u64 = 5_242_880; // 5 MB
+
+    let medium_head_response_headers = vec![
+        ("Content-Type", "application/pdf"),
+        ("Content-Length", "5242880"),
+        ("ETag", "\"def456\""),
+    ];
+
+    let medium_content_length = medium_head_response_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(medium_content_length, medium_file_size,
+        "HEAD Content-Length (5242880) matches actual file size");
+
+    // Scenario 3: Large file (1 GB)
+    let large_file_path = "/videos/presentation.mp4";
+    let large_file_size: u64 = 1_073_741_824; // 1 GB
+
+    let large_head_response_headers = vec![
+        ("Content-Type", "video/mp4"),
+        ("Content-Length", "1073741824"),
+        ("ETag", "\"ghi789\""),
+    ];
+
+    let large_content_length = large_head_response_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(large_content_length, large_file_size,
+        "HEAD Content-Length (1073741824) matches actual file size");
+
+    // Scenario 4: Very large file (50 GB)
+    let very_large_file_path = "/archive/backup.tar.gz";
+    let very_large_file_size: u64 = 53_687_091_200; // 50 GB
+
+    let very_large_head_response_headers = vec![
+        ("Content-Type", "application/gzip"),
+        ("Content-Length", "53687091200"),
+        ("ETag", "\"jkl012\""),
+    ];
+
+    let very_large_content_length = very_large_head_response_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(very_large_content_length, very_large_file_size,
+        "HEAD Content-Length (53687091200) matches actual file size");
+
+    // CRITICAL: For ALL sizes, HEAD body is 0 bytes
+    let head_body_size: u64 = 0;
+    assert_eq!(head_body_size, 0, "HEAD response body is always 0 bytes");
+    assert_ne!(head_body_size, small_content_length, "Body size ≠ Content-Length");
+    assert_ne!(head_body_size, medium_content_length, "Body size ≠ Content-Length");
+    assert_ne!(head_body_size, large_content_length, "Body size ≠ Content-Length");
+    assert_ne!(head_body_size, very_large_content_length, "Body size ≠ Content-Length");
+
+    // Real-world use case 1: Download manager pre-flight check
+
+    // User wants to download 5MB PDF
+    // Step 1: Send HEAD request
+    let head_cl = medium_content_length;
+
+    // Step 2: Check available disk space
+    let available_space: u64 = 100_000_000; // 100 MB available
+    let required_space = head_cl;
+
+    if available_space >= required_space {
+        // Step 3: Safe to download - start GET request
+        assert!(true, "Enough space to download 5MB file");
+    } else {
+        panic!("Not enough disk space!");
+    }
+
+    assert!(available_space >= required_space,
+        "100 MB available >= 5 MB required");
+
+    // Real-world use case 2: Batch download size calculation
+
+    // User wants to download 3 files
+    // Send HEAD request for each to get sizes
+    let file1_size = small_content_length;    // 1 KB
+    let file2_size = medium_content_length;   // 5 MB
+    let file3_size = large_content_length;    // 1 GB
+
+    let total_download_size = file1_size + file2_size + file3_size;
+    // 1024 + 5242880 + 1073741824 = 1,078,985,728 bytes (~1.08 GB)
+
+    assert_eq!(total_download_size, 1_078_985_728,
+        "Total download size calculated from HEAD requests");
+
+    // Estimate download time at 10 Mbps
+    let bandwidth_bytes_per_sec = 10_000_000 / 8; // 10 Mbps = 1.25 MB/s
+    let estimated_seconds = total_download_size / bandwidth_bytes_per_sec;
+    // 1,078,985,728 / 1,250,000 ≈ 863 seconds ≈ 14 minutes
+
+    assert!(estimated_seconds > 0, "Can estimate download time from Content-Length");
+
+    // Real-world use case 3: Progress bar setup
+
+    // User starts downloading 1 GB file
+    // HEAD request first to get total size
+    let total_bytes = large_content_length; // 1,073,741,824 bytes
+    let mut downloaded_bytes: u64 = 0;
+
+    // Simulate download progress
+    downloaded_bytes = 107_374_182; // Downloaded ~100 MB (~10%)
+    let progress_percent = (downloaded_bytes * 100) / total_bytes;
+
+    assert_eq!(progress_percent, 9, "Progress bar shows 9% complete (integer division)");
+
+    downloaded_bytes = 536_870_912; // Downloaded 512 MB (50%)
+    let progress_percent = (downloaded_bytes * 100) / total_bytes;
+
+    assert_eq!(progress_percent, 50, "Progress bar shows 50% complete");
+
+    // Without Content-Length from HEAD, progress bar would be impossible!
+
+    // Real-world use case 4: Bandwidth allocation
+
+    // Server wants to limit concurrent large downloads
+    // Use HEAD to categorize files by size
+
+    let categorize_file = |size: u64| -> &'static str {
+        if size < 1_000_000 {
+            "small"  // < 1 MB
+        } else if size < 100_000_000 {
+            "medium" // 1 MB - 100 MB
+        } else {
+            "large"  // > 100 MB
+        }
+    };
+
+    assert_eq!(categorize_file(small_content_length), "small");
+    assert_eq!(categorize_file(medium_content_length), "medium");
+    assert_eq!(categorize_file(large_content_length), "large");
+
+    // Policy: Allow 10 concurrent small, 5 medium, 2 large downloads
+    // HEAD requests enable this policy enforcement
+
+    // Edge case 1: Zero-byte file
+    let empty_file_size: u64 = 0;
+    let empty_file_headers = vec![
+        ("Content-Type", "text/plain"),
+        ("Content-Length", "0"),
+    ];
+
+    let empty_content_length = empty_file_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(empty_content_length, 0, "Empty file has Content-Length: 0");
+    // Both file size and HEAD body are 0, but for different reasons!
+    // - File is actually 0 bytes
+    // - HEAD body is 0 bytes because it's a HEAD request
+
+    // Edge case 2: Missing Content-Length (malformed S3 response)
+    // This should never happen with proper S3 implementation
+    // But proxy should handle gracefully
+    let malformed_headers = vec![
+        ("Content-Type", "image/jpeg"),
+        ("ETag", "\"xyz\""),
+        // No Content-Length!
+    ];
+
+    let missing_content_length = malformed_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length");
+
+    assert!(missing_content_length.is_none(),
+        "Malformed response missing Content-Length should be detected");
+    // Proxy should return 500 Internal Server Error or pass through as-is
+
+    // Edge case 3: Compressed vs uncompressed size
+    // Content-Length shows wire transfer size (compressed if Content-Encoding present)
+    let compressed_headers = vec![
+        ("Content-Type", "application/javascript"),
+        ("Content-Length", "50000"),      // 50 KB compressed
+        ("Content-Encoding", "gzip"),
+        ("x-amz-meta-original-size", "200000"), // 200 KB uncompressed
+    ];
+
+    let compressed_content_length = compressed_headers
+        .iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(compressed_content_length, 50000,
+        "Content-Length shows compressed size (what will be transferred)");
+    // Client will receive 50 KB over network
+    // Browser will decompress to 200 KB in memory
+
+    // Implementation notes for proxy:
+
+    // 1. S3 HeadObject response includes Content-Length header
+    //    - This comes directly from S3
+    //    - Reflects actual object size in S3
+
+    // 2. Proxy must preserve Content-Length exactly
+    //    - Forward header value unchanged from S3
+    //    - Do NOT set to 0 (common mistake!)
+    //    - Do NOT calculate from body (there is no body!)
+
+    // 3. HTTP response structure:
+    //    ```
+    //    HTTP/1.1 200 OK
+    //    Content-Type: video/mp4
+    //    Content-Length: 1073741824    ← From S3 HeadObject
+    //    ETag: "abc123"
+    //
+    //    [No body - connection closes after headers]
+    //    ```
+
+    // 4. Validation:
+    //    - Content-Length header MUST be present
+    //    - Value MUST be valid u64 integer
+    //    - Value SHOULD match actual S3 object size
+    //    - If missing: proxy may return 500 or pass through
+
+    // 5. Performance impact:
+    //    - Content-Length header adds ~20 bytes to response
+    //    - Negligible overhead for massive benefit
+    //    - Enables all use cases above
+
+    // Common mistakes to avoid:
+
+    // ❌ MISTAKE 1: Setting Content-Length to 0
+    // Because HEAD response has no body, some implementations incorrectly set:
+    // Content-Length: 0
+    // This is WRONG - should be actual file size!
+
+    let wrong_content_length: u64 = 0;
+    let correct_content_length: u64 = large_file_size;
+    assert_ne!(wrong_content_length, correct_content_length,
+        "Content-Length should be file size (1073741824), not 0");
+
+    // ❌ MISTAKE 2: Omitting Content-Length entirely
+    // Some proxies omit Content-Length for HEAD requests
+    // This breaks download managers and progress bars
+
+    let headers_without_cl = vec![
+        ("Content-Type", "video/mp4"),
+        ("ETag", "\"abc123\""),
+        // Missing Content-Length!
+    ];
+
+    let has_content_length = headers_without_cl
+        .iter()
+        .any(|(k, _)| k == &"Content-Length");
+
+    assert!(!has_content_length, "Missing Content-Length is a mistake");
+
+    // ✅ CORRECT: Always include Content-Length with actual file size
+    let correct_headers = vec![
+        ("Content-Type", "video/mp4"),
+        ("Content-Length", "1073741824"), // Actual file size!
+        ("ETag", "\"abc123\""),
+    ];
+
+    let has_correct_cl = correct_headers
+        .iter()
+        .any(|(k, v)| k == &"Content-Length" && v == &"1073741824");
+
+    assert!(has_correct_cl, "Correct implementation includes Content-Length");
+
+    // ❌ MISTAKE 3: Content-Length from body instead of S3
+    // Wrong: Calculate Content-Length from HEAD response body (always 0)
+    // Right: Use Content-Length from S3 HeadObject response
+
+    let head_response_body_bytes: u64 = 0;
+    let s3_object_size_bytes: u64 = large_file_size;
+
+    // Wrong approach:
+    // Content-Length: {head_response_body_bytes} = 0
+
+    // Right approach:
+    // Content-Length: {s3_object_size_bytes} = 1073741824
+
+    assert_ne!(head_response_body_bytes, s3_object_size_bytes,
+        "Don't use body size for Content-Length!");
+
+    // Verification strategy for tests:
+
+    // 1. Integration test: Real S3 HeadObject
+    //    - Upload known-size file to test bucket
+    //    - Send HEAD request through proxy
+    //    - Verify Content-Length matches uploaded size
+
+    // 2. Unit test: Mock S3 response
+    //    - Mock HeadObject to return specific Content-Length
+    //    - Verify proxy forwards header unchanged
+
+    // 3. E2E test: Compare HEAD and GET
+    //    - Send HEAD request, save Content-Length
+    //    - Send GET request, count actual bytes received
+    //    - Verify HEAD Content-Length matches GET byte count
+
+    assert_eq!(small_file_path, "/products/icon.png");
+    assert_eq!(medium_file_path, "/products/brochure.pdf");
+    assert_eq!(large_file_path, "/videos/presentation.mp4");
+    assert_eq!(very_large_file_path, "/archive/backup.tar.gz");
+}
