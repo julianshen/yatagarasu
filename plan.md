@@ -829,7 +829,7 @@ yatagarasu/
 
 ### Structured Logging
 - [x] Test: Can initialize tracing subscriber
-- [ ] Test: Logs are output in JSON format
+- [x] Test: Logs are output in JSON format
 - [ ] Test: Every log includes request ID
 - [ ] Test: Every request is logged with method, path, status, duration
 - [ ] Test: Authentication failures are logged with reason

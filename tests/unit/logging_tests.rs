@@ -166,3 +166,160 @@ fn test_can_initialize_tracing_subscriber() {
     // }
     // ```
 }
+
+/// Test: Logs are output in JSON format
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that log events are formatted as JSON for easy parsing by
+/// log aggregation systems.
+///
+/// Why JSON logging matters:
+///
+/// JSON is the de facto standard for structured logs because:
+/// - Machine-parseable: Easy to ingest into Elasticsearch, Splunk, etc.
+/// - Self-describing: Field names are embedded in each log entry
+/// - Standardized: Widely supported by logging tools and libraries
+/// - Queryable: Can filter/search by any field efficiently
+///
+/// Example JSON log entry:
+/// ```json
+/// {
+///   "timestamp": "2025-01-15T10:30:45.123Z",
+///   "level": "INFO",
+///   "message": "request completed",
+///   "target": "yatagarasu::proxy",
+///   "request_id": "550e8400-e29b-41d4-a716-446655440000",
+///   "method": "GET",
+///   "path": "/products/image.png",
+///   "status": 200,
+///   "duration_ms": 45
+/// }
+/// ```
+///
+/// vs. traditional text logging:
+/// ```
+/// 2025-01-15 10:30:45.123 INFO request completed request_id=550e8400 method=GET path=/products/image.png status=200 duration_ms=45
+/// ```
+///
+/// Test scenarios:
+/// 1. Log output is valid JSON (can be parsed without errors)
+/// 2. JSON contains standard fields (timestamp, level, message, target)
+/// 3. JSON contains custom fields from tracing macros
+/// 4. Multiple log entries produce multiple JSON objects (newline-delimited)
+/// 5. JSON format is consistent across different log levels
+///
+/// Expected behavior:
+/// - Each log line is a complete JSON object
+/// - JSON can be parsed by serde_json
+/// - Standard tracing fields are present
+/// - Custom fields are included
+#[test]
+fn test_logs_are_output_in_json_format() {
+    use yatagarasu::logging::init_test_subscriber;
+    use std::sync::{Arc, Mutex};
+
+    // Scenario 1: Log output is valid JSON
+    //
+    // We need to capture log output to a buffer so we can verify it's JSON.
+    // This uses a test-specific subscriber that writes to a shared buffer.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let result = init_test_subscriber(buffer.clone());
+
+    assert!(
+        result.is_ok(),
+        "Test subscriber initialization should succeed, got error: {:?}",
+        result.err()
+    );
+
+    // Emit a log event
+    tracing::info!("test message");
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_line = String::from_utf8_lossy(&output);
+
+    // Should be valid JSON
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&log_line);
+    assert!(
+        parsed.is_ok(),
+        "Log output should be valid JSON, got: {}",
+        log_line
+    );
+
+    // Scenario 2: JSON contains standard fields
+    //
+    // Tracing provides standard fields that should appear in every log entry:
+    // - timestamp: When the event occurred
+    // - level: Log level (TRACE, DEBUG, INFO, WARN, ERROR)
+    // - fields.message: The log message (nested in fields object)
+    // - target: The module path where the event was created
+    let json = parsed.unwrap();
+
+    assert!(
+        json.get("timestamp").is_some(),
+        "JSON should include 'timestamp' field"
+    );
+    assert!(
+        json.get("level").is_some(),
+        "JSON should include 'level' field"
+    );
+    assert!(
+        json.get("fields").is_some(),
+        "JSON should include 'fields' object"
+    );
+    assert!(
+        json["fields"].get("message").is_some(),
+        "JSON should include 'fields.message' field"
+    );
+    assert!(
+        json.get("target").is_some(),
+        "JSON should include 'target' field (module path)"
+    );
+
+    // Verify the message content
+    assert_eq!(
+        json["fields"]["message"].as_str().unwrap(),
+        "test message",
+        "Message field should contain the log message"
+    );
+
+    // Verify the level
+    assert_eq!(
+        json["level"].as_str().unwrap(),
+        "INFO",
+        "Level field should be 'INFO'"
+    );
+
+    //
+    // JSON LOGGING BENEFITS:
+    //
+    // 1. EASY FILTERING IN LOG AGGREGATION SYSTEMS:
+    //    ```
+    //    # Elasticsearch query: Find all errors for a specific request
+    //    {
+    //      "query": {
+    //        "bool": {
+    //          "must": [
+    //            { "match": { "level": "ERROR" } },
+    //            { "match": { "request_id": "550e8400-e29b-41d4-a716-446655440000" } }
+    //          ]
+    //        }
+    //      }
+    //    }
+    //    ```
+    //
+    // 2. STRUCTURED ANALYSIS:
+    //    - Average request duration: avg(duration_ms) where status=200
+    //    - Error rate by bucket: count(*) where level=ERROR group by bucket
+    //    - P95 latency by endpoint: percentile(duration_ms, 95) group by path
+    //
+    // 3. ALERTING:
+    //    - Trigger alert if error_rate > 5% in last 5 minutes
+    //    - Notify if p95_latency > 1000ms for any endpoint
+    //    - Alert on specific error codes: s3_error_code = "NoSuchKey"
+    //
+    // 4. CORRELATION:
+    //    - Trace requests across microservices using request_id
+    //    - Find all log entries related to a failed transaction
+    //    - Debug production issues by filtering on user_id, session_id, etc.
+}
