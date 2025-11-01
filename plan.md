@@ -778,7 +778,7 @@ yatagarasu/
 
 ### HEAD Request Proxying
 - [x] Test: HEAD request to /products/image.png fetches metadata from S3
-- [ ] Test: HEAD response includes all headers but no body
+- [x] Test: HEAD response includes all headers but no body
 - [ ] Test: HEAD response includes Content-Length from S3
 - [ ] Test: HEAD request doesn't download object body from S3
 

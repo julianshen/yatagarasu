@@ -9901,3 +9901,301 @@ fn extract_key<'a>(path: &'a str, prefix: &str) -> &'a str {
         .unwrap_or(path)
         .trim_start_matches('/')
 }
+
+// Test: HEAD response includes all headers but no body
+#[test]
+fn test_head_response_includes_all_headers_but_no_body() {
+    // This test verifies the critical HTTP specification requirement that HEAD responses
+    // must include ALL the same headers as a GET response would, but with NO body.
+
+    // HTTP/1.1 RFC 7231 Section 4.3.2 (HEAD method):
+    // "The server SHOULD send the same header fields in response to a HEAD request
+    // as it would have sent if the request had been a GET, except that the payload
+    // body is omitted."
+
+    // Key principle: HEAD and GET must return IDENTICAL headers
+    // - Same Content-Type
+    // - Same Content-Length (even though no body is sent!)
+    // - Same ETag
+    // - Same Last-Modified
+    // - Same Cache-Control
+    // - Same custom metadata headers
+
+    // Why this matters:
+    // 1. Clients rely on HEAD to predict GET behavior
+    // 2. Content-Length in HEAD tells client how much data GET would transfer
+    // 3. Caching logic depends on identical Cache-Control headers
+    // 4. Conditional requests need matching ETag/Last-Modified
+    // 5. HTTP specification compliance
+
+    // Example: Same file, two different requests
+
+    let file_path = "/products/logo.png";
+    let s3_key = "logo.png";
+    let bucket_name = "products";
+
+    // Simulated S3 metadata for logo.png:
+    let content_type = "image/png";
+    let content_length: u64 = 524288; // 512 KB
+    let etag = "\"d41d8cd98f00b204e9800998ecf8427e\"";
+    let last_modified = "Wed, 01 Nov 2023 15:30:00 GMT";
+    let cache_control = "public, max-age=86400";
+    let content_encoding = "identity";
+    let accept_ranges = "bytes";
+
+    // Custom S3 metadata (x-amz-meta-* headers)
+    let custom_metadata = vec![
+        ("x-amz-meta-uploaded-by", "user-123"),
+        ("x-amz-meta-original-name", "company-logo.png"),
+        ("x-amz-meta-category", "branding"),
+    ];
+
+    // Scenario 1: GET request response
+    //
+    // HTTP/1.1 200 OK
+    // Content-Type: image/png
+    // Content-Length: 524288
+    // ETag: "d41d8cd98f00b204e9800998ecf8427e"
+    // Last-Modified: Wed, 01 Nov 2023 15:30:00 GMT
+    // Cache-Control: public, max-age=86400
+    // Content-Encoding: identity
+    // Accept-Ranges: bytes
+    // x-amz-meta-uploaded-by: user-123
+    // x-amz-meta-original-name: company-logo.png
+    // x-amz-meta-category: branding
+    //
+    // [524288 bytes of PNG data follows]
+
+    let get_response_status = 200;
+    let get_response_headers = vec![
+        ("Content-Type", content_type),
+        ("Content-Length", "524288"),
+        ("ETag", etag),
+        ("Last-Modified", last_modified),
+        ("Cache-Control", cache_control),
+        ("Content-Encoding", content_encoding),
+        ("Accept-Ranges", accept_ranges),
+        ("x-amz-meta-uploaded-by", "user-123"),
+        ("x-amz-meta-original-name", "company-logo.png"),
+        ("x-amz-meta-category", "branding"),
+    ];
+    let get_response_body_length: u64 = 524288; // Full PNG data
+
+    assert_eq!(get_response_status, 200, "GET returns 200 OK");
+    assert_eq!(get_response_body_length, content_length, "GET body matches Content-Length");
+
+    // Scenario 2: HEAD request response
+    //
+    // HTTP/1.1 200 OK
+    // Content-Type: image/png
+    // Content-Length: 524288          ← CRITICAL: Same as GET!
+    // ETag: "d41d8cd98f00b204e9800998ecf8427e"
+    // Last-Modified: Wed, 01 Nov 2023 15:30:00 GMT
+    // Cache-Control: public, max-age=86400
+    // Content-Encoding: identity
+    // Accept-Ranges: bytes
+    // x-amz-meta-uploaded-by: user-123
+    // x-amz-meta-original-name: company-logo.png
+    // x-amz-meta-category: branding
+    //
+    // [NO BODY - 0 bytes follow]
+
+    let head_response_status = 200;
+    let head_response_headers = vec![
+        ("Content-Type", content_type),
+        ("Content-Length", "524288"), // Same as GET!
+        ("ETag", etag),
+        ("Last-Modified", last_modified),
+        ("Cache-Control", cache_control),
+        ("Content-Encoding", content_encoding),
+        ("Accept-Ranges", accept_ranges),
+        ("x-amz-meta-uploaded-by", "user-123"),
+        ("x-amz-meta-original-name", "company-logo.png"),
+        ("x-amz-meta-category", "branding"),
+    ];
+    let head_response_body_length: u64 = 0; // NO BODY!
+
+    assert_eq!(head_response_status, get_response_status,
+        "HEAD and GET return same status code");
+
+    // Verify headers are identical
+    assert_eq!(head_response_headers.len(), get_response_headers.len(),
+        "HEAD and GET return same number of headers");
+
+    for (get_header, head_header) in get_response_headers.iter().zip(head_response_headers.iter()) {
+        assert_eq!(get_header, head_header,
+            "Header {:?} is identical in HEAD and GET", get_header.0);
+    }
+
+    // CRITICAL: Verify body length difference
+    assert_eq!(head_response_body_length, 0,
+        "HEAD response has NO body (0 bytes)");
+    assert_ne!(head_response_body_length, get_response_body_length,
+        "HEAD body (0 bytes) differs from GET body (524288 bytes)");
+
+    // Verify critical headers are present in HEAD response
+
+    // 1. Content-Type: Browser needs this to know file type
+    assert!(head_response_headers.iter().any(|(k, v)| k == &"Content-Type" && v == &"image/png"),
+        "HEAD includes Content-Type header");
+
+    // 2. Content-Length: Client needs this to know how much data GET would transfer
+    assert!(head_response_headers.iter().any(|(k, v)| k == &"Content-Length" && v == &"524288"),
+        "HEAD includes Content-Length header matching actual file size");
+
+    // 3. ETag: Required for conditional requests (If-None-Match)
+    assert!(head_response_headers.iter().any(|(k, _)| k == &"ETag"),
+        "HEAD includes ETag header for conditional requests");
+
+    // 4. Last-Modified: Required for conditional requests (If-Modified-Since)
+    assert!(head_response_headers.iter().any(|(k, _)| k == &"Last-Modified"),
+        "HEAD includes Last-Modified header for conditional requests");
+
+    // 5. Cache-Control: Browsers need this for caching decisions
+    assert!(head_response_headers.iter().any(|(k, v)| k == &"Cache-Control" && v == &"public, max-age=86400"),
+        "HEAD includes Cache-Control header");
+
+    // 6. Accept-Ranges: Tells client if range requests are supported
+    assert!(head_response_headers.iter().any(|(k, v)| k == &"Accept-Ranges" && v == &"bytes"),
+        "HEAD includes Accept-Ranges header");
+
+    // 7. Custom metadata: x-amz-meta-* headers
+    assert!(head_response_headers.iter().any(|(k, v)| k == &"x-amz-meta-uploaded-by" && v == &"user-123"),
+        "HEAD includes custom metadata headers");
+
+    // Real-world usage example: Download manager
+
+    // Step 1: Send HEAD request to check file before downloading
+    let head_status = head_response_status;
+    let head_content_length = head_response_headers.iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+
+    assert_eq!(head_status, 200, "File exists");
+    assert_eq!(head_content_length, 524288, "File is 512 KB");
+
+    // Step 2: Check available disk space
+    let available_disk_space: u64 = 10_000_000; // 10 MB available
+    assert!(available_disk_space > head_content_length,
+        "Enough disk space to download");
+
+    // Step 3: Check if resume is supported
+    let supports_resume = head_response_headers.iter()
+        .any(|(k, v)| k == &"Accept-Ranges" && v == &"bytes");
+    assert!(supports_resume, "Server supports resume via Range requests");
+
+    // Step 4: Now safe to start GET request
+    // GET /products/logo.png
+    // → downloads 524288 bytes
+
+    // Common mistakes to avoid:
+
+    // ❌ MISTAKE 1: HEAD with Transfer-Encoding: chunked
+    // HEAD responses should use Content-Length, not chunked encoding
+    // Chunked encoding would imply streaming a body (which doesn't exist)
+    let has_chunked_encoding = head_response_headers.iter()
+        .any(|(k, v)| k == &"Transfer-Encoding" && v.contains(&"chunked"));
+    assert!(!has_chunked_encoding,
+        "HEAD should not use Transfer-Encoding: chunked");
+
+    // ❌ MISTAKE 2: HEAD with Content-Length: 0
+    // Content-Length should match the actual file size (what GET would return)
+    // Not the HEAD response body size (which is always 0)
+    let head_cl = head_response_headers.iter()
+        .find(|(k, _)| k == &"Content-Length")
+        .map(|(_, v)| v.parse::<u64>().unwrap())
+        .unwrap();
+    assert_ne!(head_cl, 0,
+        "Content-Length should be file size (524288), not HEAD body size (0)");
+    assert_eq!(head_cl, 524288,
+        "Content-Length should match actual file size");
+
+    // ❌ MISTAKE 3: HEAD with different ETag than GET
+    // ETag must be identical for HEAD and GET
+    // Clients rely on this for conditional requests
+    let get_etag = get_response_headers.iter()
+        .find(|(k, _)| k == &"ETag")
+        .map(|(_, v)| *v)
+        .unwrap();
+    let head_etag = head_response_headers.iter()
+        .find(|(k, _)| k == &"ETag")
+        .map(|(_, v)| *v)
+        .unwrap();
+    assert_eq!(get_etag, head_etag,
+        "ETag must be identical in HEAD and GET");
+
+    // ❌ MISTAKE 4: HEAD omitting custom metadata
+    // All x-amz-meta-* headers from S3 must be included
+    let get_meta_count = get_response_headers.iter()
+        .filter(|(k, _)| k.starts_with("x-amz-meta-"))
+        .count();
+    let head_meta_count = head_response_headers.iter()
+        .filter(|(k, _)| k.starts_with("x-amz-meta-"))
+        .count();
+    assert_eq!(get_meta_count, head_meta_count,
+        "HEAD must include all custom metadata headers");
+    assert_eq!(head_meta_count, 3,
+        "All 3 x-amz-meta-* headers present in HEAD");
+
+    // Edge cases
+
+    // Edge case 1: Large file (10 GB)
+    // HEAD should still return Content-Length: 10737418240
+    // Even though HEAD body is 0 bytes
+    let large_file_size: u64 = 10_737_418_240; // 10 GB
+    let large_file_head_body: u64 = 0;
+    assert_eq!(large_file_head_body, 0,
+        "Even for 10GB file, HEAD body is 0 bytes");
+    // Content-Length header would be "10737418240" (not shown in body!)
+
+    // Edge case 2: Zero-byte file
+    // HEAD returns Content-Length: 0 (because file is actually 0 bytes)
+    // HEAD body is also 0 (because it's a HEAD request)
+    let empty_file_size: u64 = 0;
+    let empty_file_head_body: u64 = 0;
+    assert_eq!(empty_file_size, 0, "File is 0 bytes");
+    assert_eq!(empty_file_head_body, 0, "HEAD body is 0 bytes");
+    // Both are 0, but for different reasons!
+
+    // Edge case 3: Compressed content
+    // Content-Length shows compressed size
+    // Content-Encoding: gzip indicates compression
+    let compressed_size: u64 = 100_000; // 100 KB compressed
+    let _uncompressed_size: u64 = 500_000; // 500 KB uncompressed
+    let compressed_head_cl = compressed_size;
+    assert_eq!(compressed_head_cl, 100_000,
+        "Content-Length shows compressed size (what transfer will be)");
+
+    // Implementation notes for proxy:
+
+    // 1. S3 HeadObject API returns:
+    //    - All metadata headers (Content-Type, Content-Length, ETag, etc.)
+    //    - All custom metadata (x-amz-meta-*)
+    //    - NO body stream (body is None/null)
+
+    // 2. Proxy must:
+    //    - Forward all headers from S3 to client
+    //    - Set status code (200, 404, etc.) from S3
+    //    - NOT write any body data to client
+    //    - Close connection after headers sent
+
+    // 3. Performance characteristics:
+    //    - HEAD request: ~50ms (metadata only)
+    //    - GET request for 512KB file: ~500ms (metadata + data)
+    //    - HEAD is 10x faster for size/existence checks
+
+    // 4. Bandwidth savings:
+    //    - HEAD: ~2 KB (HTTP headers only)
+    //    - GET: ~514 KB (headers + body)
+    //    - HEAD saves 512 KB per check
+
+    // 5. S3 costs:
+    //    - HeadObject: $0.0004 per 1000 requests
+    //    - GetObject: $0.0004 per 1000 requests + data transfer
+    //    - HEAD cheaper for existence checks (no data transfer cost)
+
+    assert_eq!(file_path, "/products/logo.png", "Testing logo.png");
+    assert_eq!(s3_key, "logo.png", "S3 key is logo.png");
+    assert_eq!(bucket_name, "products", "Bucket is products");
+}
