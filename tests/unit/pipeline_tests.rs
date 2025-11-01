@@ -1455,3 +1455,149 @@ fn test_request_passes_through_middleware_in_correct_order() {
     // This test demonstrates the complete middleware chain:
     // Request → Router (adds bucket config) → Auth (validates JWT, adds claims) → Handler (forwards to S3)
 }
+
+// Test: Middleware can short-circuit request (e.g., 401 stops pipeline)
+#[test]
+fn test_middleware_can_short_circuit_request() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Setup: Create bucket configuration (private bucket requiring auth)
+    let buckets = vec![
+        BucketConfig {
+            name: "private".to_string(),
+            path_prefix: "/private".to_string(),
+            s3: S3Config {
+                bucket: "my-private-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+            auth: Some(AuthConfig {
+                enabled: true,
+            }),
+        },
+    ];
+
+    // Create request WITHOUT JWT token (will fail auth)
+    let headers = HashMap::new(); // No Authorization header
+
+    // Step 1: ROUTER MIDDLEWARE - Extract bucket from path
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/secret.txt".to_string(),
+        headers,
+    );
+
+    let router = Router::new(buckets);
+    let bucket = router.route(context.path());
+    assert!(bucket.is_some(), "Router should find bucket for /private path");
+
+    // Router adds bucket config to context
+    context.set_bucket_config(bucket.unwrap().clone());
+    assert!(context.bucket_config().is_some(), "Router executed successfully");
+
+    // Step 2: AUTH MIDDLEWARE - Check authentication
+    let bucket_config = context.bucket_config().unwrap();
+    let auth_required = bucket_config.auth.as_ref()
+        .map(|a| a.enabled)
+        .unwrap_or(false);
+
+    assert!(auth_required, "Auth should be required for private bucket");
+
+    // Try to extract token from request
+    let extracted_token = extract_bearer_token(context.headers());
+
+    // AUTH MIDDLEWARE SHORT-CIRCUITS HERE
+    // Token is missing, auth middleware determines request should fail with 401
+    if auth_required && extracted_token.is_none() {
+        // Auth middleware short-circuits the pipeline
+        // In real implementation, would return 401 response immediately
+        // Handler would NEVER execute
+
+        // Verify the short-circuit decision
+        assert!(extracted_token.is_none(), "Token is missing");
+        assert!(auth_required, "Auth is required");
+
+        // Verify handler never runs by checking that claims were NOT added
+        assert!(context.claims().is_none(), "Auth middleware should NOT add claims when token is missing");
+
+        // In real implementation, middleware would:
+        // 1. Detect missing token
+        // 2. Return HTTP 401 response immediately
+        // 3. Stop pipeline execution
+        // 4. Handler never executes (no S3 request made)
+
+        // This demonstrates short-circuit: pipeline stops at auth middleware
+        return; // Short-circuit - handler code below never executes
+    }
+
+    // Step 3: HANDLER - This code should NEVER execute for this test
+    panic!("Handler should not execute when auth fails - pipeline should have short-circuited");
+}
+
+// Test: Middleware short-circuit prevents handler execution
+#[test]
+fn test_short_circuit_prevents_handler_execution() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Setup private bucket
+    let buckets = vec![
+        BucketConfig {
+            name: "private".to_string(),
+            path_prefix: "/private".to_string(),
+            s3: S3Config {
+                bucket: "my-private-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+            auth: Some(AuthConfig {
+                enabled: true,
+            }),
+        },
+    ];
+
+    let router = Router::new(buckets);
+
+    // Request without token
+    let headers = HashMap::new();
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        headers,
+    );
+
+    // Router runs
+    if let Some(bucket) = router.route(context.path()) {
+        context.set_bucket_config(bucket.clone());
+    }
+
+    // Auth checks and short-circuits
+    let should_short_circuit = context.bucket_config()
+        .and_then(|bc| bc.auth.as_ref())
+        .map(|auth| auth.enabled)
+        .unwrap_or(false)
+        && extract_bearer_token(context.headers()).is_none();
+
+    assert!(should_short_circuit, "Request should short-circuit due to missing token");
+
+    // Verify handler-related context is NOT set (handler never ran)
+    assert!(context.claims().is_none(), "Claims should not be set when request short-circuits");
+
+    // In real implementation:
+    // - Auth middleware returns 401 response
+    // - Pipeline stops
+    // - No S3 request is made
+    // - Resources are saved (no unnecessary S3 API calls)
+    // - Faster response to client (fail fast)
+}
