@@ -1601,3 +1601,125 @@ fn test_short_circuit_prevents_handler_execution() {
     // - Resources are saved (no unnecessary S3 API calls)
     // - Faster response to client (fail fast)
 }
+
+// Test: Middleware can modify request context
+#[test]
+fn test_middleware_can_modify_request_context() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use yatagarasu::auth::{extract_bearer_token, validate_jwt};
+    use std::collections::HashMap;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+
+    // Setup: Create bucket configuration (private bucket requiring auth)
+    let buckets = vec![
+        BucketConfig {
+            name: "secure".to_string(),
+            path_prefix: "/secure".to_string(),
+            s3: S3Config {
+                bucket: "my-secure-bucket".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "test-key".to_string(),
+                secret_key: "test-secret".to_string(),
+                endpoint: None,
+            },
+            auth: Some(AuthConfig {
+                enabled: true,
+            }),
+        },
+    ];
+
+    // Create JWT token
+    let secret = "test-secret-key";
+    let claims = json!({
+        "sub": "user123",
+        "role": "admin",
+        "exp": 9999999999u64,
+    });
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .expect("Failed to create token");
+
+    // Create request with JWT in Authorization header
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), format!("Bearer {}", token));
+
+    // PHASE 1: Initial RequestContext (before any middleware)
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/secure/document.pdf".to_string(),
+        headers,
+    );
+
+    // Verify initial state - only request metadata, no middleware data
+    assert_eq!(context.method(), "GET");
+    assert_eq!(context.path(), "/secure/document.pdf");
+    assert!(context.headers().contains_key("Authorization"));
+    assert!(context.bucket_config().is_none(), "Initial context should not have bucket config");
+    assert!(context.claims().is_none(), "Initial context should not have claims");
+
+    // PHASE 2: Router Middleware MODIFIES context
+    let router = Router::new(buckets);
+    let bucket = router.route(context.path());
+    assert!(bucket.is_some(), "Router should find matching bucket");
+
+    // Router modifies context by adding bucket_config
+    context.set_bucket_config(bucket.unwrap().clone());
+
+    // Verify Router's modification is visible
+    assert!(context.bucket_config().is_some(), "Router middleware modified context: added bucket_config");
+    assert_eq!(context.bucket_config().unwrap().name, "secure");
+    assert!(context.claims().is_none(), "Auth hasn't run yet, claims should still be None");
+
+    // PHASE 3: Auth Middleware reads Router's modifications and MODIFIES context
+    // Auth middleware can see Router's bucket_config
+    let bucket_config = context.bucket_config().expect("Auth middleware can read Router's bucket_config");
+    let auth_required = bucket_config.auth.as_ref()
+        .map(|a| a.enabled)
+        .unwrap_or(false);
+
+    assert!(auth_required, "Auth middleware reads bucket_config to determine auth is required");
+
+    // Auth middleware validates JWT and modifies context
+    let extracted_token = extract_bearer_token(context.headers())
+        .expect("Auth middleware should extract token");
+    let validated_claims = validate_jwt(&extracted_token, secret)
+        .expect("Auth middleware should validate token");
+
+    // Auth modifies context by adding claims
+    context.set_claims(validated_claims);
+
+    // Verify Auth's modification is visible
+    assert!(context.claims().is_some(), "Auth middleware modified context: added claims");
+    assert_eq!(context.claims().unwrap().sub, Some("user123".to_string()));
+
+    // PHASE 4: Handler reads ALL accumulated modifications
+    // Handler can access data from both Router and Auth middleware
+    assert!(context.bucket_config().is_some(), "Handler can read Router's bucket_config");
+    assert!(context.claims().is_some(), "Handler can read Auth's claims");
+
+    // Handler uses accumulated data to build S3 request
+    let bucket_name = &context.bucket_config().unwrap().s3.bucket;
+    let user_id = &context.claims().unwrap().sub;
+    let s3_key = router.extract_s3_key(context.path());
+
+    assert_eq!(bucket_name, "my-secure-bucket", "Handler uses bucket_config from Router");
+    assert_eq!(user_id, &Some("user123".to_string()), "Handler uses claims from Auth");
+    assert_eq!(s3_key, Some("document.pdf".to_string()), "Handler extracts S3 key using Router");
+
+    // VERIFICATION: Context acted as accumulator
+    // Each middleware stage:
+    // 1. Read previous modifications (if needed)
+    // 2. Added its own modifications
+    // 3. Modifications were visible to subsequent stages
+    //
+    // Final context contains accumulated data from entire pipeline:
+    // - Initial request data (method, path, headers)
+    // - Router's contribution (bucket_config)
+    // - Auth's contribution (claims)
+}
