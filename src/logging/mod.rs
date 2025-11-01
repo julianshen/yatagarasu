@@ -38,7 +38,7 @@ pub fn init_subscriber() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Initialize a test subscriber that captures log output to a buffer
+/// Create a test subscriber that captures log output to a buffer
 ///
 /// This function is used in tests to capture log output for verification.
 /// Unlike the production subscriber, this writes to an in-memory buffer
@@ -53,26 +53,29 @@ pub fn init_subscriber() -> Result<(), Box<dyn Error>> {
 ///
 /// * `buffer` - A shared buffer to write log output to
 ///
-/// # Errors
+/// # Returns
 ///
-/// Returns an error if the subscriber cannot be initialized.
+/// Returns a subscriber that can be used with `tracing::subscriber::with_default()`
+/// for test isolation without conflicting global state.
 ///
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::logging::init_test_subscriber;
+/// use yatagarasu::logging::create_test_subscriber;
 /// use std::sync::{Arc, Mutex};
 ///
 /// let buffer = Arc::new(Mutex::new(Vec::new()));
-/// init_test_subscriber(buffer.clone()).unwrap();
+/// let subscriber = create_test_subscriber(buffer.clone());
 ///
-/// tracing::info!("test message");
+/// tracing::subscriber::with_default(subscriber, || {
+///     tracing::info!("test message");
+/// });
 ///
 /// let output = buffer.lock().unwrap();
 /// let log_line = String::from_utf8_lossy(&output);
 /// assert!(log_line.contains("test message"));
 /// ```
-pub fn init_test_subscriber(buffer: Arc<Mutex<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
+pub fn create_test_subscriber(buffer: Arc<Mutex<Vec<u8>>>) -> impl tracing::Subscriber + Send + Sync {
     // Create a test writer that wraps the buffer
     let test_writer = TestWriter::new(buffer);
 
@@ -81,14 +84,9 @@ pub fn init_test_subscriber(buffer: Arc<Mutex<Vec<u8>>>) -> Result<(), Box<dyn E
         .json()
         .with_writer(move || test_writer.clone());
 
-    // Build the subscriber with the JSON layer
-    let subscriber = Registry::default().with(json_layer);
-
-    // Set this subscriber as the global default
-    tracing::subscriber::set_global_default(subscriber)
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-
-    Ok(())
+    // Build and return the subscriber with the JSON layer
+    // Tests should use this with tracing::subscriber::with_default() for isolation
+    Registry::default().with(json_layer)
 }
 
 /// A writer that writes to a shared buffer for testing

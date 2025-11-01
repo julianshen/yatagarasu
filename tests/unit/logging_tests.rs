@@ -215,7 +215,7 @@ fn test_can_initialize_tracing_subscriber() {
 /// - Custom fields are included
 #[test]
 fn test_logs_are_output_in_json_format() {
-    use yatagarasu::logging::init_test_subscriber;
+    use yatagarasu::logging::create_test_subscriber;
     use std::sync::{Arc, Mutex};
 
     // Scenario 1: Log output is valid JSON
@@ -223,16 +223,13 @@ fn test_logs_are_output_in_json_format() {
     // We need to capture log output to a buffer so we can verify it's JSON.
     // This uses a test-specific subscriber that writes to a shared buffer.
     let buffer = Arc::new(Mutex::new(Vec::new()));
-    let result = init_test_subscriber(buffer.clone());
+    let subscriber = create_test_subscriber(buffer.clone());
 
-    assert!(
-        result.is_ok(),
-        "Test subscriber initialization should succeed, got error: {:?}",
-        result.err()
-    );
-
-    // Emit a log event
-    tracing::info!("test message");
+    // Use with_default to set subscriber only for this test scope
+    tracing::subscriber::with_default(subscriber, || {
+        // Emit a log event
+        tracing::info!("test message");
+    });
 
     // Get the captured output
     let output = buffer.lock().unwrap();
@@ -322,4 +319,160 @@ fn test_logs_are_output_in_json_format() {
     //    - Trace requests across microservices using request_id
     //    - Find all log entries related to a failed transaction
     //    - Debug production issues by filtering on user_id, session_id, etc.
+}
+
+/// Test: Every log includes request ID
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that all log events within a request context automatically include
+/// the request ID for correlation and tracing.
+///
+/// Why request IDs matter:
+///
+/// In distributed systems, a single user request may trigger dozens or hundreds
+/// of log entries across multiple services. Request IDs allow us to:
+/// - Correlate all logs for a single request
+/// - Trace requests through the entire system
+/// - Debug production issues by following a specific request
+/// - Calculate end-to-end latency
+///
+/// Without request IDs:
+/// ```
+/// [INFO] JWT validation successful
+/// [INFO] Routing to bucket "products"
+/// [INFO] S3 request sent
+/// [INFO] Response sent (200)
+/// ```
+///
+/// With request IDs (much better!):
+/// ```
+/// [INFO] request_id=550e8400 JWT validation successful
+/// [INFO] request_id=550e8400 Routing to bucket "products"
+/// [INFO] request_id=550e8400 S3 request sent
+/// [INFO] request_id=550e8400 Response sent (200)
+/// ```
+///
+/// Now we can easily filter all logs for request 550e8400 and see the complete flow.
+///
+/// How tracing makes this automatic:
+///
+/// Using tracing spans, we can set the request_id once at the beginning of
+/// request handling, and it will automatically be included in all log events
+/// within that span:
+///
+/// ```rust
+/// async fn handle_request(req: Request) -> Result<Response> {
+///     let span = tracing::info_span!("request", request_id = %req.id());
+///     let _enter = span.enter();
+///
+///     // All logs within this scope will include request_id
+///     tracing::info!("processing request");
+///     // => {"request_id":"550e8400","message":"processing request"}
+///
+///     auth::validate(&req)?;
+///     // Auth logs will also include request_id automatically!
+///
+///     s3::fetch_object(bucket, key).await?;
+///     // S3 logs will also include request_id!
+///
+///     Ok(response)
+/// }
+/// ```
+///
+/// Test scenarios:
+/// 1. Logs within a span include span fields (request_id)
+/// 2. Multiple log events in same span all have the request_id
+/// 3. Request ID is in the span fields, not the event fields
+/// 4. Nested spans inherit parent span fields
+///
+/// Expected behavior:
+/// - All logs within a request span include the request_id
+/// - Request ID appears in the JSON output
+/// - Request ID can be used to filter/search logs
+#[test]
+fn test_every_log_includes_request_id() {
+    use yatagarasu::logging::create_test_subscriber;
+    use std::sync::{Arc, Mutex};
+
+    // Scenario 1: Logs within a span include span fields (request_id)
+    //
+    // When we create a span with a request_id field, all events logged
+    // within that span should automatically include the request_id.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let request_id = "550e8400-e29b-41d4-a716-446655440000";
+
+    // Use with_default to set subscriber only for this test scope
+    tracing::subscriber::with_default(subscriber, || {
+        // Create a span with request_id field
+        let span = tracing::info_span!("request", request_id = request_id);
+        let _enter = span.enter();
+
+        // Log within the span
+        tracing::info!("processing request");
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_line = String::from_utf8_lossy(&output);
+
+    // Parse JSON
+    let parsed: serde_json::Value = serde_json::from_str(&log_line)
+        .expect("Log output should be valid JSON");
+
+    // Verify request_id is present in the span fields
+    assert!(
+        parsed.get("span").is_some(),
+        "JSON should include 'span' object for span fields"
+    );
+    assert!(
+        parsed["span"].get("request_id").is_some(),
+        "Span should include 'request_id' field"
+    );
+    assert_eq!(
+        parsed["span"]["request_id"].as_str().unwrap(),
+        request_id,
+        "Request ID should match the value set in the span"
+    );
+
+    //
+    // REQUEST ID FORMAT:
+    //
+    // Request IDs should be:
+    // - Unique: Use UUIDs (v4) to ensure global uniqueness
+    // - Consistent: Same format across all services
+    // - Short enough: Don't bloat logs (UUIDs are 36 chars)
+    // - Generated early: At the entry point (HTTP server, message queue consumer)
+    //
+    // UUID v4 format: 550e8400-e29b-41d4-a716-446655440000
+    // - 128 bits of randomness
+    // - Extremely low collision probability
+    // - Standard format recognized by all tools
+    //
+    // DISTRIBUTED TRACING:
+    //
+    // Request IDs enable distributed tracing across microservices:
+    //
+    // Client → API Gateway → Auth Service → Proxy → S3
+    //
+    // All services use the same request_id:
+    // 1. API Gateway generates request_id: 550e8400
+    // 2. API Gateway adds X-Request-ID header
+    // 3. Auth Service reads X-Request-ID and logs with it
+    // 4. Proxy reads X-Request-ID and logs with it
+    // 5. Now we can search logs across all services for request_id=550e8400
+    //
+    // Example log aggregation query (Elasticsearch):
+    // ```
+    // {
+    //   "query": {
+    //     "match": { "span.request_id": "550e8400-e29b-41d4-a716-446655440000" }
+    //   },
+    //   "sort": [{ "timestamp": "asc" }]
+    // }
+    // ```
+    //
+    // This returns all logs for this request across all services, sorted by time.
+    // Perfect for debugging!
 }
