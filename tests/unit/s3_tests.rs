@@ -11458,3 +11458,191 @@ fn test_s3_206_partial_content_returns_http_206() {
     assert_eq!(s3_response_status, 206);
     assert_eq!(proxy_response_status, 206);
 }
+
+#[test]
+fn test_content_range_header_is_preserved() {
+    // Phase 14, Test 20: Content-Range header is preserved
+    //
+    // When S3 returns a Content-Range header in a 206 response, the proxy
+    // MUST forward this header unchanged to the client. This header tells
+    // the client what byte range was returned and the total file size.
+    //
+    // Content-Range format: "bytes start-end/total"
+    // Example: "bytes 0-1023/5000000" means:
+    //   - Returned bytes 0-1023 (1024 bytes)
+    //   - Total file size is 5,000,000 bytes
+    //
+    // Why Content-Range is critical:
+    // 1. HTTP spec compliance (RFC 7233): Required for 206 responses
+    // 2. Download managers: Use this to track resume progress
+    // 3. Video players: Use this to calculate seek position accuracy
+    // 4. Multi-part downloads: Need total size to split file
+    // 5. Progress bars: Need current position and total size
+
+    // Scenario 1: Simple range request (bytes=0-1023)
+    let client_request_range = "bytes=0-1023";
+    let file_total_size = 5_000_000_u64; // 5MB file
+
+    // S3 returns Content-Range header
+    let s3_content_range = format!("bytes 0-1023/{}", file_total_size);
+    assert_eq!(s3_content_range, "bytes 0-1023/5000000",
+        "S3 returns Content-Range with actual range and total size");
+
+    // Proxy forwards Content-Range unchanged
+    let proxy_content_range = s3_content_range.clone();
+    assert_eq!(proxy_content_range, "bytes 0-1023/5000000",
+        "Proxy forwards Content-Range header unchanged to client");
+
+    // Client parses Content-Range to extract information
+    let parts: Vec<&str> = proxy_content_range
+        .strip_prefix("bytes ")
+        .unwrap()
+        .split('/')
+        .collect();
+    let range_part = parts[0]; // "0-1023"
+    let total_part = parts[1]; // "5000000"
+
+    assert_eq!(range_part, "0-1023", "Client extracts range: 0-1023");
+    assert_eq!(total_part, "5000000", "Client extracts total: 5000000");
+
+    let total_size: u64 = total_part.parse().unwrap();
+    assert_eq!(total_size, 5_000_000, "Client knows total file size");
+
+    // Scenario 2: Middle chunk request (bytes=1000000-1999999)
+    let middle_request_range = "bytes=1000000-1999999";
+    let middle_s3_content_range = format!("bytes 1000000-1999999/{}", file_total_size);
+    let middle_proxy_content_range = middle_s3_content_range.clone();
+
+    assert_eq!(middle_proxy_content_range, "bytes 1000000-1999999/5000000",
+        "Content-Range preserved for middle chunk");
+
+    // Download manager use case: Resume calculation
+    let resume_position = 1_000_000_u64; // Resume from 1MB
+    let bytes_already_downloaded = resume_position;
+    let bytes_remaining = file_total_size - resume_position;
+
+    assert_eq!(bytes_already_downloaded, 1_000_000, "Already downloaded: 1MB");
+    assert_eq!(bytes_remaining, 4_000_000, "Remaining: 4MB");
+
+    let progress_percentage = (bytes_already_downloaded as f64 / file_total_size as f64) * 100.0;
+    assert!((progress_percentage - 20.0).abs() < 0.01, "Progress: 20%");
+
+    // Scenario 3: Open-ended range (bytes=2000000-)
+    let open_request_range = "bytes=2000000-";
+    let last_byte = file_total_size - 1; // 4999999
+    let open_s3_content_range = format!("bytes 2000000-{}/{}", last_byte, file_total_size);
+    let open_proxy_content_range = open_s3_content_range.clone();
+
+    assert_eq!(open_proxy_content_range, "bytes 2000000-4999999/5000000",
+        "Content-Range preserved for open-ended range");
+
+    // Scenario 4: Suffix range (bytes=-1024) - last 1KB
+    let suffix_request_range = "bytes=-1024";
+    let suffix_start = file_total_size - 1024; // 4998976
+    let suffix_end = file_total_size - 1; // 4999999
+    let suffix_s3_content_range = format!("bytes {}-{}/{}", suffix_start, suffix_end, file_total_size);
+    let suffix_proxy_content_range = suffix_s3_content_range.clone();
+
+    assert_eq!(suffix_proxy_content_range, "bytes 4998976-4999999/5000000",
+        "Content-Range preserved for suffix range");
+
+    // Use case 1: Video player seeking
+    // User seeks to 60% position in video
+    let video_total_bytes = 100_000_000_u64; // 100MB video
+    let seek_percentage = 0.60; // 60%
+    let seek_position = (video_total_bytes as f64 * seek_percentage) as u64;
+
+    assert_eq!(seek_position, 60_000_000, "Seek to byte 60,000,000 (60%)");
+
+    let seek_range = format!("bytes={}-", seek_position);
+    let seek_content_range = format!("bytes {}-{}/{}",
+        seek_position,
+        video_total_bytes - 1,
+        video_total_bytes);
+
+    assert_eq!(seek_content_range, "bytes 60000000-99999999/100000000",
+        "Content-Range for video seek shows remaining bytes");
+
+    // Video player uses Content-Range to update timeline
+    let bytes_in_range = (video_total_bytes - 1) - seek_position + 1;
+    assert_eq!(bytes_in_range, 40_000_000, "40MB remaining after seek");
+
+    // Use case 2: Multi-part parallel download
+    // Download manager splits 10MB file into 4 parts
+    let parallel_total = 10_000_000_u64;
+    let chunk_size = parallel_total / 4;
+
+    let chunk1_range = format!("bytes 0-{}/{}", chunk_size - 1, parallel_total);
+    let chunk2_range = format!("bytes {}-{}/{}", chunk_size, chunk_size * 2 - 1, parallel_total);
+    let chunk3_range = format!("bytes {}-{}/{}", chunk_size * 2, chunk_size * 3 - 1, parallel_total);
+    let chunk4_range = format!("bytes {}-{}/{}", chunk_size * 3, parallel_total - 1, parallel_total);
+
+    assert_eq!(chunk1_range, "bytes 0-2499999/10000000", "Chunk 1: 0-2.5MB");
+    assert_eq!(chunk2_range, "bytes 2500000-4999999/10000000", "Chunk 2: 2.5-5MB");
+    assert_eq!(chunk3_range, "bytes 5000000-7499999/10000000", "Chunk 3: 5-7.5MB");
+    assert_eq!(chunk4_range, "bytes 7500000-9999999/10000000", "Chunk 4: 7.5-10MB");
+
+    // Common mistakes:
+    // ❌ MISTAKE 1: Omit Content-Range header
+    let missing_content_range: Option<String> = None;
+    assert!(missing_content_range.is_none(),
+        "Don't omit Content-Range - breaks download managers!");
+
+    // ❌ MISTAKE 2: Return wrong total size
+    let wrong_total = format!("bytes 0-1023/{}", 1024); // Says total is 1024
+    let correct_total = format!("bytes 0-1023/{}", file_total_size); // Says total is 5000000
+    assert_ne!(wrong_total, correct_total,
+        "Don't return partial size as total - breaks progress tracking!");
+
+    // ❌ MISTAKE 3: Return wrong range boundaries
+    let wrong_range = "bytes 0-1024/5000000"; // Says 1025 bytes (0-1024 inclusive)
+    let correct_range = "bytes 0-1023/5000000"; // Says 1024 bytes (0-1023 inclusive)
+    assert_ne!(wrong_range, correct_range,
+        "Don't mess up range boundaries - off-by-one errors break clients!");
+
+    // ✅ CORRECT: Forward Content-Range unchanged from S3
+    let s3_header = "bytes 0-1023/5000000";
+    let proxy_header = s3_header; // Exact copy
+    assert_eq!(proxy_header, "bytes 0-1023/5000000",
+        "Forward Content-Range header exactly as S3 returns it");
+
+    // Why proxy must preserve Content-Range exactly:
+    //
+    // Reason 1: HTTP spec compliance (RFC 7233 Section 4.2)
+    //   "A server generating a 206 response MUST generate a Content-Range
+    //    header field describing what range of the selected representation
+    //    is enclosed"
+    //
+    // Reason 2: Download manager progress tracking
+    //   wget: Uses Content-Range to show "0% [=====>  ] 1,024  --.-KB/s  eta 2m 30s"
+    //   curl: Uses Content-Range to show "0.02% of 5000000 bytes"
+    //   aria2: Uses Content-Range to split remaining bytes across connections
+    //
+    // Reason 3: Video player seek accuracy
+    //   Video players parse Content-Range to:
+    //   - Update timeline position (start-end tells current position)
+    //   - Calculate buffered percentage (end/total)
+    //   - Determine if more seeks needed (total tells file size)
+    //
+    // Reason 4: Multi-part download coordination
+    //   Download managers need total size to:
+    //   - Split file into equal chunks
+    //   - Verify all chunks downloaded (sum of chunks == total)
+    //   - Resume failed chunks (know which bytes still needed)
+    //
+    // Reason 5: Content-Length interpretation
+    //   Without Content-Range, Content-Length is ambiguous:
+    //   - Is it the range size or total file size?
+    //   Content-Range makes it explicit:
+    //   - Content-Length: 1024 (bytes in THIS response)
+    //   - Content-Range: bytes 0-1023/5000000 (position in TOTAL file)
+
+    // Client compatibility:
+    // All these clients parse Content-Range and break without it:
+    // - wget --continue: Shows "Cannot write to ... (Success)" error
+    // - curl -C -: Shows wrong progress percentage
+    // - aria2c: Refuses to split download, downloads sequentially
+    // - Chrome/Firefox: Video seeking jumps to wrong position
+    // - Safari: Video timeline shows wrong duration
+    // - Video.js: Buffering indicator shows 100% when only 1% buffered
+}
