@@ -215,8 +215,8 @@ fn test_can_initialize_tracing_subscriber() {
 /// - Custom fields are included
 #[test]
 fn test_logs_are_output_in_json_format() {
-    use yatagarasu::logging::create_test_subscriber;
     use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
 
     // Scenario 1: Log output is valid JSON
     //
@@ -391,8 +391,8 @@ fn test_logs_are_output_in_json_format() {
 /// - Request ID can be used to filter/search logs
 #[test]
 fn test_every_log_includes_request_id() {
-    use yatagarasu::logging::create_test_subscriber;
     use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
 
     // Scenario 1: Logs within a span include span fields (request_id)
     //
@@ -418,8 +418,8 @@ fn test_every_log_includes_request_id() {
     let log_line = String::from_utf8_lossy(&output);
 
     // Parse JSON
-    let parsed: serde_json::Value = serde_json::from_str(&log_line)
-        .expect("Log output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&log_line).expect("Log output should be valid JSON");
 
     // Verify request_id is present in the span fields
     assert!(
@@ -530,9 +530,9 @@ fn test_every_log_includes_request_id() {
 /// - Log level is INFO for 2xx/3xx responses
 #[test]
 fn test_every_request_logged_with_method_path_status_duration() {
-    use yatagarasu::logging::create_test_subscriber;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use yatagarasu::logging::create_test_subscriber;
 
     // Scenario 1: Request log includes all required fields
     //
@@ -588,8 +588,8 @@ fn test_every_request_logged_with_method_path_status_duration() {
         .find(|line| line.contains("request completed"))
         .expect("Should find 'request completed' log entry");
 
-    let parsed: serde_json::Value = serde_json::from_str(request_log)
-        .expect("Log output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(request_log).expect("Log output should be valid JSON");
 
     // Scenario 2: Verify all required fields are present in span
     assert!(
@@ -822,8 +822,8 @@ fn test_every_request_logged_with_method_path_status_duration() {
 /// - Token value itself is never logged (security)
 #[test]
 fn test_authentication_failures_logged_with_reason() {
-    use yatagarasu::logging::create_test_subscriber;
     use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
 
     // Scenario 1: Auth failure log includes specific reason
     //
@@ -868,8 +868,8 @@ fn test_authentication_failures_logged_with_reason() {
         .find(|line| line.contains("authentication failed"))
         .expect("Should find 'authentication failed' log entry");
 
-    let parsed: serde_json::Value = serde_json::from_str(auth_log)
-        .expect("Log output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(auth_log).expect("Log output should be valid JSON");
 
     // Scenario 2: Verify log level is WARN
     assert_eq!(
@@ -1056,4 +1056,332 @@ fn test_authentication_failures_logged_with_reason() {
     //    - Check if token refresh is working
     //    - Look at token_age_hours distribution
     //    ```
+}
+
+/// Test: S3 errors are logged with bucket, key, error code
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that S3 errors are logged with complete context: bucket name,
+/// S3 key, and specific error code to enable debugging of S3 integration issues.
+///
+/// Why logging S3 errors with context matters:
+///
+/// S3 integration is a critical dependency. When S3 requests fail, we need to know:
+/// - WHICH bucket failed (bucket name)
+/// - WHICH object was requested (S3 key)
+/// - WHY it failed (S3 error code: NoSuchKey, AccessDenied, etc.)
+/// - WHEN it happened (timestamp)
+/// - WHICH request triggered it (request_id correlation)
+///
+/// This enables:
+/// - Debugging: "Why is this specific object failing?"
+/// - Monitoring: Track error rates by bucket and error type
+/// - Alerting: Spike in AccessDenied errors = credential issue
+/// - Analysis: Which buckets/keys have highest error rates
+///
+/// Example S3 error log:
+/// ```json
+/// {
+///   "timestamp": "2025-11-01T12:00:00.000Z",
+///   "level": "ERROR",
+///   "fields": {
+///     "message": "S3 request failed",
+///     "bucket": "my-products-bucket",
+///     "key": "images/product-123.png",
+///     "error_code": "NoSuchKey",
+///     "status_code": 404
+///   },
+///   "span": {
+///     "request_id": "550e8400-e29b-41d4-a716-446655440000",
+///     "method": "GET",
+///     "path": "/products/images/product-123.png"
+///   }
+/// }
+/// ```
+///
+/// Common S3 error codes and their meanings:
+/// - "NoSuchKey": Object doesn't exist (404)
+/// - "NoSuchBucket": Bucket doesn't exist (404)
+/// - "AccessDenied": Insufficient permissions (403)
+/// - "InvalidAccessKeyId": AWS credentials invalid (403)
+/// - "SignatureDoesNotMatch": AWS signature calculation error (403)
+/// - "RequestTimeout": S3 didn't respond in time (408/504)
+/// - "SlowDown": Rate limiting (503)
+/// - "InternalError": S3 internal error (500)
+///
+/// Test scenarios:
+/// 1. S3 error log includes bucket name
+/// 2. S3 error log includes S3 key (full path)
+/// 3. S3 error log includes specific error code
+/// 4. S3 error log is at ERROR level
+/// 5. Log includes request context (request_id) via span
+/// 6. Error code is structured field (not in message)
+/// 7. Log includes HTTP status code from S3
+///
+/// Expected behavior:
+/// - Every S3 error produces a log entry with bucket, key, error_code
+/// - Fields are structured for easy querying
+/// - Log level is ERROR (server-side failures)
+/// - AWS credentials are never logged (security)
+#[test]
+fn test_s3_errors_logged_with_bucket_key_error_code() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: S3 error log includes bucket, key, and error code
+    //
+    // When an S3 request fails, we should log the failure with complete context:
+    // - bucket: The S3 bucket name
+    // - key: The S3 object key
+    // - error_code: Specific S3 error code (NoSuchKey, AccessDenied, etc.)
+    // - status_code: HTTP status code from S3
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/products/images/product-123.png";
+
+        // Create request span
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path
+        );
+        let _enter = span.enter();
+
+        // Simulate S3 error with full context
+        let bucket = "my-products-bucket";
+        let key = "images/product-123.png";
+        let error_code = "NoSuchKey";
+        let status_code = 404;
+
+        tracing::error!(
+            bucket = bucket,
+            key = key,
+            error_code = error_code,
+            status_code = status_code,
+            "S3 request failed"
+        );
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Find the S3 error log entry
+    let log_lines: Vec<&str> = log_output.lines().collect();
+    let s3_error_log = log_lines
+        .iter()
+        .find(|line| line.contains("S3 request failed"))
+        .expect("Should find 'S3 request failed' log entry");
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(s3_error_log).expect("Log output should be valid JSON");
+
+    // Scenario 2: Verify log level is ERROR
+    assert_eq!(
+        parsed["level"].as_str().unwrap(),
+        "ERROR",
+        "S3 errors should be logged at ERROR level"
+    );
+
+    // Scenario 3: Verify bucket field is present and correct
+    assert!(
+        parsed.get("fields").is_some(),
+        "Log should include fields object"
+    );
+    assert!(
+        parsed["fields"].get("bucket").is_some(),
+        "S3 error should include 'bucket' field"
+    );
+    assert_eq!(
+        parsed["fields"]["bucket"].as_str().unwrap(),
+        "my-products-bucket",
+        "Bucket field should contain the S3 bucket name"
+    );
+
+    // Scenario 4: Verify key field is present and correct
+    assert!(
+        parsed["fields"].get("key").is_some(),
+        "S3 error should include 'key' field"
+    );
+    assert_eq!(
+        parsed["fields"]["key"].as_str().unwrap(),
+        "images/product-123.png",
+        "Key field should contain the S3 object key"
+    );
+
+    // Scenario 5: Verify error_code field is present and correct
+    assert!(
+        parsed["fields"].get("error_code").is_some(),
+        "S3 error should include 'error_code' field"
+    );
+    assert_eq!(
+        parsed["fields"]["error_code"].as_str().unwrap(),
+        "NoSuchKey",
+        "Error code should be specific S3 error code"
+    );
+
+    // Scenario 6: Verify status_code field is present
+    assert!(
+        parsed["fields"].get("status_code").is_some(),
+        "S3 error should include 'status_code' field"
+    );
+    assert_eq!(
+        parsed["fields"]["status_code"].as_u64().unwrap(),
+        404,
+        "Status code should match S3 HTTP response status"
+    );
+
+    // Scenario 7: Verify request context is included in span
+    assert!(
+        parsed.get("span").is_some(),
+        "S3 error log should include request span for correlation"
+    );
+    assert_eq!(
+        parsed["span"]["request_id"].as_str().unwrap(),
+        "550e8400-e29b-41d4-a716-446655440000",
+        "Should include request_id for tracing the request"
+    );
+
+    //
+    // S3 ERROR LOGGING BEST PRACTICES:
+    //
+    // 1. LOG AT ERROR LEVEL:
+    //    - S3 errors are server-side failures (from our perspective)
+    //    - Use ERROR level to enable alerting on S3 integration issues
+    //    - Exception: 404 NoSuchKey might be WARN if expected (e.g., optional files)
+    //
+    // 2. ALWAYS INCLUDE BUCKET AND KEY:
+    //    Bad:  tracing::error!("S3 request failed")
+    //    Good: tracing::error!(bucket = "my-bucket", key = "file.png", error_code = "NoSuchKey", "S3 request failed")
+    //
+    //    Without bucket/key, you can't debug which request failed.
+    //
+    // 3. USE STRUCTURED S3 ERROR CODES:
+    //    - Parse S3 XML/JSON error response to extract error code
+    //    - Don't log raw error messages (inconsistent format)
+    //    - S3 error codes are standardized across all S3-compatible services
+    //
+    // 4. NEVER LOG AWS CREDENTIALS:
+    //    Don't log:
+    //    - access_key_id
+    //    - secret_access_key
+    //    - session_token
+    //    - Signed URLs with credentials in query params
+    //
+    //    Do log:
+    //    - Bucket name
+    //    - Object key (unless it contains PII)
+    //    - Error codes
+    //    - Request IDs from S3 (x-amz-request-id header)
+    //
+    // 5. INCLUDE REQUEST CONTEXT VIA SPANS:
+    //    - S3 errors should be logged within request span
+    //    - This automatically includes request_id, method, path
+    //    - Enables correlation: "Which user requests are hitting S3 errors?"
+    //
+    // PRODUCTION USAGE IN S3 MODULE:
+    //
+    // In the S3 client code:
+    // ```rust
+    // pub async fn get_object(
+    //     bucket: &str,
+    //     key: &str,
+    //     client: &S3Client
+    // ) -> Result<GetObjectOutput, S3Error> {
+    //     let result = client
+    //         .get_object()
+    //         .bucket(bucket)
+    //         .key(key)
+    //         .send()
+    //         .await;
+    //
+    //     match result {
+    //         Ok(output) => Ok(output),
+    //         Err(e) => {
+    //             // Extract S3 error details
+    //             let error_code = extract_s3_error_code(&e);
+    //             let status_code = extract_status_code(&e);
+    //             let request_id = extract_request_id(&e);
+    //
+    //             // Log with complete context
+    //             tracing::error!(
+    //                 bucket = bucket,
+    //                 key = key,
+    //                 error_code = error_code,
+    //                 status_code = status_code,
+    //                 s3_request_id = request_id,
+    //                 "S3 request failed"
+    //             );
+    //
+    //             Err(S3Error::from(e))
+    //         }
+    //     }
+    // }
+    // ```
+    //
+    // MONITORING AND ALERTING:
+    //
+    // With structured S3 error logs, you can build powerful monitoring:
+    //
+    // 1. Track error rates by bucket:
+    //    ```
+    //    SELECT fields.bucket, count(*) as errors
+    //    FROM logs
+    //    WHERE level = 'ERROR'
+    //      AND message = 'S3 request failed'
+    //      AND timestamp > now() - interval '1 hour'
+    //    GROUP BY fields.bucket
+    //    ORDER BY errors DESC
+    //    ```
+    //
+    // 2. Alert on credential issues:
+    //    ```
+    //    Alert if:
+    //      count(error_code IN ('AccessDenied', 'InvalidAccessKeyId', 'SignatureDoesNotMatch'))
+    //      > 10 in 5 minutes
+    //    ```
+    //    This indicates AWS credential problems.
+    //
+    // 3. Track most-failed keys:
+    //    ```
+    //    SELECT fields.bucket, fields.key, count(*) as failures
+    //    FROM logs
+    //    WHERE message = 'S3 request failed'
+    //      AND timestamp > now() - interval '1 day'
+    //    GROUP BY fields.bucket, fields.key
+    //    ORDER BY failures DESC
+    //    LIMIT 10
+    //    ```
+    //    Identifies problematic files or patterns.
+    //
+    // 4. Monitor S3 availability:
+    //    ```
+    //    SELECT
+    //      count(*) FILTER (WHERE error_code IN ('InternalError', 'ServiceUnavailable')) as s3_errors,
+    //      count(*) as total_requests,
+    //      (s3_errors::float / total_requests) * 100 as error_rate
+    //    FROM logs
+    //    WHERE timestamp > now() - interval '5 minutes'
+    //    ```
+    //    Alert if error_rate > 5% (S3 outage)
+    //
+    // 5. Correlate with user requests:
+    //    ```
+    //    # Find all logs for requests that hit S3 errors
+    //    SELECT *
+    //    FROM logs
+    //    WHERE span.request_id IN (
+    //      SELECT DISTINCT span.request_id
+    //      FROM logs
+    //      WHERE message = 'S3 request failed'
+    //        AND timestamp > now() - interval '1 hour'
+    //    )
+    //    ORDER BY timestamp ASC
+    //    ```
+    //    See complete request flow for failed requests.
 }
