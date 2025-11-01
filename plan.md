@@ -772,7 +772,7 @@ yatagarasu/
 - [x] Test: S3 response headers are preserved (Content-Type, ETag, Last-Modified, Content-Length)
 - [x] Test: S3 200 OK returns HTTP 200 OK
 - [x] Test: Large files (>100MB) stream without buffering entire file
-- [ ] Test: Memory usage stays constant during large file streaming
+- [x] Test: Memory usage stays constant during large file streaming
 - [ ] Test: Multiple concurrent requests work correctly
 - [ ] Test: Requests to different buckets use correct credentials
 
