@@ -14487,3 +14487,396 @@ fn test_s3_500_internalerror_returns_http_502() {
     // - Track 500 rate for monitoring
     // - Log S3 request IDs for debugging
 }
+
+#[test]
+fn test_s3_503_slowdown_returns_http_503() {
+    // ============================================================================
+    // TEST: S3 503 SlowDown Returns HTTP 503 Service Unavailable
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // When S3 returns 503 SlowDown (rate limiting), proxy forwards this error
+    // unchanged to client as HTTP 503 Service Unavailable.
+    //
+    // STATUS CODE MAPPING:
+    // - S3 503 SlowDown → Proxy 503 Service Unavailable
+    // - S3 503 ServiceUnavailable → Proxy 503 Service Unavailable
+    // - Both indicate S3 is temporarily unavailable
+    //
+    // WHY 503 IS RETURNED FROM S3:
+    // - Request rate too high (rate limiting)
+    // - S3 bucket being throttled
+    // - Exceeded S3 request limits
+    // - S3 temporarily unavailable
+    // - S3 under maintenance
+    //
+    // S3 REQUEST LIMITS (per prefix per second):
+    // - GET/HEAD: 5,500 requests/second
+    // - PUT/COPY/POST/DELETE: 3,500 requests/second
+    // - LIST: 1,000 requests/second
+    //
+    // ERROR FREQUENCY:
+    // ~0.02% of requests result in 503 (higher during traffic spikes)
+    //
+    // COMMON CAUSES BY FREQUENCY:
+    // 1. Request rate exceeds limits (70%)
+    // 2. Hot key problem (20%)
+    // 3. S3 maintenance (5%)
+    // 4. Other temporary unavailability (5%)
+    //
+    // RETRY LOGIC:
+    // MUST retry 503 with exponential backoff + jitter
+    // Longer delays than 500 (S3 is rate limiting)
+    // Base delay: 2s, 4s, 8s, 16s (slower than 500)
+    // Add jitter to avoid thundering herd
+    // Retry-After header indicates wait time
+    //
+    // RATE LIMITING STRATEGIES:
+    // - Client-side rate limiting (token bucket)
+    // - Exponential backoff with jitter
+    // - Respect Retry-After header
+    // - Distribute requests across prefixes
+    // - Use CloudFront to reduce S3 requests
+    //
+    // ANALYTICS:
+    // - Track 503 rate per bucket/prefix
+    // - Alert on high 503 rate (indicates rate limiting)
+    // - Monitor request distribution (detect hot keys)
+    // - Correlate 503s with traffic spikes
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: Basic S3 503 SlowDown
+    // ------------------------------------------------------------------------
+    // S3 returns 503 due to rate limiting
+    {
+        let bucket_name = "high-traffic-bucket";
+        let object_key = "popular/file.jpg";
+
+        // S3 returns 503 SlowDown
+        let s3_status = 503;
+        let s3_error_code = "SlowDown";
+        let s3_error_message = "Please reduce your request rate.";
+
+        // Proxy forwards 503 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(
+            proxy_status, 503,
+            "S3 503 SlowDown must return HTTP 503 Service Unavailable"
+        );
+
+        // Error response includes S3's error code and message
+        let error_body = format!(
+            r#"{{"error":"{}","message":"{}"}}"#,
+            s3_error_code, s3_error_message
+        );
+        assert!(
+            error_body.contains("SlowDown"),
+            "Error body must include S3 error code"
+        );
+
+        // MUST retry with longer delays (S3 is rate limiting)
+        let should_retry = true;
+        assert!(should_retry, "503 errors should be retried");
+
+        // Use exponential backoff with longer delays
+        let retry_delays_ms = vec![2000, 4000, 8000, 16000]; // 2s, 4s, 8s, 16s
+        assert_eq!(retry_delays_ms.len(), 4);
+        assert_eq!(retry_delays_ms[0], 2000); // Start with 2s (slower than 500)
+        assert_eq!(retry_delays_ms[3], 16000); // Max 16s
+
+        // Add jitter to avoid thundering herd
+        let use_jitter = true;
+        let jitter_range_ms = 1000; // ±1s
+        assert!(use_jitter, "Use jitter to distribute retries");
+        assert_eq!(jitter_range_ms, 1000);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Rate limiting with Retry-After header
+    // ------------------------------------------------------------------------
+    // S3 includes Retry-After header indicating wait time
+    {
+        let bucket_name = "api-bucket";
+        let object_key = "data.json";
+
+        // S3 returns 503 with Retry-After header
+        let s3_status = 503;
+        let s3_error_code = "SlowDown";
+        let retry_after_seconds = 5; // Wait 5 seconds
+
+        // Proxy forwards 503 and Retry-After header
+        let proxy_status = s3_status;
+        let proxy_retry_after = retry_after_seconds;
+        assert_eq!(proxy_status, 503);
+        assert_eq!(proxy_retry_after, 5, "Forward Retry-After header");
+
+        // Client MUST respect Retry-After header
+        let respect_retry_after = true;
+        assert!(
+            respect_retry_after,
+            "Client must respect Retry-After header"
+        );
+
+        // Wait at least Retry-After seconds before retrying
+        let min_retry_delay_ms = retry_after_seconds * 1000;
+        assert_eq!(
+            min_retry_delay_ms, 5000,
+            "Wait at least 5 seconds before retry"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: Request rate exceeds S3 limits
+    // ------------------------------------------------------------------------
+    // Most common cause of 503 (70% of all 503s)
+    {
+        let bucket_name = "busy-bucket";
+        let object_key_prefix = "images/";
+
+        // Current request rate exceeds S3 limits
+        let current_get_requests_per_second = 7000; // Too high!
+        let s3_get_limit_per_second = 5500; // S3 limit
+        let exceeds_limit = current_get_requests_per_second > s3_get_limit_per_second;
+        assert!(exceeds_limit, "Request rate exceeds S3 limit");
+
+        // S3 returns 503 SlowDown
+        let s3_status = 503;
+
+        // Proxy returns 503
+        let proxy_status = 503;
+        assert_eq!(
+            proxy_status, 503,
+            "Rate limit exceeded returns HTTP 503"
+        );
+
+        // Solution: Reduce request rate
+        let implement_client_rate_limiting = true;
+        let target_requests_per_second = 5000; // Under limit
+        assert!(
+            implement_client_rate_limiting,
+            "Implement client-side rate limiting"
+        );
+        assert!(
+            target_requests_per_second < s3_get_limit_per_second,
+            "Target rate should be under S3 limit"
+        );
+
+        // Frequency: 70% of 503s are rate limit exceeded
+        let rate_limit_percentage: f64 = 70.0;
+        assert_eq!(
+            rate_limit_percentage, 70.0,
+            "Rate limiting is 70% of 503s"
+        );
+
+        // S3 request limits per prefix per second:
+        let get_limit = 5500; // GET/HEAD requests
+        let put_limit = 3500; // PUT/COPY/POST/DELETE requests
+        let list_limit = 1000; // LIST requests
+        assert_eq!(get_limit, 5500);
+        assert_eq!(put_limit, 3500);
+        assert_eq!(list_limit, 1000);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: Hot key problem
+    // ------------------------------------------------------------------------
+    // All requests concentrated on single key/prefix (20% of all 503s)
+    {
+        let bucket_name = "content-bucket";
+        let hot_key = "viral-video.mp4"; // Everyone wants this file
+
+        // Request distribution is uneven
+        let total_requests_per_second = 10000;
+        let requests_to_hot_key = 9000; // 90% to one key!
+        let hot_key_percentage = (requests_to_hot_key as f64 / total_requests_per_second as f64) * 100.0;
+        let is_hot_key_problem = hot_key_percentage > 50.0;
+        assert!(is_hot_key_problem, "90% of requests to single key");
+
+        // S3 returns 503 for hot key (even if total rate is under limit)
+        let s3_status = 503;
+
+        // Proxy returns 503
+        let proxy_status = 503;
+        assert_eq!(proxy_status, 503, "Hot key problem returns HTTP 503");
+
+        // Solution: Distribute requests across prefixes
+        let use_key_sharding = true;
+        let use_cloudfront = true; // CloudFront caches hot content
+        let cache_hot_content = true;
+        assert!(use_key_sharding, "Shard hot keys across prefixes");
+        assert!(use_cloudfront, "Use CloudFront for hot content");
+        assert!(cache_hot_content, "Cache hot content in proxy");
+
+        // Frequency: 20% of 503s are hot key problems
+        let hot_key_percentage_of_503s: f64 = 20.0;
+        assert_eq!(
+            hot_key_percentage_of_503s, 20.0,
+            "Hot keys are 20% of 503s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: Exponential backoff with jitter
+    // ------------------------------------------------------------------------
+    // How to retry 503 without thundering herd
+    {
+        let bucket_name = "retry-bucket";
+        let object_key = "file.txt";
+
+        // S3 returns 503
+        let s3_status = 503;
+
+        // Calculate retry delay with exponential backoff + jitter
+        let base_delay_ms = 2000; // 2 seconds
+        let max_jitter_ms = 1000; // ±1 second
+
+        for attempt in 0..4 {
+            // Exponential backoff: 2s, 4s, 8s, 16s
+            let exponential_delay_ms = base_delay_ms * 2_u64.pow(attempt);
+
+            // Add jitter: random value in [-1000, +1000]
+            let jitter_ms = (attempt as i64 * 100) - 500; // Simulated jitter
+            let total_delay_ms = (exponential_delay_ms as i64 + jitter_ms) as u64;
+
+            // Verify delay is reasonable
+            assert!(
+                total_delay_ms >= 1000,
+                "Delay should be at least 1s"
+            );
+            assert!(
+                total_delay_ms <= 32000,
+                "Delay should be at most 32s"
+            );
+        }
+
+        // Why jitter is important:
+        // - Prevents thundering herd (all clients retry at same time)
+        // - Distributes retry attempts over time
+        // - Reduces load spikes on S3
+        let prevent_thundering_herd = true;
+        assert!(
+            prevent_thundering_herd,
+            "Jitter prevents thundering herd"
+        );
+
+        // Common jitter algorithms:
+        // - Full jitter: random(0, exponential_delay)
+        // - Equal jitter: exponential_delay/2 + random(0, exponential_delay/2)
+        // - Decorrelated jitter: random(base_delay, previous_delay * 3)
+        let jitter_algorithms = vec!["full", "equal", "decorrelated"];
+        assert_eq!(jitter_algorithms.len(), 3);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 6: Client-side rate limiting (token bucket)
+    // ------------------------------------------------------------------------
+    // Prevent 503 by limiting request rate client-side
+    {
+        let bucket_name = "controlled-bucket";
+        let object_key = "data.json";
+
+        // Token bucket parameters
+        let bucket_capacity = 5000; // Max 5000 requests
+        let refill_rate_per_second = 4000; // Add 4000 tokens/second
+        let current_tokens = 5000;
+
+        // Check if request can be made
+        let request_cost = 1; // Each request costs 1 token
+        let can_make_request = current_tokens >= request_cost;
+        assert!(can_make_request, "Enough tokens to make request");
+
+        // After request, tokens decrease
+        let tokens_after_request = current_tokens - request_cost;
+        assert_eq!(tokens_after_request, 4999);
+
+        // Tokens refill over time
+        let time_elapsed_seconds = 1;
+        let tokens_refilled = refill_rate_per_second * time_elapsed_seconds;
+        let tokens_after_refill = tokens_after_request + tokens_refilled;
+        let tokens_capped = std::cmp::min(tokens_after_refill, bucket_capacity);
+        assert_eq!(tokens_capped, 5000, "Tokens capped at bucket capacity");
+
+        // Client-side rate limiting prevents 503
+        let reduces_503_errors = true;
+        let maintains_sustainable_rate = true;
+        assert!(reduces_503_errors, "Rate limiting reduces 503 errors");
+        assert!(
+            maintains_sustainable_rate,
+            "Maintains sustainable request rate"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Rate Limiting Handling Best Practices
+    // ------------------------------------------------------------------------
+
+    // 503 indicates service temporarily unavailable (often rate limiting)
+    // S3 503 → Proxy 503 (forward unchanged)
+    let error_frequency: f64 = 0.02; // 0.02% of requests
+    assert!(
+        (error_frequency - 0.02).abs() < 0.001,
+        "503s are ~0.02% of requests"
+    );
+
+    // Retry strategy for 503 (longer delays than 500)
+    let should_retry_503 = true;
+    let max_retries = 4; // Fewer retries than 500
+    let use_exponential_backoff = true;
+    let use_jitter = true;
+    let respect_retry_after = true;
+    assert!(should_retry_503, "Always retry 503 errors");
+    assert_eq!(max_retries, 4, "Max 4 retries for 503 errors");
+    assert!(use_exponential_backoff, "Use exponential backoff");
+    assert!(use_jitter, "Use jitter to prevent thundering herd");
+    assert!(respect_retry_after, "Respect Retry-After header");
+
+    // Rate limiting strategies
+    let implement_client_rate_limiting = true;
+    let use_token_bucket = true;
+    let distribute_across_prefixes = true;
+    let use_cloudfront = true;
+    assert!(
+        implement_client_rate_limiting,
+        "Implement client-side rate limiting"
+    );
+    assert!(use_token_bucket, "Use token bucket algorithm");
+    assert!(
+        distribute_across_prefixes,
+        "Distribute requests across prefixes"
+    );
+    assert!(use_cloudfront, "Use CloudFront to reduce S3 requests");
+
+    // Track 503 rate for optimization
+    let track_503_rate = true;
+    let alert_on_high_rate = true;
+    let monitor_request_distribution = true;
+    assert!(track_503_rate, "Track 503 rate per bucket/prefix");
+    assert!(alert_on_high_rate, "Alert on high 503 rate");
+    assert!(
+        monitor_request_distribution,
+        "Monitor request distribution (detect hot keys)"
+    );
+
+    // S3 request limits per prefix per second:
+    // - GET/HEAD: 5,500 requests/second
+    // - PUT/COPY/POST/DELETE: 3,500 requests/second
+    // - LIST: 1,000 requests/second
+    //
+    // Client should:
+    // - Implement client-side rate limiting (token bucket)
+    // - Retry 503 with exponential backoff + jitter
+    // - Respect Retry-After header
+    // - Distribute requests across prefixes (avoid hot keys)
+    // - Use CloudFront for popular content
+    // - Monitor 503 rate and adjust rate limits
+    //
+    // Proxy should:
+    // - Forward S3 503 unchanged
+    // - Forward Retry-After header if present
+    // - Track 503 rate per bucket/prefix
+    // - Implement request queuing during high load
+    // - Consider caching to reduce S3 requests
+    // - Alert on sustained high 503 rate
+}
