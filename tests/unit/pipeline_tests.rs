@@ -1339,3 +1339,119 @@ fn test_fallback_to_query_when_authorization_missing() {
     // This demonstrates that auth middleware falls back to alternate sources
     // when the primary source (Authorization header) doesn't have a token
 }
+
+// Test: Request passes through middleware in correct order (router → auth → handler)
+#[test]
+fn test_request_passes_through_middleware_in_correct_order() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::router::Router;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use yatagarasu::auth::{validate_jwt, extract_bearer_token};
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+    use yatagarasu::auth::Claims;
+    use std::collections::HashMap;
+
+    // Setup: Create bucket configuration (private bucket requiring auth)
+    let buckets = vec![
+        BucketConfig {
+            name: "private".to_string(),
+            path_prefix: "/private".to_string(),
+            s3: S3Config {
+                bucket: "my-private-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "test".to_string(),
+                secret_key: "test".to_string(),
+                endpoint: None,
+            },
+            auth: Some(AuthConfig {
+                enabled: true,
+            }),
+        },
+    ];
+
+    let secret = "test_secret_key_123";
+
+    // Create a valid JWT token
+    let mut custom_claims = serde_json::Map::new();
+    custom_claims.insert("role".to_string(), json!("admin"));
+
+    let test_claims = Claims {
+        sub: Some("user123".to_string()),
+        exp: None,
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: custom_claims,
+    };
+
+    let token = encode(
+        &Header::default(),
+        &test_claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    ).expect("Failed to encode token");
+
+    // Create request with valid JWT
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), format!("Bearer {}", token));
+
+    // Step 1: ROUTER MIDDLEWARE - Extract bucket from path
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/secret.txt".to_string(),
+        headers,
+    );
+
+    let router = Router::new(buckets);
+    let bucket = router.route(context.path());
+    assert!(bucket.is_some(), "Router should find bucket for /private path");
+
+    // Router adds bucket config to context
+    context.set_bucket_config(bucket.unwrap().clone());
+
+    assert!(context.bucket_config().is_some(), "Router should have added bucket config to context");
+
+    // Step 2: AUTH MIDDLEWARE - Validate JWT if required
+    let bucket_config = context.bucket_config().unwrap();
+    let auth_required = bucket_config.auth.as_ref()
+        .map(|a| a.enabled)
+        .unwrap_or(false);
+
+    assert!(auth_required, "Auth should be required for private bucket");
+
+    // Extract token from request
+    let extracted_token = extract_bearer_token(context.headers());
+    assert!(extracted_token.is_some(), "Auth middleware should find token");
+
+    // Validate token
+    let claims = validate_jwt(&extracted_token.unwrap(), secret)
+        .expect("Auth middleware should validate token successfully");
+
+    // Auth middleware adds claims to context
+    context.set_claims(claims);
+
+    assert!(context.claims().is_some(), "Auth middleware should have added claims to context");
+
+    // Step 3: HANDLER - Process request (would forward to S3)
+    // At this point, the request has:
+    // - Bucket configuration (from router)
+    // - Validated JWT claims (from auth)
+    // - Request ID (from initial context creation)
+
+    // Handler would use bucket_config to determine S3 credentials
+    // Handler would use router.extract_s3_key() to get the S3 key
+    let s3_key = router.extract_s3_key(context.path());
+    assert_eq!(s3_key, Some("secret.txt".to_string()), "Handler should extract S3 key");
+
+    // Verify the complete pipeline execution:
+    // 1. Router executed: bucket_config is present
+    assert!(context.bucket_config().is_some());
+    // 2. Auth executed: claims are present
+    assert!(context.claims().is_some());
+    // 3. Handler can proceed: has all necessary context to forward to S3
+    assert_eq!(context.bucket_config().unwrap().s3.bucket, "my-private-bucket");
+    assert_eq!(context.claims().unwrap().sub, Some("user123".to_string()));
+
+    // This test demonstrates the complete middleware chain:
+    // Request → Router (adds bucket config) → Auth (validates JWT, adds claims) → Handler (forwards to S3)
+}

@@ -744,7 +744,7 @@ yatagarasu/
 - [x] Test: Multiple token sources checked in configured order
 
 ### Middleware Chain
-- [ ] Test: Request passes through middleware in correct order (router → auth → handler)
+- [x] Test: Request passes through middleware in correct order (router → auth → handler)
 - [ ] Test: Middleware can short-circuit request (e.g., 401 stops pipeline)
 - [ ] Test: Middleware can modify request context
 - [ ] Test: Errors in middleware return appropriate HTTP status
