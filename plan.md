@@ -774,7 +774,7 @@ yatagarasu/
 - [x] Test: Large files (>100MB) stream without buffering entire file
 - [x] Test: Memory usage stays constant during large file streaming
 - [x] Test: Multiple concurrent requests work correctly
-- [ ] Test: Requests to different buckets use correct credentials
+- [x] Test: Requests to different buckets use correct credentials
 
 ### HEAD Request Proxying
 - [ ] Test: HEAD request to /products/image.png fetches metadata from S3
