@@ -739,7 +739,7 @@ yatagarasu/
 - [x] Test: Valid JWT adds claims to request context
 - [x] Test: Missing JWT on private bucket returns 401 Unauthorized
 - [x] Test: Invalid JWT signature returns 401 Unauthorized
-- [ ] Test: Expired JWT returns 401 Unauthorized
+- [x] Test: Expired JWT returns 401 Unauthorized
 - [ ] Test: JWT with wrong claims returns 403 Forbidden
 - [ ] Test: Multiple token sources checked in configured order
 

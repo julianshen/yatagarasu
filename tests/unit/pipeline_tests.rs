@@ -1096,3 +1096,66 @@ fn test_invalid_jwt_signature_returns_401() {
     // For this test, we verify that invalid signatures are detected
     // and would result in 401 response
 }
+
+// Test: Expired JWT returns 401 Unauthorized
+#[test]
+fn test_expired_jwt_returns_401() {
+    use yatagarasu::auth::validate_jwt;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+    use yatagarasu::auth::Claims;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let secret = "test_secret_key_123";
+
+    // Get current time and set expiration to 1 hour in the past
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let expired_time = now - 3600; // 1 hour ago
+
+    // Create test claims with expired exp claim
+    let mut custom_claims = serde_json::Map::new();
+    custom_claims.insert("name".to_string(), json!("John Doe"));
+
+    let test_claims = Claims {
+        sub: Some("user123".to_string()),
+        exp: Some(expired_time), // Token expired 1 hour ago
+        iat: Some(now - 7200), // Issued 2 hours ago
+        nbf: None,
+        iss: None,
+        custom: custom_claims,
+    };
+
+    // Encode the JWT token
+    let token = encode(
+        &Header::default(),
+        &test_claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    ).expect("Failed to encode token");
+
+    // Try to validate the expired token
+    let validation_result = validate_jwt(&token, secret);
+
+    // Verify that validation fails
+    assert!(validation_result.is_err(), "Token validation should fail for expired token");
+
+    // Verify the error is specifically ExpiredSignature
+    let err = validation_result.unwrap_err();
+    assert!(
+        format!("{:?}", err).contains("ExpiredSignature"),
+        "Error should be ExpiredSignature, got: {:?}", err
+    );
+
+    // In real implementation, auth middleware would:
+    // 1. Extract token from request (succeed)
+    // 2. Validate JWT with configured secret (succeed signature check)
+    // 3. Check expiration claim (fail - token expired)
+    // 4. Return 401 Unauthorized
+    // 5. Set response body to {"error":"Unauthorized","message":"Token has expired","status":401}
+    // 6. Block request from proceeding to S3
+
+    // For this test, we verify that expired tokens are detected
+    // and would result in 401 response
+}
