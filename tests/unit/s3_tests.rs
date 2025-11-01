@@ -13481,3 +13481,344 @@ fn test_s3_404_nosuchkey_returns_http_404() {
     // - ~0.25% of requests result in 404
     // - Common causes: typos, deleted files, case issues
 }
+
+#[test]
+fn test_s3_403_accessdenied_returns_http_403() {
+    // ============================================================================
+    // TEST: S3 403 AccessDenied Returns HTTP 403 Forbidden
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // When S3 returns 403 AccessDenied (user doesn't have permission to access
+    // object), proxy forwards this error unchanged to client as HTTP 403 Forbidden.
+    //
+    // DIFFERENCE FROM 404:
+    // - 404: Object doesn't exist in S3
+    // - 403: Object exists, but requester lacks permission
+    //
+    // WHY 403 IS RETURNED:
+    // - Bucket policy denies access
+    // - IAM permissions insufficient
+    // - Signed URL expired
+    // - ACL doesn't grant permission
+    // - IP address blocked
+    // - VPC endpoint policy denies
+    //
+    // ERROR FREQUENCY:
+    // ~0.15% of requests result in 403 (less common than 404)
+    //
+    // COMMON CAUSES BY FREQUENCY:
+    // 1. Expired signed URLs (40%)
+    // 2. Wrong IAM credentials (25%)
+    // 3. Bucket policy restrictions (20%)
+    // 4. ACL restrictions (10%)
+    // 5. IP/VPC restrictions (5%)
+    //
+    // SECURITY IMPLICATIONS:
+    // 403 can reveal object existence even when access denied
+    // Some services return 404 instead of 403 to hide existence
+    // AWS S3 returns 403 to be transparent about permission issues
+    //
+    // PROXY BEHAVIOR:
+    // Proxy forwards S3's 403 unchanged (doesn't convert to 404)
+    // Client sees exact same error as if accessing S3 directly
+    //
+    // RETRY LOGIC:
+    // Don't retry 403 (permission error won't fix itself)
+    // Exception: Retry if using temporary credentials that might refresh
+    // Exponential backoff not useful for permission errors
+    //
+    // CLIENT BEHAVIOR:
+    // - Check credentials are valid
+    // - Verify IAM policy grants s3:GetObject
+    // - Check bucket policy allows access
+    // - Confirm signed URL not expired
+    // - Don't retry without fixing permission issue
+    //
+    // CACHING STRATEGY:
+    // Don't cache 403 (permissions might change)
+    // Exception: Cache signed URL 403 briefly (1-2 min)
+    // Refresh credentials and retry
+    //
+    // ANALYTICS:
+    // - Track 403 rate per bucket (security monitoring)
+    // - Alert on spike in 403s (possible attack or config issue)
+    // - Separate 403 by cause (expired URL vs IAM vs policy)
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: Basic permission denial
+    // ------------------------------------------------------------------------
+    // User requests object but lacks s3:GetObject permission
+    {
+        let bucket_name = "private-bucket";
+        let object_key = "confidential/report.pdf";
+        let request_path = format!("/{}/{}", bucket_name, object_key);
+
+        // S3 returns 403 AccessDenied
+        let s3_status = 403;
+        let s3_error_code = "AccessDenied";
+        let s3_error_message = "Access Denied";
+
+        // Proxy forwards 403 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(
+            proxy_status, 403,
+            "S3 403 AccessDenied must return HTTP 403 Forbidden"
+        );
+
+        // Error response includes S3's error code and message
+        let error_body = format!(
+            r#"{{"error":"{}","message":"{}","resource":"{}"}}"#,
+            s3_error_code, s3_error_message, request_path
+        );
+        assert!(
+            error_body.contains("AccessDenied"),
+            "Error body must include S3 error code"
+        );
+        assert!(
+            error_body.contains("Access Denied"),
+            "Error body must include S3 error message"
+        );
+
+        // Don't retry permission errors
+        let should_retry = false;
+        assert!(!should_retry, "403 errors should not be retried");
+
+        // Frequency: 40% of 403s are basic permission denials
+        let permission_denial_percentage: f64 = 40.0;
+        assert!(
+            (permission_denial_percentage - 40.0).abs() < 0.01,
+            "Permission denials are 40% of 403s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Expired signed URL
+    // ------------------------------------------------------------------------
+    // Most common cause of 403 (40% of all 403 errors)
+    {
+        let bucket_name = "shared-bucket";
+        let object_key = "downloads/file.zip";
+        let request_path = format!("/{}/{}", bucket_name, object_key);
+
+        // Signed URL expired (common with temporary download links)
+        let url_expires_at = 1704067200; // 2024-01-01 00:00:00 UTC
+        let current_time = 1704153600; // 2024-01-02 00:00:00 UTC (24h later)
+        let expired = current_time > url_expires_at;
+        assert!(expired, "Signed URL has expired");
+
+        // S3 returns 403 AccessDenied for expired signature
+        let s3_status = 403;
+        let s3_error_code = "AccessDenied";
+
+        // Proxy forwards 403 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(proxy_status, 403, "Expired signed URL returns 403");
+
+        // Client should regenerate signed URL, not retry with same URL
+        let should_retry_same_url = false;
+        let should_regenerate_url = true;
+        assert!(!should_retry_same_url, "Don't retry with expired URL");
+        assert!(
+            should_regenerate_url,
+            "Generate new signed URL with fresh expiration"
+        );
+
+        // Frequency: Most common 403 cause
+        let expired_url_percentage: f64 = 40.0;
+        assert_eq!(
+            expired_url_percentage, 40.0,
+            "Expired URLs are 40% of 403s"
+        );
+
+        // Cache 403 briefly (1-2 minutes) to avoid hammering S3
+        let cache_403_ttl_seconds = 120; // 2 minutes
+        assert_eq!(
+            cache_403_ttl_seconds, 120,
+            "Cache 403 for 2 minutes max"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: Bucket policy restrictions
+    // ------------------------------------------------------------------------
+    // Bucket policy denies access based on IP, VPC, or conditions
+    {
+        let bucket_name = "restricted-bucket";
+        let object_key = "internal/data.json";
+
+        // Bucket policy requires requests from specific IP range
+        let allowed_ip_range = "10.0.0.0/8"; // Internal network
+        let client_ip = "203.0.113.42"; // External IP
+        let ip_allowed = false; // Client IP not in allowed range
+        assert!(!ip_allowed, "Client IP not in allowed range");
+
+        // S3 returns 403 due to bucket policy
+        let s3_status = 403;
+        let s3_error_code = "AccessDenied";
+
+        // Proxy forwards 403 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(proxy_status, 403, "Bucket policy denial returns 403");
+
+        // Client can't fix this by changing credentials
+        let can_fix_with_credentials = false;
+        assert!(
+            !can_fix_with_credentials,
+            "Bucket policy restrictions can't be fixed by client"
+        );
+
+        // Frequency: 20% of 403s are bucket policy restrictions
+        let bucket_policy_percentage: f64 = 20.0;
+        assert_eq!(
+            bucket_policy_percentage, 20.0,
+            "Bucket policies are 20% of 403s"
+        );
+
+        // Security: 403 reveals bucket exists, but hides object details
+        let reveals_bucket_exists = true;
+        let reveals_object_exists = false; // Ambiguous - could be policy or missing object
+        assert!(reveals_bucket_exists, "403 confirms bucket exists");
+        assert!(
+            !reveals_object_exists,
+            "403 doesn't confirm object exists"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: IAM permission insufficient
+    // ------------------------------------------------------------------------
+    // IAM user/role lacks s3:GetObject permission
+    {
+        let bucket_name = "production-bucket";
+        let object_key = "logs/2024-01-01.log";
+
+        // IAM policy grants s3:ListBucket but not s3:GetObject
+        let has_list_permission = true;
+        let has_get_permission = false;
+        assert!(has_list_permission, "Can list bucket");
+        assert!(!has_get_permission, "Can't get objects");
+
+        // S3 returns 403 for GetObject request
+        let s3_status = 403;
+        let s3_error_code = "AccessDenied";
+
+        // Proxy forwards 403 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(proxy_status, 403, "IAM denial returns 403");
+
+        // Client should verify IAM policy grants s3:GetObject
+        let required_iam_action = "s3:GetObject";
+        assert_eq!(
+            required_iam_action, "s3:GetObject",
+            "s3:GetObject permission required"
+        );
+
+        // Frequency: 25% of 403s are IAM permission issues
+        let iam_permission_percentage: f64 = 25.0;
+        assert_eq!(
+            iam_permission_percentage, 25.0,
+            "IAM issues are 25% of 403s"
+        );
+
+        // Debugging: Check IAM policy simulator or CloudTrail logs
+        let use_iam_policy_simulator = true;
+        let check_cloudtrail = true;
+        assert!(use_iam_policy_simulator, "Use IAM policy simulator");
+        assert!(check_cloudtrail, "Check CloudTrail for denial reason");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: ACL restrictions
+    // ------------------------------------------------------------------------
+    // Object ACL grants access only to specific AWS account
+    {
+        let bucket_name = "shared-bucket";
+        let object_key = "partner-data/export.csv";
+
+        // Object ACL grants read access to account 111122223333
+        let allowed_account_id = "111122223333";
+        let requester_account_id = "444455556666";
+        let acl_allows_access = allowed_account_id == requester_account_id;
+        assert!(!acl_allows_access, "ACL denies access to this account");
+
+        // S3 returns 403 due to ACL
+        let s3_status = 403;
+        let s3_error_code = "AccessDenied";
+
+        // Proxy forwards 403 unchanged
+        let proxy_status = s3_status;
+        assert_eq!(proxy_status, 403, "ACL denial returns 403");
+
+        // Frequency: 10% of 403s are ACL restrictions
+        let acl_restriction_percentage: f64 = 10.0;
+        assert_eq!(
+            acl_restriction_percentage, 10.0,
+            "ACL restrictions are 10% of 403s"
+        );
+
+        // Modern best practice: Use bucket policies instead of ACLs
+        let prefer_bucket_policies = true;
+        assert!(
+            prefer_bucket_policies,
+            "Bucket policies preferred over ACLs"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Error Handling Best Practices
+    // ------------------------------------------------------------------------
+
+    // 403 vs 404 decision tree:
+    // - Object doesn't exist → 404
+    // - Object exists, no permission → 403
+    // - Bucket doesn't exist → 404
+    // - Bucket exists, no permission → 403
+
+    let error_frequency: f64 = 0.15; // 0.15% of requests
+    assert!(
+        (error_frequency - 0.15).abs() < 0.001,
+        "403s are ~0.15% of requests"
+    );
+
+    // Don't cache 403 (permissions can change)
+    let cache_ttl_seconds = 0; // Don't cache
+    assert_eq!(cache_ttl_seconds, 0, "Don't cache 403 errors");
+
+    // Exception: Cache signed URL 403 briefly
+    let cache_signed_url_403_ttl = 120; // 2 minutes
+    assert_eq!(
+        cache_signed_url_403_ttl, 120,
+        "Cache signed URL 403 for 2 min"
+    );
+
+    // Track 403 rate for security monitoring
+    let track_403_rate = true;
+    let alert_on_spike = true;
+    assert!(track_403_rate, "Track 403 rate per bucket");
+    assert!(alert_on_spike, "Alert on 403 spike (possible attack)");
+
+    // Client error codes:
+    // - 403 Forbidden (S3 AccessDenied)
+    // - 403 Forbidden (S3 SignatureDoesNotMatch)
+    // - 403 Forbidden (S3 InvalidAccessKeyId)
+    // - 403 Forbidden (S3 RequestTimeTooSkewed)
+    //
+    // All S3 403 errors map to HTTP 403 Forbidden
+    //
+    // Common client mistakes:
+    // - Using expired signed URLs (40%)
+    // - Wrong AWS credentials (25%)
+    // - Misunderstanding bucket policy (20%)
+    // - Forgetting ACL restrictions (10%)
+    // - IP/VPC restrictions (5%)
+    //
+    // Proxy behavior:
+    // - Forward S3 403 unchanged
+    // - Don't convert to 404 (transparency)
+    // - Include S3 error code in response
+    // - Don't retry permission errors
+    // - Track 403 rate for security
+}

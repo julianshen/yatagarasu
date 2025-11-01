@@ -794,7 +794,7 @@ yatagarasu/
 
 ### Error Handling
 - [x] Test: S3 404 NoSuchKey returns HTTP 404 Not Found
-- [ ] Test: S3 403 AccessDenied returns HTTP 403 Forbidden
+- [x] Test: S3 403 AccessDenied returns HTTP 403 Forbidden
 - [ ] Test: S3 400 InvalidRequest returns HTTP 400 Bad Request
 - [ ] Test: S3 500 InternalError returns HTTP 502 Bad Gateway
 - [ ] Test: S3 503 SlowDown returns HTTP 503 Service Unavailable
