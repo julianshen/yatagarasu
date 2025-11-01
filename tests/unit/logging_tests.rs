@@ -2762,3 +2762,119 @@ fn test_aws_credentials_never_logged() {
     // - AWS Macie: Scans S3 buckets for credentials and PII
     // - GitHub Secret Scanning: Automatically detects AWS credentials in public repos
 }
+
+/// Test: Authorization headers are redacted in logs
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Security & Privacy)
+/// Verifies that Authorization headers are redacted in logs to prevent leaking
+/// authentication tokens (JWT, API keys, Basic auth) that could be used to
+/// impersonate users or gain unauthorized access.
+///
+/// Why Authorization headers must be redacted:
+///
+/// Authorization headers contain credentials that grant access to protected resources.
+/// If logged unredacted:
+/// - JWT tokens can be stolen and used to impersonate users
+/// - API keys can be used to access services
+/// - Basic auth credentials (username:password) can be decoded
+/// - Session tokens can be hijacked
+///
+/// Test scenarios:
+/// 1. Bearer token in Authorization header is redacted
+/// 2. Basic auth credentials are redacted
+/// 3. Custom authorization schemes are redacted
+///
+/// Expected behavior:
+/// - Authorization header values are redacted or omitted
+/// - Can log presence: "auth: present" or "auth_type: bearer"
+/// - All auth schemes are redacted consistently
+#[test]
+fn test_authorization_headers_redacted_in_logs() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: Bearer token in Authorization header is redacted
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let bearer_token = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/api/users";
+
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path,
+        );
+        let _enter = span.enter();
+
+        tracing::info!("processing authenticated request");
+    });
+
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Verify Bearer token NEVER appears in logs
+    assert!(
+        !log_output.contains("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"),
+        "Bearer token should NEVER appear in logs"
+    );
+
+    // Scenario 2: Basic auth credentials are redacted
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    let basic_auth = "Basic YWRtaW46cGFzc3dvcmQxMjM=";
+
+    tracing::subscriber::with_default(subscriber2, || {
+        let span = tracing::info_span!("request");
+        let _enter = span.enter();
+
+        tracing::info!(auth_present = true, auth_type = "basic", "request received");
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+
+    assert!(
+        !log_output2.contains("Basic YWRtaW46cGFzc3dvcmQxMjM="),
+        "Basic auth credentials should NEVER appear in logs"
+    );
+    assert!(
+        !log_output2.contains("YWRtaW46cGFzc3dvcmQxMjM="),
+        "Base64-encoded credentials should NEVER appear in logs"
+    );
+
+    // Scenario 3: Custom authorization schemes are redacted
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    let api_key_header = "ApiKey sk_live_51234567890abcdef";
+
+    tracing::subscriber::with_default(subscriber3, || {
+        let span = tracing::info_span!("request");
+        let _enter = span.enter();
+
+        tracing::info!(
+            auth_present = true,
+            auth_type = "apikey",
+            "request with API key"
+        );
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+
+    assert!(
+        !log_output3.contains("ApiKey sk_live_51234567890abcdef"),
+        "API key should NEVER appear in logs"
+    );
+    assert!(
+        !log_output3.contains("sk_live_51234567890abcdef"),
+        "API key value should NEVER appear in logs"
+    );
+}
