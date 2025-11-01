@@ -716,3 +716,103 @@ fn test_jwt_extraction_returns_none_when_bearer_prefix_missing() {
     let extracted_token = extract_bearer_token(context.headers());
     assert!(extracted_token.is_none(), "Should return None when Bearer prefix is missing");
 }
+
+// Test: JWT extracted from query parameter (if configured)
+#[test]
+fn test_jwt_extracted_from_query_parameter() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_query_token;
+    use std::collections::HashMap;
+
+    // Create a request context with JWT token in query parameter
+    let mut query_params = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    query_params.insert("token".to_string(), expected_token.to_string());
+
+    let context = RequestContext::with_query_params(
+        "GET".to_string(),
+        "/private/data.json".to_string(),
+        query_params,
+    );
+
+    // Auth middleware should extract the token from the query parameter
+    let extracted_token = extract_query_token(context.query_params(), "token");
+
+    // Verify the token was successfully extracted
+    assert!(extracted_token.is_some(), "Token should be extracted from query parameter");
+    assert_eq!(
+        extracted_token.unwrap(),
+        expected_token,
+        "Extracted token should match the original token"
+    );
+}
+
+// Test: JWT extraction from query parameter with custom parameter name
+#[test]
+fn test_jwt_extracted_from_query_parameter_custom_name() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_query_token;
+    use std::collections::HashMap;
+
+    // Create request with custom query parameter name "access_token"
+    let mut query_params = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    query_params.insert("access_token".to_string(), expected_token.to_string());
+
+    let context = RequestContext::with_query_params(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        query_params,
+    );
+
+    // Extract with custom parameter name
+    let extracted_token = extract_query_token(context.query_params(), "access_token");
+    assert!(extracted_token.is_some(), "Token should be extracted from custom query parameter");
+    assert_eq!(extracted_token.unwrap(), expected_token);
+}
+
+// Test: JWT extraction returns None when query parameter is missing
+#[test]
+fn test_jwt_extraction_from_query_returns_none_when_missing() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_query_token;
+    use std::collections::HashMap;
+
+    // Create request without the expected query parameter
+    let query_params = HashMap::new();
+    let context = RequestContext::with_query_params(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        query_params,
+    );
+
+    // Token extraction should return None
+    let extracted_token = extract_query_token(context.query_params(), "token");
+    assert!(extracted_token.is_none(), "Should return None when query parameter is missing");
+}
+
+// Test: JWT extraction from query parameter ignores other parameters
+#[test]
+fn test_jwt_extraction_from_query_ignores_other_parameters() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::extract_query_token;
+    use std::collections::HashMap;
+
+    // Create request with multiple query parameters
+    let mut query_params = HashMap::new();
+    let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    query_params.insert("token".to_string(), expected_token.to_string());
+    query_params.insert("foo".to_string(), "bar".to_string());
+    query_params.insert("page".to_string(), "1".to_string());
+
+    let context = RequestContext::with_query_params(
+        "GET".to_string(),
+        "/private/file.txt".to_string(),
+        query_params,
+    );
+
+    // Should extract only the token parameter, ignoring others
+    let extracted_token = extract_query_token(context.query_params(), "token");
+    assert!(extracted_token.is_some(), "Token should be extracted despite other parameters");
+    assert_eq!(extracted_token.unwrap(), expected_token);
+}
