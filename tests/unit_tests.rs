@@ -9,4 +9,5 @@ mod unit {
     mod auth_tests;
     mod server_tests;  // Phase 12: Pingora Server Setup
     mod pipeline_tests;  // Phase 13: Request Pipeline Integration
+    mod error_tests;  // Phase 15: Error Handling & Logging
 }

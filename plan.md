@@ -819,7 +819,7 @@ yatagarasu/
 **Goal**: Comprehensive error handling, structured logging, and request tracing.
 
 ### Centralized Error Handling
-- [ ] Test: Can create ProxyError enum with variants (Config, Auth, S3, Internal)
+- [x] Test: Can create ProxyError enum with variants (Config, Auth, S3, Internal)
 - [ ] Test: Errors convert to HTTP status codes correctly
 - [ ] Test: Error responses use consistent JSON format
 - [ ] Test: 4xx errors include client-friendly messages
