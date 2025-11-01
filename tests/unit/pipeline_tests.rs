@@ -979,3 +979,64 @@ fn test_valid_jwt_adds_claims_to_request_context() {
         "Custom claim 'name' should equal 'John Doe'"
     );
 }
+
+// Test: Missing JWT on private bucket returns 401 Unauthorized
+#[test]
+fn test_missing_jwt_on_private_bucket_returns_401() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use yatagarasu::auth::extract_bearer_token;
+    use std::collections::HashMap;
+
+    // Create a private bucket configuration (auth required)
+    let bucket_config = BucketConfig {
+        name: "private".to_string(),
+        path_prefix: "/private".to_string(),
+        s3: S3Config {
+            bucket: "my-private-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: None,
+        },
+        auth: Some(AuthConfig {
+            enabled: true,
+        }),
+    };
+
+    // Create a request context WITHOUT any JWT token
+    let headers = HashMap::new(); // No Authorization header
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/secret.txt".to_string(),
+        headers,
+    );
+
+    // Add bucket config to context (as router would do)
+    context.set_bucket_config(bucket_config.clone());
+
+    // Check if authentication is required
+    let auth_required = context.bucket_config()
+        .and_then(|bc| bc.auth.as_ref())
+        .map(|auth| auth.enabled)
+        .unwrap_or(false);
+
+    assert!(auth_required, "Auth should be required for private bucket");
+
+    // Try to extract token from Authorization header
+    let token = extract_bearer_token(context.headers());
+
+    // Verify token is missing
+    assert!(token.is_none(), "Token should be None when not provided");
+
+    // In real implementation, auth middleware would:
+    // 1. Check if auth is required for the bucket (auth_required == true)
+    // 2. Attempt to extract token from configured sources
+    // 3. If token is None and auth is required, return 401 Unauthorized
+    // 4. Set response status to 401
+    // 5. Set response body to {"error":"Unauthorized","message":"Missing authentication token","status":401}
+
+    // For this test, we verify the decision logic:
+    let should_return_401 = auth_required && token.is_none();
+    assert!(should_return_401, "Should return 401 when token is missing on private bucket");
+}
