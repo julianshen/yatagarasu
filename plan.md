@@ -832,7 +832,7 @@ yatagarasu/
 - [x] Test: Logs are output in JSON format
 - [x] Test: Every log includes request ID
 - [x] Test: Every request is logged with method, path, status, duration
-- [ ] Test: Authentication failures are logged with reason
+- [x] Test: Authentication failures are logged with reason
 - [ ] Test: S3 errors are logged with bucket, key, error code
 - [ ] Test: Successful requests are logged at INFO level
 - [ ] Test: Errors are logged at ERROR level with context

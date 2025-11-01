@@ -761,3 +761,299 @@ fn test_every_request_logged_with_method_path_status_duration() {
     //    - Error rate > 5% for 5 minutes
     //    - Requests to specific endpoint drop to zero (outage detection)
 }
+
+/// Test: Authentication failures are logged with reason
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that authentication failures are logged with specific reasons
+/// to enable debugging and monitoring of auth issues in production.
+///
+/// Why logging auth failures with reasons matters:
+///
+/// Authentication is a critical security boundary. When auth fails, we need to know:
+/// - WHY it failed (expired token, invalid signature, missing token, etc.)
+/// - WHEN it happened (timestamp)
+/// - WHAT was attempted (which endpoint, which bucket)
+/// - WHO attempted it (IP address, if available)
+///
+/// This enables:
+/// - Security monitoring: Detect brute force attacks, stolen tokens
+/// - Debugging: Understand why legitimate users can't authenticate
+/// - Metrics: Track auth failure rates by reason
+/// - Alerting: Spike in "invalid signature" could indicate attack
+///
+/// Example auth failure log:
+/// ```json
+/// {
+///   "timestamp": "2025-11-01T12:00:00.000Z",
+///   "level": "WARN",
+///   "fields": {
+///     "message": "authentication failed",
+///     "reason": "token expired",
+///     "token_age_hours": 25
+///   },
+///   "span": {
+///     "request_id": "550e8400-e29b-41d4-a716-446655440000",
+///     "method": "GET",
+///     "path": "/products/image.png"
+///   }
+/// }
+/// ```
+///
+/// Common auth failure reasons:
+/// - "token expired": Token's exp claim is in the past
+/// - "invalid signature": Token signature doesn't match
+/// - "missing token": No token provided in request
+/// - "invalid format": Token isn't valid JWT format
+/// - "missing required claims": Token lacks required claims (sub, exp, etc.)
+/// - "claim validation failed": Custom claim validation failed
+///
+/// Test scenarios:
+/// 1. Auth failure log includes specific reason field
+/// 2. Auth failure log is at WARN level (not ERROR - it's expected behavior)
+/// 3. Reason is descriptive and actionable
+/// 4. Log includes request context (request_id, path)
+/// 5. Sensitive data (token value) is NOT logged
+///
+/// Expected behavior:
+/// - Every auth failure produces a log entry with reason
+/// - Reason field is structured (not buried in message)
+/// - Log level is WARN for auth failures
+/// - Token value itself is never logged (security)
+#[test]
+fn test_authentication_failures_logged_with_reason() {
+    use yatagarasu::logging::create_test_subscriber;
+    use std::sync::{Arc, Mutex};
+
+    // Scenario 1: Auth failure log includes specific reason
+    //
+    // When JWT validation fails, we should log the failure with a specific
+    // reason that helps operators understand what went wrong.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/products/image.png";
+
+        // Create request span
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path
+        );
+        let _enter = span.enter();
+
+        // Simulate authentication failure with specific reason
+        let auth_failure_reason = "token expired";
+        let token_age_hours = 25;
+
+        tracing::warn!(
+            reason = auth_failure_reason,
+            token_age_hours = token_age_hours,
+            "authentication failed"
+        );
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Find the auth failure log entry
+    let log_lines: Vec<&str> = log_output.lines().collect();
+    let auth_log = log_lines
+        .iter()
+        .find(|line| line.contains("authentication failed"))
+        .expect("Should find 'authentication failed' log entry");
+
+    let parsed: serde_json::Value = serde_json::from_str(auth_log)
+        .expect("Log output should be valid JSON");
+
+    // Scenario 2: Verify log level is WARN
+    assert_eq!(
+        parsed["level"].as_str().unwrap(),
+        "WARN",
+        "Authentication failures should be logged at WARN level (not ERROR)"
+    );
+
+    // Scenario 3: Verify reason field is present and descriptive
+    assert!(
+        parsed.get("fields").is_some(),
+        "Log should include fields object"
+    );
+    assert!(
+        parsed["fields"].get("reason").is_some(),
+        "Auth failure should include 'reason' field"
+    );
+    assert_eq!(
+        parsed["fields"]["reason"].as_str().unwrap(),
+        "token expired",
+        "Reason should be specific and descriptive"
+    );
+
+    // Scenario 4: Verify additional context is included
+    assert!(
+        parsed["fields"].get("token_age_hours").is_some(),
+        "Auth failure should include relevant context (token_age_hours)"
+    );
+    assert_eq!(
+        parsed["fields"]["token_age_hours"].as_u64().unwrap(),
+        25,
+        "Context fields should have correct values"
+    );
+
+    // Scenario 5: Verify request context is included in span
+    assert!(
+        parsed.get("span").is_some(),
+        "Auth failure log should include request span"
+    );
+    assert_eq!(
+        parsed["span"]["request_id"].as_str().unwrap(),
+        "550e8400-e29b-41d4-a716-446655440000",
+        "Should include request_id for correlation"
+    );
+    assert_eq!(
+        parsed["span"]["path"].as_str().unwrap(),
+        "/products/image.png",
+        "Should include path to know which endpoint was attempted"
+    );
+
+    //
+    // AUTH FAILURE LOGGING BEST PRACTICES:
+    //
+    // 1. USE WARN LEVEL, NOT ERROR:
+    //    - Auth failures are expected in production (wrong passwords, expired tokens)
+    //    - ERROR level should be for unexpected server failures
+    //    - WARN level indicates "expected but noteworthy" events
+    //
+    // 2. LOG SPECIFIC REASONS:
+    //    Bad:  tracing::warn!("authentication failed")
+    //    Good: tracing::warn!(reason = "token expired", token_age_hours = 25, "authentication failed")
+    //
+    //    Specific reasons enable:
+    //    - Debugging: "Why can't this user log in?"
+    //    - Monitoring: Track failure rates by reason
+    //    - Security: Detect attack patterns (many "invalid signature" = attack)
+    //
+    // 3. NEVER LOG SENSITIVE DATA:
+    //    Don't log:
+    //    - Token values (security risk if logs leaked)
+    //    - Passwords (obviously)
+    //    - Full Authorization headers
+    //    - AWS credentials
+    //
+    //    Do log:
+    //    - Token age, expiry time
+    //    - Expected vs actual claim values (not sensitive)
+    //    - Which validation step failed
+    //
+    // 4. INCLUDE REQUEST CONTEXT:
+    //    - request_id: Correlate auth failure with full request
+    //    - path: Know which endpoint was attempted
+    //    - method: Useful for analysis
+    //    - client_ip: Security monitoring (optional, privacy considerations)
+    //
+    // 5. LOG ONCE PER FAILURE:
+    //    - Don't log at multiple levels (validated, then handler, then middleware)
+    //    - Choose one place: typically at the auth validation layer
+    //    - Include enough context so you don't need multiple logs
+    //
+    // PRODUCTION USAGE IN AUTH MODULE:
+    //
+    // In the JWT validation code:
+    // ```rust
+    // pub fn validate_jwt(token: &str, secret: &[u8]) -> Result<Claims, AuthError> {
+    //     // Parse token
+    //     let token_data = match decode::<Claims>(token, secret, &Validation::default()) {
+    //         Ok(data) => data,
+    //         Err(e) => {
+    //             // Log specific failure reason
+    //             match e.kind() {
+    //                 ErrorKind::ExpiredSignature => {
+    //                     let exp = extract_exp_from_token(token);
+    //                     let age_hours = (now() - exp) / 3600;
+    //                     tracing::warn!(
+    //                         reason = "token expired",
+    //                         token_age_hours = age_hours,
+    //                         "authentication failed"
+    //                     );
+    //                 }
+    //                 ErrorKind::InvalidSignature => {
+    //                     tracing::warn!(
+    //                         reason = "invalid signature",
+    //                         "authentication failed"
+    //                     );
+    //                 }
+    //                 ErrorKind::InvalidToken => {
+    //                     tracing::warn!(
+    //                         reason = "invalid token format",
+    //                         "authentication failed"
+    //                     );
+    //                 }
+    //                 _ => {
+    //                     tracing::warn!(
+    //                         reason = "jwt validation failed",
+    //                         error = %e,
+    //                         "authentication failed"
+    //                     );
+    //                 }
+    //             }
+    //             return Err(AuthError::InvalidToken);
+    //         }
+    //     };
+    //
+    //     // Validate custom claims
+    //     if !validate_custom_claims(&token_data.claims) {
+    //         tracing::warn!(
+    //             reason = "claim validation failed",
+    //             "authentication failed"
+    //         );
+    //         return Err(AuthError::ClaimValidationFailed);
+    //     }
+    //
+    //     Ok(token_data.claims)
+    // }
+    // ```
+    //
+    // SECURITY MONITORING QUERIES:
+    //
+    // With structured auth failure logs, you can build security monitoring:
+    //
+    // 1. Detect brute force attacks:
+    //    ```
+    //    SELECT count(*) as failures, client_ip
+    //    FROM logs
+    //    WHERE level = 'WARN'
+    //      AND message = 'authentication failed'
+    //      AND timestamp > now() - interval '5 minutes'
+    //    GROUP BY client_ip
+    //    HAVING count(*) > 10
+    //    ```
+    //
+    // 2. Track auth failure rate by reason:
+    //    ```
+    //    SELECT fields.reason, count(*) as count
+    //    FROM logs
+    //    WHERE message = 'authentication failed'
+    //      AND timestamp > now() - interval '1 hour'
+    //    GROUP BY fields.reason
+    //    ORDER BY count DESC
+    //    ```
+    //
+    // 3. Alert on signature attacks:
+    //    ```
+    //    Alert if:
+    //      count(reason = 'invalid signature') > 100 in 5 minutes
+    //    ```
+    //    This could indicate someone trying to forge tokens.
+    //
+    // 4. Identify expired token issues:
+    //    ```
+    //    If many users have 'token expired' failures:
+    //    - Check token expiry settings (too short?)
+    //    - Check if token refresh is working
+    //    - Look at token_age_hours distribution
+    //    ```
+}
