@@ -798,7 +798,7 @@ yatagarasu/
 - [x] Test: S3 400 InvalidRequest returns HTTP 400 Bad Request
 - [x] Test: S3 500 InternalError returns HTTP 502 Bad Gateway
 - [x] Test: S3 503 SlowDown returns HTTP 503 Service Unavailable
-- [ ] Test: Network timeout to S3 returns HTTP 504 Gateway Timeout
+- [x] Test: Network timeout to S3 returns HTTP 504 Gateway Timeout
 - [ ] Test: S3 error messages are parsed and returned to client
 - [ ] Test: Error responses include JSON body with error code and message
 

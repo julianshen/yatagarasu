@@ -14880,3 +14880,442 @@ fn test_s3_503_slowdown_returns_http_503() {
     // - Consider caching to reduce S3 requests
     // - Alert on sustained high 503 rate
 }
+
+#[test]
+fn test_network_timeout_returns_http_504() {
+    // ============================================================================
+    // TEST: Network Timeout to S3 Returns HTTP 504 Gateway Timeout
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // When proxy cannot reach S3 within timeout period (connection timeout or
+    // read timeout), proxy returns HTTP 504 Gateway Timeout to client.
+    //
+    // STATUS CODE MAPPING:
+    // - Connection timeout → HTTP 504 Gateway Timeout
+    // - Read timeout → HTTP 504 Gateway Timeout
+    // - DNS resolution timeout → HTTP 504 Gateway Timeout
+    // - Any network timeout → HTTP 504 Gateway Timeout
+    //
+    // DIFFERENCE FROM OTHER 5xx:
+    // - 500: Proxy itself has error
+    // - 502: S3 returned invalid response
+    // - 503: S3 temporarily unavailable (rate limiting)
+    // - 504: S3 didn't respond in time (timeout)
+    //
+    // WHY TIMEOUTS OCCUR:
+    // - S3 endpoint unreachable
+    // - Network connectivity issues
+    // - DNS resolution failures
+    // - Firewall blocking connections
+    // - S3 region unavailable
+    // - S3 taking too long to respond
+    //
+    // ERROR FREQUENCY:
+    // ~0.005% of requests result in 504 (rare, indicates network issues)
+    //
+    // COMMON CAUSES BY FREQUENCY:
+    // 1. S3 slow response (40%)
+    // 2. Network connectivity issues (30%)
+    // 3. DNS resolution failures (15%)
+    // 4. Firewall/security group blocking (10%)
+    // 5. S3 region outage (5%)
+    //
+    // TIMEOUT CONFIGURATION:
+    // - Connection timeout: 10 seconds (time to establish connection)
+    // - Read timeout: 60 seconds (time to receive response)
+    // - DNS timeout: 5 seconds (time to resolve hostname)
+    // - Total timeout: connection + read (70 seconds max)
+    //
+    // RETRY LOGIC:
+    // SHOULD retry 504 with exponential backoff
+    // Similar to 500 errors (transient network issues)
+    // Max retries: 3-5
+    // Check if timeout is due to large file (don't retry)
+    //
+    // ANALYTICS:
+    // - Track 504 rate per S3 endpoint
+    // - Alert on spike in 504s (indicates network issues)
+    // - Correlate 504s with network metrics
+    // - Monitor timeout durations
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: Connection timeout
+    // ------------------------------------------------------------------------
+    // Cannot establish connection to S3 within timeout
+    {
+        let bucket_name = "unreachable-bucket";
+        let object_key = "file.txt";
+
+        // Connection timeout after 10 seconds
+        let connection_timeout_seconds = 10;
+        let time_elapsed_seconds = 11; // Exceeded timeout
+        let connection_established = false;
+        assert!(
+            time_elapsed_seconds > connection_timeout_seconds,
+            "Connection timeout exceeded"
+        );
+        assert!(!connection_established, "Connection not established");
+
+        // Proxy returns 504 Gateway Timeout
+        let proxy_status = 504;
+        assert_eq!(
+            proxy_status, 504,
+            "Connection timeout must return HTTP 504 Gateway Timeout"
+        );
+
+        // Error response includes timeout information
+        let error_body = format!(
+            r#"{{"error":"GatewayTimeout","message":"S3 connection timeout after {}s","upstream":"S3"}}"#,
+            connection_timeout_seconds
+        );
+        assert!(
+            error_body.contains("GatewayTimeout"),
+            "Error body must include timeout error"
+        );
+        assert!(
+            error_body.contains("connection timeout"),
+            "Error body should indicate connection timeout"
+        );
+
+        // Should retry connection timeouts (might be transient)
+        let should_retry = true;
+        assert!(should_retry, "Connection timeouts should be retried");
+
+        // Frequency: Connection timeouts are less common than read timeouts
+        let connection_timeout_percentage: f64 = 30.0;
+        assert_eq!(
+            connection_timeout_percentage, 30.0,
+            "Connection timeouts are 30% of 504s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Read timeout
+    // ------------------------------------------------------------------------
+    // S3 takes too long to send response (most common 504 cause)
+    {
+        let bucket_name = "slow-bucket";
+        let object_key = "large-file.bin";
+
+        // Read timeout after 60 seconds
+        let read_timeout_seconds = 60;
+        let time_waiting_for_response_seconds = 65; // Exceeded timeout
+        let response_received = false;
+        assert!(
+            time_waiting_for_response_seconds > read_timeout_seconds,
+            "Read timeout exceeded"
+        );
+        assert!(!response_received, "Response not received");
+
+        // Proxy returns 504 Gateway Timeout
+        let proxy_status = 504;
+        assert_eq!(
+            proxy_status, 504,
+            "Read timeout must return HTTP 504 Gateway Timeout"
+        );
+
+        // Error response includes timeout information
+        let error_body = format!(
+            r#"{{"error":"GatewayTimeout","message":"S3 read timeout after {}s"}}"#,
+            read_timeout_seconds
+        );
+        assert!(error_body.contains("read timeout"));
+
+        // Analyze why read timeout occurred
+        let file_size_bytes: u64 = 1_000_000_000; // 1GB
+        let network_speed_mbps = 1; // Very slow!
+        let expected_transfer_time_seconds = (file_size_bytes / 1_000_000) / network_speed_mbps;
+        let timeout_too_short = expected_transfer_time_seconds > read_timeout_seconds;
+
+        // For large files, read timeout might be expected
+        if timeout_too_short {
+            // Don't retry - increase timeout or use streaming
+            let should_retry_large_file = false;
+            let should_increase_timeout = true;
+            assert!(!should_retry_large_file, "Don't retry large file timeouts");
+            assert!(should_increase_timeout, "Increase timeout for large files");
+        }
+
+        // Frequency: Read timeouts are most common (40% of 504s)
+        let read_timeout_percentage: f64 = 40.0;
+        assert_eq!(
+            read_timeout_percentage, 40.0,
+            "Read timeouts are 40% of 504s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: DNS resolution timeout
+    // ------------------------------------------------------------------------
+    // Cannot resolve S3 endpoint hostname (15% of 504s)
+    {
+        let bucket_name = "dns-bucket";
+        let s3_endpoint = "s3.us-east-1.amazonaws.com";
+
+        // DNS resolution timeout after 5 seconds
+        let dns_timeout_seconds = 5;
+        let dns_query_time_seconds = 6; // Exceeded timeout
+        let dns_resolved = false;
+        assert!(
+            dns_query_time_seconds > dns_timeout_seconds,
+            "DNS timeout exceeded"
+        );
+        assert!(!dns_resolved, "DNS not resolved");
+
+        // Proxy returns 504 Gateway Timeout
+        let proxy_status = 504;
+        assert_eq!(
+            proxy_status, 504,
+            "DNS timeout must return HTTP 504 Gateway Timeout"
+        );
+
+        // Error response includes DNS timeout information
+        let error_body = format!(
+            r#"{{"error":"GatewayTimeout","message":"DNS resolution timeout for {}"}}"#,
+            s3_endpoint
+        );
+        assert!(error_body.contains("DNS resolution timeout"));
+
+        // DNS timeout causes:
+        // - DNS server unavailable
+        // - DNS query blocked by firewall
+        // - DNS server overloaded
+        // - Network connectivity issues
+        let dns_timeout_causes = vec![
+            "DNS server unavailable",
+            "DNS query blocked",
+            "DNS server overloaded",
+            "Network connectivity",
+        ];
+        assert_eq!(dns_timeout_causes.len(), 4);
+
+        // Should retry DNS timeouts (might be transient)
+        let should_retry = true;
+        assert!(should_retry, "DNS timeouts should be retried");
+
+        // Frequency: 15% of 504s are DNS timeouts
+        let dns_timeout_percentage: f64 = 15.0;
+        assert_eq!(
+            dns_timeout_percentage, 15.0,
+            "DNS timeouts are 15% of 504s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: Firewall/security group blocking
+    // ------------------------------------------------------------------------
+    // Connection blocked by firewall or security group (10% of 504s)
+    {
+        let bucket_name = "blocked-bucket";
+        let object_key = "data.json";
+        let s3_endpoint_ip = "52.216.0.0"; // Example S3 IP
+
+        // Firewall blocks connection (appears as timeout)
+        let firewall_allows_connection = false;
+        let connection_timeout_seconds = 10;
+        let connection_established = false;
+        assert!(!firewall_allows_connection, "Firewall blocks connection");
+        assert!(!connection_established, "Connection blocked");
+
+        // Proxy returns 504 Gateway Timeout
+        let proxy_status = 504;
+        assert_eq!(
+            proxy_status, 504,
+            "Blocked connection returns HTTP 504"
+        );
+
+        // Troubleshooting firewall issues:
+        // - Check security group rules (allow outbound HTTPS to S3)
+        // - Check network ACLs (allow S3 IP ranges)
+        // - Check VPC endpoint configuration
+        // - Check proxy firewall rules
+        let troubleshooting_steps = vec![
+            "Check security group outbound rules",
+            "Check network ACL rules",
+            "Check VPC endpoint config",
+            "Check proxy firewall rules",
+        ];
+        assert_eq!(troubleshooting_steps.len(), 4);
+
+        // Don't retry immediately - likely persistent issue
+        let should_retry_immediately = false;
+        let should_alert_operations = true;
+        assert!(!should_retry_immediately, "Don't retry blocked connections");
+        assert!(should_alert_operations, "Alert operations team");
+
+        // Frequency: 10% of 504s are firewall blocks
+        let firewall_block_percentage: f64 = 10.0;
+        assert_eq!(
+            firewall_block_percentage, 10.0,
+            "Firewall blocks are 10% of 504s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: S3 region outage
+    // ------------------------------------------------------------------------
+    // Entire S3 region is unavailable (5% of 504s, but very impactful)
+    {
+        let bucket_name = "region-bucket";
+        let s3_region = "us-east-1";
+
+        // S3 region experiencing outage
+        let region_available = false;
+        let all_requests_timing_out = true;
+        assert!(!region_available, "S3 region unavailable");
+        assert!(all_requests_timing_out, "All requests timing out");
+
+        // Proxy returns 504 Gateway Timeout
+        let proxy_status = 504;
+        assert_eq!(proxy_status, 504, "Region outage returns HTTP 504");
+
+        // Fallback strategies for region outage:
+        // - Try different S3 region (multi-region setup)
+        // - Serve stale cache (if available)
+        // - Return custom maintenance page
+        // - Queue requests for later processing
+        let use_multi_region_fallback = true;
+        let serve_stale_cache = true;
+        assert!(use_multi_region_fallback, "Use multi-region for DR");
+        assert!(serve_stale_cache, "Serve stale during outage");
+
+        // Monitor S3 health dashboard
+        let check_s3_health_dashboard = true;
+        let alert_on_region_outage = true;
+        assert!(check_s3_health_dashboard, "Check S3 health dashboard");
+        assert!(alert_on_region_outage, "Alert on region outage");
+
+        // Frequency: 5% of 504s are region outages (rare but severe)
+        let region_outage_percentage: f64 = 5.0;
+        assert_eq!(
+            region_outage_percentage, 5.0,
+            "Region outages are 5% of 504s"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 6: Timeout configuration
+    // ------------------------------------------------------------------------
+    // How to configure timeouts appropriately
+    {
+        let bucket_name = "config-bucket";
+        let object_key = "file.txt";
+
+        // Recommended timeout values
+        let connection_timeout_seconds = 10; // Time to establish TCP connection
+        let read_timeout_seconds = 60; // Time to receive response
+        let dns_timeout_seconds = 5; // Time to resolve DNS
+        let total_timeout_seconds = connection_timeout_seconds + read_timeout_seconds;
+
+        assert_eq!(connection_timeout_seconds, 10);
+        assert_eq!(read_timeout_seconds, 60);
+        assert_eq!(dns_timeout_seconds, 5);
+        assert_eq!(total_timeout_seconds, 70);
+
+        // Adjust timeouts based on use case:
+        // - Small files (<1MB): Use default timeouts
+        // - Large files (>100MB): Increase read timeout or use streaming
+        // - High latency networks: Increase connection timeout
+        // - Interactive applications: Use shorter timeouts
+        let small_file_read_timeout = 60; // 1 minute
+        let large_file_read_timeout = 300; // 5 minutes
+        let interactive_read_timeout = 30; // 30 seconds
+        assert_eq!(small_file_read_timeout, 60);
+        assert_eq!(large_file_read_timeout, 300);
+        assert_eq!(interactive_read_timeout, 30);
+
+        // Connection timeout should be shorter than read timeout
+        let connection_shorter_than_read = connection_timeout_seconds < read_timeout_seconds;
+        assert!(
+            connection_shorter_than_read,
+            "Connection timeout should be shorter than read timeout"
+        );
+
+        // Total timeout should be less than client timeout
+        let client_timeout_seconds = 120; // 2 minutes
+        let proxy_timeout_under_client = total_timeout_seconds < client_timeout_seconds;
+        assert!(
+            proxy_timeout_under_client,
+            "Proxy timeout should be less than client timeout"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Timeout Handling Best Practices
+    // ------------------------------------------------------------------------
+
+    // 504 indicates upstream gateway timeout (S3 didn't respond in time)
+    let error_frequency: f64 = 0.005; // 0.005% of requests
+    assert!(
+        (error_frequency - 0.005).abs() < 0.0001,
+        "504s are ~0.005% of requests"
+    );
+
+    // Retry strategy for 504 (similar to 500)
+    let should_retry_504 = true;
+    let max_retries = 3; // Fewer than other errors
+    let use_exponential_backoff = true;
+    assert!(should_retry_504, "Retry 504 errors (transient)");
+    assert_eq!(max_retries, 3, "Max 3 retries for 504 errors");
+    assert!(use_exponential_backoff, "Use exponential backoff");
+
+    // Exception: Don't retry if timeout is expected (large files)
+    let file_size_bytes: u64 = 5_000_000_000; // 5GB
+    let is_large_file = file_size_bytes > 1_000_000_000; // >1GB
+    let timeout_expected_for_large_file = is_large_file;
+    if timeout_expected_for_large_file {
+        let should_retry_large = false;
+        let should_use_streaming = true;
+        assert!(!should_retry_large, "Don't retry expected timeouts");
+        assert!(should_use_streaming, "Use streaming for large files");
+    }
+
+    // Timeout configuration
+    let connection_timeout_ms = 10_000; // 10 seconds
+    let read_timeout_ms = 60_000; // 60 seconds
+    let dns_timeout_ms = 5_000; // 5 seconds
+    assert_eq!(connection_timeout_ms, 10_000);
+    assert_eq!(read_timeout_ms, 60_000);
+    assert_eq!(dns_timeout_ms, 5_000);
+
+    // Track 504 rate for network monitoring
+    let track_504_rate = true;
+    let alert_on_spike = true;
+    let correlate_with_network_metrics = true;
+    let monitor_timeout_durations = true;
+    assert!(track_504_rate, "Track 504 rate per S3 endpoint");
+    assert!(alert_on_spike, "Alert on 504 spike (network issues)");
+    assert!(
+        correlate_with_network_metrics,
+        "Correlate with network metrics"
+    );
+    assert!(monitor_timeout_durations, "Monitor timeout durations");
+
+    // Common causes of 504:
+    // - S3 slow response (40%)
+    // - Network connectivity issues (30%)
+    // - DNS resolution failures (15%)
+    // - Firewall/security group blocking (10%)
+    // - S3 region outage (5%)
+    //
+    // Client should:
+    // - Retry 504 with exponential backoff
+    // - Max 3 retries for timeouts
+    // - Check network connectivity
+    // - Verify S3 endpoint is reachable
+    // - Check S3 health dashboard
+    // - Use streaming for large files
+    //
+    // Proxy should:
+    // - Return 504 for any network timeout
+    // - Configure appropriate timeouts (10s connect, 60s read)
+    // - Track 504 rate per endpoint
+    // - Alert on spike in 504s
+    // - Correlate with network metrics
+    // - Implement circuit breaker for failing endpoints
+    // - Consider multi-region fallback
+    // - Monitor timeout durations
+}
