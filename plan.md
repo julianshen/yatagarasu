@@ -828,7 +828,7 @@ yatagarasu/
 - [x] Test: Stack traces only in logs, never in responses
 
 ### Structured Logging
-- [ ] Test: Can initialize tracing subscriber
+- [x] Test: Can initialize tracing subscriber
 - [ ] Test: Logs are output in JSON format
 - [ ] Test: Every log includes request ID
 - [ ] Test: Every request is logged with method, path, status, duration
