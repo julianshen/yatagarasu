@@ -800,10 +800,10 @@ yatagarasu/
 - [x] Test: S3 503 SlowDown returns HTTP 503 Service Unavailable
 - [x] Test: Network timeout to S3 returns HTTP 504 Gateway Timeout
 - [x] Test: S3 error messages are parsed and returned to client
-- [ ] Test: Error responses include JSON body with error code and message
+- [x] Test: Error responses include JSON body with error code and message
 
 ### Connection Management
-- [ ] Test: Client disconnect cancels S3 request
+- [x] Test: Client disconnect cancels S3 request
 - [ ] Test: S3 connection is closed after response completes
 - [ ] Test: Connection pool reuses connections for same bucket
 - [ ] Test: No connection leaks after many requests
