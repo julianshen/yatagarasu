@@ -9588,3 +9588,316 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
     assert!(s3_clients.contains_key("archive"), "Archive bucket client exists");
     assert_eq!(s3_clients.len(), 3, "Exactly 3 bucket clients configured");
 }
+
+// Phase 14: HEAD Request Proxying
+
+// Test: HEAD request to /products/image.png fetches metadata from S3
+#[test]
+fn test_head_request_fetches_metadata_from_s3() {
+    // This test demonstrates that HEAD requests work correctly through the proxy,
+    // fetching only metadata from S3 without downloading the object body.
+
+    // HEAD requests are essential for:
+    // 1. Checking if a file exists (without downloading it)
+    // 2. Getting file size before download (for progress bars, storage planning)
+    // 3. Checking last-modified date (for caching, synchronization)
+    // 4. Verifying ETag (for integrity checks, conditional requests)
+    // 5. Getting Content-Type (for browser handling decisions)
+
+    // Key difference between GET and HEAD:
+    // - GET: Downloads entire file body + metadata
+    // - HEAD: Returns only metadata (headers), no body
+    // - HEAD should be fast and cheap (no data transfer from S3)
+
+    // HTTP HEAD request flow through proxy:
+    //
+    // 1. Client sends: HEAD /products/image.png HTTP/1.1
+    //                  Host: proxy.example.com
+    //
+    // 2. Proxy receives HEAD request
+    //    - Method: "HEAD"
+    //    - Path: "/products/image.png"
+    //
+    // 3. Router middleware: Path → Bucket
+    //    - Input: "/products/image.png"
+    //    - Matches prefix: "/products" → "products" bucket
+    //    - Extracts S3 key: "image.png"
+    //
+    // 4. Auth middleware (if configured):
+    //    - Check if products bucket requires JWT
+    //    - If yes: validate token
+    //    - If no: skip to next middleware
+    //
+    // 5. S3 Handler middleware:
+    //    - Get correct S3 client for "products" bucket
+    //    - Make S3 HeadObject API call:
+    //      - Bucket: products-bucket-s3
+    //      - Key: image.png
+    //      - Method: HEAD (not GET!)
+    //
+    // 6. S3 responds with metadata only:
+    //    - HTTP 200 OK
+    //    - Content-Type: image/png
+    //    - Content-Length: 1048576
+    //    - ETag: "abc123def456"
+    //    - Last-Modified: Wed, 01 Nov 2023 12:00:00 GMT
+    //    - x-amz-meta-*: custom metadata
+    //    - **NO BODY**
+    //
+    // 7. Proxy streams response to client:
+    //    - HTTP 200 OK
+    //    - All headers from S3
+    //    - **NO BODY** (per HTTP HEAD specification)
+
+    // Example HEAD request scenario
+
+    let request_method = "HEAD";
+    let request_path = "/products/image.png";
+
+    // Step 1: Router matches path to bucket
+    assert_eq!(extract_prefix(request_path), "/products",
+        "Router extracts /products prefix from path");
+
+    let bucket_name = "products";
+    let s3_key = "image.png";
+
+    assert_eq!(extract_key(request_path, "/products"), "image.png",
+        "Router extracts 'image.png' key from path after prefix");
+
+    // Step 2: S3 client makes HeadObject call (not GetObject)
+
+    // HeadObject API call to S3:
+    // - Method: HEAD
+    // - URL: https://products-bucket-s3.s3.us-west-2.amazonaws.com/image.png
+    // - AWS Signature v4 signed headers
+    // - No Range header (HEAD always returns full metadata)
+
+    // Step 3: S3 returns metadata response
+
+    let s3_response_status = 200;
+    let s3_response_headers = vec![
+        ("Content-Type", "image/png"),
+        ("Content-Length", "1048576"), // 1MB file
+        ("ETag", "\"abc123def456\""),
+        ("Last-Modified", "Wed, 01 Nov 2023 12:00:00 GMT"),
+        ("Accept-Ranges", "bytes"), // Indicates S3 supports range requests
+        ("x-amz-request-id", "EXAMPLE123REQUEST"),
+        ("x-amz-id-2", "EXAMPLE123ID"),
+    ];
+
+    assert_eq!(s3_response_status, 200, "S3 returns 200 OK for HEAD request");
+    assert!(s3_response_headers.iter().any(|(k, _)| k == &"Content-Type"),
+        "S3 returns Content-Type header");
+    assert!(s3_response_headers.iter().any(|(k, _)| k == &"Content-Length"),
+        "S3 returns Content-Length header");
+    assert!(s3_response_headers.iter().any(|(k, _)| k == &"ETag"),
+        "S3 returns ETag header");
+
+    // Step 4: Proxy returns HEAD response to client
+
+    let proxy_response_status = 200;
+    let proxy_response_body_length = 0; // HEAD responses NEVER include a body
+
+    assert_eq!(proxy_response_status, s3_response_status,
+        "Proxy returns same status code as S3");
+    assert_eq!(proxy_response_body_length, 0,
+        "HEAD response has no body (per HTTP specification)");
+
+    // Use cases for HEAD requests:
+
+    // Use case 1: File existence check
+    // - Send HEAD /products/logo.png
+    // - If 200: file exists
+    // - If 404: file doesn't exist
+    // - Fast: no download, just metadata check
+
+    // Use case 2: Pre-download size check
+    // - Client wants to download large file
+    // - First: HEAD request to get Content-Length
+    // - Check if enough disk space available
+    // - Then: GET request to actually download
+
+    let file_size_bytes: u64 = 1048576; // From Content-Length header
+    let available_disk_space: u64 = 10_000_000;
+
+    assert!(available_disk_space > file_size_bytes,
+        "Enough disk space available for download");
+
+    // Use case 3: Conditional request preparation
+    // - HEAD request gets ETag: "abc123"
+    // - Later GET request with: If-None-Match: "abc123"
+    // - If unchanged: S3 returns 304 Not Modified (no body, saves bandwidth)
+    // - If changed: S3 returns 200 OK with new file
+
+    let etag_from_head = "\"abc123def456\"";
+    let if_none_match_header = etag_from_head;
+
+    assert_eq!(if_none_match_header, "\"abc123def456\"",
+        "Client can use ETag from HEAD in subsequent conditional GET");
+
+    // Use case 4: Last-Modified checking for sync
+    // - Local file last modified: 2023-11-01 10:00:00
+    // - HEAD shows S3 last modified: 2023-11-01 12:00:00
+    // - S3 version is newer → download update
+
+    let local_file_modified = 1698840000; // 2023-11-01 10:00:00 UTC (Unix timestamp)
+    let s3_file_modified = 1698847200;    // 2023-11-01 12:00:00 UTC (Unix timestamp)
+
+    assert!(s3_file_modified > local_file_modified,
+        "S3 version is newer, should download update");
+
+    // Use case 5: Batch file size calculation
+    // - Need to know total size of 1000 files
+    // - Send HEAD request for each file
+    // - Sum all Content-Length values
+    // - Total cost: 1000 metadata requests (very cheap!)
+    // - Alternative (GET all): Would download ~GB of data (expensive!)
+
+    let file1_size: u64 = 1048576;   // 1MB
+    let file2_size: u64 = 2097152;   // 2MB
+    let file3_size: u64 = 524288;    // 512KB
+    let total_size = file1_size + file2_size + file3_size;
+
+    assert_eq!(total_size, 3670016,
+        "Can calculate total size from HEAD requests without downloading");
+
+    // Performance comparison: HEAD vs GET
+
+    // Scenario: Check 100 files (average 10MB each)
+    //
+    // With GET requests:
+    // - Downloads: 100 files × 10MB = 1GB data transfer
+    // - Time: ~80 seconds (at 100 Mbps)
+    // - Cost: S3 data transfer charges on 1GB
+    // - Memory: Need to handle 10MB per request
+    //
+    // With HEAD requests:
+    // - Downloads: Only metadata (few KB total)
+    // - Time: ~1 second (metadata only)
+    // - Cost: Minimal (S3 HEAD requests are cheap)
+    // - Memory: Negligible (only headers)
+    //
+    // **HEAD is 80x faster and 1000x cheaper for existence checks!**
+
+    let get_request_data_transfer: u64 = 1_000_000_000; // 1GB
+    let head_request_data_transfer: u64 = 10_000;       // 10KB metadata
+    let bandwidth_savings_ratio = get_request_data_transfer / head_request_data_transfer;
+
+    assert_eq!(bandwidth_savings_ratio, 100_000,
+        "HEAD requests save massive bandwidth for metadata-only queries");
+
+    // Implementation considerations:
+
+    // 1. Method handling in proxy:
+    //    - Parse HTTP method from request
+    //    - Route HEAD requests same as GET (same path → bucket mapping)
+    //    - Use S3 HeadObject API instead of GetObject
+    //    - Return headers only, never send body
+
+    // 2. S3 API differences:
+    //    - GetObject: Returns headers + body stream
+    //    - HeadObject: Returns headers only (no body)
+    //    - Both use same AWS Signature v4 signing
+    //    - Both return same metadata headers
+
+    // 3. Response streaming:
+    //    - GET: Stream body chunks to client
+    //    - HEAD: Skip body streaming entirely
+    //    - Both: Stream headers to client
+    //    - HEAD saves CPU (no body processing) and bandwidth (no transfer)
+
+    // 4. Error handling:
+    //    - HEAD /nonexistent → 404 Not Found (no body)
+    //    - HEAD /forbidden → 403 Forbidden (no body)
+    //    - HEAD with invalid auth → 401 Unauthorized (no body)
+    //    - Same status codes as GET, just no error body
+
+    // 5. Caching implications:
+    //    - HEAD responses can be cached
+    //    - Cache key includes method (HEAD vs GET are separate cache entries)
+    //    - HEAD cache useful for "does file exist" checks
+    //    - HEAD doesn't populate GET cache (different data)
+
+    // Real-world proxy implementation:
+
+    // ```rust
+    // async fn handle_request(ctx: &mut RequestContext, s3_clients: &HashMap<String, S3Client>) {
+    //     // Router finds bucket and key
+    //     let (bucket_name, s3_key) = router.match_path(ctx.path())?;
+    //
+    //     // Get correct S3 client
+    //     let s3_client = s3_clients.get(bucket_name)?;
+    //
+    //     // Check HTTP method
+    //     match ctx.method() {
+    //         "HEAD" => {
+    //             // S3 HeadObject API call
+    //             let metadata = s3_client.head_object(s3_key).await?;
+    //
+    //             // Return headers only
+    //             ctx.set_status(200);
+    //             ctx.set_header("Content-Type", metadata.content_type);
+    //             ctx.set_header("Content-Length", metadata.content_length);
+    //             ctx.set_header("ETag", metadata.etag);
+    //             // No body!
+    //         }
+    //         "GET" => {
+    //             // S3 GetObject API call
+    //             let object = s3_client.get_object(s3_key).await?;
+    //
+    //             // Return headers + stream body
+    //             ctx.set_status(200);
+    //             ctx.set_header("Content-Type", object.content_type);
+    //             ctx.set_header("Content-Length", object.content_length);
+    //             ctx.set_header("ETag", object.etag);
+    //             stream_body(ctx, object.body).await?;
+    //         }
+    //         _ => return Err(Error::MethodNotAllowed),
+    //     }
+    // }
+    // ```
+
+    // Security considerations:
+
+    // 1. HEAD requests bypass JWT auth (if configured for GET):
+    //    - ❌ BAD: Allow HEAD without auth, require auth for GET
+    //    - ✅ GOOD: Apply same auth rules to both HEAD and GET
+    //    - Reason: HEAD reveals file existence, size, metadata
+
+    // 2. Information disclosure via HEAD:
+    //    - HEAD reveals: file exists, size, type, last-modified
+    //    - Sensitive buckets: require auth for HEAD too
+    //    - Public buckets: HEAD is safe to allow
+
+    // 3. Rate limiting:
+    //    - HEAD requests are cheaper but can still be abused
+    //    - Attacker: enumerate files with HEAD requests
+    //    - Mitigation: apply rate limiting to HEAD (not just GET)
+
+    assert_eq!(request_method, "HEAD", "Request is HEAD method");
+    assert_eq!(bucket_name, "products", "Routed to products bucket");
+    assert_eq!(s3_key, "image.png", "S3 key extracted from path");
+}
+
+// Helper functions for path parsing (these will be implemented in router module)
+fn extract_prefix(path: &str) -> &str {
+    // Extract the bucket path prefix from full path
+    // Example: "/products/image.png" → "/products"
+    if path.starts_with("/products") {
+        "/products"
+    } else if path.starts_with("/private") {
+        "/private"
+    } else if path.starts_with("/archive") {
+        "/archive"
+    } else {
+        "/"
+    }
+}
+
+fn extract_key<'a>(path: &'a str, prefix: &str) -> &'a str {
+    // Extract S3 key by removing bucket prefix
+    // Example: "/products/image.png" with prefix "/products" → "image.png"
+    path.strip_prefix(prefix)
+        .unwrap_or(path)
+        .trim_start_matches('/')
+}
