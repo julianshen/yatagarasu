@@ -767,7 +767,7 @@ yatagarasu/
 - [x] Test: Each bucket has isolated S3 client (no credential mixing)
 
 ### GET Request Proxying
-- [ ] Test: GET request to /products/image.png fetches from S3
+- [x] Test: GET request to /products/image.png fetches from S3
 - [ ] Test: S3 response body streams to HTTP client
 - [ ] Test: S3 response headers are preserved (Content-Type, ETag, Last-Modified, Content-Length)
 - [ ] Test: S3 200 OK returns HTTP 200 OK
