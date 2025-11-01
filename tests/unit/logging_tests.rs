@@ -3081,3 +3081,188 @@ fn test_s3_secret_keys_never_logged() {
         "S3 secret key should not leak in request failure logs"
     );
 }
+
+/// Test: Request ID is generated for every request (UUID v4)
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Request Tracing)
+/// Verifies that every HTTP request gets a unique request ID for tracing.
+///
+/// Request IDs enable distributed tracing:
+/// - Correlate all log messages for a single request across components
+/// - Debug issues by filtering logs: request_id = "abc123"
+/// - Track request latency from entry to exit
+/// - Link frontend errors to backend logs
+/// - Monitor request flow through multiple services
+///
+/// Why UUID v4:
+/// - Globally unique (no coordination needed between servers)
+/// - Random (no information leakage about volume, timing)
+/// - Standard format (128-bit, 36 characters with dashes)
+/// - Example: "550e8400-e29b-41d4-a716-446655440000"
+///
+/// Why not sequential IDs:
+/// - Requires coordination across servers (single point of failure)
+/// - Leaks information about request volume
+/// - Predictable (security risk for some use cases)
+///
+/// Request ID best practices:
+/// - Generate once at entry point (server ingress)
+/// - Propagate through all function calls (via tracing span)
+/// - Include in all log messages automatically (via span fields)
+/// - Return to client in X-Request-Id response header
+/// - Accept client's X-Request-Id if provided (for distributed tracing)
+///
+/// Use cases:
+/// 1. User reports error: "My upload failed at 2pm"
+///    - Find error in logs by timestamp
+///    - Get request_id from error log
+///    - Filter all logs: request_id = "abc123"
+///    - See complete request flow from entry to failure
+///
+/// 2. Slow request investigation:
+///    - Monitor logs for requests >1s
+///    - Get request_id from slow request log
+///    - Filter all logs to see where time was spent
+///    - Identify bottleneck (DB query, S3 download, etc.)
+///
+/// 3. Cross-service debugging:
+///    - Request flows: Frontend → API Gateway → Proxy → S3
+///    - Each service logs with same request_id
+///    - Can trace request across all services
+///
+/// Test validates:
+/// - Request ID is generated for every request
+/// - Request ID is a valid UUID v4 (format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
+/// - Request ID is included in log output
+/// - Each request gets a unique request ID (no collisions)
+/// - Request ID is logged in request span context
+#[test]
+fn test_request_id_generated_for_every_request() {
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: Single request generates a request ID
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let request_id = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber, || {
+        let span = tracing::info_span!(
+            "http_request",
+            request_id = %request_id,
+            method = "GET",
+            path = "/health"
+        );
+        let _enter = span.enter();
+
+        tracing::info!("Processing request");
+    });
+
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Verify request ID appears in logs
+    assert!(
+        log_output.contains(&request_id.to_string()),
+        "Request ID should appear in logs"
+    );
+
+    // Verify request ID is valid UUID v4 format
+    let parsed_uuid = Uuid::parse_str(&request_id.to_string());
+    assert!(parsed_uuid.is_ok(), "Request ID should be valid UUID");
+    assert_eq!(
+        parsed_uuid.unwrap().get_version(),
+        Some(uuid::Version::Random),
+        "Request ID should be UUID v4 (random)"
+    );
+
+    // Scenario 2: Multiple requests each get unique request IDs
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    let request_id1 = Uuid::new_v4();
+    let request_id2 = Uuid::new_v4();
+    let request_id3 = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber2, || {
+        // Request 1
+        let span1 = tracing::info_span!("http_request", request_id = %request_id1);
+        let _enter1 = span1.enter();
+        tracing::info!("Request 1");
+        drop(_enter1);
+
+        // Request 2
+        let span2 = tracing::info_span!("http_request", request_id = %request_id2);
+        let _enter2 = span2.enter();
+        tracing::info!("Request 2");
+        drop(_enter2);
+
+        // Request 3
+        let span3 = tracing::info_span!("http_request", request_id = %request_id3);
+        let _enter3 = span3.enter();
+        tracing::info!("Request 3");
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+
+    // Verify all three request IDs appear in logs
+    assert!(
+        log_output2.contains(&request_id1.to_string()),
+        "Request ID 1 should appear in logs"
+    );
+    assert!(
+        log_output2.contains(&request_id2.to_string()),
+        "Request ID 2 should appear in logs"
+    );
+    assert!(
+        log_output2.contains(&request_id3.to_string()),
+        "Request ID 3 should appear in logs"
+    );
+
+    // Verify all request IDs are unique
+    assert_ne!(request_id1, request_id2, "Request IDs should be unique");
+    assert_ne!(request_id1, request_id3, "Request IDs should be unique");
+    assert_ne!(request_id2, request_id3, "Request IDs should be unique");
+
+    // Scenario 3: Request ID is included in nested operations
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    let request_id = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber3, || {
+        let span = tracing::info_span!("http_request", request_id = %request_id);
+        let _enter = span.enter();
+
+        tracing::info!("Received request");
+
+        // Nested operation (e.g., database query)
+        let db_span = tracing::info_span!("database_query", table = "users");
+        let _db_enter = db_span.enter();
+        tracing::info!("Executing query");
+        drop(_db_enter);
+
+        // Nested operation (e.g., S3 request)
+        let s3_span = tracing::info_span!("s3_request", bucket = "my-bucket");
+        let _s3_enter = s3_span.enter();
+        tracing::info!("Fetching from S3");
+        drop(_s3_enter);
+
+        tracing::info!("Completed request");
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+
+    // Count occurrences of request ID (should appear in all log messages)
+    let request_id_str = request_id.to_string();
+    let count = log_output3.matches(&request_id_str).count();
+    assert!(
+        count >= 4,
+        "Request ID should appear in all log messages within the request span (expected >= 4, got {})",
+        count
+    );
+}

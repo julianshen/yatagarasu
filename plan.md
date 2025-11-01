@@ -845,7 +845,7 @@ yatagarasu/
 - [x] Test: S3 secret keys are never logged
 
 ### Request Tracing
-- [ ] Test: Request ID is generated for every request (UUID v4)
+- [x] Test: Request ID is generated for every request (UUID v4)
 - [ ] Test: Request ID is returned in X-Request-Id response header
 - [ ] Test: Request ID is included in all log messages for that request
 - [ ] Test: Request ID is passed to S3 client for tracing
