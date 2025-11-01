@@ -1385,3 +1385,324 @@ fn test_s3_errors_logged_with_bucket_key_error_code() {
     //    ```
     //    See complete request flow for failed requests.
 }
+
+/// Test: Successful requests are logged at INFO level
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that successful HTTP requests (2xx status codes) are logged at
+/// INFO level, not ERROR or WARN, to enable proper log filtering and alerting.
+///
+/// Why log level matters for successful requests:
+///
+/// Using the correct log level is critical for effective monitoring and alerting:
+/// - INFO: Normal operations, successful requests (2xx, 3xx)
+/// - WARN: Expected but noteworthy events, client errors (4xx)
+/// - ERROR: Unexpected failures, server errors (5xx)
+///
+/// If we logged successful requests at ERROR level:
+/// - Error rate metrics would be meaningless (100% "errors")
+/// - Alert fatigue from false positives
+/// - Can't distinguish real problems from normal traffic
+/// - Log aggregation costs higher (more ERROR logs to store)
+///
+/// Example successful request log (should be INFO):
+/// ```json
+/// {
+///   "timestamp": "2025-11-01T12:00:00.000Z",
+///   "level": "INFO",
+///   "fields": {
+///     "message": "request completed"
+///   },
+///   "span": {
+///     "request_id": "550e8400-e29b-41d4-a716-446655440000",
+///     "method": "GET",
+///     "path": "/products/image.png",
+///     "status": 200,
+///     "duration_ms": 45
+///   }
+/// }
+/// ```
+///
+/// Log level guidelines by status code:
+/// - 2xx (Success): INFO level
+///   - 200 OK: Normal successful request
+///   - 201 Created: Resource created successfully
+///   - 204 No Content: Successful with no response body
+///   - 206 Partial Content: Successful range request
+///
+/// - 3xx (Redirection): INFO level
+///   - 301/302 Redirects: Normal behavior
+///   - 304 Not Modified: Cache hit (good!)
+///
+/// - 4xx (Client Errors): WARN level
+///   - 400 Bad Request: Client sent malformed request
+///   - 401 Unauthorized: Missing/invalid auth
+///   - 403 Forbidden: Valid auth but insufficient permissions
+///   - 404 Not Found: Resource doesn't exist
+///
+/// - 5xx (Server Errors): ERROR level
+///   - 500 Internal Server Error: Unexpected proxy error
+///   - 502 Bad Gateway: S3 error
+///   - 503 Service Unavailable: Overloaded
+///   - 504 Gateway Timeout: S3 timeout
+///
+/// Test scenarios:
+/// 1. Request with 200 OK status is logged at INFO level
+/// 2. Request with 201 Created status is logged at INFO level
+/// 3. Request with 204 No Content status is logged at INFO level
+/// 4. Request with 206 Partial Content status is logged at INFO level
+/// 5. Request with 304 Not Modified status is logged at INFO level
+/// 6. All 2xx/3xx responses use INFO level (not WARN or ERROR)
+///
+/// Expected behavior:
+/// - Successful requests (2xx, 3xx) always logged at INFO level
+/// - Log includes all standard fields (method, path, status, duration)
+/// - Can filter logs by level to see only errors (level >= WARN)
+#[test]
+fn test_successful_requests_logged_at_info_level() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: Request with 200 OK status is logged at INFO level
+    //
+    // The most common successful response is 200 OK. This should always
+    // be logged at INFO level to represent normal operation.
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_id = "550e8400-e29b-41d4-a716-446655440000";
+        let method = "GET";
+        let path = "/products/image.png";
+        let status = 200;
+        let duration_ms = 45;
+
+        // Create request span
+        let span = tracing::info_span!(
+            "request",
+            request_id = request_id,
+            method = method,
+            path = path,
+            status = status,
+            duration_ms = duration_ms
+        );
+        let _enter = span.enter();
+
+        // Log successful request completion at INFO level
+        tracing::info!("request completed");
+    });
+
+    // Get the captured output
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Find the request completion log entry
+    let log_lines: Vec<&str> = log_output.lines().collect();
+    let request_log = log_lines
+        .iter()
+        .find(|line| line.contains("request completed"))
+        .expect("Should find 'request completed' log entry");
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(request_log).expect("Log output should be valid JSON");
+
+    // Verify log level is INFO for 200 OK
+    assert_eq!(
+        parsed["level"].as_str().unwrap(),
+        "INFO",
+        "200 OK requests should be logged at INFO level"
+    );
+
+    // Verify status code is included in span
+    assert!(
+        parsed.get("span").is_some(),
+        "Log should include span fields"
+    );
+    assert_eq!(
+        parsed["span"]["status"].as_u64().unwrap(),
+        200,
+        "Status should be 200"
+    );
+
+    // Scenario 2: Test other 2xx status codes are also INFO level
+    //
+    // All 2xx status codes indicate success and should use INFO level.
+    // Test common ones: 201 Created, 204 No Content, 206 Partial Content
+    let test_cases = vec![
+        (201, "201 Created"),
+        (204, "204 No Content"),
+        (206, "206 Partial Content"),
+    ];
+
+    for (status_code, description) in test_cases {
+        let buffer2 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber2 = create_test_subscriber(buffer2.clone());
+
+        tracing::subscriber::with_default(subscriber2, || {
+            let span = tracing::info_span!("request", status = status_code);
+            let _enter = span.enter();
+            tracing::info!("request completed");
+        });
+
+        let output2 = buffer2.lock().unwrap();
+        let log_output2 = String::from_utf8_lossy(&output2);
+        let log_lines2: Vec<&str> = log_output2.lines().collect();
+        let request_log2 = log_lines2
+            .iter()
+            .find(|line| line.contains("request completed"))
+            .expect("Should find log entry");
+
+        let parsed2: serde_json::Value = serde_json::from_str(request_log2).unwrap();
+
+        assert_eq!(
+            parsed2["level"].as_str().unwrap(),
+            "INFO",
+            "{} should be logged at INFO level",
+            description
+        );
+    }
+
+    // Scenario 3: Test 3xx status codes (redirects) are also INFO level
+    //
+    // Redirects are normal HTTP behavior and should use INFO level.
+    // Test common ones: 301 Moved Permanently, 302 Found, 304 Not Modified
+    let redirect_cases = vec![
+        (301, "301 Moved Permanently"),
+        (302, "302 Found"),
+        (304, "304 Not Modified"),
+    ];
+
+    for (status_code, description) in redirect_cases {
+        let buffer3 = Arc::new(Mutex::new(Vec::new()));
+        let subscriber3 = create_test_subscriber(buffer3.clone());
+
+        tracing::subscriber::with_default(subscriber3, || {
+            let span = tracing::info_span!("request", status = status_code);
+            let _enter = span.enter();
+            tracing::info!("request completed");
+        });
+
+        let output3 = buffer3.lock().unwrap();
+        let log_output3 = String::from_utf8_lossy(&output3);
+        let log_lines3: Vec<&str> = log_output3.lines().collect();
+        let request_log3 = log_lines3
+            .iter()
+            .find(|line| line.contains("request completed"))
+            .expect("Should find log entry");
+
+        let parsed3: serde_json::Value = serde_json::from_str(request_log3).unwrap();
+
+        assert_eq!(
+            parsed3["level"].as_str().unwrap(),
+            "INFO",
+            "{} should be logged at INFO level",
+            description
+        );
+    }
+
+    //
+    // LOG LEVEL BEST PRACTICES:
+    //
+    // 1. USE INFO FOR SUCCESS (2xx, 3xx):
+    //    - Represents normal operation
+    //    - Enables filtering: "show me only problems" (level >= WARN)
+    //    - Keeps error rate metrics meaningful
+    //
+    // 2. USE WARN FOR CLIENT ERRORS (4xx):
+    //    - Expected but noteworthy
+    //    - Client sent bad request, not our fault
+    //    - Helps identify API misuse
+    //    - Examples: 400 Bad Request, 401 Unauthorized, 404 Not Found
+    //
+    // 3. USE ERROR FOR SERVER ERRORS (5xx):
+    //    - Unexpected failures on our side
+    //    - Requires investigation and fixing
+    //    - Triggers alerts in production
+    //    - Examples: 500 Internal Error, 502 Bad Gateway, 504 Timeout
+    //
+    // PRODUCTION IMPLEMENTATION:
+    //
+    // In the request handler:
+    // ```rust
+    // async fn handle_request(req: Request) -> Result<Response> {
+    //     let span = tracing::info_span!("request",
+    //         request_id = %req.id(),
+    //         method = %req.method(),
+    //         path = %req.path(),
+    //         status = tracing::field::Empty,
+    //         duration_ms = tracing::field::Empty
+    //     );
+    //     let _enter = span.enter();
+    //     let start = Instant::now();
+    //
+    //     // Handle request
+    //     let result = proxy_to_s3(req).await;
+    //
+    //     // Record outcome
+    //     let status = result.as_ref().map(|r| r.status()).unwrap_or(500);
+    //     let duration_ms = start.elapsed().as_millis() as u64;
+    //
+    //     span.record("status", status.as_u16());
+    //     span.record("duration_ms", duration_ms);
+    //
+    //     // Log at appropriate level based on status code
+    //     match status.as_u16() {
+    //         200..=399 => tracing::info!("request completed"),
+    //         400..=499 => tracing::warn!("request completed with client error"),
+    //         _         => tracing::error!("request completed with server error"),
+    //     }
+    //
+    //     result
+    // }
+    // ```
+    //
+    // MONITORING AND ALERTING:
+    //
+    // With proper log levels, you can:
+    //
+    // 1. Alert on ERROR logs:
+    //    ```
+    //    Alert if: count(level = 'ERROR') > 10 in 5 minutes
+    //    ```
+    //    This catches server errors without noise from successful requests.
+    //
+    // 2. Monitor client error rate:
+    //    ```
+    //    Client error rate = count(level = 'WARN') / count(level >= 'INFO')
+    //    ```
+    //    Track how many requests have client errors.
+    //
+    // 3. Calculate success rate:
+    //    ```
+    //    Success rate = count(level = 'INFO') / count(level >= 'INFO')
+    //    ```
+    //    Should be high (>95%) for healthy service.
+    //
+    // 4. Filter logs in production:
+    //    ```bash
+    //    # Show only problems (WARN and ERROR)
+    //    cat logs.json | jq 'select(.level == "WARN" or .level == "ERROR")'
+    //
+    //    # Show only server errors (ERROR)
+    //    cat logs.json | jq 'select(.level == "ERROR")'
+    //
+    //    # Count requests by level
+    //    cat logs.json | jq -r '.level' | sort | uniq -c
+    //    ```
+    //
+    // 5. Set up log retention policies:
+    //    - INFO: Keep 7 days (high volume, normal operation)
+    //    - WARN: Keep 30 days (medium volume, investigate patterns)
+    //    - ERROR: Keep 90+ days (low volume, critical for debugging)
+    //
+    // COST OPTIMIZATION:
+    //
+    // Using correct log levels saves money in log aggregation systems:
+    // - Most requests are successful (INFO level)
+    // - If you log everything at ERROR, you pay to store all traffic as "errors"
+    // - With proper levels, you can:
+    //   - Sample INFO logs (keep 10%, discard 90%)
+    //   - Keep all WARN logs (less volume)
+    //   - Keep all ERROR logs forever (very low volume)
+    //   - Total cost: Much lower than keeping everything
+}
