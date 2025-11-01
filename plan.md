@@ -1,23 +1,27 @@
 # Yatagarasu Implementation Plan
 
-This document tracks the test-driven development of Yatagarasu. Each test should be implemented one at a time following the Red-Green-Refactor cycle.
+**Last Updated**: 2025-11-01
+**Current Status**: Library complete (Phases 1-5 ✅), Server integration in progress (Phases 0, 12-16 🚧)
 
-## How to Use This Plan
+---
 
-1. Find the next unmarked test (marked with `[ ]`)
-2. Write the test and watch it fail (Red)
-3. Write the minimum code to make it pass (Green)
-4. Refactor if needed while keeping tests green
-5. Mark the test complete with `[x]`
-6. Commit (separately for structural and behavioral changes)
-7. Move to the next test
+## ⚠️ IMPORTANT: Current State (As of 2025-11-01)
 
-## Legend
+**What's Complete**:
+- ✅ Phases 1-5: Library layer (config, router, auth, S3) with 504 passing tests
+- ✅ 98.43% test coverage on library modules
 
-- `[ ]` - Not yet implemented
-- `[x]` - Implemented and passing
-- `[~]` - In progress
-- `[!]` - Blocked or needs discussion
+**What's NOT Complete**:
+- ❌ Phases 6-16: Many tests marked [x] but are stubs/mocks, NOT real implementations
+- ❌ proxy/mod.rs is empty (2 lines) - ProxyHttp trait NOT implemented
+- ❌ main.rs doesn't start server - just logs and exits
+- ❌ HTTP server does NOT accept connections
+
+**Current Priority**:
+- 🚨 **Phase 0** (NEW): Fix critical bugs (S3 timestamp, JWT algorithm, add dependencies)
+- 🚧 **Phase 12-16**: Implement actual HTTP server with Pingora ProxyHttp trait
+
+See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed analysis.
 
 ---
 
@@ -661,11 +665,51 @@ yatagarasu/
 
 ---
 
+## Phase 0: Critical Bug Fixes (URGENT - Added 2025-11-01)
+
+**Objective**: Fix critical bugs and add missing dependencies before server implementation
+
+**Goal**: Ensure core library modules work correctly and all required dependencies are available.
+
+⚠️ **This phase was added after discovering critical issues during deep dive analysis.**
+
+### Missing Dependencies
+- [ ] Add `async-trait = "0.1"` to Cargo.toml (required for ProxyHttp trait)
+- [ ] Add `pingora-proxy = "0.6"` to Cargo.toml (required for ProxyHttp trait definition)
+- [ ] Add `chrono = "0.4"` to Cargo.toml (required for S3 timestamp generation)
+- [ ] Verify all dependencies compile without errors
+
+### S3 Client Bug Fixes
+- [ ] Fix S3 timestamp hardcoded to "20130524T000000Z" in src/s3/mod.rs:136-139
+- [ ] Replace hardcoded timestamp with `Utc::now()` for signature generation
+- [ ] Test: S3 signatures use current timestamp
+- [ ] Test: S3 signatures are valid with current date/time
+- [ ] Verify existing S3 tests still pass after timestamp fix
+
+### JWT Authentication Security Fix
+- [ ] Fix JWT algorithm mismatch vulnerability in src/auth/mod.rs:100
+- [ ] Pass algorithm from config to validate_jwt() function
+- [ ] Test: JWT validation uses correct algorithm from config (HS256/HS384/HS512)
+- [ ] Test: JWT with wrong algorithm is rejected
+- [ ] Verify all existing auth tests still pass after fix
+
+### Quality Gates
+- [ ] Run `cargo test` - all tests must pass
+- [ ] Run `cargo clippy -- -D warnings` - zero warnings
+- [ ] Run `cargo fmt` - code properly formatted
+- [ ] Commit bug fixes with [BEHAVIORAL] prefix
+
+**Expected Outcome**: Core library modules work correctly with no critical bugs, ready for server integration.
+
+---
+
 ## Phase 12: Pingora Server Setup
 
 **Objective**: Initialize Pingora HTTP server and handle basic HTTP requests
 
 **Goal**: Create a running HTTP server that can accept connections and respond to basic requests.
+
+⚠️ **REALITY CHECK (2025-11-01)**: Many tests below are marked [x] but proxy/mod.rs is empty (2 lines). These tests exist but test stub/mock implementations, not real HTTP server functionality. The actual ProxyHttp trait implementation is NOT done.
 
 ### Server Initialization
 - [x] Test: Can add Pingora dependency to Cargo.toml

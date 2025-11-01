@@ -12,22 +12,31 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 
 ## ⚠️ DEVELOPMENT STATUS
 
-**Current State**: Core library modules are complete and well-tested. HTTP server integration is in progress.
+**Current State**: Core library modules are complete and well-tested (v0.1.0). HTTP server integration is in progress. **The proxy does not yet accept HTTP connections.**
 
-**What Works Now**:
+**What Works Now** (Library Layer - v0.1.0):
 - ✅ Configuration parsing (YAML + environment variables)
 - ✅ Multi-bucket routing with longest prefix matching
 - ✅ JWT authentication and claims verification
-- ✅ S3 client with AWS Signature v4
-- ✅ 373 passing tests with 98.43% coverage
+- ✅ S3 client with AWS Signature v4 signing
+- ✅ Range request header parsing
+- ✅ 504 passing tests with 98.43% coverage
+
+**What Doesn't Work Yet** (Server Layer):
+- ❌ HTTP server (Pingora integration incomplete)
+- ❌ Request pipeline (router → auth → S3 not connected)
+- ❌ S3 proxying (no actual HTTP requests to S3)
+- ❌ Response streaming
+- ❌ `curl` commands in examples won't work yet
 
 **What's Coming Next**:
-- 🚧 **Phase 12-16** (v0.2.0): HTTP server integration (3-4 weeks)
+- 🚧 **Phase 0** (Critical Fixes): Fix S3 timestamp bug, JWT algorithm mismatch, add dependencies (1-2 days)
+- 🚧 **Phase 12-16** (v0.2.0): HTTP server integration with Pingora ProxyHttp trait (3-4 weeks)
 - 🚧 **Phase 17-20** (v0.3.0): Production features (metrics, hot reload, graceful shutdown)
 - 🚧 **Phase 21-24** (v0.4.0): Docker images and CI/CD automation
 - 🎯 **Phase 25-27** (v1.0.0): Caching layer and advanced features
 
-See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed analysis and [ROADMAP.md](ROADMAP.md) for implementation plan.
+See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed technical analysis and progress assessment.
 
 ## What is Yatagarasu?
 
@@ -707,29 +716,33 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 
 **Progress**:
 
-- **Tests written**: 400+ (373 behavioral, 27 meta tests)
-- **Tests passing**: 373 (100%)
+- **Tests written**: 500+ tests
+- **Tests passing**: 504 (100%)
 - **Test coverage**: 98.43% (314/319 lines)
-- **Phases complete**: 11/16 phases (Phases 1-11 ✅)
+- **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 10% (Phases 6-16 🚧)
 
 **Completed Milestones**:
 - ✅ Phase 1-2: Foundation and Configuration (50 tests)
 - ✅ Phase 3: Path Routing (26 tests)
 - ✅ Phase 4: JWT Authentication (49 tests)
 - ✅ Phase 5: S3 Client & Signature (73 tests)
-- ✅ Phase 6-11: Test implementation (175 proxy tests written, awaiting integration)
 
-**Current Sprint**: Phase 12 - Pingora Server Setup
-- Initialize Pingora HTTP server
-- Configure server address and threading
-- Implement basic HTTP request/response handling
-- Add health check endpoint
+**Current Sprint**: Phase 0 + Phase 12 - Critical Fixes and Server Integration
+- **Phase 0**: Fix S3 timestamp bug, JWT algorithm vulnerability, add missing dependencies
+- **Phase 12**: Implement Pingora ProxyHttp trait (currently empty proxy/mod.rs)
+- Wire up main.rs to start event loop
+- Connect router → auth → S3 pipeline
 
 **Next Milestones**:
 - Phase 13: Request Pipeline Integration
 - Phase 14: S3 Proxying Implementation
 - Phase 15: Error Handling & Logging
-- Phase 16: Final Integration & Testing
+- Phase 16: Final Integration & Testing with MinIO
+
+**Known Issues**:
+- ⚠️ S3 timestamp hardcoded to 2013 (causes 403 Forbidden on all S3 requests)
+- ⚠️ JWT algorithm mismatch vulnerability
+- ⚠️ proxy/mod.rs is empty (2 lines) - core blocker for HTTP functionality
 
 See [plan.md](plan.md) for detailed test checklist and [ROADMAP.md](ROADMAP.md) for implementation roadmap.
 
