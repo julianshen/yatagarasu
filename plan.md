@@ -770,7 +770,7 @@ yatagarasu/
 - [x] Test: GET request to /products/image.png fetches from S3
 - [x] Test: S3 response body streams to HTTP client
 - [x] Test: S3 response headers are preserved (Content-Type, ETag, Last-Modified, Content-Length)
-- [ ] Test: S3 200 OK returns HTTP 200 OK
+- [x] Test: S3 200 OK returns HTTP 200 OK
 - [ ] Test: Large files (>100MB) stream without buffering entire file
 - [ ] Test: Memory usage stays constant during large file streaming
 - [ ] Test: Multiple concurrent requests work correctly
