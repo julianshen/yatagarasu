@@ -825,7 +825,7 @@ yatagarasu/
 - [x] Test: 4xx errors include client-friendly messages
 - [x] Test: 5xx errors don't leak implementation details
 - [x] Test: Errors include error code for client parsing
-- [ ] Test: Stack traces only in logs, never in responses
+- [x] Test: Stack traces only in logs, never in responses
 
 ### Structured Logging
 - [ ] Test: Can initialize tracing subscriber

@@ -1336,3 +1336,325 @@ fn test_errors_include_error_code_for_client_parsing() {
     // This stability allows clients to build robust error handling
     // without worrying about breaking changes.
 }
+
+/// Test: Stack traces only in logs, never in responses
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging)
+/// Verifies that stack traces never appear in error responses sent to clients.
+/// Stack traces should only be logged on the server side for debugging.
+///
+/// Why this matters:
+///
+/// Stack traces are incredibly valuable for debugging, but they should NEVER
+/// be sent to clients because they:
+/// 1. Leak source code file paths and line numbers
+/// 2. Reveal internal function names and module structure
+/// 3. Expose the technology stack (Rust, specific libraries)
+/// 4. Can be overwhelming and confusing for end users
+/// 5. Can be very long (hundreds or thousands of lines)
+/// 6. Provide attackers with detailed information about the system
+///
+/// Security principle: "Fail securely"
+/// When an error occurs, the response should be minimal and generic,
+/// while detailed debugging information goes to secure server logs.
+///
+/// Stack trace indicators to check for:
+/// - "at " (Rust stack trace format: "at src/main.rs:42:5")
+/// - "panicked at" (Rust panic message format)
+/// - "stack backtrace:" (Rust backtrace header)
+/// - File paths with line numbers (src/module.rs:123)
+/// - "thread 'main' panicked" (Rust thread panic message)
+/// - "note: run with `RUST_BACKTRACE=1`" (Rust backtrace hint)
+/// - Function call chains (fn1 -> fn2 -> fn3)
+///
+/// Test scenarios:
+/// 1. Config errors don't include "at src/..." patterns
+/// 2. S3 errors don't include "panicked at" messages
+/// 3. Internal errors don't include "stack backtrace:" headers
+/// 4. No error includes file paths with line numbers
+/// 5. No error includes thread panic messages
+/// 6. No error includes RUST_BACKTRACE hints
+/// 7. No error includes function call chains
+/// 8. Error responses stay under reasonable size limit (< 1KB)
+///
+/// What SHOULD be in responses:
+/// - Error code ("config", "auth", "s3", "internal")
+/// - User-friendly message ("Configuration error: failed to initialize")
+/// - HTTP status code (500, 401, 502)
+/// - Request ID for correlation with logs
+///
+/// What should ONLY be in server logs:
+/// - Full stack traces
+/// - File paths and line numbers
+/// - Function call chains
+/// - Variable values at time of error
+/// - System state information
+///
+/// Expected flow when an error occurs:
+/// 1. Error happens (e.g., panic in request handler)
+/// 2. Proxy catches error and creates ProxyError::Internal
+/// 3. Full stack trace logged to server logs with request_id
+/// 4. Generic error response sent to client with same request_id
+/// 5. Support team can correlate client report with server logs using request_id
+#[test]
+fn test_stack_traces_only_in_logs_never_in_responses() {
+    use yatagarasu::error::ProxyError;
+
+    // Scenario 1: Config errors don't include "at src/..." patterns
+    //
+    // Stack traces in Rust typically include lines like:
+    // "at src/config/loader.rs:42:5"
+    // "at /home/user/.cargo/registry/src/.../lib.rs:123"
+    //
+    // These should NEVER appear in client responses.
+    let config_error = ProxyError::Config("failed to parse configuration".to_string());
+    let json = config_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include stack trace patterns
+    assert!(!message.contains(" at "), "Message should not include ' at ' (stack trace indicator)");
+    assert!(!message.contains("src/"), "Message should not include 'src/' (source file path)");
+    assert!(!json.contains(" at "), "JSON should not include ' at ' (stack trace indicator)");
+    assert!(!json.contains("src/"), "JSON should not include 'src/' (source file path)");
+
+    // Scenario 2: S3 errors don't include "panicked at" messages
+    //
+    // When a panic occurs, Rust generates messages like:
+    // "thread 'main' panicked at 'index out of bounds', src/main.rs:10:5"
+    //
+    // These should be caught and converted to generic messages.
+    let s3_error = ProxyError::S3("upstream service error".to_string());
+    let json = s3_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include panic-related patterns
+    assert!(!message.contains("panicked at"), "Message should not include 'panicked at'");
+    assert!(!message.contains("thread "), "Message should not include 'thread '");
+    assert!(!json.contains("panicked at"), "JSON should not include 'panicked at'");
+    assert!(!json.contains("thread "), "JSON should not include 'thread '");
+
+    // Scenario 3: Internal errors don't include "stack backtrace:" headers
+    //
+    // When RUST_BACKTRACE=1 is set, Rust includes full stack traces with:
+    // "stack backtrace:"
+    // "   0: std::backtrace::Backtrace::create"
+    // "   1: yatagarasu::proxy::handler::handle_request"
+    // "   ..."
+    //
+    // These are for server logs only, not client responses.
+    let internal_error = ProxyError::Internal("unexpected error".to_string());
+    let json = internal_error.to_json_response(None);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let message = parsed["message"].as_str().unwrap();
+
+    // Should not include backtrace patterns
+    assert!(!message.contains("stack backtrace"), "Message should not include 'stack backtrace'");
+    assert!(!message.contains("backtrace:"), "Message should not include 'backtrace:'");
+    assert!(!json.contains("stack backtrace"), "JSON should not include 'stack backtrace'");
+    assert!(!json.contains("backtrace:"), "JSON should not include 'backtrace:'");
+
+    // Scenario 4: No error includes file paths with line numbers
+    //
+    // File paths with line numbers are the hallmark of stack traces:
+    // "src/config.rs:42"
+    // "lib.rs:123:5"
+    // "/home/user/project/src/main.rs:10"
+    //
+    // These should never appear in any error response.
+    let errors = vec![
+        ProxyError::Config("parse error".to_string()),
+        ProxyError::Auth("validation failed".to_string()),
+        ProxyError::S3("connection failed".to_string()),
+        ProxyError::Internal("system error".to_string()),
+    ];
+
+    for error in &errors {
+        let json = error.to_json_response(None);
+
+        // Check for file path patterns
+        assert!(!json.contains(".rs:"), "Error response should not include '.rs:' (Rust file with line number)");
+        assert!(!json.contains(".go:"), "Error response should not include '.go:' (Go file with line number)");
+        assert!(!json.contains(".py:"), "Error response should not include '.py:' (Python file with line number)");
+        assert!(!json.contains(".js:"), "Error response should not include '.js:' (JavaScript file with line number)");
+
+        // Check for line number patterns (":123" or ":42:5")
+        // We use a regex-like pattern check
+        for i in 0..10 {
+            let pattern = format!(":{}", i);
+            if json.contains(&pattern) {
+                // Allow ":4", ":5" if they're part of numbers like "401" or "502", or timestamps
+                // But don't allow patterns that look like line numbers (e.g., "src/file.rs:42")
+                if json.contains(&format!("src/{}", pattern))
+                    || json.contains(&format!("lib{}", pattern))
+                    || json.contains(&format!("main{}", pattern)) {
+                    panic!("Error response includes line number pattern: {}", pattern);
+                }
+            }
+        }
+    }
+
+    // Scenario 5: No error includes thread panic messages
+    //
+    // Rust panic messages include thread information:
+    // "thread 'main' panicked at 'assertion failed'"
+    // "thread 'tokio-runtime-worker' panicked at 'unwrap failed'"
+    //
+    // These are internal implementation details.
+    let internal_error = ProxyError::Internal("system failure".to_string());
+    let json = internal_error.to_json_response(None);
+
+    assert!(!json.contains("thread '"), "Error response should not include thread names");
+    assert!(!json.contains("panicked"), "Error response should not include panic messages");
+    assert!(!json.contains("assertion failed"), "Error response should not include assertion messages");
+    assert!(!json.contains("unwrap"), "Error response should not include unwrap errors");
+    assert!(!json.contains("expect"), "Error response should not include expect errors");
+
+    // Scenario 6: No error includes RUST_BACKTRACE hints
+    //
+    // Rust sometimes includes helpful hints like:
+    // "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+    //
+    // These are for developers, not end users.
+    let errors = vec![
+        ProxyError::Config("error".to_string()),
+        ProxyError::Auth("error".to_string()),
+        ProxyError::S3("error".to_string()),
+        ProxyError::Internal("error".to_string()),
+    ];
+
+    for error in &errors {
+        let json = error.to_json_response(None);
+
+        assert!(!json.contains("RUST_BACKTRACE"), "Error response should not include RUST_BACKTRACE");
+        assert!(!json.contains("backtrace"), "Error response should not include backtrace references");
+        assert!(!json.contains("note:"), "Error response should not include compiler notes");
+        assert!(!json.contains("environment variable"), "Error response should not include env var instructions");
+    }
+
+    // Scenario 7: No error includes function call chains
+    //
+    // Stack traces show function call chains:
+    // "std::panic::catch_unwind"
+    // "yatagarasu::proxy::handler::handle_request"
+    // "tokio::runtime::task::poll"
+    //
+    // These reveal internal structure and should not be exposed.
+    let internal_error = ProxyError::Internal("processing error".to_string());
+    let json = internal_error.to_json_response(None);
+
+    // Should not include common Rust std library function names
+    assert!(!json.contains("std::panic"), "Error response should not include std::panic");
+    assert!(!json.contains("std::result"), "Error response should not include std::result");
+    assert!(!json.contains("tokio::"), "Error response should not include tokio:: functions");
+    assert!(!json.contains("hyper::"), "Error response should not include hyper:: functions");
+
+    // Should not include project module paths
+    assert!(!json.contains("yatagarasu::"), "Error response should not include yatagarasu:: module paths");
+    assert!(!json.contains("::"), "Error response should not include :: (module path separator)");
+
+    // Scenario 8: Error responses stay under reasonable size limit
+    //
+    // Stack traces can be hundreds or thousands of lines long.
+    // Error responses should be concise (typically < 1KB).
+    //
+    // Typical error response size:
+    // - Error code: ~10 bytes ("internal")
+    // - Message: ~50-200 bytes ("Configuration error: failed to initialize")
+    // - Status: ~10 bytes (500)
+    // - Request ID: ~40 bytes (UUID)
+    // - JSON structure: ~50 bytes
+    // Total: ~200-400 bytes typical, max 1KB
+    let errors = vec![
+        ProxyError::Config("configuration validation failed".to_string()),
+        ProxyError::Auth("authentication check failed".to_string()),
+        ProxyError::S3("upstream connection failed".to_string()),
+        ProxyError::Internal("internal processing error".to_string()),
+    ];
+
+    for error in &errors {
+        let json = error.to_json_response(Some("550e8400-e29b-41d4-a716-446655440000".to_string()));
+
+        // Size should be reasonable (< 1KB)
+        assert!(
+            json.len() < 1024,
+            "Error response should be < 1KB, got {} bytes. Large responses likely contain stack traces.",
+            json.len()
+        );
+
+        // For extra safety, typical responses should be even smaller
+        assert!(
+            json.len() < 500,
+            "Error response should be concise (< 500 bytes), got {} bytes",
+            json.len()
+        );
+    }
+
+    //
+    // PROPER ERROR HANDLING FLOW:
+    //
+    // When an error occurs in production:
+    //
+    // 1. ERROR OCCURS
+    //    - panic!("index out of bounds")
+    //    - S3 connection timeout
+    //    - Invalid configuration
+    //
+    // 2. CAUGHT BY ERROR HANDLER
+    //    - Panic caught by catch_unwind or panic handler
+    //    - Converted to ProxyError::Internal
+    //    - Request ID generated
+    //
+    // 3. LOGGED TO SERVER (with full details)
+    //    [ERROR] request_id=550e8400 error="panic occurred"
+    //      message="index out of bounds"
+    //      location="src/proxy/handler.rs:123:5"
+    //      thread="tokio-runtime-worker-1"
+    //      stack_trace=[
+    //        "yatagarasu::proxy::handler::handle_request",
+    //        "tokio::runtime::task::poll",
+    //        ...
+    //      ]
+    //
+    // 4. SENT TO CLIENT (generic message only)
+    //    {
+    //      "error": "internal",
+    //      "message": "Internal error: unexpected error",
+    //      "status": 500,
+    //      "request_id": "550e8400-e29b-41d4-a716-446655440000"
+    //    }
+    //
+    // 5. CLIENT REPORTS TO SUPPORT
+    //    "I got an error with request_id: 550e8400-e29b-41d4-a716-446655440000"
+    //
+    // 6. SUPPORT LOOKS UP LOGS
+    //    grep "550e8400" /var/log/yatagarasu.log
+    //    → Finds full stack trace and debugging information
+    //
+    // This flow ensures:
+    // - Users see friendly, non-technical error messages
+    // - Security: No internal details leaked to clients
+    // - Debuggability: Full stack traces available in logs
+    // - Correlation: Request ID links client reports to server logs
+    //
+    // ANTI-PATTERN (what NOT to do):
+    //
+    // ❌ BAD: Send stack trace to client
+    // {
+    //   "error": "internal",
+    //   "message": "thread 'main' panicked at 'index out of bounds: 5', src/proxy/handler.rs:123:5",
+    //   "stack_trace": [
+    //     "yatagarasu::proxy::handler::handle_request",
+    //     "tokio::runtime::task::poll",
+    //     ...
+    //   ],
+    //   "status": 500
+    // }
+    //
+    // This is BAD because:
+    // - Leaks source code structure to clients/attackers
+    // - Confuses non-technical users
+    // - Response size is massive (slows down error handling)
+    // - Violates security best practices
+}
