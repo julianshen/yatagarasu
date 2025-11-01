@@ -993,7 +993,7 @@ fn test_validates_correctly_signed_jwt_with_hs256() {
     .expect("Failed to encode token");
 
     // Validate the token
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
 
     assert!(
         result.is_ok(),
@@ -1042,7 +1042,7 @@ fn test_rejects_jwt_with_invalid_signature() {
     .expect("Failed to encode token");
 
     // Try to validate with wrong secret - should fail
-    let result = validate_jwt(&token, wrong_secret);
+    let result = validate_jwt(&token, wrong_secret, "HS256");
 
     assert!(
         result.is_err(),
@@ -1083,7 +1083,7 @@ fn test_rejects_completely_tampered_jwt() {
     let tampered_token = format!("{}.{}.{}X", parts[0], parts[1], parts[2]);
 
     // Try to validate the tampered token
-    let result = validate_jwt(&tampered_token, secret);
+    let result = validate_jwt(&tampered_token, secret, "HS256");
 
     assert!(
         result.is_err(),
@@ -1119,7 +1119,7 @@ fn test_rejects_jwt_with_expired_exp_claim() {
     .expect("Failed to encode token");
 
     // Try to validate the expired token
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
 
     assert!(
         result.is_err(),
@@ -1166,7 +1166,7 @@ fn test_rejects_jwt_with_future_nbf_claim() {
     .expect("Failed to encode token");
 
     // Try to validate the token with future nbf
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
 
     assert!(
         result.is_err(),
@@ -1215,7 +1215,7 @@ fn test_accepts_jwt_with_valid_exp_and_nbf_claims() {
     .expect("Failed to encode token");
 
     // Validate the token - should succeed
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
 
     assert!(
         result.is_ok(),
@@ -1252,7 +1252,7 @@ fn test_rejects_malformed_jwt_not_3_parts() {
 
     // Test 1: JWT with only 2 parts (missing signature)
     let two_part_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0";
-    let result = validate_jwt(two_part_token, secret);
+    let result = validate_jwt(two_part_token, secret, "HS256");
     assert!(
         result.is_err(),
         "Expected JWT with only 2 parts to be rejected, but it was accepted"
@@ -1260,7 +1260,7 @@ fn test_rejects_malformed_jwt_not_3_parts() {
 
     // Test 2: JWT with only 1 part
     let one_part_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
-    let result2 = validate_jwt(one_part_token, secret);
+    let result2 = validate_jwt(one_part_token, secret, "HS256");
     assert!(
         result2.is_err(),
         "Expected JWT with only 1 part to be rejected, but it was accepted"
@@ -1269,7 +1269,7 @@ fn test_rejects_malformed_jwt_not_3_parts() {
     // Test 3: JWT with 4 parts (too many)
     let four_part_token =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0.signature.extra";
-    let result3 = validate_jwt(four_part_token, secret);
+    let result3 = validate_jwt(four_part_token, secret, "HS256");
     assert!(
         result3.is_err(),
         "Expected JWT with 4 parts to be rejected, but it was accepted"
@@ -1277,7 +1277,7 @@ fn test_rejects_malformed_jwt_not_3_parts() {
 
     // Test 4: Empty string
     let empty_token = "";
-    let result4 = validate_jwt(empty_token, secret);
+    let result4 = validate_jwt(empty_token, secret, "HS256");
     assert!(
         result4.is_err(),
         "Expected empty token to be rejected, but it was accepted"
@@ -1285,7 +1285,7 @@ fn test_rejects_malformed_jwt_not_3_parts() {
 
     // Test 5: Just dots
     let dots_token = "..";
-    let result5 = validate_jwt(dots_token, secret);
+    let result5 = validate_jwt(dots_token, secret, "HS256");
     assert!(
         result5.is_err(),
         "Expected token with just dots to be rejected, but it was accepted"
@@ -1298,7 +1298,7 @@ fn test_rejects_jwt_with_invalid_base64_encoding() {
 
     // Test 1: Invalid Base64 characters in header (@ is not valid base64)
     let invalid_header = "@@@invalid@@@.eyJzdWIiOiJ1c2VyMTIzIn0.signature";
-    let result1 = validate_jwt(invalid_header, secret);
+    let result1 = validate_jwt(invalid_header, secret, "HS256");
     assert!(
         result1.is_err(),
         "Expected JWT with invalid Base64 in header to be rejected"
@@ -1306,7 +1306,7 @@ fn test_rejects_jwt_with_invalid_base64_encoding() {
 
     // Test 2: Invalid Base64 characters in payload (! is not valid base64)
     let invalid_payload = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.!!!invalid!!!.signature";
-    let result2 = validate_jwt(invalid_payload, secret);
+    let result2 = validate_jwt(invalid_payload, secret, "HS256");
     assert!(
         result2.is_err(),
         "Expected JWT with invalid Base64 in payload to be rejected"
@@ -1315,7 +1315,7 @@ fn test_rejects_jwt_with_invalid_base64_encoding() {
     // Test 3: Invalid Base64 characters in signature (spaces are not valid base64)
     let invalid_signature =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0.invalid signature with spaces";
-    let result3 = validate_jwt(invalid_signature, secret);
+    let result3 = validate_jwt(invalid_signature, secret, "HS256");
     assert!(
         result3.is_err(),
         "Expected JWT with invalid Base64 in signature to be rejected"
@@ -1323,7 +1323,7 @@ fn test_rejects_jwt_with_invalid_base64_encoding() {
 
     // Test 4: Mix of invalid characters ($, #, %)
     let mixed_invalid = "$invalid#header%.{invalid}payload.signature~with~tildes";
-    let result4 = validate_jwt(mixed_invalid, secret);
+    let result4 = validate_jwt(mixed_invalid, secret, "HS256");
     assert!(
         result4.is_err(),
         "Expected JWT with multiple invalid Base64 characters to be rejected"
@@ -1338,7 +1338,7 @@ fn test_rejects_jwt_with_invalid_json_in_payload() {
     // Header: {"alg":"HS256","typ":"JWT"} (valid)
     // Payload: "not json at all" (base64: bm90IGpzb24gYXQgYWxs)
     let plain_text_payload = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.bm90IGpzb24gYXQgYWxs.signature";
-    let result1 = validate_jwt(plain_text_payload, secret);
+    let result1 = validate_jwt(plain_text_payload, secret, "HS256");
     assert!(
         result1.is_err(),
         "Expected JWT with plain text payload to be rejected"
@@ -1347,7 +1347,7 @@ fn test_rejects_jwt_with_invalid_json_in_payload() {
     // Test 2: Malformed JSON - missing closing brace
     // Payload: {"sub":"user123" (base64: eyJzdWIiOiJ1c2VyMTIzIg==)
     let malformed_json = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIg.signature";
-    let result2 = validate_jwt(malformed_json, secret);
+    let result2 = validate_jwt(malformed_json, secret, "HS256");
     assert!(
         result2.is_err(),
         "Expected JWT with malformed JSON in payload to be rejected"
@@ -1356,7 +1356,7 @@ fn test_rejects_jwt_with_invalid_json_in_payload() {
     // Test 3: Invalid JSON - single quotes instead of double quotes
     // Payload: {'sub':'user'} (base64: eydzdWInOid1c2VyJ30=)
     let single_quotes_json = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eydzdWInOid1c2VyJ30.signature";
-    let result3 = validate_jwt(single_quotes_json, secret);
+    let result3 = validate_jwt(single_quotes_json, secret, "HS256");
     assert!(
         result3.is_err(),
         "Expected JWT with single-quoted JSON to be rejected"
@@ -1365,7 +1365,7 @@ fn test_rejects_jwt_with_invalid_json_in_payload() {
     // Test 4: Just a number (valid JSON but not an object)
     // Payload: 12345 (base64: MTIzNDU=)
     let number_payload = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.MTIzNDU.signature";
-    let result4 = validate_jwt(number_payload, secret);
+    let result4 = validate_jwt(number_payload, secret, "HS256");
     assert!(
         result4.is_err(),
         "Expected JWT with non-object JSON payload to be rejected"
@@ -1395,7 +1395,7 @@ fn test_extracts_standard_claims() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1461,7 +1461,7 @@ fn test_extracts_custom_claims_from_payload() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1524,7 +1524,7 @@ fn test_handles_missing_optional_claims_gracefully() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(
         result.is_ok(),
         "Expected JWT with missing optional claims to be accepted"
@@ -1616,7 +1616,7 @@ fn test_handles_nested_claim_structures() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1720,7 +1720,7 @@ fn test_handles_array_claims() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1812,7 +1812,7 @@ fn test_handles_null_claim_values() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1871,7 +1871,7 @@ fn test_verifies_string_claim_equals_expected_value() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1924,7 +1924,7 @@ fn test_verifies_numeric_claim_equals_expected_value() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -1985,7 +1985,7 @@ fn test_verifies_boolean_claim_equals_expected_value() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2053,7 +2053,7 @@ fn test_fails_when_claim_value_doesnt_match() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2127,7 +2127,7 @@ fn test_fails_when_claim_is_missing() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2188,7 +2188,7 @@ fn test_case_sensitive_string_comparison() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2271,7 +2271,7 @@ fn test_passes_when_all_verification_rules_pass() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2342,7 +2342,7 @@ fn test_fails_when_any_verification_rule_fails() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2456,7 +2456,7 @@ fn test_handles_verification_with_empty_rules_list() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();
@@ -2506,7 +2506,7 @@ fn test_evaluates_all_rules_even_if_first_fails() {
     .expect("Failed to encode JWT");
 
     // Validate and extract claims
-    let result = validate_jwt(&token, secret);
+    let result = validate_jwt(&token, secret, "HS256");
     assert!(result.is_ok(), "Expected valid JWT to be accepted");
 
     let extracted_claims = result.unwrap();

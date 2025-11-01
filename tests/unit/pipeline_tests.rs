@@ -1007,7 +1007,7 @@ fn test_valid_jwt_adds_claims_to_request_context() {
     .expect("Failed to encode token");
 
     // Validate the JWT and extract claims
-    let claims = validate_jwt(&token, secret).expect("Token should be valid");
+    let claims = validate_jwt(&token, secret, "HS256").expect("Token should be valid");
 
     // Create a request context
     let mut context = RequestContext::new("GET".to_string(), "/private/data.json".to_string());
@@ -1138,7 +1138,7 @@ fn test_invalid_jwt_signature_returns_401() {
     .expect("Failed to encode token");
 
     // Try to validate the token with a different secret
-    let validation_result = validate_jwt(&token, validation_secret);
+    let validation_result = validate_jwt(&token, validation_secret, "HS256");
 
     // Verify that validation fails
     assert!(
@@ -1205,7 +1205,7 @@ fn test_expired_jwt_returns_401() {
     .expect("Failed to encode token");
 
     // Try to validate the expired token
-    let validation_result = validate_jwt(&token, secret);
+    let validation_result = validate_jwt(&token, secret, "HS256");
 
     // Verify that validation fails
     assert!(
@@ -1266,7 +1266,7 @@ fn test_jwt_with_wrong_claims_returns_403() {
     .expect("Failed to encode token");
 
     // Validate the JWT (should succeed - token is valid)
-    let claims = validate_jwt(&token, secret).expect("Token should be valid");
+    let claims = validate_jwt(&token, secret, "HS256").expect("Token should be valid");
 
     // Define claim rules that require role="admin" (but token has role="user")
     let claim_rules = vec![ClaimRule {
@@ -1526,7 +1526,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
     );
 
     // Validate token
-    let claims = validate_jwt(&extracted_token.unwrap(), secret)
+    let claims = validate_jwt(&extracted_token.unwrap(), secret, "HS256")
         .expect("Auth middleware should validate token successfully");
 
     // Auth middleware adds claims to context
@@ -1822,8 +1822,8 @@ fn test_middleware_can_modify_request_context() {
     // Auth middleware validates JWT and modifies context
     let extracted_token =
         extract_bearer_token(context.headers()).expect("Auth middleware should extract token");
-    let validated_claims =
-        validate_jwt(&extracted_token, secret).expect("Auth middleware should validate token");
+    let validated_claims = validate_jwt(&extracted_token, secret, "HS256")
+        .expect("Auth middleware should validate token");
 
     // Auth modifies context by adding claims
     context.set_claims(validated_claims);
@@ -2014,7 +2014,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
         assert!(extracted_token.is_some());
 
         // Auth validates JWT with correct secret - should fail
-        let validation_result = validate_jwt(&extracted_token.unwrap(), secret);
+        let validation_result = validate_jwt(&extracted_token.unwrap(), secret, "HS256");
 
         // Validation fails due to signature mismatch
         assert!(
@@ -2071,7 +2071,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
         assert!(extracted_token.is_some());
 
         // Auth validates JWT - should fail due to expiration
-        let validation_result = validate_jwt(&extracted_token.unwrap(), secret);
+        let validation_result = validate_jwt(&extracted_token.unwrap(), secret, "HS256");
 
         // Validation fails due to expired token
         assert!(
@@ -2123,8 +2123,8 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
         let extracted_token = extract_bearer_token(context.headers());
         assert!(extracted_token.is_some());
 
-        let claims =
-            validate_jwt(&extracted_token.unwrap(), secret).expect("JWT validation should succeed");
+        let claims = validate_jwt(&extracted_token.unwrap(), secret, "HS256")
+            .expect("JWT validation should succeed");
 
         // Auth verifies claims against rules - should fail
         let claim_rules = vec![ClaimRule {

@@ -96,8 +96,20 @@ pub fn try_extract_token(
     None
 }
 
-pub fn validate_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let mut validation = Validation::new(Algorithm::HS256);
+pub fn validate_jwt(
+    token: &str,
+    secret: &str,
+    algorithm: &str,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
+    // Map algorithm string from config to jsonwebtoken Algorithm enum
+    let algo = match algorithm {
+        "HS256" => Algorithm::HS256,
+        "HS384" => Algorithm::HS384,
+        "HS512" => Algorithm::HS512,
+        _ => Algorithm::HS256, // Default to HS256 for backward compatibility
+    };
+
+    let mut validation = Validation::new(algo);
     validation.validate_exp = true; // Validate expiration if present
     validation.validate_nbf = true; // Validate not-before if present
     validation.required_spec_claims.clear(); // Don't require exp, nbf, etc. (but validate if present)
@@ -170,8 +182,8 @@ pub fn authenticate_request(
     let token = try_extract_token(headers, query_params, &jwt_config.token_sources)
         .ok_or(AuthError::MissingToken)?;
 
-    // Validate JWT
-    let claims = validate_jwt(&token, &jwt_config.secret)
+    // Validate JWT with configured algorithm
+    let claims = validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm)
         .map_err(|e| AuthError::InvalidToken(e.to_string()))?;
 
     // Verify claims if rules are configured

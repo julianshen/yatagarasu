@@ -133,9 +133,10 @@ impl S3Request {
     ) -> std::collections::HashMap<String, String> {
         use std::collections::HashMap;
 
-        // Generate timestamp (hardcoded for now, will use actual time later)
-        let datetime = "20130524T000000Z";
-        let date = "20130524";
+        // Generate current timestamp for AWS Signature V4
+        let now = chrono::Utc::now();
+        let datetime = now.format("%Y%m%dT%H%M%SZ").to_string();
+        let date = now.format("%Y%m%d").to_string();
 
         // Build headers
         let mut headers = HashMap::new();
@@ -155,8 +156,8 @@ impl S3Request {
             secret_key,
             region: &self.region,
             service: "s3",
-            date,
-            datetime,
+            date: &date,
+            datetime: &datetime,
         };
 
         // Generate Authorization header
