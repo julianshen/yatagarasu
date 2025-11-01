@@ -820,7 +820,7 @@ yatagarasu/
 
 ### Centralized Error Handling
 - [x] Test: Can create ProxyError enum with variants (Config, Auth, S3, Internal)
-- [ ] Test: Errors convert to HTTP status codes correctly
+- [x] Test: Errors convert to HTTP status codes correctly
 - [ ] Test: Error responses use consistent JSON format
 - [ ] Test: 4xx errors include client-friendly messages
 - [ ] Test: 5xx errors don't leak implementation details

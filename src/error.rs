@@ -33,3 +33,21 @@ impl fmt::Display for ProxyError {
 }
 
 impl std::error::Error for ProxyError {}
+
+impl ProxyError {
+    /// Convert error to appropriate HTTP status code
+    ///
+    /// Maps error variants to HTTP status codes following RFC 7231:
+    /// - Config errors → 500 (Internal Server Error - proxy misconfiguration)
+    /// - Auth errors → 401 (Unauthorized - authentication failed)
+    /// - S3 errors → 502 (Bad Gateway - upstream service error)
+    /// - Internal errors → 500 (Internal Server Error - unexpected proxy error)
+    pub fn to_http_status(&self) -> u16 {
+        match self {
+            ProxyError::Config(_) => 500,    // Internal Server Error
+            ProxyError::Auth(_) => 401,      // Unauthorized
+            ProxyError::S3(_) => 502,        // Bad Gateway
+            ProxyError::Internal(_) => 500,  // Internal Server Error
+        }
+    }
+}
