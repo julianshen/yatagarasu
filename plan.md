@@ -44,7 +44,17 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed analysis.
 
 # Yatagarasu Implementation Plan
 
-This document tracks the test-driven development of Yatagarasu S3 proxy. Each test should be implemented one at a time following the Red-Green-Refactor cycle.
+**Project Goal**: Build a production-ready, high-performance S3 proxy server using Cloudflare's Pingora framework.
+
+This document tracks the development of Yatagarasu through test-driven development (TDD). The plan is organized around **functional milestones** - working server capabilities - not just library code and tests.
+
+## Development Philosophy
+
+**Primary Goal**: Working HTTP proxy server that routes requests to S3
+**Secondary Goal**: Excellent test coverage to ensure reliability
+**Tertiary Goal**: Production-ready features (metrics, monitoring, hot reload)
+
+Each phase delivers **working functionality** that can be demonstrated and tested end-to-end.
 
 ## How to Use This Plan
 
@@ -53,8 +63,9 @@ This document tracks the test-driven development of Yatagarasu S3 proxy. Each te
 3. Write the minimum code to make it pass (Green)
 4. Refactor if needed while keeping tests green
 5. Mark the test complete with `[x]`
-6. Commit (separately for structural and behavioral changes)
-7. Move to the next test
+6. **Verify the server works** - not just tests passing, but actual HTTP requests working
+7. Commit (separately for structural and behavioral changes)
+8. Move to the next test
 
 ## Legend
 
@@ -62,6 +73,49 @@ This document tracks the test-driven development of Yatagarasu S3 proxy. Each te
 - `[x]` - Implemented and passing
 - `[~]` - In progress
 - `[!]` - Blocked or needs discussion
+
+---
+
+## Functional Milestones
+
+This plan is organized around working server capabilities, not just passing tests:
+
+### ✅ Milestone 1: Library Foundation (Phases 1-5) - COMPLETE
+**Deliverable**: Well-tested library modules that can be used to build the server
+**Verification**: `cargo test` passes with >90% coverage
+**Status**: ✅ DONE - 504 tests passing, 98.43% coverage
+
+### ✅ Milestone 2: HTTP Server Accepts Connections (Phase 12) - COMPLETE
+**Deliverable**: Server starts, binds to port, accepts HTTP requests
+**Verification**: `curl http://localhost:8080/` gets a response
+**Status**: ✅ DONE - Server accepts connections and returns 404 for unknown paths
+
+### ✅ Milestone 3: Server Routes to S3 (Phase 13) - COMPLETE
+**Deliverable**: GET /bucket/key proxies to S3 and returns object
+**Verification**: `curl http://localhost:8080/public/test.txt` returns S3 file content
+**Status**: ✅ DONE - Routing, auth, S3 signing all working
+
+### ✅ Milestone 4: Integration Tests Pass (Phase 16 partial) - COMPLETE
+**Deliverable**: End-to-end tests with LocalStack validate proxy functionality
+**Verification**: `cargo test --test e2e_localstack_test -- --ignored` passes
+**Status**: ✅ DONE - 6 integration tests passing (GET, HEAD, 404)
+
+### ⏳ Milestone 5: Complete Integration Coverage (Phase 16) - IN PROGRESS
+**Deliverable**: All major workflows validated end-to-end
+**Verification**: Range requests, JWT auth, multi-bucket all tested
+**Status**: 🚧 IN PROGRESS - Basic tests done, advanced scenarios needed
+
+### ⏳ Milestone 6: Performance Validated (Phase 17) - NOT STARTED
+**Deliverable**: Proxy meets performance requirements under load
+**Verification**: >1,000 req/s, <1ms JWT validation, <100ms TTFB
+**Status**: ⏳ NOT STARTED
+
+### ⏳ Milestone 7: Production Ready (Phase 18) - NOT STARTED
+**Deliverable**: Metrics, health checks, operational features working
+**Verification**: /metrics returns Prometheus data, /health returns 200
+**Status**: ⏳ NOT STARTED
+
+**Target**: Milestone 7 = v1.0 production release
 
 ---
 
@@ -739,9 +793,13 @@ yatagarasu/
 
 ## Phase 12: Pingora Server Setup (COMPLETE - 2025-11-02)
 
+**Functional Milestone**: HTTP Server Accepts Connections
+
 **Objective**: Initialize Pingora HTTP server and handle basic HTTP requests
 
-**Goal**: Create a running HTTP server that can accept connections and respond to basic requests.
+**Goal**: Create a **working HTTP server** that can accept connections and respond to requests.
+
+**Deliverable**: Server binary that starts up, binds to port, accepts HTTP requests, returns responses
 
 ✅ **STATUS UPDATE (2025-11-02)**: ProxyHttp trait fully implemented! The HTTP server is now functional with routing, JWT authentication, and S3 proxying. All 504 tests passing. Ready for integration testing.
 
@@ -806,11 +864,15 @@ yatagarasu/
 
 ---
 
-## Phase 13: Request Pipeline Integration
+## Phase 13: Request Pipeline Integration (COMPLETE - 2025-11-02)
+
+**Functional Milestone**: Server Routes to S3
 
 **Objective**: Connect router and authentication to HTTP request handling
 
-**Goal**: Route incoming HTTP requests to correct bucket and validate JWT tokens.
+**Goal**: **Working proxy** that routes HTTP requests to S3, validates JWT, signs requests with AWS SigV4.
+
+**Deliverable**: `curl http://localhost:8080/public/test.txt` returns file from S3
 
 ### Request Context
 - [x] Test: Can create RequestContext from HTTP request
