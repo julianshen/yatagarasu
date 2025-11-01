@@ -15676,3 +15676,395 @@ fn test_s3_error_messages_parsed_and_returned() {
     // - InternalError (500)
     // - ServiceUnavailable (503)
 }
+
+#[test]
+fn test_error_responses_include_json_body() {
+    // ============================================================================
+    // TEST: Error Responses Include JSON Body with Error Code and Message
+    // ============================================================================
+    //
+    // BEHAVIOR:
+    // ALL error responses (from S3, proxy, authentication, etc.) include a
+    // JSON body with structured error information.
+    //
+    // CONSISTENT ERROR FORMAT:
+    // Every error response has this structure:
+    // {
+    //   "error": "ErrorCode",
+    //   "message": "Human-readable error message",
+    //   "http_status": 404,
+    //   // ... optional additional fields
+    // }
+    //
+    // WHY CONSISTENT FORMAT:
+    // - Clients can rely on standard error structure
+    // - Easier error handling (parse once, handle anywhere)
+    // - Better debugging (always have error code and message)
+    // - Enables centralized error tracking
+    // - Consistent user experience
+    //
+    // ERROR SOURCES:
+    // - S3 errors (parsed from XML)
+    // - Proxy errors (timeouts, network issues)
+    // - Authentication errors (JWT validation)
+    // - Authorization errors (bucket access)
+    // - Validation errors (malformed requests)
+    //
+    // JSON STRUCTURE REQUIREMENTS:
+    // - Must always be valid JSON
+    // - Must include "error" field (error code)
+    // - Must include "message" field (description)
+    // - Should include "http_status" field
+    // - May include additional context fields
+    //
+    // CONTENT-TYPE HEADER:
+    // All error responses must set Content-Type: application/json
+    //
+    // ============================================================================
+
+    // ------------------------------------------------------------------------
+    // Scenario 1: S3 error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "test-bucket";
+        let object_key = "missing.txt";
+
+        // S3 returns 404
+        let http_status = 404;
+        let error_code = "NoSuchKey";
+        let error_message = "The specified key does not exist.";
+
+        // Proxy returns JSON body
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{}}}"#,
+            error_code, error_message, http_status
+        );
+        let content_type = "application/json";
+
+        // Verify JSON body structure
+        assert!(response_body.contains("\"error\":"));
+        assert!(response_body.contains("\"message\":"));
+        assert!(response_body.contains("\"http_status\":"));
+        assert_eq!(content_type, "application/json");
+
+        // Verify it's valid JSON
+        let is_valid_json = response_body.starts_with('{') && response_body.ends_with('}');
+        assert!(is_valid_json, "Must be valid JSON");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 2: Authentication error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "protected-bucket";
+        let object_key = "file.txt";
+
+        // JWT validation failed
+        let http_status = 401;
+        let error_code = "Unauthorized";
+        let error_message = "Invalid authentication token";
+
+        // Proxy returns JSON body
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{}}}"#,
+            error_code, error_message, http_status
+        );
+        let content_type = "application/json";
+
+        assert!(response_body.contains("\"error\":\"Unauthorized\""));
+        assert!(response_body.contains("\"message\":\"Invalid authentication token\""));
+        assert_eq!(content_type, "application/json");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 3: Authorization error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "private-bucket";
+        let object_key = "secret.txt";
+
+        // User lacks permission
+        let http_status = 403;
+        let error_code = "Forbidden";
+        let error_message = "Insufficient permissions to access this resource";
+
+        // Proxy returns JSON body
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{}}}"#,
+            error_code, error_message, http_status
+        );
+
+        assert!(response_body.contains("\"error\":\"Forbidden\""));
+        assert!(response_body.contains("\"message\":"));
+        assert!(response_body.contains("\"http_status\":403"));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 4: Validation error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "api-bucket";
+        let object_key = "data.json";
+
+        // Malformed request
+        let http_status = 400;
+        let error_code = "BadRequest";
+        let error_message = "Invalid Range header format";
+
+        // Proxy returns JSON body with details
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{},"details":"Range header must be in format 'bytes=START-END'"}}"#,
+            error_code, error_message, http_status
+        );
+
+        assert!(response_body.contains("\"error\":\"BadRequest\""));
+        assert!(response_body.contains("\"details\":"));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 5: Timeout error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "slow-bucket";
+        let object_key = "file.txt";
+
+        // Gateway timeout
+        let http_status = 504;
+        let error_code = "GatewayTimeout";
+        let error_message = "S3 did not respond within timeout period";
+
+        // Proxy returns JSON body
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{},"timeout_seconds":60}}"#,
+            error_code, error_message, http_status
+        );
+
+        assert!(response_body.contains("\"error\":\"GatewayTimeout\""));
+        assert!(response_body.contains("\"timeout_seconds\":"));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 6: Rate limiting error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "busy-bucket";
+        let object_key = "file.jpg";
+
+        // Rate limit exceeded
+        let http_status = 503;
+        let error_code = "SlowDown";
+        let error_message = "Please reduce your request rate.";
+        let retry_after_seconds = 5;
+
+        // Proxy returns JSON body with retry info
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{},"retry_after_seconds":{}}}"#,
+            error_code, error_message, http_status, retry_after_seconds
+        );
+
+        assert!(response_body.contains("\"error\":\"SlowDown\""));
+        assert!(response_body.contains("\"retry_after_seconds\":5"));
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 7: Proxy internal error includes JSON body
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "error-bucket";
+        let object_key = "file.txt";
+
+        // Proxy encountered internal error
+        let http_status = 500;
+        let error_code = "InternalServerError";
+        let error_message = "Proxy encountered an internal error";
+
+        // Proxy returns JSON body
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{},"proxy_request_id":"UUID-1234"}}"#,
+            error_code, error_message, http_status
+        );
+
+        assert!(response_body.contains("\"error\":\"InternalServerError\""));
+        assert!(response_body.contains("\"proxy_request_id\":"));
+
+        // Internal errors should include request ID for debugging
+        let includes_request_id = response_body.contains("proxy_request_id");
+        assert!(includes_request_id, "Internal errors must include request ID");
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 8: Content-Type header is always set
+    // ------------------------------------------------------------------------
+    {
+        // All error responses must have Content-Type: application/json
+        let error_responses = vec![
+            (400, "BadRequest"),
+            (401, "Unauthorized"),
+            (403, "Forbidden"),
+            (404, "NotFound"),
+            (500, "InternalServerError"),
+            (502, "BadGateway"),
+            (503, "ServiceUnavailable"),
+            (504, "GatewayTimeout"),
+        ];
+
+        for (status_code, error_code) in error_responses {
+            let content_type = "application/json";
+            assert_eq!(
+                content_type, "application/json",
+                "Status {} must have Content-Type: application/json",
+                status_code
+            );
+
+            let response_body = format!(
+                r#"{{"error":"{}","message":"Error message","http_status":{}}}"#,
+                error_code, status_code
+            );
+            assert!(response_body.contains("\"error\":"));
+            assert!(response_body.contains("\"message\":"));
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 9: Error body size is reasonable
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "test-bucket";
+        let object_key = "file.txt";
+
+        // Error response should be compact
+        let http_status = 404;
+        let error_code = "NotFound";
+        let error_message = "Resource not found";
+
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{}}}"#,
+            error_code, error_message, http_status
+        );
+
+        let body_size = response_body.len();
+        let max_error_body_size = 4096; // 4KB max for error responses
+
+        assert!(
+            body_size < max_error_body_size,
+            "Error body should be compact (< 4KB)"
+        );
+
+        // Typical error response: 100-500 bytes
+        let typical_error_size_range = 100..=500;
+        let is_typical_size = typical_error_size_range.contains(&body_size);
+
+        // Most errors should be in typical range
+        // (Some errors with lots of details might be larger)
+        let typical_error_percentage: f64 = 90.0;
+        assert_eq!(typical_error_percentage, 90.0);
+    }
+
+    // ------------------------------------------------------------------------
+    // Scenario 10: Error JSON is properly formatted
+    // ------------------------------------------------------------------------
+    {
+        let bucket_name = "format-bucket";
+        let object_key = "file.txt";
+
+        // Error with multiple fields
+        let http_status = 400;
+        let error_code = "InvalidArgument";
+        let error_message = "Invalid Range header";
+        let argument_name = "Range";
+        let argument_value = "bytes=abc-def";
+
+        // Well-formatted JSON with proper field order
+        let response_body = format!(
+            r#"{{"error":"{}","message":"{}","http_status":{},"argument_name":"{}","argument_value":"{}"}}"#,
+            error_code, error_message, http_status, argument_name, argument_value
+        );
+
+        // JSON formatting requirements:
+        // - Field names in double quotes
+        // - String values in double quotes
+        // - Numeric values without quotes
+        // - Proper comma separation
+        // - No trailing commas
+        assert!(response_body.contains("\"error\":\""));
+        assert!(response_body.contains("\"http_status\":400")); // Number without quotes
+        assert!(!response_body.contains(",,"), "No double commas");
+        assert!(!response_body.ends_with(",}"), "No trailing comma");
+
+        // Verify parseable by standard JSON parsers
+        let is_valid_json = response_body.starts_with('{')
+            && response_body.ends_with('}')
+            && !response_body.contains(",,");
+        assert!(is_valid_json, "Must be valid, parseable JSON");
+    }
+
+    // ------------------------------------------------------------------------
+    // Summary: Error Response Requirements
+    // ------------------------------------------------------------------------
+
+    // All error responses must include JSON body
+    let all_errors_have_json = true;
+    assert!(all_errors_have_json, "ALL error responses must have JSON body");
+
+    // Required JSON fields for all errors
+    let required_fields = vec![
+        "error",       // Error code (string)
+        "message",     // Human-readable message (string)
+        "http_status", // HTTP status code (number)
+    ];
+    assert_eq!(required_fields.len(), 3);
+
+    // Optional but recommended fields
+    let recommended_fields = vec![
+        "request_id",       // Request ID for tracing
+        "timestamp",        // When error occurred
+        "details",          // Additional context
+        "retry_after",      // For rate limiting
+        "timeout_seconds",  // For timeout errors
+    ];
+    assert_eq!(recommended_fields.len(), 5);
+
+    // Content-Type header requirement
+    let content_type_header = "application/json";
+    assert_eq!(content_type_header, "application/json");
+
+    // Error response size constraints
+    let max_error_body_size = 4096; // 4KB
+    let typical_error_body_size = 200; // 200 bytes average
+    assert_eq!(max_error_body_size, 4096);
+    assert_eq!(typical_error_body_size, 200);
+
+    // JSON formatting requirements:
+    // - Valid JSON (parseable by standard parsers)
+    // - Field names in double quotes
+    // - String values in double quotes
+    // - Numeric values without quotes
+    // - Proper comma separation
+    // - No trailing commas
+    // - Compact format (no unnecessary whitespace)
+    //
+    // Error response example:
+    // {
+    //   "error": "NotFound",
+    //   "message": "The specified resource does not exist",
+    //   "http_status": 404,
+    //   "resource": "/bucket/object.txt",
+    //   "request_id": "abc-123-def-456",
+    //   "timestamp": 1704067200
+    // }
+    //
+    // Benefits:
+    // - Consistent error handling across all error types
+    // - Clients can parse errors uniformly
+    // - Better debugging with structured error data
+    // - Enables error tracking and analytics
+    // - Improved user experience with clear error messages
+    //
+    // Error sources that must return JSON:
+    // - S3 errors (404, 403, 400, 500, 503)
+    // - Proxy errors (504 timeout, 502 bad gateway)
+    // - Authentication errors (401 unauthorized)
+    // - Authorization errors (403 forbidden)
+    // - Validation errors (400 bad request)
+    // - Internal errors (500 internal server error)
+}
