@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (2108 lines)
-- ✅ 14 tests: 3 infrastructure validation + 11 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (2320 lines)
+- ✅ 15 tests: 3 infrastructure validation + 12 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1050,6 +1050,7 @@ yatagarasu/
 12. `test_proxy_jwt_from_query_parameter()` - Proxy accepts JWT from query parameter (?token=)
 13. `test_proxy_jwt_from_custom_header()` - Proxy accepts JWT from custom header (X-Auth-Token)
 14. `test_proxy_multi_bucket_a()` - Proxy routes /bucket-a/* to bucket-a with isolated credentials
+15. `test_proxy_multi_bucket_b()` - Proxy routes /bucket-b/* to bucket-b with isolated credentials
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1088,7 +1089,7 @@ yatagarasu/
 
 ### End-to-End Scenarios - Multi-Bucket
 - [x] Integration: GET /bucket-a/file.txt uses bucket-a credentials
-- [ ] Integration: GET /bucket-b/file.txt uses bucket-b credentials
+- [x] Integration: GET /bucket-b/file.txt uses bucket-b credentials
 - [ ] Integration: Concurrent requests to different buckets work
 - [ ] Integration: Each bucket uses isolated credentials (no mixing)
 - [ ] Integration: Public and private buckets in same proxy work

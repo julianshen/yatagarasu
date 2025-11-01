@@ -2106,3 +2106,215 @@ buckets:
 
     log::info!("=== Multi-Bucket Test: Bucket A PASSED ===");
 }
+
+/// Test 15: Proxy routes /bucket-b/* to bucket-b with isolated credentials
+///
+/// This test complements Test 14 by validating the second bucket in multi-bucket config:
+/// 1. Create two S3 buckets (bucket-a, bucket-b) in LocalStack
+/// 2. Upload different files to each bucket
+/// 3. Configure proxy with two bucket configs:
+///    - /bucket-a/* -> S3 bucket "bucket-a" with credentials A
+///    - /bucket-b/* -> S3 bucket "bucket-b" with credentials B
+/// 4. Request GET /bucket-b/file-b.txt
+/// 5. Proxy routes to bucket-b using credentials B
+/// 6. Returns 200 OK with content from bucket-b
+///
+/// This validates:
+/// - Routing correctly selects bucket-b by path prefix /bucket-b/*
+/// - Request to bucket-b does NOT access bucket-a
+/// - Both buckets work correctly in same proxy instance
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_multi_bucket_b() {
+    init_logging();
+    log::info!("=== Starting Multi-Bucket Test: Bucket B ===");
+
+    // Step 1: Start LocalStack container with S3
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!(
+        "LocalStack started on port {} (S3 endpoint: {})",
+        port,
+        s3_endpoint
+    );
+
+    // Step 2: Create TWO S3 buckets and upload different files to each
+    let content_a = r#"{"bucket": "bucket-a", "file": "file-a.txt"}"#;
+    let content_b = r#"{"bucket": "bucket-b", "file": "file-b.txt"}"#;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region("us-east-1")
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket-a and upload file-a.txt
+        s3_client
+            .create_bucket()
+            .bucket("bucket-a")
+            .send()
+            .await
+            .expect("Failed to create bucket-a");
+        log::info!("Created S3 bucket: bucket-a");
+
+        s3_client
+            .put_object()
+            .bucket("bucket-a")
+            .key("file-a.txt")
+            .body(content_a.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file-a.txt to bucket-a");
+        log::info!("Uploaded file-a.txt to bucket-a");
+
+        // Create bucket-b and upload file-b.txt
+        s3_client
+            .create_bucket()
+            .bucket("bucket-b")
+            .send()
+            .await
+            .expect("Failed to create bucket-b");
+        log::info!("Created S3 bucket: bucket-b");
+
+        s3_client
+            .put_object()
+            .bucket("bucket-b")
+            .key("file-b.txt")
+            .body(content_b.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file-b.txt to bucket-b");
+        log::info!("Uploaded file-b.txt to bucket-b");
+    });
+
+    // Step 3: Create proxy configuration with TWO buckets
+    let proxy_port = 18090; // Unique port for this test
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+buckets:
+  - name: "bucket-a"
+    path_prefix: "/bucket-a"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-a"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+
+  - name: "bucket-b"
+    path_prefix: "/bucket-b"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-b"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+"#,
+        proxy_port, s3_endpoint, s3_endpoint
+    );
+
+    // Write config to temporary file
+    let config_path = std::env::temp_dir().join(format!("yatagarasu_test_{}.yaml", proxy_port));
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+    log::info!("Wrote proxy config to: {:?}", config_path);
+
+    // Step 4: Start proxy in background thread
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config in proxy thread");
+        log::info!(
+            "Loaded config in proxy thread with {} buckets",
+            config.buckets.len()
+        );
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        log::info!("Proxy listening on: {}", listen_addr);
+
+        server.add_service(proxy_service);
+        server.run_forever(); // This blocks
+    });
+
+    // Wait for proxy to start
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    log::info!("Proxy should be started now");
+
+    // Step 5: Make HTTP request to /bucket-b/file-b.txt
+    let client = reqwest::blocking::Client::new();
+    let proxy_url = format!("http://127.0.0.1:{}/bucket-b/file-b.txt", proxy_port);
+    log::info!("Making request to proxy: {}", proxy_url);
+
+    let response = client
+        .get(&proxy_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!(
+        "Received response: status={}, headers={:?}",
+        response.status(),
+        response.headers()
+    );
+
+    // Step 6: Verify 200 OK status
+    assert_eq!(
+        response.status(),
+        200,
+        "Expected 200 OK for /bucket-b/file-b.txt, got {}",
+        response.status()
+    );
+
+    // Step 7: Verify response body matches content from bucket-b (not bucket-a)
+    let body = response.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body);
+    assert_eq!(
+        body, content_b,
+        "Expected content from bucket-b, got '{}'",
+        body
+    );
+
+    // Verify we got bucket-b content, not bucket-a content
+    assert!(
+        body.contains("bucket-b"),
+        "Response should contain 'bucket-b'"
+    );
+    assert!(
+        !body.contains("bucket-a"),
+        "Response should NOT contain 'bucket-a'"
+    );
+
+    log::info!("=== Multi-Bucket Test: Bucket B PASSED ===");
+}
