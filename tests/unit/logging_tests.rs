@@ -3423,3 +3423,271 @@ fn test_request_id_returned_in_response_header() {
         "Different requests should have different request IDs"
     );
 }
+
+/// Test: Request ID is included in all log messages for that request
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Request Tracing)
+/// Verifies that the request ID appears in every log message within the request context.
+///
+/// Request ID propagation via tracing spans:
+/// - Request ID is set as a span field at the request entry point
+/// - All child spans inherit the request ID from parent span
+/// - Every log message within a span includes span fields
+/// - Result: Request ID automatically appears in all logs
+///
+/// Why this matters:
+/// - Enables filtering all logs for a single request
+/// - No need to manually pass request ID to every function
+/// - Tracing framework handles propagation automatically
+/// - Works across async boundaries and thread pools
+///
+/// Example log correlation:
+/// ```
+/// Filter logs where request_id = "550e8400-..."
+///
+/// 2024-01-01T10:00:00Z INFO Request received request_id="550e8400-..." method="GET" path="/file.txt"
+/// 2024-01-01T10:00:00Z INFO Route matched request_id="550e8400-..." route="/products/*"
+/// 2024-01-01T10:00:00Z INFO Auth validated request_id="550e8400-..." user_id="12345"
+/// 2024-01-01T10:00:00Z INFO S3 request started request_id="550e8400-..." bucket="my-bucket"
+/// 2024-01-01T10:00:00Z INFO S3 response received request_id="550e8400-..." status=200 size=1024
+/// 2024-01-01T10:00:01Z INFO Response sent request_id="550e8400-..." status=200 latency_ms=1000
+/// ```
+///
+/// Tracing span hierarchy:
+/// ```
+/// http_request (request_id)
+///   ├─ routing (inherits request_id)
+///   ├─ authentication (inherits request_id)
+///   │   └─ jwt_validation (inherits request_id)
+///   ├─ s3_request (inherits request_id)
+///   │   ├─ signature_generation (inherits request_id)
+///   │   └─ http_client (inherits request_id)
+///   └─ response_writing (inherits request_id)
+/// ```
+///
+/// How span fields work:
+/// - Span fields are key-value pairs attached to a span
+/// - Child spans inherit parent span fields
+/// - Log events within a span include all span fields
+/// - No manual propagation needed - automatic via context
+///
+/// Benefits of automatic propagation:
+/// - Less error-prone (can't forget to pass request ID)
+/// - Works across async boundaries (tokio tasks, threads)
+/// - No need to modify function signatures
+/// - Consistent across the entire codebase
+///
+/// Common pitfalls (avoided by tracing):
+/// - Forgetting to pass request ID to helper functions
+/// - Losing request ID across async boundaries
+/// - Inconsistent field names (requestId vs request_id vs req_id)
+/// - Missing request ID in error paths
+///
+/// Use cases:
+/// 1. Debug slow request:
+///    - Filter logs by request_id
+///    - See every step: routing, auth, S3, response
+///    - Identify bottleneck: "S3 request took 5s"
+///
+/// 2. Debug error:
+///    - User reports 500 error with request_id
+///    - Filter logs by request_id
+///    - See where error occurred: "S3 returned 403"
+///
+/// 3. Security audit:
+///    - Investigate suspicious activity
+///    - Filter logs by user_id to get request_ids
+///    - See complete request flow for each request
+///
+/// Test validates:
+/// - Request ID appears in request entry log
+/// - Request ID appears in nested operation logs (routing, auth, S3)
+/// - Request ID appears in error logs
+/// - Request ID is consistent across all logs for a single request
+/// - Multiple requests have isolated request IDs (no cross-contamination)
+#[test]
+fn test_request_id_included_in_all_log_messages() {
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: Request ID appears in all log messages within request span
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let request_id = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber, || {
+        let request_span = tracing::info_span!(
+            "http_request",
+            request_id = %request_id,
+            method = "GET",
+            path = "/products/image.png"
+        );
+        let _enter = request_span.enter();
+
+        tracing::info!("Request received");
+
+        // Routing
+        let routing_span = tracing::info_span!("routing", route = "/products/*");
+        let _routing_enter = routing_span.enter();
+        tracing::info!("Route matched");
+        drop(_routing_enter);
+
+        // Authentication
+        let auth_span = tracing::info_span!("authentication");
+        let _auth_enter = auth_span.enter();
+        tracing::info!("Auth validated");
+        drop(_auth_enter);
+
+        // S3 request
+        let s3_span = tracing::info_span!("s3_request", bucket = "my-bucket", key = "image.png");
+        let _s3_enter = s3_span.enter();
+        tracing::info!("S3 request started");
+        tracing::info!("S3 response received");
+        drop(_s3_enter);
+
+        tracing::info!("Response sent");
+    });
+
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+    let request_id_str = request_id.to_string();
+
+    // Verify request ID appears in all log messages
+    let log_lines: Vec<&str> = log_output.lines().collect();
+    let logs_with_request_id = log_lines
+        .iter()
+        .filter(|line| line.contains(&request_id_str))
+        .count();
+
+    assert_eq!(
+        logs_with_request_id,
+        log_lines.len(),
+        "Request ID should appear in ALL log messages (expected {}, got {})",
+        log_lines.len(),
+        logs_with_request_id
+    );
+
+    // Verify specific log messages contain request ID
+    assert!(
+        log_output.contains(&format!("{}", request_id_str))
+            && log_output.contains("Request received"),
+        "Entry log should contain request ID"
+    );
+    assert!(
+        log_output.contains(&format!("{}", request_id_str)) && log_output.contains("Route matched"),
+        "Routing log should contain request ID"
+    );
+    assert!(
+        log_output.contains(&format!("{}", request_id_str))
+            && log_output.contains("Auth validated"),
+        "Auth log should contain request ID"
+    );
+    assert!(
+        log_output.contains(&format!("{}", request_id_str))
+            && log_output.contains("S3 request started"),
+        "S3 log should contain request ID"
+    );
+    assert!(
+        log_output.contains(&format!("{}", request_id_str)) && log_output.contains("Response sent"),
+        "Response log should contain request ID"
+    );
+
+    // Scenario 2: Error paths also include request ID
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    let request_id2 = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber2, || {
+        let request_span = tracing::info_span!(
+            "http_request",
+            request_id = %request_id2,
+            method = "GET",
+            path = "/products/missing.png"
+        );
+        let _enter = request_span.enter();
+
+        tracing::info!("Request received");
+
+        // S3 request that fails
+        let s3_span = tracing::info_span!("s3_request", bucket = "my-bucket", key = "missing.png");
+        let _s3_enter = s3_span.enter();
+        tracing::error!(error_code = "NoSuchKey", "S3 error occurred");
+        drop(_s3_enter);
+
+        tracing::error!(status = 404, "Request failed");
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+    let request_id2_str = request_id2.to_string();
+
+    // Verify request ID appears in error logs
+    assert!(
+        log_output2.contains(&request_id2_str) && log_output2.contains("S3 error occurred"),
+        "S3 error log should contain request ID"
+    );
+    assert!(
+        log_output2.contains(&request_id2_str) && log_output2.contains("Request failed"),
+        "Request error log should contain request ID"
+    );
+
+    // Scenario 3: Multiple concurrent requests have isolated request IDs
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    let request_id_a = Uuid::new_v4();
+    let request_id_b = Uuid::new_v4();
+
+    tracing::subscriber::with_default(subscriber3, || {
+        // Request A
+        let request_span_a = tracing::info_span!("http_request", request_id = %request_id_a);
+        let _enter_a = request_span_a.enter();
+        tracing::info!("Request A processing");
+        drop(_enter_a);
+
+        // Request B
+        let request_span_b = tracing::info_span!("http_request", request_id = %request_id_b);
+        let _enter_b = request_span_b.enter();
+        tracing::info!("Request B processing");
+        drop(_enter_b);
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+
+    // Verify both request IDs appear in logs
+    assert!(
+        log_output3.contains(&request_id_a.to_string()),
+        "Request A ID should appear in logs"
+    );
+    assert!(
+        log_output3.contains(&request_id_b.to_string()),
+        "Request B ID should appear in logs"
+    );
+
+    // Verify request IDs don't cross-contaminate
+    let lines_a: Vec<&str> = log_output3
+        .lines()
+        .filter(|line| line.contains("Request A"))
+        .collect();
+    let lines_b: Vec<&str> = log_output3
+        .lines()
+        .filter(|line| line.contains("Request B"))
+        .collect();
+
+    assert!(
+        lines_a
+            .iter()
+            .all(|line| line.contains(&request_id_a.to_string())),
+        "Request A logs should only contain request_id A"
+    );
+    assert!(
+        lines_b
+            .iter()
+            .all(|line| line.contains(&request_id_b.to_string())),
+        "Request B logs should only contain request_id B"
+    );
+}
