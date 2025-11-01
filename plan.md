@@ -762,7 +762,7 @@ yatagarasu/
 ### S3 Client Integration
 - [x] Test: Can create S3 HTTP client from bucket config
 - [x] Test: S3 client uses bucket-specific credentials
-- [ ] Test: S3 client connects to configured endpoint (or AWS default)
+- [x] Test: S3 client connects to configured endpoint (or AWS default)
 - [ ] Test: S3 client generates valid AWS Signature v4
 - [ ] Test: Each bucket has isolated S3 client (no credential mixing)
 

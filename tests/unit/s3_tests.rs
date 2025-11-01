@@ -8257,3 +8257,104 @@ fn test_s3_client_uses_bucket_specific_credentials() {
     // - A request to /private/* will use private credentials
     // - A request to /archive/* will use archive credentials
 }
+
+// Test: S3 client connects to configured endpoint (or AWS default)
+#[test]
+fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
+    use yatagarasu::config::BucketConfig;
+
+    // SCENARIO 1: Custom endpoint configured (e.g., MinIO, LocalStack, or private S3-compatible storage)
+    let minio_bucket = BucketConfig {
+        name: "minio-test".to_string(),
+        path_prefix: "/minio".to_string(),
+        s3: S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "minioadmin".to_string(),
+            secret_key: "minioadmin".to_string(),
+            endpoint: Some("http://localhost:9000".to_string()), // Custom endpoint
+        },
+        auth: None,
+    };
+
+    let minio_client = create_s3_client(&minio_bucket.s3)
+        .expect("Should create MinIO client");
+
+    // Verify custom endpoint is used
+    assert_eq!(
+        minio_client.config.endpoint,
+        Some("http://localhost:9000".to_string()),
+        "MinIO client should use custom endpoint"
+    );
+
+    // SCENARIO 2: No endpoint configured - should use AWS default
+    let aws_bucket = BucketConfig {
+        name: "aws-production".to_string(),
+        path_prefix: "/production".to_string(),
+        s3: S3Config {
+            bucket: "production-bucket".to_string(),
+            region: "us-west-2".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None, // No custom endpoint - use AWS default
+        },
+        auth: None,
+    };
+
+    let aws_client = create_s3_client(&aws_bucket.s3)
+        .expect("Should create AWS client");
+
+    // Verify no custom endpoint (will use AWS default based on region)
+    assert_eq!(
+        aws_client.config.endpoint,
+        None,
+        "AWS client should have no custom endpoint (uses AWS default)"
+    );
+
+    // SCENARIO 3: Different custom endpoints for different buckets
+    let localstack_bucket = BucketConfig {
+        name: "localstack-dev".to_string(),
+        path_prefix: "/dev".to_string(),
+        s3: S3Config {
+            bucket: "dev-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: Some("http://localhost:4566".to_string()), // LocalStack endpoint
+        },
+        auth: None,
+    };
+
+    let localstack_client = create_s3_client(&localstack_bucket.s3)
+        .expect("Should create LocalStack client");
+
+    // Verify LocalStack endpoint is used
+    assert_eq!(
+        localstack_client.config.endpoint,
+        Some("http://localhost:4566".to_string()),
+        "LocalStack client should use LocalStack endpoint"
+    );
+
+    // Verify different buckets can have different endpoints
+    assert_ne!(
+        minio_client.config.endpoint,
+        localstack_client.config.endpoint,
+        "MinIO and LocalStack clients should have different endpoints"
+    );
+
+    assert_ne!(
+        minio_client.config.endpoint,
+        aws_client.config.endpoint,
+        "MinIO client (custom) and AWS client (default) should have different endpoint configs"
+    );
+
+    // This demonstrates:
+    // - Custom endpoints allow using S3-compatible services (MinIO, LocalStack, Wasabi, DigitalOcean Spaces, etc.)
+    // - When endpoint is None, AWS SDK defaults to: https://s3.{region}.amazonaws.com
+    // - Different buckets can point to different S3-compatible services simultaneously
+    // - Use cases:
+    //   * Development: LocalStack at http://localhost:4566
+    //   * Testing: MinIO at http://localhost:9000
+    //   * Production: AWS S3 (endpoint=None)
+    //   * Hybrid: Some buckets on AWS, some on private S3-compatible storage
+}
