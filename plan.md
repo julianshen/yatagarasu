@@ -860,6 +860,9 @@ yatagarasu/
 
 **Goal**: Verify all components work together correctly in real-world scenarios.
 
+### Binary Implementation
+- [x] Implement: main.rs with CLI argument parsing and server startup
+
 ### Integration Test Setup
 - [ ] Test: Can start MinIO container for integration tests
 - [ ] Test: Can upload test files to MinIO buckets

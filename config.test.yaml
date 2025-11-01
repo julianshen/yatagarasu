@@ -1,0 +1,14 @@
+# Test configuration for binary startup test
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      region: "us-east-1"
+      bucket: "my-test-bucket"
+      endpoint: "http://localhost:9000"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
