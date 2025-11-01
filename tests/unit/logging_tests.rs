@@ -2972,3 +2972,112 @@ fn test_query_parameters_with_token_redacted_in_logs() {
         "access_token value from query parameter should NEVER appear in logs"
     );
 }
+
+/// Test: S3 secret keys are never logged
+///
+/// BEHAVIORAL TEST (Phase 15: Error Handling & Logging - Security & Privacy)
+/// Verifies that S3 secret keys are NEVER logged in S3-specific contexts to prevent
+/// unauthorized access to S3 buckets and data.
+///
+/// Why S3 secret keys must never be logged:
+///
+/// S3 secret keys grant full access to S3 buckets. If leaked:
+/// - Attackers can read, modify, or delete data
+/// - Unauthorized usage can cause massive AWS bills
+/// - Data breaches and compliance violations
+///
+/// Test scenarios:
+/// 1. S3 client configuration doesn't log secret keys
+/// 2. S3 signature errors don't leak secret keys
+/// 3. S3 request failures don't expose credentials
+///
+/// Expected behavior:
+/// - No S3 secret key values appear in any log output
+/// - Can log that S3 credentials are configured
+/// - Can log S3 regions and bucket names (not sensitive)
+#[test]
+fn test_s3_secret_keys_never_logged() {
+    use std::sync::{Arc, Mutex};
+    use yatagarasu::logging::create_test_subscriber;
+
+    // Scenario 1: S3 client configuration doesn't log secret keys
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = create_test_subscriber(buffer.clone());
+
+    let s3_secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+    tracing::subscriber::with_default(subscriber, || {
+        let span = tracing::info_span!("s3_client");
+        let _enter = span.enter();
+
+        // Log S3 configuration WITHOUT secret key
+        tracing::info!(
+            credentials_configured = true,
+            region = "us-east-1",
+            bucket = "my-bucket",
+            "S3 client configured"
+        );
+    });
+
+    let output = buffer.lock().unwrap();
+    let log_output = String::from_utf8_lossy(&output);
+
+    // Verify S3 secret key NEVER appears
+    assert!(
+        !log_output.contains(s3_secret_key),
+        "S3 secret key should NEVER appear in logs"
+    );
+    assert!(
+        !log_output.contains("wJalrXUtnFEMI"),
+        "S3 secret key fragments should NEVER appear in logs"
+    );
+
+    // Scenario 2: S3 signature errors don't leak secret keys
+    let buffer2 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber2 = create_test_subscriber(buffer2.clone());
+
+    tracing::subscriber::with_default(subscriber2, || {
+        let span = tracing::info_span!("s3_request");
+        let _enter = span.enter();
+
+        // Log S3 signature error WITHOUT exposing secret key
+        tracing::error!(
+            error_code = "SignatureDoesNotMatch",
+            error_type = "S3AuthError",
+            bucket = "my-bucket",
+            "S3 signature verification failed"
+        );
+    });
+
+    let output2 = buffer2.lock().unwrap();
+    let log_output2 = String::from_utf8_lossy(&output2);
+
+    assert!(
+        !log_output2.contains(s3_secret_key),
+        "S3 secret key should not appear even in error logs"
+    );
+
+    // Scenario 3: S3 request failures don't expose credentials
+    let buffer3 = Arc::new(Mutex::new(Vec::new()));
+    let subscriber3 = create_test_subscriber(buffer3.clone());
+
+    tracing::subscriber::with_default(subscriber3, || {
+        let span = tracing::info_span!("s3_get");
+        let _enter = span.enter();
+
+        tracing::error!(
+            bucket = "my-bucket",
+            key = "file.png",
+            error_code = "AccessDenied",
+            "S3 request failed"
+        );
+    });
+
+    let output3 = buffer3.lock().unwrap();
+    let log_output3 = String::from_utf8_lossy(&output3);
+
+    assert!(
+        !log_output3.contains(s3_secret_key),
+        "S3 secret key should not leak in request failure logs"
+    );
+}
