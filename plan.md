@@ -805,7 +805,7 @@ yatagarasu/
 ### Connection Management
 - [x] Test: Client disconnect cancels S3 request
 - [x] Test: S3 connection is closed after response completes
-- [ ] Test: Connection pool reuses connections for same bucket
+- [x] Test: Connection pool reuses connections for same bucket
 - [ ] Test: No connection leaks after many requests
 
 **Expected Outcome**: Working S3 proxy that handles GET/HEAD requests and streams responses.
