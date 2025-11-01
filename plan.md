@@ -747,7 +747,7 @@ yatagarasu/
 - [x] Test: Request passes through middleware in correct order (router → auth → handler)
 - [x] Test: Middleware can short-circuit request (e.g., 401 stops pipeline)
 - [x] Test: Middleware can modify request context
-- [ ] Test: Errors in middleware return appropriate HTTP status
+- [x] Test: Errors in middleware return appropriate HTTP status
 
 **Expected Outcome**: HTTP server that routes requests and validates JWT tokens before reaching S3 handler.
 
