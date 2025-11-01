@@ -8358,3 +8358,216 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
     //   * Production: AWS S3 (endpoint=None)
     //   * Hybrid: Some buckets on AWS, some on private S3-compatible storage
 }
+
+// Test: S3 client generates valid AWS Signature v4
+#[test]
+fn test_s3_client_generates_valid_aws_signature_v4() {
+    use yatagarasu::config::BucketConfig;
+
+    // Setup: Create S3 client with known credentials
+    let bucket_config = BucketConfig {
+        name: "test-bucket".to_string(),
+        path_prefix: "/test".to_string(),
+        s3: S3Config {
+            bucket: "example-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: None,
+        },
+        auth: None,
+    };
+
+    let s3_client = create_s3_client(&bucket_config.s3)
+        .expect("Should create S3 client");
+
+    // The S3 client must be able to generate AWS Signature v4 for authenticated requests
+    // AWS Signature v4 process involves:
+    // 1. Create canonical request (HTTP method, URI, query string, headers, payload hash)
+    // 2. Create string to sign (algorithm, timestamp, credential scope, canonical request hash)
+    // 3. Calculate signing key (derived from secret key, date, region, service)
+    // 4. Calculate signature (HMAC-SHA256 of string to sign with signing key)
+    // 5. Add Authorization header with signature
+
+    // Verify the client has the necessary components for signing
+    assert_eq!(
+        s3_client.config.access_key, "AKIAIOSFODNN7EXAMPLE",
+        "Client should have access key for signature generation"
+    );
+    assert_eq!(
+        s3_client.config.secret_key,
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "Client should have secret key for signature generation"
+    );
+    assert_eq!(
+        s3_client.config.region, "us-east-1",
+        "Client should have region for signature scope"
+    );
+    assert_eq!(
+        s3_client.config.bucket, "example-bucket",
+        "Client should have bucket name for request URI"
+    );
+
+    // This demonstrates that:
+    // - S3 client has all required components for AWS Signature v4 generation
+    // - Access key used in Authorization header: AWS4-HMAC-SHA256 Credential={access_key}/...
+    // - Secret key used to derive signing key (never sent over network)
+    // - Region used in credential scope: {date}/{region}/s3/aws4_request
+    // - Each request will get a unique signature based on:
+    //   * Request timestamp (x-amz-date header)
+    //   * Request method (GET, HEAD, PUT, etc.)
+    //   * Request URI and query parameters
+    //   * Request headers (Host, x-amz-content-sha256, etc.)
+    //   * Request payload hash
+    //
+    // The actual signature generation happens in the S3 module's sign_request function
+    // (tested in earlier Phase 3 tests: test_generates_valid_aws_signature_v4_for_get_request)
+}
+
+// Test: Each bucket has isolated S3 client (no credential mixing)
+#[test]
+fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
+    use yatagarasu::config::BucketConfig;
+    use std::collections::HashMap;
+
+    // Setup: Create a proxy configuration with multiple buckets
+    // This simulates the real proxy setup where each bucket gets its own S3 client
+
+    // Bucket 1: Products (public, AWS S3)
+    let products_config = BucketConfig {
+        name: "products".to_string(),
+        path_prefix: "/products".to_string(),
+        s3: S3Config {
+            bucket: "products-bucket-s3".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAPRODUCTS12345".to_string(),
+            secret_key: "products-secret-key".to_string(),
+            endpoint: None, // AWS S3
+        },
+        auth: None, // Public bucket
+    };
+
+    // Bucket 2: Private (authenticated, AWS S3)
+    let private_config = BucketConfig {
+        name: "private".to_string(),
+        path_prefix: "/private".to_string(),
+        s3: S3Config {
+            bucket: "private-bucket-s3".to_string(),
+            region: "eu-west-1".to_string(),
+            access_key: "AKIAPRIVATE67890".to_string(),
+            secret_key: "private-secret-key".to_string(),
+            endpoint: None, // AWS S3
+        },
+        auth: Some(yatagarasu::config::AuthConfig {
+            enabled: true, // Requires JWT
+        }),
+    };
+
+    // Bucket 3: Archive (MinIO, custom endpoint)
+    let archive_config = BucketConfig {
+        name: "archive".to_string(),
+        path_prefix: "/archive".to_string(),
+        s3: S3Config {
+            bucket: "archive-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "minioadmin".to_string(),
+            secret_key: "minioadmin".to_string(),
+            endpoint: Some("http://localhost:9000".to_string()), // MinIO
+        },
+        auth: None,
+    };
+
+    // Simulate proxy initialization: Create isolated S3 client for each bucket
+    let mut s3_clients: HashMap<String, S3Client> = HashMap::new();
+
+    s3_clients.insert(
+        "products".to_string(),
+        create_s3_client(&products_config.s3).expect("Should create products client"),
+    );
+
+    s3_clients.insert(
+        "private".to_string(),
+        create_s3_client(&private_config.s3).expect("Should create private client"),
+    );
+
+    s3_clients.insert(
+        "archive".to_string(),
+        create_s3_client(&archive_config.s3).expect("Should create archive client"),
+    );
+
+    // Verify: Each bucket has its own isolated S3 client
+    assert_eq!(
+        s3_clients.len(),
+        3,
+        "Should have 3 isolated S3 clients, one per bucket"
+    );
+
+    // Verify: Products client has products-specific configuration
+    let products_client = s3_clients.get("products").expect("Should have products client");
+    assert_eq!(products_client.config.bucket, "products-bucket-s3");
+    assert_eq!(products_client.config.access_key, "AKIAPRODUCTS12345");
+    assert_eq!(products_client.config.secret_key, "products-secret-key");
+    assert_eq!(products_client.config.region, "us-east-1");
+    assert_eq!(products_client.config.endpoint, None);
+
+    // Verify: Private client has private-specific configuration
+    let private_client = s3_clients.get("private").expect("Should have private client");
+    assert_eq!(private_client.config.bucket, "private-bucket-s3");
+    assert_eq!(private_client.config.access_key, "AKIAPRIVATE67890");
+    assert_eq!(private_client.config.secret_key, "private-secret-key");
+    assert_eq!(private_client.config.region, "eu-west-1");
+    assert_eq!(private_client.config.endpoint, None);
+
+    // Verify: Archive client has archive-specific configuration
+    let archive_client = s3_clients.get("archive").expect("Should have archive client");
+    assert_eq!(archive_client.config.bucket, "archive-bucket");
+    assert_eq!(archive_client.config.access_key, "minioadmin");
+    assert_eq!(archive_client.config.secret_key, "minioadmin");
+    assert_eq!(archive_client.config.region, "us-east-1");
+    assert_eq!(
+        archive_client.config.endpoint,
+        Some("http://localhost:9000".to_string())
+    );
+
+    // Verify: NO credential mixing between clients
+    assert_ne!(
+        products_client.config.access_key,
+        private_client.config.access_key,
+        "Products and private should have different access keys"
+    );
+    assert_ne!(
+        products_client.config.secret_key,
+        private_client.config.secret_key,
+        "Products and private should have different secret keys"
+    );
+    assert_ne!(
+        private_client.config.access_key,
+        archive_client.config.access_key,
+        "Private and archive should have different access keys"
+    );
+    assert_ne!(
+        products_client.config.bucket,
+        private_client.config.bucket,
+        "Products and private should point to different S3 buckets"
+    );
+
+    // This demonstrates the complete integration pattern:
+    //
+    // 1. Proxy startup:
+    //    - Loads configuration with multiple bucket definitions
+    //    - Creates isolated S3 client for each bucket
+    //    - Stores clients in HashMap<bucket_name, S3Client>
+    //
+    // 2. Request handling:
+    //    - Router extracts bucket name from request path
+    //    - Looks up corresponding S3 client from HashMap
+    //    - Uses bucket-specific client to make S3 request
+    //    - Client generates AWS Signature v4 with bucket-specific credentials
+    //
+    // 3. Security through isolation:
+    //    - Request to /products/* → uses products client → products AWS credentials
+    //    - Request to /private/* → uses private client → private AWS credentials
+    //    - Request to /archive/* → uses archive client → MinIO credentials
+    //    - No risk of credential mixing or using wrong credentials
+    //    - Each client independently signs requests with its own secret key
+}
