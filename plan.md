@@ -674,30 +674,30 @@ yatagarasu/
 ⚠️ **This phase was added after discovering critical issues during deep dive analysis.**
 
 ### Missing Dependencies
-- [ ] Add `async-trait = "0.1"` to Cargo.toml (required for ProxyHttp trait)
-- [ ] Add `pingora-proxy = "0.6"` to Cargo.toml (required for ProxyHttp trait definition)
-- [ ] Add `chrono = "0.4"` to Cargo.toml (required for S3 timestamp generation)
-- [ ] Verify all dependencies compile without errors
+- [x] Add `async-trait = "0.1"` to Cargo.toml (required for ProxyHttp trait)
+- [x] Add `pingora-proxy = "0.6"` to Cargo.toml (required for ProxyHttp trait definition)
+- [x] Add `chrono = "0.4"` to Cargo.toml (required for S3 timestamp generation)
+- [x] Verify all dependencies compile without errors
 
 ### S3 Client Bug Fixes
-- [ ] Fix S3 timestamp hardcoded to "20130524T000000Z" in src/s3/mod.rs:136-139
-- [ ] Replace hardcoded timestamp with `Utc::now()` for signature generation
-- [ ] Test: S3 signatures use current timestamp
-- [ ] Test: S3 signatures are valid with current date/time
-- [ ] Verify existing S3 tests still pass after timestamp fix
+- [x] Fix S3 timestamp hardcoded to "20130524T000000Z" in src/s3/mod.rs:136-139
+- [x] Replace hardcoded timestamp with `Utc::now()` for signature generation
+- [x] Test: S3 signatures use current timestamp
+- [x] Test: S3 signatures are valid with current date/time
+- [x] Verify existing S3 tests still pass after timestamp fix
 
 ### JWT Authentication Security Fix
-- [ ] Fix JWT algorithm mismatch vulnerability in src/auth/mod.rs:100
-- [ ] Pass algorithm from config to validate_jwt() function
-- [ ] Test: JWT validation uses correct algorithm from config (HS256/HS384/HS512)
-- [ ] Test: JWT with wrong algorithm is rejected
-- [ ] Verify all existing auth tests still pass after fix
+- [x] Fix JWT algorithm mismatch vulnerability in src/auth/mod.rs:100
+- [x] Pass algorithm from config to validate_jwt() function
+- [x] Test: JWT validation uses correct algorithm from config (HS256/HS384/HS512)
+- [x] Test: JWT with wrong algorithm is rejected
+- [x] Verify all existing auth tests still pass after fix
 
 ### Quality Gates
-- [ ] Run `cargo test` - all tests must pass
-- [ ] Run `cargo clippy -- -D warnings` - zero warnings
-- [ ] Run `cargo fmt` - code properly formatted
-- [ ] Commit bug fixes with [BEHAVIORAL] prefix
+- [x] Run `cargo test` - all tests must pass
+- [x] Run `cargo clippy -- -D warnings` - zero warnings
+- [x] Run `cargo fmt` - code properly formatted
+- [x] Commit bug fixes with [BEHAVIORAL] prefix
 
 **Expected Outcome**: Core library modules work correctly with no critical bugs, ready for server integration.
 
