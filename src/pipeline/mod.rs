@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use crate::config::BucketConfig;
+use crate::auth::Claims;
 
 /// Request context that holds all information about an HTTP request
 /// as it flows through the middleware pipeline
@@ -17,6 +18,7 @@ pub struct RequestContext {
     query_params: HashMap<String, String>,
     timestamp: u64,
     bucket_config: Option<BucketConfig>,
+    claims: Option<Claims>,
 }
 
 impl RequestContext {
@@ -34,6 +36,7 @@ impl RequestContext {
                 .unwrap()
                 .as_secs(),
             bucket_config: None,
+            claims: None,
         }
     }
 
@@ -51,6 +54,7 @@ impl RequestContext {
                 .unwrap()
                 .as_secs(),
             bucket_config: None,
+            claims: None,
         }
     }
 
@@ -68,6 +72,7 @@ impl RequestContext {
                 .unwrap()
                 .as_secs(),
             bucket_config: None,
+            claims: None,
         }
     }
 
@@ -109,6 +114,16 @@ impl RequestContext {
     /// Get the bucket configuration for this request
     pub fn bucket_config(&self) -> Option<&BucketConfig> {
         self.bucket_config.as_ref()
+    }
+
+    /// Set the JWT claims for this request
+    pub fn set_claims(&mut self, claims: Claims) {
+        self.claims = Some(claims);
+    }
+
+    /// Get the JWT claims for this request
+    pub fn claims(&self) -> Option<&Claims> {
+        self.claims.as_ref()
     }
 }
 

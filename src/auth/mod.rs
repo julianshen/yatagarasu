@@ -9,7 +9,7 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 
 use crate::config::{ClaimRule, JwtConfig};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Option<String>,
     pub exp: Option<u64>,

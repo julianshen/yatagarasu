@@ -924,3 +924,58 @@ fn test_jwt_extraction_from_custom_header_returns_none_when_missing() {
     let extracted_token = extract_header_token(context.headers(), "X-Auth-Token");
     assert!(extracted_token.is_none(), "Should return None when custom header is missing");
 }
+
+// Test: Valid JWT adds claims to request context
+#[test]
+fn test_valid_jwt_adds_claims_to_request_context() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::auth::{validate_jwt, Claims};
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+
+    let secret = "test_secret_key_123";
+
+    // Create test claims
+    let mut custom_claims = serde_json::Map::new();
+    custom_claims.insert("name".to_string(), json!("John Doe"));
+
+    let test_claims = Claims {
+        sub: Some("user123".to_string()),
+        exp: None,
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: custom_claims,
+    };
+
+    // Encode the JWT token
+    let token = encode(
+        &Header::default(),
+        &test_claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    ).expect("Failed to encode token");
+
+    // Validate the JWT and extract claims
+    let claims = validate_jwt(&token, secret).expect("Token should be valid");
+
+    // Create a request context
+    let mut context = RequestContext::new("GET".to_string(), "/private/data.json".to_string());
+
+    // Auth middleware should add the validated claims to the context
+    context.set_claims(claims.clone());
+
+    // Verify the claims were added to the context
+    let stored_claims = context.claims();
+    assert!(stored_claims.is_some(), "Claims should be present in context");
+
+    let claims_ref = stored_claims.unwrap();
+    assert_eq!(claims_ref.sub, Some("user123".to_string()), "Subject claim should match");
+
+    // Verify custom claim "name" is present
+    assert!(claims_ref.custom.contains_key("name"), "Custom claim 'name' should be present");
+    assert_eq!(
+        claims_ref.custom.get("name").and_then(|v| v.as_str()),
+        Some("John Doe"),
+        "Custom claim 'name' should equal 'John Doe'"
+    );
+}
