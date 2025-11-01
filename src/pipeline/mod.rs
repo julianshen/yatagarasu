@@ -1,11 +1,11 @@
 // Request pipeline module - handles request context and middleware chain
 // Phase 13: Request Pipeline Integration
 
+use crate::auth::Claims;
+use crate::config::BucketConfig;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
-use crate::config::BucketConfig;
-use crate::auth::Claims;
 
 /// Request context that holds all information about an HTTP request
 /// as it flows through the middleware pipeline
@@ -60,7 +60,11 @@ impl RequestContext {
 
     /// Create a new RequestContext with query parameters
     /// Automatically generates a unique request ID (UUID v4) and captures current timestamp
-    pub fn with_query_params(method: String, path: String, query_params: HashMap<String, String>) -> Self {
+    pub fn with_query_params(
+        method: String,
+        path: String,
+        query_params: HashMap<String, String>,
+    ) -> Self {
         Self {
             request_id: Uuid::new_v4().to_string(),
             method,

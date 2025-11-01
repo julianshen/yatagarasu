@@ -58,12 +58,12 @@ impl YatagarasuServer {
     /// Create a new YatagarasuServer instance
     pub fn new(config: ServerConfig) -> Result<Self, String> {
         // Validate that the address can be parsed
-        config.address.parse::<std::net::SocketAddr>()
+        config
+            .address
+            .parse::<std::net::SocketAddr>()
             .map_err(|e| format!("Invalid address '{}': {}", config.address, e))?;
 
-        Ok(Self {
-            config,
-        })
+        Ok(Self { config })
     }
 
     /// Get the server configuration
@@ -84,7 +84,8 @@ impl YatagarasuServer {
 
     /// Parse the configured address into a SocketAddr
     pub fn parse_address(&self) -> Result<std::net::SocketAddr, String> {
-        self.config.address
+        self.config
+            .address
             .parse()
             .map_err(|e| format!("Failed to parse address '{}': {}", self.config.address, e))
     }
@@ -132,7 +133,8 @@ impl HttpService {
         if method.is_empty() {
             let mut response = HttpResponse::new(400);
             response.add_header("Content-Type", "application/json");
-            let error_body = r#"{"error":"Bad Request","message":"Method cannot be empty","status":400}"#;
+            let error_body =
+                r#"{"error":"Bad Request","message":"Method cannot be empty","status":400}"#;
             response.set_body(error_body.as_bytes().to_vec());
             return Ok(response);
         }
@@ -140,7 +142,8 @@ impl HttpService {
         if path.is_empty() {
             let mut response = HttpResponse::new(400);
             response.add_header("Content-Type", "application/json");
-            let error_body = r#"{"error":"Bad Request","message":"Path cannot be empty","status":400}"#;
+            let error_body =
+                r#"{"error":"Bad Request","message":"Path cannot be empty","status":400}"#;
             response.set_body(error_body.as_bytes().to_vec());
             return Ok(response);
         }
@@ -148,7 +151,8 @@ impl HttpService {
         if !path.starts_with('/') {
             let mut response = HttpResponse::new(400);
             response.add_header("Content-Type", "application/json");
-            let error_body = r#"{"error":"Bad Request","message":"Path must start with /","status":400}"#;
+            let error_body =
+                r#"{"error":"Bad Request","message":"Path must start with /","status":400}"#;
             response.set_body(error_body.as_bytes().to_vec());
             return Ok(response);
         }

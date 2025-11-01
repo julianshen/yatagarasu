@@ -75,14 +75,14 @@ pub fn init_subscriber() -> Result<(), Box<dyn Error>> {
 /// let log_line = String::from_utf8_lossy(&output);
 /// assert!(log_line.contains("test message"));
 /// ```
-pub fn create_test_subscriber(buffer: Arc<Mutex<Vec<u8>>>) -> impl tracing::Subscriber + Send + Sync {
+pub fn create_test_subscriber(
+    buffer: Arc<Mutex<Vec<u8>>>,
+) -> impl tracing::Subscriber + Send + Sync {
     // Create a test writer that wraps the buffer
     let test_writer = TestWriter::new(buffer);
 
     // Configure JSON formatting layer
-    let json_layer = fmt::layer()
-        .json()
-        .with_writer(move || test_writer.clone());
+    let json_layer = fmt::layer().json().with_writer(move || test_writer.clone());
 
     // Build and return the subscriber with the JSON layer
     // Tests should use this with tracing::subscriber::with_default() for isolation

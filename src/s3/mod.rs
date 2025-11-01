@@ -447,4 +447,3 @@ pub fn sign_request(params: &SigningParams) -> String {
         params.access_key, credential_scope, signed_headers, signature
     )
 }
-

@@ -1,8 +1,8 @@
 // Router module unit tests
 // Extracted from src/router/mod.rs for improved readability
 
-use yatagarasu::router::Router;
 use yatagarasu::config::{BucketConfig, S3Config};
+use yatagarasu::router::Router;
 
 #[test]
 fn test_can_create_router_with_empty_bucket_list() {
@@ -1017,7 +1017,7 @@ fn test_router_lookup_is_fast_for_reasonable_config_sizes() {
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
                 endpoint: None,
             },
-        auth: None,
+            auth: None,
         });
     }
     let router = Router::new(buckets);
@@ -1060,7 +1060,7 @@ fn test_can_handle_100_plus_bucket_configurations_efficiently() {
                 secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
                 endpoint: None,
             },
-        auth: None,
+            auth: None,
         });
     }
     let router = Router::new(buckets);

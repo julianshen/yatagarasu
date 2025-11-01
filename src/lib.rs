@@ -5,9 +5,9 @@ pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod error;
+pub mod logging;
+pub mod pipeline; // Phase 13: Request Pipeline Integration
 pub mod proxy;
 pub mod router;
 pub mod s3;
-pub mod server;  // Phase 12: Pingora Server Setup
-pub mod pipeline;  // Phase 13: Request Pipeline Integration
-pub mod logging;  // Phase 15: Error Handling & Logging
+pub mod server; // Phase 12: Pingora Server Setup // Phase 15: Error Handling & Logging

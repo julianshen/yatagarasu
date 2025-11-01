@@ -392,7 +392,10 @@ fn test_error_responses_use_consistent_json_format() {
 
     // Verify field values
     assert_eq!(parsed["error"], "config");
-    assert_eq!(parsed["message"], "Configuration error: invalid bucket name");
+    assert_eq!(
+        parsed["message"],
+        "Configuration error: invalid bucket name"
+    );
     assert_eq!(parsed["status"], 500);
 
     // Scenario 2: Auth error produces correct JSON structure
@@ -998,7 +1001,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     // Message should be simple and generic
     let message = parsed["message"].as_str().unwrap();
     assert!(message.len() < 200); // Keep it concise
-    assert!(message.len() > 10);  // But not TOO concise
+    assert!(message.len() > 10); // But not TOO concise
 
     // Should indicate category
     assert!(message.starts_with("Configuration error:"));
@@ -1128,14 +1131,24 @@ fn test_errors_include_error_code_for_client_parsing() {
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
     // Must have "error" field
-    assert!(parsed.get("error").is_some(), "JSON response must include 'error' field");
+    assert!(
+        parsed.get("error").is_some(),
+        "JSON response must include 'error' field"
+    );
 
     // Error code must be "config"
-    assert_eq!(parsed["error"], "config", "Config error must have code 'config'");
+    assert_eq!(
+        parsed["error"], "config",
+        "Config error must have code 'config'"
+    );
 
     // Error code must be lowercase (consistency)
     let error_code = parsed["error"].as_str().unwrap();
-    assert_eq!(error_code, error_code.to_lowercase(), "Error codes must be lowercase");
+    assert_eq!(
+        error_code,
+        error_code.to_lowercase(),
+        "Error codes must be lowercase"
+    );
 
     // Scenario 2: Auth error has code "auth"
     //
@@ -1165,7 +1178,10 @@ fn test_errors_include_error_code_for_client_parsing() {
     let json = internal_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(parsed["error"], "internal", "Internal error must have code 'internal'");
+    assert_eq!(
+        parsed["error"], "internal",
+        "Internal error must have code 'internal'"
+    );
 
     // Scenario 5: Error codes are lowercase and consistent
     //
@@ -1184,10 +1200,19 @@ fn test_errors_include_error_code_for_client_parsing() {
         let code = parsed["error"].as_str().unwrap();
 
         // Must be lowercase
-        assert_eq!(code, code.to_lowercase(), "Error code '{}' must be lowercase", code);
+        assert_eq!(
+            code,
+            code.to_lowercase(),
+            "Error code '{}' must be lowercase",
+            code
+        );
 
         // Must match expected
-        assert_eq!(code, *expected_code, "Error code must be '{}'", expected_code);
+        assert_eq!(
+            code, *expected_code,
+            "Error code must be '{}'",
+            expected_code
+        );
     }
 
     // Scenario 6: Error codes are stable (same every time)
@@ -1220,10 +1245,7 @@ fn test_errors_include_error_code_for_client_parsing() {
         parsed.get("error").is_some(),
         "Error code must be present even without request_id"
     );
-    assert!(
-        parsed["error"].is_string(),
-        "Error code must be a string"
-    );
+    assert!(parsed["error"].is_string(), "Error code must be a string");
 
     let error_with_request_id = ProxyError::Config("test".to_string());
     let json = error_with_request_id.to_json_response(Some("req-123".to_string()));
@@ -1413,10 +1435,22 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     let message = parsed["message"].as_str().unwrap();
 
     // Should not include stack trace patterns
-    assert!(!message.contains(" at "), "Message should not include ' at ' (stack trace indicator)");
-    assert!(!message.contains("src/"), "Message should not include 'src/' (source file path)");
-    assert!(!json.contains(" at "), "JSON should not include ' at ' (stack trace indicator)");
-    assert!(!json.contains("src/"), "JSON should not include 'src/' (source file path)");
+    assert!(
+        !message.contains(" at "),
+        "Message should not include ' at ' (stack trace indicator)"
+    );
+    assert!(
+        !message.contains("src/"),
+        "Message should not include 'src/' (source file path)"
+    );
+    assert!(
+        !json.contains(" at "),
+        "JSON should not include ' at ' (stack trace indicator)"
+    );
+    assert!(
+        !json.contains("src/"),
+        "JSON should not include 'src/' (source file path)"
+    );
 
     // Scenario 2: S3 errors don't include "panicked at" messages
     //
@@ -1430,10 +1464,22 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     let message = parsed["message"].as_str().unwrap();
 
     // Should not include panic-related patterns
-    assert!(!message.contains("panicked at"), "Message should not include 'panicked at'");
-    assert!(!message.contains("thread "), "Message should not include 'thread '");
-    assert!(!json.contains("panicked at"), "JSON should not include 'panicked at'");
-    assert!(!json.contains("thread "), "JSON should not include 'thread '");
+    assert!(
+        !message.contains("panicked at"),
+        "Message should not include 'panicked at'"
+    );
+    assert!(
+        !message.contains("thread "),
+        "Message should not include 'thread '"
+    );
+    assert!(
+        !json.contains("panicked at"),
+        "JSON should not include 'panicked at'"
+    );
+    assert!(
+        !json.contains("thread "),
+        "JSON should not include 'thread '"
+    );
 
     // Scenario 3: Internal errors don't include "stack backtrace:" headers
     //
@@ -1450,10 +1496,22 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     let message = parsed["message"].as_str().unwrap();
 
     // Should not include backtrace patterns
-    assert!(!message.contains("stack backtrace"), "Message should not include 'stack backtrace'");
-    assert!(!message.contains("backtrace:"), "Message should not include 'backtrace:'");
-    assert!(!json.contains("stack backtrace"), "JSON should not include 'stack backtrace'");
-    assert!(!json.contains("backtrace:"), "JSON should not include 'backtrace:'");
+    assert!(
+        !message.contains("stack backtrace"),
+        "Message should not include 'stack backtrace'"
+    );
+    assert!(
+        !message.contains("backtrace:"),
+        "Message should not include 'backtrace:'"
+    );
+    assert!(
+        !json.contains("stack backtrace"),
+        "JSON should not include 'stack backtrace'"
+    );
+    assert!(
+        !json.contains("backtrace:"),
+        "JSON should not include 'backtrace:'"
+    );
 
     // Scenario 4: No error includes file paths with line numbers
     //
@@ -1474,10 +1532,22 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
         let json = error.to_json_response(None);
 
         // Check for file path patterns
-        assert!(!json.contains(".rs:"), "Error response should not include '.rs:' (Rust file with line number)");
-        assert!(!json.contains(".go:"), "Error response should not include '.go:' (Go file with line number)");
-        assert!(!json.contains(".py:"), "Error response should not include '.py:' (Python file with line number)");
-        assert!(!json.contains(".js:"), "Error response should not include '.js:' (JavaScript file with line number)");
+        assert!(
+            !json.contains(".rs:"),
+            "Error response should not include '.rs:' (Rust file with line number)"
+        );
+        assert!(
+            !json.contains(".go:"),
+            "Error response should not include '.go:' (Go file with line number)"
+        );
+        assert!(
+            !json.contains(".py:"),
+            "Error response should not include '.py:' (Python file with line number)"
+        );
+        assert!(
+            !json.contains(".js:"),
+            "Error response should not include '.js:' (JavaScript file with line number)"
+        );
 
         // Check for line number patterns (":123" or ":42:5")
         // We use a regex-like pattern check
@@ -1488,7 +1558,8 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
                 // But don't allow patterns that look like line numbers (e.g., "src/file.rs:42")
                 if json.contains(&format!("src/{}", pattern))
                     || json.contains(&format!("lib{}", pattern))
-                    || json.contains(&format!("main{}", pattern)) {
+                    || json.contains(&format!("main{}", pattern))
+                {
                     panic!("Error response includes line number pattern: {}", pattern);
                 }
             }
@@ -1505,11 +1576,26 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     let internal_error = ProxyError::Internal("system failure".to_string());
     let json = internal_error.to_json_response(None);
 
-    assert!(!json.contains("thread '"), "Error response should not include thread names");
-    assert!(!json.contains("panicked"), "Error response should not include panic messages");
-    assert!(!json.contains("assertion failed"), "Error response should not include assertion messages");
-    assert!(!json.contains("unwrap"), "Error response should not include unwrap errors");
-    assert!(!json.contains("expect"), "Error response should not include expect errors");
+    assert!(
+        !json.contains("thread '"),
+        "Error response should not include thread names"
+    );
+    assert!(
+        !json.contains("panicked"),
+        "Error response should not include panic messages"
+    );
+    assert!(
+        !json.contains("assertion failed"),
+        "Error response should not include assertion messages"
+    );
+    assert!(
+        !json.contains("unwrap"),
+        "Error response should not include unwrap errors"
+    );
+    assert!(
+        !json.contains("expect"),
+        "Error response should not include expect errors"
+    );
 
     // Scenario 6: No error includes RUST_BACKTRACE hints
     //
@@ -1527,10 +1613,22 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     for error in &errors {
         let json = error.to_json_response(None);
 
-        assert!(!json.contains("RUST_BACKTRACE"), "Error response should not include RUST_BACKTRACE");
-        assert!(!json.contains("backtrace"), "Error response should not include backtrace references");
-        assert!(!json.contains("note:"), "Error response should not include compiler notes");
-        assert!(!json.contains("environment variable"), "Error response should not include env var instructions");
+        assert!(
+            !json.contains("RUST_BACKTRACE"),
+            "Error response should not include RUST_BACKTRACE"
+        );
+        assert!(
+            !json.contains("backtrace"),
+            "Error response should not include backtrace references"
+        );
+        assert!(
+            !json.contains("note:"),
+            "Error response should not include compiler notes"
+        );
+        assert!(
+            !json.contains("environment variable"),
+            "Error response should not include env var instructions"
+        );
     }
 
     // Scenario 7: No error includes function call chains
@@ -1545,14 +1643,32 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     let json = internal_error.to_json_response(None);
 
     // Should not include common Rust std library function names
-    assert!(!json.contains("std::panic"), "Error response should not include std::panic");
-    assert!(!json.contains("std::result"), "Error response should not include std::result");
-    assert!(!json.contains("tokio::"), "Error response should not include tokio:: functions");
-    assert!(!json.contains("hyper::"), "Error response should not include hyper:: functions");
+    assert!(
+        !json.contains("std::panic"),
+        "Error response should not include std::panic"
+    );
+    assert!(
+        !json.contains("std::result"),
+        "Error response should not include std::result"
+    );
+    assert!(
+        !json.contains("tokio::"),
+        "Error response should not include tokio:: functions"
+    );
+    assert!(
+        !json.contains("hyper::"),
+        "Error response should not include hyper:: functions"
+    );
 
     // Should not include project module paths
-    assert!(!json.contains("yatagarasu::"), "Error response should not include yatagarasu:: module paths");
-    assert!(!json.contains("::"), "Error response should not include :: (module path separator)");
+    assert!(
+        !json.contains("yatagarasu::"),
+        "Error response should not include yatagarasu:: module paths"
+    );
+    assert!(
+        !json.contains("::"),
+        "Error response should not include :: (module path separator)"
+    );
 
     // Scenario 8: Error responses stay under reasonable size limit
     //

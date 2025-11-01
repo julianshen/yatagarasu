@@ -44,10 +44,10 @@ impl ProxyError {
     /// - Internal errors → 500 (Internal Server Error - unexpected proxy error)
     pub fn to_http_status(&self) -> u16 {
         match self {
-            ProxyError::Config(_) => 500,    // Internal Server Error
-            ProxyError::Auth(_) => 401,      // Unauthorized
-            ProxyError::S3(_) => 502,        // Bad Gateway
-            ProxyError::Internal(_) => 500,  // Internal Server Error
+            ProxyError::Config(_) => 500,   // Internal Server Error
+            ProxyError::Auth(_) => 401,     // Unauthorized
+            ProxyError::S3(_) => 502,       // Bad Gateway
+            ProxyError::Internal(_) => 500, // Internal Server Error
         }
     }
 

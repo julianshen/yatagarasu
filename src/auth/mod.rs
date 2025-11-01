@@ -184,4 +184,3 @@ pub fn authenticate_request(
 
     Ok(claims)
 }
-

@@ -95,8 +95,8 @@ fn test_server_config_accessible() {
 // Test: Server binds to configured address
 #[test]
 fn test_server_binds_to_configured_address() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port by binding to port 0
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -149,8 +149,8 @@ fn test_server_rejects_invalid_address() {
 // Test: Server starts without errors with valid configuration
 #[test]
 fn test_server_starts_without_errors() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -173,8 +173,8 @@ fn test_server_starts_without_errors() {
 // Test: Can stop server programmatically
 #[test]
 fn test_can_stop_server() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -201,8 +201,8 @@ fn test_can_stop_server() {
 // Test: Server accepts HTTP/1.1 GET requests
 #[test]
 fn test_server_accepts_get_requests() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -226,8 +226,8 @@ fn test_server_accepts_get_requests() {
 // Test: Server accepts HTTP/1.1 HEAD requests
 #[test]
 fn test_server_accepts_head_requests() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -251,8 +251,8 @@ fn test_server_accepts_head_requests() {
 // Test: Server returns proper HTTP response with status code
 #[test]
 fn test_server_returns_response_with_status_code() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -283,8 +283,8 @@ fn test_server_returns_response_with_status_code() {
 // Test: Server returns proper HTTP response with headers
 #[test]
 fn test_server_returns_response_with_headers() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -305,7 +305,10 @@ fn test_server_returns_response_with_headers() {
     response.add_header("X-Custom-Header", "custom-value");
 
     // Should be able to retrieve headers
-    assert_eq!(response.get_header("Content-Type"), Some("application/json"));
+    assert_eq!(
+        response.get_header("Content-Type"),
+        Some("application/json")
+    );
     assert_eq!(response.get_header("X-Custom-Header"), Some("custom-value"));
     assert_eq!(response.get_header("Non-Existent"), None);
 
@@ -319,8 +322,8 @@ fn test_server_returns_response_with_headers() {
 // Test: Server returns proper HTTP response with body
 #[test]
 fn test_server_returns_response_with_body() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -356,10 +359,10 @@ fn test_server_returns_response_with_body() {
 // Test: Server handles concurrent requests (10+ simultaneous)
 #[test]
 fn test_server_handles_concurrent_requests() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
     use std::sync::Arc;
     use std::thread;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -399,8 +402,8 @@ fn test_server_handles_concurrent_requests() {
 // Test: Server handles request pipeline (keep-alive)
 #[test]
 fn test_server_handles_request_pipeline() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -448,8 +451,8 @@ fn test_server_handles_request_pipeline() {
 // Test: GET /health returns 200 OK
 #[test]
 fn test_health_endpoint_returns_200() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -473,8 +476,8 @@ fn test_health_endpoint_returns_200() {
 // Test: /health response includes JSON body with status
 #[test]
 fn test_health_endpoint_returns_json_body() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -510,8 +513,8 @@ fn test_health_endpoint_returns_json_body() {
 // Test: /health checks configuration is loaded
 #[test]
 fn test_health_endpoint_checks_configuration() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -544,9 +547,9 @@ fn test_health_endpoint_checks_configuration() {
 // Test: /health response time < 10ms
 #[test]
 fn test_health_endpoint_response_time() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
     use std::time::Instant;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -570,16 +573,18 @@ fn test_health_endpoint_response_time() {
     assert_eq!(resp.status_code(), 200);
 
     // Response time should be less than 10ms
-    assert!(duration.as_millis() < 10,
+    assert!(
+        duration.as_millis() < 10,
         "Health endpoint took {}ms, expected < 10ms",
-        duration.as_millis());
+        duration.as_millis()
+    );
 }
 
 // Test: /health works before other endpoints are ready
 #[test]
 fn test_health_endpoint_works_early() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -611,8 +616,8 @@ fn test_health_endpoint_works_early() {
 // Test: HEAD /health returns 200 without body
 #[test]
 fn test_health_endpoint_head_request() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -642,8 +647,8 @@ fn test_health_endpoint_head_request() {
 // Test: Unknown paths return 404 Not Found
 #[test]
 fn test_unknown_paths_return_404() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -661,7 +666,7 @@ fn test_unknown_paths_return_404() {
         "/",
         "/unknown",
         "/api/v1/data",
-        "/health/metrics",  // Similar to /health but not exact match
+        "/health/metrics", // Similar to /health but not exact match
         "/favicon.ico",
     ];
 
@@ -682,8 +687,8 @@ fn test_unknown_paths_return_404() {
 // Test: Invalid HTTP methods return 405 Method Not Allowed
 #[test]
 fn test_invalid_http_methods_return_405() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -697,19 +702,16 @@ fn test_invalid_http_methods_return_405() {
     let service = server.create_http_service().unwrap();
 
     // Test unsupported HTTP methods
-    let invalid_methods = vec![
-        "PUT",
-        "DELETE",
-        "PATCH",
-        "OPTIONS",
-        "TRACE",
-        "CONNECT",
-    ];
+    let invalid_methods = vec!["PUT", "DELETE", "PATCH", "OPTIONS", "TRACE", "CONNECT"];
 
     for method in invalid_methods {
         // Test against /health endpoint
         let response = service.handle_request(method, "/health");
-        assert!(response.is_ok(), "Request with method {} should succeed", method);
+        assert!(
+            response.is_ok(),
+            "Request with method {} should succeed",
+            method
+        );
 
         let resp = response.unwrap();
         assert_eq!(
@@ -721,7 +723,11 @@ fn test_invalid_http_methods_return_405() {
 
         // Test against other paths too
         let response2 = service.handle_request(method, "/unknown");
-        assert!(response2.is_ok(), "Request with method {} should succeed", method);
+        assert!(
+            response2.is_ok(),
+            "Request with method {} should succeed",
+            method
+        );
 
         let resp2 = response2.unwrap();
         assert_eq!(
@@ -736,8 +742,8 @@ fn test_invalid_http_methods_return_405() {
 // Test: Malformed requests return 400 Bad Request
 #[test]
 fn test_malformed_requests_return_400() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -754,33 +760,49 @@ fn test_malformed_requests_return_400() {
     let response = service.handle_request("", "/health");
     assert!(response.is_ok());
     let resp = response.unwrap();
-    assert_eq!(resp.status_code(), 400, "Empty method should return 400 Bad Request");
+    assert_eq!(
+        resp.status_code(),
+        400,
+        "Empty method should return 400 Bad Request"
+    );
 
     // Test empty path
     let response2 = service.handle_request("GET", "");
     assert!(response2.is_ok());
     let resp2 = response2.unwrap();
-    assert_eq!(resp2.status_code(), 400, "Empty path should return 400 Bad Request");
+    assert_eq!(
+        resp2.status_code(),
+        400,
+        "Empty path should return 400 Bad Request"
+    );
 
     // Test path without leading slash
     let response3 = service.handle_request("GET", "health");
     assert!(response3.is_ok());
     let resp3 = response3.unwrap();
-    assert_eq!(resp3.status_code(), 400, "Path without leading slash should return 400 Bad Request");
+    assert_eq!(
+        resp3.status_code(),
+        400,
+        "Path without leading slash should return 400 Bad Request"
+    );
 
     // Test excessively long path (> 8192 bytes)
     let long_path = format!("/{}", "a".repeat(8200));
     let response4 = service.handle_request("GET", &long_path);
     assert!(response4.is_ok());
     let resp4 = response4.unwrap();
-    assert_eq!(resp4.status_code(), 400, "Excessively long path should return 400 Bad Request");
+    assert_eq!(
+        resp4.status_code(),
+        400,
+        "Excessively long path should return 400 Bad Request"
+    );
 }
 
 // Test: Server errors return 500 Internal Server Error
 #[test]
 fn test_server_errors_return_500() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -819,8 +841,8 @@ fn test_server_errors_return_500() {
 // Test: Error responses include JSON body with error details
 #[test]
 fn test_error_responses_include_json_body() {
-    use yatagarasu::server::YatagarasuServer;
     use std::net::TcpListener;
+    use yatagarasu::server::YatagarasuServer;
 
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -844,8 +866,10 @@ fn test_error_responses_include_json_body() {
     if !body.is_empty() {
         // If body is present, it should be valid JSON with error details
         let json: serde_json::Value = serde_json::from_str(body).unwrap();
-        assert!(json.get("error").is_some() || json.get("status").is_some(),
-                "Error response should contain error or status field");
+        assert!(
+            json.get("error").is_some() || json.get("status").is_some(),
+            "Error response should contain error or status field"
+        );
     }
 
     // Test 405 Method Not Allowed error response
@@ -858,8 +882,10 @@ fn test_error_responses_include_json_body() {
     let body2 = std::str::from_utf8(resp2.body()).unwrap();
     if !body2.is_empty() {
         let json2: serde_json::Value = serde_json::from_str(body2).unwrap();
-        assert!(json2.get("error").is_some() || json2.get("status").is_some(),
-                "Error response should contain error or status field");
+        assert!(
+            json2.get("error").is_some() || json2.get("status").is_some(),
+            "Error response should contain error or status field"
+        );
     }
 
     // Test 400 Bad Request error response
@@ -872,7 +898,9 @@ fn test_error_responses_include_json_body() {
     let body3 = std::str::from_utf8(resp3.body()).unwrap();
     if !body3.is_empty() {
         let json3: serde_json::Value = serde_json::from_str(body3).unwrap();
-        assert!(json3.get("error").is_some() || json3.get("status").is_some(),
-                "Error response should contain error or status field");
+        assert!(
+            json3.get("error").is_some() || json3.get("status").is_some(),
+            "Error response should contain error or status field"
+        );
     }
 }

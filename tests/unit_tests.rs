@@ -2,13 +2,13 @@
 // This file acts as the entry point for all unit tests in tests/unit/
 
 mod unit {
-    mod router_tests;
-    mod config_tests;
-    mod proxy_tests;
-    mod s3_tests;
     mod auth_tests;
-    mod server_tests;  // Phase 12: Pingora Server Setup
-    mod pipeline_tests;  // Phase 13: Request Pipeline Integration
-    mod error_tests;  // Phase 15: Error Handling & Logging
-    mod logging_tests;  // Phase 15: Error Handling & Logging (Structured Logging)
+    mod config_tests;
+    mod error_tests; // Phase 15: Error Handling & Logging
+    mod logging_tests;
+    mod pipeline_tests; // Phase 13: Request Pipeline Integration
+    mod proxy_tests;
+    mod router_tests;
+    mod s3_tests;
+    mod server_tests; // Phase 12: Pingora Server Setup // Phase 15: Error Handling & Logging (Structured Logging)
 }
