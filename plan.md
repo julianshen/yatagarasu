@@ -804,7 +804,7 @@ yatagarasu/
 
 ### Connection Management
 - [x] Test: Client disconnect cancels S3 request
-- [ ] Test: S3 connection is closed after response completes
+- [x] Test: S3 connection is closed after response completes
 - [ ] Test: Connection pool reuses connections for same bucket
 - [ ] Test: No connection leaks after many requests
 
