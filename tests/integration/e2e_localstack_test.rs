@@ -1307,3 +1307,193 @@ buckets:
 
     log::info!("=== JWT 200 OK Valid Token Test PASSED ===");
 }
+
+/// Test 11: Proxy returns 403 Forbidden for JWT with wrong claims
+///
+/// This test verifies that the proxy correctly rejects JWTs with valid signatures
+/// but claims that don't match the configured claim rules:
+/// 1. Configure bucket with auth.enabled = true and specific claim requirements
+/// 2. Client sends request with valid JWT but wrong claim values
+/// 3. Proxy validates JWT signature (succeeds)
+/// 4. Proxy validates claims against rules (fails)
+/// 5. Proxy returns 403 Forbidden
+///
+/// This is critical for:
+/// - Authorization: Token is valid but user doesn't have access
+/// - RBAC: Role-based access control via claims
+/// - Multi-tenancy: Ensure users can only access their own data
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_403_wrong_claims() {
+    init_logging();
+
+    log::info!("=== Starting JWT 403 Wrong Claims Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!("LocalStack S3 running at: {}", s3_endpoint);
+
+    // Step 2: Create S3 bucket and upload test file
+    log::info!("Creating S3 bucket and uploading test file...");
+    let test_content = r#"{"secret": "admin-only data", "user": "admin"}"#;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create private bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-private-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+        log::info!("Bucket created: test-private-bucket");
+
+        // Upload test file
+        s3_client
+            .put_object()
+            .bucket("test-private-bucket")
+            .key("admin.json")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file");
+        log::info!("Uploaded admin.json to private bucket");
+    });
+
+    // Step 3: Create proxy configuration with JWT auth + claim rules
+    // Require: role = "admin" (but we'll send role = "user")
+    let proxy_port = 18086; // Different port from other tests
+    let jwt_secret = "test-secret-key-min-32-characters-long";
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+jwt:
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "bearer_header"
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+
+buckets:
+  - name: "private"
+    path_prefix: "/private"
+    auth:
+      enabled: true
+    s3:
+      region: "us-east-1"
+      bucket: "test-private-bucket"
+      endpoint: "{}"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+"#,
+        proxy_port, jwt_secret, s3_endpoint
+    );
+
+    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
+    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+    log::info!("Proxy config written to: {:?}", config_file.path());
+
+    // Step 4: Start Yatagarasu proxy in background thread
+    log::info!("Starting Yatagarasu proxy server...");
+    let config_path = config_file.path().to_str().unwrap().to_string();
+    std::thread::spawn(move || {
+        let config =
+            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
+        let mut server =
+            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
+        server.bootstrap();
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        server.add_service(proxy_service);
+        log::info!("Proxy server starting on {}", listen_addr);
+        server.run_forever();
+    });
+
+    // Wait for server to start
+    std::thread::sleep(Duration::from_secs(2));
+    log::info!("Proxy server should be ready");
+
+    // Step 5: Create JWT with WRONG role claim (role = "user" instead of "admin")
+    log::info!("Creating JWT with wrong role claim...");
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        sub: String,
+        role: String,
+        exp: usize,
+    }
+
+    let wrong_claims = Claims {
+        sub: "user123".to_string(),
+        role: "user".to_string(), // WRONG: proxy requires "admin"
+        exp: (chrono::Utc::now().timestamp() + 3600) as usize,
+    };
+
+    let token_with_wrong_claims = encode(
+        &Header::default(),
+        &wrong_claims,
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .expect("Failed to create JWT with wrong claims");
+
+    log::info!("JWT with wrong claims created (role=user, expected role=admin)");
+
+    // Step 6: Make HTTP request with JWT that has wrong claims
+    log::info!("Making request WITH valid JWT but wrong claims...");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let proxy_url = format!("http://127.0.0.1:{}/private/admin.json", proxy_port);
+
+    let response = client
+        .get(&proxy_url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", token_with_wrong_claims),
+        )
+        .send()
+        .expect("Failed to GET from proxy");
+
+    // Step 7: Verify 403 Forbidden response
+    log::info!("Response status: {}", response.status());
+    assert_eq!(
+        response.status(),
+        403,
+        "Expected 403 Forbidden for JWT with wrong claims (role=user, expected role=admin), got {}",
+        response.status()
+    );
+
+    log::info!("=== JWT 403 Wrong Claims Test PASSED ===");
+}
