@@ -788,7 +788,7 @@ yatagarasu/
 - [x] Test: Content-Range header is preserved
 - [x] Test: Range requests stream only requested bytes
 - [x] Test: Multiple range requests (bytes=0-100,200-300) work
-- [ ] Test: Open-ended ranges (bytes=1000-) work
+- [x] Test: Open-ended ranges (bytes=1000-) work
 - [ ] Test: Suffix ranges (bytes=-1000) work
 - [ ] Test: Invalid ranges return 416 Range Not Satisfiable
 
