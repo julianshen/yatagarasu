@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (1122 lines)
-- ✅ 9 tests: 3 infrastructure validation + 6 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (1309 lines)
+- ✅ 10 tests: 3 infrastructure validation + 7 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1045,6 +1045,7 @@ yatagarasu/
 7. `test_proxy_range_request_from_localstack()` - Proxy Range request returns 206 Partial Content
 8. `test_proxy_401_without_jwt()` - Proxy returns 401 when JWT required but not provided
 9. `test_proxy_403_invalid_jwt()` - Proxy returns 403 for malformed/invalid/expired JWT (3 consolidated cases)
+10. `test_proxy_200_valid_jwt()` - Proxy returns 200 OK and file content with valid JWT (happy path)
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1076,7 +1077,7 @@ yatagarasu/
 - [x] Integration: GET /private/data.json with invalid JWT returns 403
 - [x] Integration: GET /private/data.json with expired JWT returns 403 (consolidated with invalid JWT test)
 - [ ] Integration: GET /private/data.json with wrong claims returns 403
-- [ ] Integration: GET /private/data.json with valid JWT returns file content
+- [x] Integration: GET /private/data.json with valid JWT returns file content
 - [ ] Integration: JWT from Authorization header works
 - [ ] Integration: JWT from query parameter works
 - [ ] Integration: JWT from custom header works
