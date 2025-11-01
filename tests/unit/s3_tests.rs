@@ -8120,3 +8120,140 @@ fn test_can_create_s3_http_client_from_bucket_config() {
     // 3. S3 client is created with bucket-specific credentials
     // 4. Client is ready to make authenticated requests to S3
 }
+
+// Test: S3 client uses bucket-specific credentials
+#[test]
+fn test_s3_client_uses_bucket_specific_credentials() {
+    use yatagarasu::config::BucketConfig;
+
+    // Setup: Create multiple BucketConfigs with DIFFERENT credentials
+    let products_bucket = BucketConfig {
+        name: "products".to_string(),
+        path_prefix: "/products".to_string(),
+        s3: S3Config {
+            bucket: "products-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAPRODUCTS12345".to_string(),
+            secret_key: "products-secret-key-abc123".to_string(),
+            endpoint: None,
+        },
+        auth: None,
+    };
+
+    let private_bucket = BucketConfig {
+        name: "private".to_string(),
+        path_prefix: "/private".to_string(),
+        s3: S3Config {
+            bucket: "private-bucket".to_string(),
+            region: "eu-west-1".to_string(),
+            access_key: "AKIAPRIVATE67890".to_string(),
+            secret_key: "private-secret-key-xyz789".to_string(),
+            endpoint: None,
+        },
+        auth: Some(yatagarasu::config::AuthConfig {
+            enabled: true,
+        }),
+    };
+
+    let archive_bucket = BucketConfig {
+        name: "archive".to_string(),
+        path_prefix: "/archive".to_string(),
+        s3: S3Config {
+            bucket: "archive-bucket".to_string(),
+            region: "us-west-2".to_string(),
+            access_key: "AKIAARCHIVE99999".to_string(),
+            secret_key: "archive-secret-key-def456".to_string(),
+            endpoint: None,
+        },
+        auth: None,
+    };
+
+    // Action: Create S3 clients for each bucket
+    let products_client = create_s3_client(&products_bucket.s3)
+        .expect("Should create products client");
+    let private_client = create_s3_client(&private_bucket.s3)
+        .expect("Should create private client");
+    let archive_client = create_s3_client(&archive_bucket.s3)
+        .expect("Should create archive client");
+
+    // Verification: Each client has its own bucket-specific credentials
+
+    // Products client has products credentials
+    assert_eq!(
+        products_client.config.bucket, "products-bucket",
+        "Products client should use products bucket name"
+    );
+    assert_eq!(
+        products_client.config.access_key, "AKIAPRODUCTS12345",
+        "Products client should use products access key"
+    );
+    assert_eq!(
+        products_client.config.secret_key, "products-secret-key-abc123",
+        "Products client should use products secret key"
+    );
+    assert_eq!(
+        products_client.config.region, "us-east-1",
+        "Products client should use products region"
+    );
+
+    // Private client has private credentials
+    assert_eq!(
+        private_client.config.bucket, "private-bucket",
+        "Private client should use private bucket name"
+    );
+    assert_eq!(
+        private_client.config.access_key, "AKIAPRIVATE67890",
+        "Private client should use private access key"
+    );
+    assert_eq!(
+        private_client.config.secret_key, "private-secret-key-xyz789",
+        "Private client should use private secret key"
+    );
+    assert_eq!(
+        private_client.config.region, "eu-west-1",
+        "Private client should use private region"
+    );
+
+    // Archive client has archive credentials
+    assert_eq!(
+        archive_client.config.bucket, "archive-bucket",
+        "Archive client should use archive bucket name"
+    );
+    assert_eq!(
+        archive_client.config.access_key, "AKIAARCHIVE99999",
+        "Archive client should use archive access key"
+    );
+    assert_eq!(
+        archive_client.config.secret_key, "archive-secret-key-def456",
+        "Archive client should use archive secret key"
+    );
+    assert_eq!(
+        archive_client.config.region, "us-west-2",
+        "Archive client should use archive region"
+    );
+
+    // Verify NO credential leakage between clients
+    assert_ne!(
+        products_client.config.access_key,
+        private_client.config.access_key,
+        "Products and private clients should have different access keys"
+    );
+    assert_ne!(
+        products_client.config.secret_key,
+        private_client.config.secret_key,
+        "Products and private clients should have different secret keys"
+    );
+    assert_ne!(
+        private_client.config.access_key,
+        archive_client.config.access_key,
+        "Private and archive clients should have different access keys"
+    );
+
+    // This demonstrates:
+    // - Each bucket gets its own S3 client with isolated credentials
+    // - No risk of using wrong credentials for a bucket
+    // - Security through per-bucket credential isolation
+    // - A request to /products/* will use products credentials
+    // - A request to /private/* will use private credentials
+    // - A request to /archive/* will use archive credentials
+}
