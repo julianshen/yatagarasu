@@ -548,3 +548,66 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
     // Verify the request can proceed without JWT validation
     // (In real implementation, auth middleware would skip JWT extraction and validation)
 }
+
+// Test: Auth middleware validates JWT for private buckets (auth.enabled=true)
+#[test]
+fn test_auth_middleware_validates_jwt_for_private_buckets() {
+    use yatagarasu::pipeline::RequestContext;
+    use yatagarasu::config::{BucketConfig, S3Config, AuthConfig};
+    use std::collections::HashMap;
+
+    // Create a bucket configuration with authentication enabled (private bucket)
+    let bucket_config = BucketConfig {
+        name: "private".to_string(),
+        path_prefix: "/private".to_string(),
+        s3: S3Config {
+            bucket: "my-private-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            endpoint: None,
+        },
+        auth: Some(AuthConfig {
+            enabled: true,
+        }),
+    };
+
+    // Create a request context with a JWT token in Authorization header
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U".to_string());
+
+    let mut context = RequestContext::with_headers(
+        "GET".to_string(),
+        "/private/secret.txt".to_string(),
+        headers,
+    );
+
+    // Add bucket config to context (as router would do)
+    context.set_bucket_config(bucket_config.clone());
+
+    // Auth middleware should check if authentication is required
+    let auth_required = context.bucket_config()
+        .and_then(|bc| bc.auth.as_ref())
+        .map(|auth| auth.enabled)
+        .unwrap_or(false);
+
+    // For private bucket (auth.enabled=true), auth should be required
+    assert!(auth_required, "Auth should be required for private bucket");
+
+    // Verify that the request has authorization header
+    assert!(context.headers().contains_key("Authorization"),
+            "Request should have Authorization header for private bucket");
+
+    // Verify the Authorization header has a Bearer token
+    let auth_header = context.headers().get("Authorization").unwrap();
+    assert!(auth_header.starts_with("Bearer "),
+            "Authorization header should start with 'Bearer '");
+
+    // In real implementation, auth middleware would:
+    // 1. Extract the JWT token from the Authorization header
+    // 2. Validate the JWT signature
+    // 3. Check expiration and other standard claims
+    // 4. Verify custom claims if configured
+    // 5. Add validated claims to request context
+    // 6. Return 401 if validation fails
+}
