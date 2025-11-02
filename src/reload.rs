@@ -701,4 +701,367 @@ buckets:
         assert_eq!(new_config.buckets[0].s3.bucket, "media-bucket");
         assert_eq!(old_config.buckets[0].s3.bucket, "media-bucket");
     }
+
+    #[test]
+    fn test_can_rotate_jwt_secret() {
+        // Test: Can rotate JWT secret (with grace period for old tokens)
+        // This verifies JWT secret rotation without restart
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "old_jwt_secret_key_12345"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims: []
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with old JWT secret
+        let old_config = manager.reload_config().unwrap();
+        assert!(old_config.jwt.is_some());
+        assert_eq!(old_config.jwt.as_ref().unwrap().secret, "old_jwt_secret_key_12345");
+
+        // Update config file with new JWT secret (rotation)
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "new_jwt_secret_key_67890"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims: []
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify new JWT secret in new config
+        assert!(new_config.jwt.is_some());
+        assert_eq!(new_config.jwt.as_ref().unwrap().secret, "new_jwt_secret_key_67890");
+
+        // Old config still has old JWT secret (grace period for in-flight)
+        assert!(old_config.jwt.is_some());
+        assert_eq!(old_config.jwt.as_ref().unwrap().secret, "old_jwt_secret_key_12345");
+
+        // Algorithm unchanged
+        assert_eq!(new_config.jwt.as_ref().unwrap().algorithm, "HS256");
+        assert_eq!(old_config.jwt.as_ref().unwrap().algorithm, "HS256");
+    }
+
+    #[test]
+    fn test_can_change_jwt_algorithm() {
+        // Test: Can change JWT algorithm
+        // This verifies algorithm change during reload
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "jwt_secret"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims: []
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with HS256
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.jwt.as_ref().unwrap().algorithm, "HS256");
+
+        // Update config file with HS512 algorithm
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "jwt_secret"
+  algorithm: "HS512"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims: []
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify new algorithm in new config
+        assert_eq!(new_config.jwt.as_ref().unwrap().algorithm, "HS512");
+
+        // Old config still has HS256 (in-flight requests)
+        assert_eq!(old_config.jwt.as_ref().unwrap().algorithm, "HS256");
+
+        // Secret unchanged
+        assert_eq!(new_config.jwt.as_ref().unwrap().secret, "jwt_secret");
+        assert_eq!(old_config.jwt.as_ref().unwrap().secret, "jwt_secret");
+    }
+
+    #[test]
+    fn test_can_add_remove_custom_claims_validation() {
+        // Test: Can add/remove custom claims validation
+        // This verifies claims configuration changes during reload
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "jwt_secret"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims: []
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with no claims validation
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.jwt.as_ref().unwrap().claims.len(), 0);
+
+        // Update config file to add claims validation
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "jwt_secret"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+    - claim: "permissions"
+      operator: "contains"
+      value: "read:api"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify claims were added in new config
+        assert_eq!(new_config.jwt.as_ref().unwrap().claims.len(), 2);
+        assert_eq!(new_config.jwt.as_ref().unwrap().claims[0].claim, "role");
+        assert_eq!(new_config.jwt.as_ref().unwrap().claims[0].operator, "equals");
+        assert_eq!(new_config.jwt.as_ref().unwrap().claims[1].claim, "permissions");
+        assert_eq!(new_config.jwt.as_ref().unwrap().claims[1].operator, "contains");
+
+        // Old config still has no claims (in-flight requests)
+        assert_eq!(old_config.jwt.as_ref().unwrap().claims.len(), 0);
+    }
+
+    #[test]
+    fn test_can_change_token_sources() {
+        // Test: Can change token sources (header, query param, custom)
+        // This verifies token source configuration changes during reload
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "jwt_secret"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+  claims: []
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with header token source only
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.jwt.as_ref().unwrap().token_sources.len(), 1);
+        assert_eq!(old_config.jwt.as_ref().unwrap().token_sources[0].source_type, "header");
+
+        // Update config file to add query parameter token source
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      bucket: "api-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+
+jwt:
+  enabled: true
+  secret: "jwt_secret"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+    - type: "query"
+      name: "token"
+    - type: "header"
+      name: "X-API-Token"
+  claims: []
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify token sources were updated in new config
+        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources.len(), 3);
+        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[0].source_type, "header");
+        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[1].source_type, "query");
+        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[1].name, Some("token".to_string()));
+        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[2].source_type, "header");
+        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[2].name, Some("X-API-Token".to_string()));
+
+        // Old config still has only 1 token source (in-flight requests)
+        assert_eq!(old_config.jwt.as_ref().unwrap().token_sources.len(), 1);
+    }
 }

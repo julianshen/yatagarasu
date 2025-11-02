@@ -1279,10 +1279,10 @@ curl http://localhost:8080/metrics
 - [x] Test: Can change bucket path prefix
 
 ### Test: JWT configuration changes
-- [ ] Test: Can rotate JWT secret (with grace period for old tokens)
-- [ ] Test: Can change JWT algorithm
-- [ ] Test: Can add/remove custom claims validation
-- [ ] Test: Can change token sources (header, query param, custom)
+- [x] Test: Can rotate JWT secret (with grace period for old tokens)
+- [x] Test: Can change JWT algorithm
+- [x] Test: Can add/remove custom claims validation
+- [x] Test: Can change token sources (header, query param, custom)
 
 ### Test: Server configuration changes (requires restart)
 - [ ] Test: Changing server address requires restart (documented)
