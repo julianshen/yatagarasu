@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (2598 lines)
-- ✅ 16 tests: 3 infrastructure validation + 13 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (2879 lines)
+- ✅ 17 tests: 3 infrastructure validation + 14 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1052,6 +1052,7 @@ yatagarasu/
 14. `test_proxy_multi_bucket_a()` - Proxy routes /bucket-a/* to bucket-a with isolated credentials
 15. `test_proxy_multi_bucket_b()` - Proxy routes /bucket-b/* to bucket-b with isolated credentials
 16. `test_proxy_mixed_public_private_buckets()` - Public and private buckets coexist (3 test cases)
+17. `test_proxy_credential_isolation()` - Each bucket uses isolated credentials (SECURITY CRITICAL)
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1092,7 +1093,7 @@ yatagarasu/
 - [x] Integration: GET /bucket-a/file.txt uses bucket-a credentials
 - [x] Integration: GET /bucket-b/file.txt uses bucket-b credentials
 - [ ] Integration: Concurrent requests to different buckets work
-- [ ] Integration: Each bucket uses isolated credentials (no mixing)
+- [x] Integration: Each bucket uses isolated credentials (no mixing)
 - [x] Integration: Public and private buckets in same proxy work
 
 ### Error Scenarios

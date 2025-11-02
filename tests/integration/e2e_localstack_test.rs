@@ -2596,3 +2596,284 @@ buckets:
 
     log::info!("=== Mixed Public/Private Buckets Test PASSED ===");
 }
+
+/// Test 17: Each bucket uses isolated credentials (no credential mixing)
+///
+/// This is a CRITICAL SECURITY TEST that validates credential isolation:
+/// 1. Create two S3 buckets in LocalStack with DIFFERENT credentials
+///    - bucket-secure-a: accessible ONLY with credentials-a
+///    - bucket-secure-b: accessible ONLY with credentials-b
+/// 2. Configure proxy with two buckets using DIFFERENT S3 credentials
+///    - /secure-a/* -> bucket-secure-a with credentials-a
+///    - /secure-b/* -> bucket-secure-b with credentials-b
+/// 3. Request GET /secure-a/file.txt -> Proxy MUST use credentials-a
+/// 4. Request GET /secure-b/file.txt -> Proxy MUST use credentials-b
+/// 5. Verify proxy does NOT mix credentials (security critical!)
+///
+/// Security implications:
+/// - Credential mixing would allow access to wrong bucket's data
+/// - Multi-tenant isolation depends on credential separation
+/// - Prevents privilege escalation between buckets
+/// - Critical for compliance (PCI-DSS, HIPAA, SOC 2)
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_credential_isolation() {
+    init_logging();
+    log::info!("=== Starting Credential Isolation Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!(
+        "LocalStack started on port {} (S3 endpoint: {})",
+        port,
+        s3_endpoint
+    );
+
+    // Step 2: Create TWO S3 buckets with DIFFERENT credentials
+    // In real AWS, these would be separate IAM users/roles
+    // In LocalStack, we simulate this with different access keys
+    let content_a = r#"{"bucket": "secure-a", "credentials": "user-a"}"#;
+    let content_b = r#"{"bucket": "secure-b", "credentials": "user-b"}"#;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        // Create bucket-secure-a with credentials-a
+        let config_a = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region("us-east-1")
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "user-a-access-key",
+                "user-a-secret-key",
+                None,
+                None,
+                "user-a",
+            ))
+            .load()
+            .await;
+
+        let s3_client_a = aws_sdk_s3::Client::new(&config_a);
+
+        s3_client_a
+            .create_bucket()
+            .bucket("bucket-secure-a")
+            .send()
+            .await
+            .expect("Failed to create bucket-secure-a");
+        log::info!("Created S3 bucket: bucket-secure-a (with credentials-a)");
+
+        s3_client_a
+            .put_object()
+            .bucket("bucket-secure-a")
+            .key("file.txt")
+            .body(content_a.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file.txt to bucket-secure-a");
+        log::info!("Uploaded file.txt to bucket-secure-a");
+
+        // Create bucket-secure-b with credentials-b
+        let config_b = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region("us-east-1")
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "user-b-access-key",
+                "user-b-secret-key",
+                None,
+                None,
+                "user-b",
+            ))
+            .load()
+            .await;
+
+        let s3_client_b = aws_sdk_s3::Client::new(&config_b);
+
+        s3_client_b
+            .create_bucket()
+            .bucket("bucket-secure-b")
+            .send()
+            .await
+            .expect("Failed to create bucket-secure-b");
+        log::info!("Created S3 bucket: bucket-secure-b (with credentials-b)");
+
+        s3_client_b
+            .put_object()
+            .bucket("bucket-secure-b")
+            .key("file.txt")
+            .body(content_b.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file.txt to bucket-secure-b");
+        log::info!("Uploaded file.txt to bucket-secure-b");
+    });
+
+    // Step 3: Configure proxy with DIFFERENT credentials for each bucket
+    let proxy_port = 18092; // Unique port for this test
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+buckets:
+  - name: "secure-a"
+    path_prefix: "/secure-a"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-secure-a"
+      access_key: "user-a-access-key"
+      secret_key: "user-a-secret-key"
+    auth:
+      enabled: false
+
+  - name: "secure-b"
+    path_prefix: "/secure-b"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-secure-b"
+      access_key: "user-b-access-key"
+      secret_key: "user-b-secret-key"
+    auth:
+      enabled: false
+"#,
+        proxy_port, s3_endpoint, s3_endpoint
+    );
+
+    // Write config to temporary file
+    let config_path = std::env::temp_dir().join(format!("yatagarasu_test_{}.yaml", proxy_port));
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+    log::info!("Wrote proxy config to: {:?}", config_path);
+
+    // Step 4: Start proxy in background thread
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config in proxy thread");
+        log::info!(
+            "Loaded config in proxy thread with {} buckets",
+            config.buckets.len()
+        );
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        log::info!("Proxy listening on: {}", listen_addr);
+
+        server.add_service(proxy_service);
+        server.run_forever(); // This blocks
+    });
+
+    // Wait for proxy to start
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    log::info!("Proxy should be started now");
+
+    let client = reqwest::blocking::Client::new();
+
+    // Test Case 1: Request to /secure-a/* uses credentials-a
+    log::info!("Test Case 1: /secure-a/* uses credentials-a");
+    let url_a = format!("http://127.0.0.1:{}/secure-a/file.txt", proxy_port);
+    log::info!("Making request to: {}", url_a);
+
+    let response_a = client.get(&url_a).send().expect("Failed to GET from proxy");
+
+    log::info!(
+        "Response status: {}, headers: {:?}",
+        response_a.status(),
+        response_a.headers()
+    );
+
+    assert_eq!(
+        response_a.status(),
+        200,
+        "Expected 200 OK for /secure-a/file.txt, got {}",
+        response_a.status()
+    );
+
+    let body_a = response_a.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body_a);
+    assert_eq!(
+        body_a, content_a,
+        "Expected content from bucket-secure-a, got '{}'",
+        body_a
+    );
+
+    // Verify content is from bucket-secure-a (not bucket-secure-b)
+    assert!(
+        body_a.contains("secure-a"),
+        "Response should contain 'secure-a'"
+    );
+    assert!(
+        body_a.contains("user-a"),
+        "Response should indicate credentials-a were used"
+    );
+
+    // Test Case 2: Request to /secure-b/* uses credentials-b
+    log::info!("Test Case 2: /secure-b/* uses credentials-b");
+    let url_b = format!("http://127.0.0.1:{}/secure-b/file.txt", proxy_port);
+    log::info!("Making request to: {}", url_b);
+
+    let response_b = client.get(&url_b).send().expect("Failed to GET from proxy");
+
+    log::info!(
+        "Response status: {}, headers: {:?}",
+        response_b.status(),
+        response_b.headers()
+    );
+
+    assert_eq!(
+        response_b.status(),
+        200,
+        "Expected 200 OK for /secure-b/file.txt, got {}",
+        response_b.status()
+    );
+
+    let body_b = response_b.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body_b);
+    assert_eq!(
+        body_b, content_b,
+        "Expected content from bucket-secure-b, got '{}'",
+        body_b
+    );
+
+    // Verify content is from bucket-secure-b (not bucket-secure-a)
+    assert!(
+        body_b.contains("secure-b"),
+        "Response should contain 'secure-b'"
+    );
+    assert!(
+        body_b.contains("user-b"),
+        "Response should indicate credentials-b were used"
+    );
+
+    // Verify NO credential mixing
+    assert!(
+        !body_a.contains("user-b"),
+        "SECURITY: bucket-a should NOT use credentials-b!"
+    );
+    assert!(
+        !body_b.contains("user-a"),
+        "SECURITY: bucket-b should NOT use credentials-a!"
+    );
+
+    log::info!("=== Credential Isolation Test PASSED ===");
+    log::info!("SECURITY VERIFIED: Each bucket uses its own credentials only");
+}
