@@ -1106,7 +1106,7 @@ yatagarasu/
 - [x] Integration: Invalid S3 credentials return 502
 - [x] Integration: S3 bucket doesn't exist returns 404
 - [x] Integration: S3 endpoint unreachable returns 502/503/504
-- [ ] Integration: Malformed request returns 400
+- [x] Integration: Malformed request returns 400 (Test 23: documents Pingora's automatic validation)
 - [x] Integration: Unknown path returns 404
 
 ### Performance & Stability
