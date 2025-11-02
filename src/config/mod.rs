@@ -11,6 +11,8 @@ pub struct Config {
     pub buckets: Vec<BucketConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jwt: Option<JwtConfig>,
+    #[serde(skip)]
+    pub generation: u64, // Config version, increments on reload
 }
 
 impl Config {
@@ -35,7 +37,9 @@ impl Config {
             std::env::var(var_name).unwrap() // Safe because we checked above
         });
 
-        serde_yaml::from_str(&substituted).map_err(|e| e.to_string())
+        let mut config: Config = serde_yaml::from_str(&substituted).map_err(|e| e.to_string())?;
+        config.generation = 0; // Initialize generation to 0
+        Ok(config)
     }
 
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
@@ -174,4 +178,44 @@ pub struct ClaimRule {
     pub claim: String,
     pub operator: String,
     pub value: serde_json::Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_config_can_be_loaded_from_file_path() {
+        // Create temporary config file
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        temp_file.write_all(config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Load config from file
+        let config = Config::from_file(temp_file.path()).unwrap();
+
+        // Verify config was loaded correctly
+        assert_eq!(config.server.address, "127.0.0.1");
+        assert_eq!(config.server.port, 8080);
+        assert_eq!(config.buckets.len(), 1);
+        assert_eq!(config.buckets[0].name, "test-bucket");
+        assert_eq!(config.buckets[0].path_prefix, "/test");
+        assert_eq!(config.generation, 0); // Initial generation is 0
+    }
 }

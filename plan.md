@@ -1253,7 +1253,7 @@ curl http://localhost:8080/metrics
 **Rationale**: Hot reload enables adding/removing buckets, updating credentials, and changing JWT secrets without dropping connections. Critical for production operations.
 
 ### Test: Configuration reload infrastructure
-- [ ] Test: Config can be loaded from file path
+- [x] Test: Config can be loaded from file path
 - [ ] Test: Config validation catches errors before applying
 - [ ] Test: Invalid config rejected without affecting running service
 - [ ] Test: Config has generation/version number that increments on reload

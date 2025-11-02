@@ -11,6 +11,7 @@ fn test_can_create_empty_config_struct() {
         },
         buckets: vec![],
         jwt: None,
+        generation: 0,
     };
 }
 
