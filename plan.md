@@ -1327,14 +1327,14 @@ kill -HUP $(pidof yatagarasu)
 **Rationale**: While we have basic integration tests, we need comprehensive coverage of HTTP Range requests, multi-bucket routing, JWT authentication, error scenarios, and edge cases.
 
 ### Test: HTTP Range request support
-- [ ] Test: GET with Range: bytes=0-1023 returns 206 Partial Content
-- [ ] Test: Response includes Content-Range header with correct range
-- [ ] Test: Response body contains correct byte range from S3 object
+- [x] Test: GET with Range: bytes=0-1023 returns 206 Partial Content
+- [x] Test: Response includes Content-Range header with correct range
+- [x] Test: Response body contains correct byte range from S3 object
 - [ ] Test: Multiple ranges in single request (multipart/byteranges)
-- [ ] Test: Suffix range (Range: bytes=-1000) returns last 1000 bytes
-- [ ] Test: Open-ended range (Range: bytes=1000-) returns from offset to end
-- [ ] Test: Invalid range returns 416 Range Not Satisfiable
-- [ ] File: `tests/integration_range_requests.rs`
+- [x] Test: Suffix range (Range: bytes=-1000) returns last 1000 bytes
+- [x] Test: Open-ended range (Range: bytes=1000-) returns from offset to end
+- [x] Test: Invalid range returns 416 Range Not Satisfiable
+- [x] File: `tests/integration/range_requests_test.rs`
 
 ### Test: Multi-bucket routing scenarios
 - [ ] Test: Multiple buckets with different path prefixes (/products, /images, /videos)
