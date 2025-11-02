@@ -3437,3 +3437,157 @@ buckets:
     log::info!("✅ Proxy handles invalid S3 credentials appropriately");
     log::info!("✅ Error handling logic validated (502 or LocalStack permissive 200)");
 }
+
+/// Test 20: S3 bucket doesn't exist returns 404 Not Found
+///
+/// This test validates error handling when the S3 bucket itself doesn't exist:
+/// - Proxy configured to route to bucket "nonexistent-bucket"
+/// - Bucket was never created in S3
+/// - S3 returns NoSuchBucket error (404)
+/// - Proxy should return 404 Not Found to client
+///
+/// Test setup:
+/// - LocalStack S3 running (no buckets created)
+/// - Proxy configured with bucket "bucket-does-not-exist"
+/// - Make request to proxy
+/// - S3 returns 404 NoSuchBucket
+/// - Proxy should return 404 to client
+///
+/// Why this matters:
+/// - 404 Not Found = correct status for missing resource
+/// - Helps debugging: "is bucket name correct in config?"
+/// - Different from Test 6 (missing object) - this is missing bucket
+/// - Different from Test 19 (invalid creds) - credentials are fine, bucket missing
+///
+/// HTTP status code semantics:
+/// - 404 Not Found: Resource doesn't exist (bucket or object missing)
+/// - 502 Bad Gateway: Upstream server error (invalid credentials, server error)
+/// - 503 Service Unavailable: Upstream unreachable (network/timeout)
+///
+/// S3 error mapping:
+/// - NoSuchBucket (S3) → 404 Not Found (proxy)
+/// - NoSuchKey (S3) → 404 Not Found (proxy)
+/// - AccessDenied (S3) → 502 Bad Gateway (proxy)
+/// - InternalError (S3) → 502 Bad Gateway (proxy)
+#[test]
+#[ignore]
+fn test_proxy_404_bucket_does_not_exist() {
+    env_logger::init();
+    log::info!("=== Test 20: S3 Bucket Doesn't Exist Returns 404 ===");
+
+    let docker = Cli::default();
+    let localstack_image = LocalStack::default();
+    let container = docker.run(localstack_image);
+
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Wait for LocalStack to be ready
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    log::info!("⚠️ NOT creating any S3 buckets (intentionally empty)");
+    log::info!("⚠️ Proxy will be configured to use nonexistent bucket");
+
+    log::info!("Creating Yatagarasu proxy configuration with nonexistent bucket...");
+
+    // Create config pointing to bucket that doesn't exist
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 18095
+
+buckets:
+  - name: "bucket-does-not-exist"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-does-not-exist"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+"#,
+        s3_endpoint
+    );
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config_test20.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+
+    log::info!("Config file written to: {}", config_path.display());
+
+    log::info!("Starting Yatagarasu proxy in background thread...");
+
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config");
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+
+        server.add_service(proxy_service);
+
+        log::info!("Proxy server running on {}", listen_addr);
+
+        server.run_forever();
+    });
+
+    // Wait for proxy to start
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    log::info!("=== Making HTTP request to proxy for nonexistent bucket ===");
+
+    let client = reqwest::blocking::Client::new();
+    let url = "http://127.0.0.1:18095/test/anyfile.txt";
+
+    log::info!("GET {}", url);
+
+    match client.get(url).send() {
+        Ok(response) => {
+            let status = response.status();
+            log::info!("Response status: {}", status);
+
+            // Expected: 404 Not Found
+            // S3 returns NoSuchBucket error, proxy should return 404
+            assert_eq!(
+                status, 404,
+                "Expected 404 Not Found for nonexistent bucket, got {}",
+                status
+            );
+
+            log::info!("✅ Proxy correctly returned 404 Not Found");
+        }
+        Err(e) => {
+            // Network error is NOT expected - proxy should return 404
+            panic!(
+                "❌ FAIL: Network error occurred: {}\n\
+                 Expected proxy to return 404 Not Found for nonexistent bucket",
+                e
+            );
+        }
+    }
+
+    log::info!("=== Bucket Doesn't Exist Test PASSED ===");
+    log::info!("✅ Proxy returns 404 Not Found for nonexistent S3 bucket");
+    log::info!("✅ Error handling: NoSuchBucket → 404");
+}
