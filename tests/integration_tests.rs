@@ -8,6 +8,7 @@ mod integration {
     mod concurrency_test;
     mod e2e_localstack_test;
     mod error_scenarios_test;
+    mod hot_reload_test;
     mod jwt_auth_test;
     mod metrics_test;
     mod multibucket_test;

@@ -1386,11 +1386,11 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/metrics_test.rs`
 
 ### Test: Hot reload validation (requires Phase 19)
-- [ ] Test: Add new bucket via config reload (SIGHUP)
-- [ ] Test: Remove bucket via config reload (in-flight requests complete)
-- [ ] Test: Update bucket credentials via config reload
-- [ ] Test: Invalid config reload rejected without affecting service
-- [ ] File: `tests/integration_hot_reload.rs`
+- [x] Test: Add new bucket via config reload (SIGHUP)
+- [x] Test: Remove bucket via config reload (in-flight requests complete)
+- [x] Test: Update bucket credentials via config reload
+- [x] Test: Invalid config reload rejected without affecting service
+- [x] File: `tests/integration/hot_reload_test.rs`
 
 **Test Infrastructure**:
 - Use MinIO container for S3 backend
