@@ -1188,10 +1188,10 @@ yatagarasu/
 - [x] File: `src/metrics/mod.rs` (new module - 95 lines with tests)
 
 ### Test: Request count metrics
-- [ ] Test: Track total HTTP requests received
-- [ ] Test: Track requests by status code (2xx, 3xx, 4xx, 5xx)
-- [ ] Test: Track requests by bucket name
-- [ ] Test: Track requests by HTTP method (GET, HEAD, POST, etc.)
+- [x] Test: Track total HTTP requests received
+- [x] Test: Track requests by status code (2xx, 3xx, 4xx, 5xx)
+- [x] Test: Track requests by bucket name
+- [x] Test: Track requests by HTTP method (GET, HEAD, POST, etc.)
 
 ### Test: Latency metrics
 - [ ] Test: Record request duration histogram (p50, p90, p95, p99)
