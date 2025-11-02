@@ -1260,11 +1260,11 @@ curl http://localhost:8080/metrics
 - [x] File: Extend `src/config/mod.rs` with reload support
 
 ### Test: SIGHUP signal handler
-- [ ] Test: Process registers SIGHUP signal handler
-- [ ] Test: Receiving SIGHUP triggers config reload
-- [ ] Test: Signal handler works on Linux (signal_hook crate)
-- [ ] Test: Signal handler works on macOS (signal_hook crate)
-- [ ] File: `src/main.rs` - add signal handling
+- [x] Test: Process registers SIGHUP signal handler
+- [x] Test: Receiving SIGHUP triggers config reload (flag-based)
+- [x] Test: Signal handler works on Linux (signal_hook crate)
+- [x] Test: Signal handler works on macOS (signal_hook crate)
+- [x] File: `src/reload.rs` - add signal handling with ReloadManager
 
 ### Test: Graceful config transition
 - [ ] Test: In-flight requests continue with old config

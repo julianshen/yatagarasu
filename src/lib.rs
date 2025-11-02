@@ -9,6 +9,7 @@ pub mod logging;
 pub mod metrics; // Phase 18: Prometheus Metrics
 pub mod pipeline; // Phase 13: Request Pipeline Integration
 pub mod proxy;
+pub mod reload; // Phase 19: Configuration Hot Reload
 pub mod router;
 pub mod s3;
 pub mod server; // Phase 12: Pingora Server Setup // Phase 15: Error Handling & Logging
