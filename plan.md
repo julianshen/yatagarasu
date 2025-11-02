@@ -1379,11 +1379,11 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/streaming_test.rs`
 
 ### Test: Metrics validation
-- [ ] Test: /metrics endpoint returns Prometheus format
-- [ ] Test: Request counters increment correctly
-- [ ] Test: Latency histograms populated
-- [ ] Test: S3 error counters increment on S3 errors
-- [ ] File: `tests/integration_metrics.rs`
+- [x] Test: /metrics endpoint returns Prometheus format
+- [x] Test: Request counters increment correctly
+- [x] Test: Latency histograms populated
+- [x] Test: S3 error counters increment on S3 errors
+- [x] File: `tests/integration/metrics_test.rs`
 
 ### Test: Hot reload validation (requires Phase 19)
 - [ ] Test: Add new bucket via config reload (SIGHUP)

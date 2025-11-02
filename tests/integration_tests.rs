@@ -9,6 +9,7 @@ mod integration {
     mod e2e_localstack_test;
     mod error_scenarios_test;
     mod jwt_auth_test;
+    mod metrics_test;
     mod multibucket_test;
     mod range_requests_test;
     mod server_basic_test;
