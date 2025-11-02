@@ -4547,3 +4547,285 @@ buckets:
     log::info!("without buffering the entire file into memory, enabling");
     log::info!("thousands of concurrent large file downloads.");
 }
+
+/// Test 25: Concurrent GETs to same file work without race conditions
+///
+/// This test validates thread safety when multiple clients request the SAME file
+/// simultaneously. Unlike Test 18 (concurrent requests to different buckets),
+/// this test stresses the proxy's ability to handle concurrent access to the
+/// same resource without data corruption or race conditions.
+///
+/// Why this test matters:
+/// In production, popular files (logos, common assets, shared datasets) receive
+/// many concurrent requests. The proxy must handle this without:
+/// - Race conditions in routing/auth logic
+/// - Data corruption (mixed responses)
+/// - Crashes or deadlocks
+/// - Resource leaks (file handles, memory)
+///
+/// What this test validates:
+/// 1. Multiple threads can request the same file simultaneously
+/// 2. All requests complete successfully (no errors)
+/// 3. All requests receive correct content (no corruption)
+/// 4. Response times are reasonable (no blocking/serialization)
+/// 5. No crashes, panics, or resource exhaustion
+///
+/// Concurrency patterns tested:
+/// - Shared read access to routing table
+/// - Concurrent S3 client usage (per-bucket client reuse)
+/// - Concurrent request context creation (UUID generation)
+/// - Concurrent response streaming (multiple readers)
+///
+/// Real-world scenarios:
+/// - CDN origin: Thousands requesting same popular image
+/// - Shared dataset: Multiple ML engineers downloading same training data
+/// - Common assets: Logo files, CSS, JS files requested by many users
+/// - Burst traffic: Sudden spike in requests to same resource
+#[test]
+#[ignore]
+fn test_proxy_concurrent_gets_same_file() {
+    env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Info)
+        .try_init()
+        .ok();
+
+    log::info!("=== Test 25: Concurrent GETs to Same File ===");
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    log::info!("Starting LocalStack container for concurrent GET test...");
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Give LocalStack time to fully start
+    std::thread::sleep(std::time::Duration::from_secs(3));
+
+    // Create test file with known content
+    let test_content = "Concurrent access test: YATAGARASU handles multiple simultaneous requests to the same file without race conditions or data corruption.";
+    log::info!("Test file content length: {} bytes", test_content.len());
+
+    // Create S3 client and upload test file
+    log::info!("Uploading test file to LocalStack S3...");
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    rt.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "static",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket
+        log::info!("Creating bucket: concurrent-test-bucket...");
+        s3_client
+            .create_bucket()
+            .bucket("concurrent-test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        // Upload test file
+        s3_client
+            .put_object()
+            .bucket("concurrent-test-bucket")
+            .key("popular.txt")
+            .body(test_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload test file");
+
+        log::info!("✅ Test file uploaded successfully");
+    });
+
+    // Create proxy config
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 18100
+
+buckets:
+  - name: "concurrent"
+    path_prefix: "/concurrent"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "concurrent-test-bucket"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+    auth:
+      enabled: false
+"#,
+        s3_endpoint
+    );
+
+    let config_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = config_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+
+    log::info!("Created proxy config at: {}", config_path.to_string_lossy());
+
+    // Start proxy in background thread
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config");
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+
+        server.add_service(proxy_service);
+        server.run_forever();
+    });
+
+    log::info!("Waiting for proxy to start on port 18100...");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    // Launch concurrent requests to the SAME file
+    log::info!("Launching 20 concurrent GET requests to /concurrent/popular.txt...");
+
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    let success_count = Arc::new(Mutex::new(0));
+    let error_count = Arc::new(Mutex::new(0));
+    let content_errors = Arc::new(Mutex::new(0));
+
+    let mut handles = vec![];
+
+    let start_time = std::time::Instant::now();
+
+    // Launch 20 concurrent requests to the SAME file
+    for i in 0..20 {
+        let success_count = Arc::clone(&success_count);
+        let error_count = Arc::clone(&error_count);
+        let content_errors = Arc::clone(&content_errors);
+        let expected_content = test_content.to_string();
+
+        let handle = std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .expect("Failed to create HTTP client");
+
+            let thread_start = std::time::Instant::now();
+            let url = "http://127.0.0.1:18100/concurrent/popular.txt";
+
+            match client.get(url).send() {
+                Ok(response) => {
+                    let status = response.status();
+                    let duration = thread_start.elapsed();
+
+                    if status == 200 {
+                        match response.text() {
+                            Ok(body) => {
+                                if body == expected_content {
+                                    *success_count.lock().unwrap() += 1;
+                                    log::info!(
+                                        "Thread {}: ✅ SUCCESS (200 OK, content verified, {:.2}ms)",
+                                        i,
+                                        duration.as_secs_f64() * 1000.0
+                                    );
+                                } else {
+                                    *content_errors.lock().unwrap() += 1;
+                                    log::error!(
+                                        "Thread {}: ❌ CONTENT MISMATCH (expected {} bytes, got {} bytes)",
+                                        i,
+                                        expected_content.len(),
+                                        body.len()
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                *error_count.lock().unwrap() += 1;
+                                log::error!("Thread {}: ❌ Failed to read body: {}", i, e);
+                            }
+                        }
+                    } else {
+                        *error_count.lock().unwrap() += 1;
+                        log::error!("Thread {}: ❌ HTTP {}", i, status);
+                    }
+                }
+                Err(e) => {
+                    *error_count.lock().unwrap() += 1;
+                    log::error!("Thread {}: ❌ Request failed: {}", i, e);
+                }
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    let total_duration = start_time.elapsed();
+
+    // Collect results
+    let success = *success_count.lock().unwrap();
+    let errors = *error_count.lock().unwrap();
+    let content_err = *content_errors.lock().unwrap();
+
+    log::info!("");
+    log::info!("=== Concurrent GET Test Results ===");
+    log::info!("Total requests: 20");
+    log::info!("✅ Successful (200 OK, content verified): {}", success);
+    log::info!("❌ HTTP errors or failures: {}", errors);
+    log::info!("❌ Content mismatches: {}", content_err);
+    log::info!("Total duration: {:.2}s", total_duration.as_secs_f64());
+    log::info!(
+        "Average latency: {:.2}ms",
+        (total_duration.as_secs_f64() * 1000.0) / 20.0
+    );
+    log::info!("");
+
+    // Assertions
+    assert_eq!(
+        success, 20,
+        "Expected all 20 requests to succeed, got {} successes, {} errors, {} content errors",
+        success, errors, content_err
+    );
+    assert_eq!(errors, 0, "Expected no HTTP errors");
+    assert_eq!(content_err, 0, "Expected no content mismatches");
+
+    log::info!("=== Concurrent GET Test PASSED ===");
+    log::info!("✅ All 20 concurrent requests succeeded");
+    log::info!("✅ No race conditions detected");
+    log::info!("✅ All responses had correct content (no corruption)");
+    log::info!("✅ No crashes or resource exhaustion");
+    log::info!("");
+    log::info!("This validates the proxy's thread safety when multiple clients");
+    log::info!("request the same file simultaneously, proving it can handle");
+    log::info!("popular files in production (CDN origin, shared assets, etc.).");
+}

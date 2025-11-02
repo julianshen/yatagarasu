@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (4549 lines)
-- ✅ 24 tests: 3 infrastructure validation + 21 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (4835 lines)
+- ✅ 25 tests: 3 infrastructure validation + 22 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1060,6 +1060,7 @@ yatagarasu/
 22. `test_proxy_502_or_503_endpoint_unreachable()` - S3 endpoint unreachable returns 502/503 (network failure)
 23. `test_proxy_http_validation_boundary()` - Documents HTTP validation boundary (Pingora vs application, 6 test cases)
 24. `test_proxy_large_file_streaming()` - Large file (100MB) streams successfully without buffering entire file
+25. `test_proxy_concurrent_gets_same_file()` - Concurrent GETs to same file work without race conditions (20 threads)
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1084,7 +1085,7 @@ yatagarasu/
 - [x] Integration: GET /public/large.bin (100MB) streams successfully
 - [x] Integration: GET /public/test.txt with Range: bytes=0-100 returns partial content
 - [x] Integration: GET /public/nonexistent.txt returns 404
-- [ ] Integration: Concurrent GETs to same file work correctly
+- [x] Integration: Concurrent GETs to same file work correctly
 
 ### End-to-End Scenarios - Private Bucket
 - [x] Integration: GET /private/data.json without JWT returns 401
