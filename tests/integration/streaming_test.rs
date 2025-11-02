@@ -7,6 +7,8 @@
 // - Client disconnect stops S3 transfer (no resource leak)
 // - Multiple concurrent large file downloads work correctly
 
+use super::test_harness::ProxyTestHarness;
+use std::fs;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 use testcontainers::{clients::Cli, RunnableImage};
@@ -22,6 +24,37 @@ fn init_logging() {
             .filter_level(log::LevelFilter::Debug)
             .try_init();
     });
+}
+
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!("Created config file at {} for endpoint {}", config_path, s3_endpoint);
 }
 
 // Helper: Setup LocalStack with large test file
@@ -118,7 +151,13 @@ fn test_large_file_streams_correctly() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-streaming-test.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for streaming test");
 
         let proxy_url = "http://127.0.0.1:18080/test/large.bin";
 
@@ -218,7 +257,13 @@ fn test_streaming_starts_immediately_low_ttfb() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-ttfb-test.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for TTFB test");
 
         let proxy_url = "http://127.0.0.1:18080/test/large.bin";
 
@@ -311,7 +356,13 @@ fn test_client_disconnect_stops_s3_transfer() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-disconnect-test.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for disconnect test");
 
         let proxy_url = "http://127.0.0.1:18080/test/large.bin";
 
@@ -453,7 +504,13 @@ fn test_multiple_concurrent_large_file_downloads() {
             log::info!("Uploaded {} ({}MB)", key, size_mb_per_file);
         }
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-concurrent-test.yaml";
+        create_localstack_config(&endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for concurrent test");
 
         let proxy_base_url = "http://127.0.0.1:18080/test";
 

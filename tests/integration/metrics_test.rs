@@ -7,8 +7,10 @@
 // - Latency histograms populated
 // - S3 error counters increment on S3 errors
 
+use std::fs;
 use std::sync::Once;
 use std::time::Duration;
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -19,6 +21,41 @@ fn init_logging() {
             .filter_level(log::LevelFilter::Debug)
             .try_init();
     });
+}
+
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
 }
 
 #[test]
@@ -51,8 +88,13 @@ fn test_metrics_endpoint_returns_prometheus_format() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        // TODO: Start Yatagarasu proxy server here
-        // Metrics endpoint typically on separate port (e.g., :9090)
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-metrics-1.yaml";
+        create_localstack_config("http://127.0.0.1:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for metrics endpoint test");
 
         let metrics_url = "http://127.0.0.1:9090/metrics";
 
@@ -147,7 +189,13 @@ fn test_request_counters_increment_correctly() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-metrics-2.yaml";
+        create_localstack_config("http://127.0.0.1:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for request counter test");
 
         let metrics_url = "http://127.0.0.1:9090/metrics";
         let proxy_url = "http://127.0.0.1:18080/test/sample.txt";
@@ -257,7 +305,13 @@ fn test_latency_histograms_populated() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-metrics-3.yaml";
+        create_localstack_config("http://127.0.0.1:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for latency histogram test");
 
         let metrics_url = "http://127.0.0.1:9090/metrics";
         let proxy_url = "http://127.0.0.1:18080/test/sample.txt";
@@ -361,8 +415,13 @@ fn test_s3_error_counters_increment_on_errors() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        // TODO: Start Yatagarasu proxy server here
-        // TODO: Start S3 backend (LocalStack or MinIO)
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-metrics-4.yaml";
+        create_localstack_config("http://127.0.0.1:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for S3 error counter test");
 
         let metrics_url = "http://127.0.0.1:9090/metrics";
         let proxy_base_url = "http://127.0.0.1:18080/test";

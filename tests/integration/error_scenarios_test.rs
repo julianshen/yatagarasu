@@ -7,10 +7,13 @@
 // - Timeouts (504)
 // - Large file streaming without buffering
 
+use std::fs;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
+
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -60,6 +63,41 @@ async fn setup_localstack_with_bucket<'a>(
     (container, endpoint)
 }
 
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
 #[test]
 #[ignore] // Requires Docker and running proxy - run with: cargo test -- --ignored
 fn test_nonexistent_s3_object_returns_404() {
@@ -86,8 +124,13 @@ fn test_nonexistent_s3_object_returns_404() {
         // Note: We intentionally do NOT upload any files to the bucket
         // so that requests will trigger NoSuchKey errors
 
-        // TODO: Start Yatagarasu proxy server here
-        // For now, this test will fail with "Connection refused"
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-error-404.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for 404 error test");
 
         let proxy_url = "http://127.0.0.1:18080/test/does-not-exist.txt";
 
@@ -430,7 +473,13 @@ fn test_large_file_streams_without_buffering() {
 
         log::info!("Uploaded large file to S3 in {:?}", upload_start.elapsed());
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-error-large.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for large file streaming test");
 
         let proxy_url = "http://127.0.0.1:18080/test/large-file.bin";
 

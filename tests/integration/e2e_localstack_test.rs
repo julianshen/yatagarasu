@@ -1,6 +1,7 @@
 // End-to-end integration tests with LocalStack
 // Phase 16: Real S3 integration testing using testcontainers
 
+use super::test_harness::ProxyTestHarness;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
@@ -253,47 +254,14 @@ buckets:
         proxy_port, s3_endpoint
     );
 
-    let config_file = tempfile::NamedTempFile::new().expect("Failed to create temp config file");
-    std::fs::write(config_file.path(), config_content).expect("Failed to write config");
+    let config_path = "/tmp/yatagarasu-e2e-test.yaml";
+    std::fs::write(config_path, config_content).expect("Failed to write config");
 
-    log::info!("Created proxy config at {:?}", config_file.path());
+    log::info!("Created proxy config at {}", config_path);
 
-    // Start proxy server in background thread
-    let config_path = config_file.path().to_str().unwrap().to_string();
-
-    std::thread::spawn(move || {
-        // Load configuration
-        let config =
-            yatagarasu::config::Config::from_file(&config_path).expect("Failed to load config");
-
-        log::info!("Proxy config loaded");
-
-        // Create Pingora server
-        let mut server =
-            pingora_core::server::Server::new(None).expect("Failed to create Pingora server");
-        server.bootstrap();
-
-        // Create YatagarasuProxy instance
-        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
-
-        // Create HTTP proxy service
-        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
-
-        // Add TCP listener
-        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
-        proxy_service.add_tcp(&listen_addr);
-
-        log::info!("Starting proxy server at {}", listen_addr);
-
-        // Register service with server
-        server.add_service(proxy_service);
-
-        // Run server (blocks until shutdown)
-        server.run_forever();
-    });
-
-    // Give server time to start up and bind to port
-    std::thread::sleep(Duration::from_secs(2));
+    // Start proxy with test harness
+    let _proxy = ProxyTestHarness::start(config_path, proxy_port)
+        .expect("Failed to start proxy for e2e test");
 
     // Test: Make GET request to proxy
     let client = reqwest::blocking::Client::builder()

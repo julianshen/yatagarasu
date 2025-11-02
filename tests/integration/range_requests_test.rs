@@ -4,10 +4,12 @@
 // Tests that the proxy correctly handles HTTP Range requests (RFC 7233)
 // for partial content delivery, video seeking, and parallel downloads.
 
+use std::fs;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -18,6 +20,41 @@ fn init_logging() {
             .filter_level(log::LevelFilter::Debug)
             .try_init();
     });
+}
+
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
 }
 
 // Helper: Setup LocalStack with a test file
@@ -98,9 +135,13 @@ fn test_range_request_returns_206_partial_content() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
-        // For now, this test will fail with "Connection refused" because proxy isn't running
-        // Once we implement proxy startup in tests, this will test the actual Range support
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-1.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for range request partial content test");
 
         let proxy_url = "http://127.0.0.1:18080/test/test.txt";
 
@@ -171,9 +212,17 @@ fn test_range_request_includes_content_range_header() {
 
     runtime.block_on(async {
         let test_content = vec![0u8; 5000]; // 5000 bytes of zeros
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_test_file(&docker, "test-bucket", "data.bin", &test_content)
                 .await;
+
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-2.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for content range header test");
 
         let proxy_url = "http://127.0.0.1:18080/test/data.bin";
 
@@ -232,9 +281,17 @@ fn test_range_request_returns_correct_byte_range() {
         }
         // Total: 2000 bytes (1000 * 2 bytes)
 
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_test_file(&docker, "test-bucket", "pattern.bin", &test_content)
                 .await;
+
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-3.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for byte range verification test");
 
         let proxy_url = "http://127.0.0.1:18080/test/pattern.bin";
 
@@ -292,9 +349,17 @@ fn test_suffix_range_returns_last_n_bytes() {
         // 62 bytes total
         let total_len = test_content.len();
 
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_test_file(&docker, "test-bucket", "suffix.txt", test_content)
                 .await;
+
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-4.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for suffix range test");
 
         let proxy_url = "http://127.0.0.1:18080/test/suffix.txt";
 
@@ -351,9 +416,17 @@ fn test_open_ended_range_returns_from_offset_to_end() {
         let test_content = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         let total_len = test_content.len();
 
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_test_file(&docker, "test-bucket", "openended.txt", test_content)
                 .await;
+
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-5.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for open-ended range test");
 
         let proxy_url = "http://127.0.0.1:18080/test/openended.txt";
 
@@ -410,9 +483,17 @@ fn test_invalid_range_returns_416_range_not_satisfiable() {
         let test_content = b"0123456789"; // 10 bytes
         let total_len = test_content.len();
 
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_test_file(&docker, "test-bucket", "invalid.txt", test_content)
                 .await;
+
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-6.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for invalid range test");
 
         let proxy_url = "http://127.0.0.1:18080/test/invalid.txt";
 

@@ -7,11 +7,14 @@
 // - Connection pooling works correctly
 // - Memory usage stays constant (no leaks)
 
+use std::fs;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
 use tokio::task::JoinSet;
+
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -80,6 +83,41 @@ async fn setup_localstack_with_test_files<'a>(
     (container, endpoint)
 }
 
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
 #[test]
 #[ignore] // Requires Docker and running proxy - run with: cargo test -- --ignored
 fn test_100_concurrent_requests_all_succeed() {
@@ -111,7 +149,13 @@ fn test_100_concurrent_requests_all_succeed() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-concurrency-100.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for 100 concurrent requests test");
 
         let proxy_base_url = "http://127.0.0.1:18080/test";
 
@@ -226,7 +270,13 @@ fn test_no_race_conditions_in_request_handling() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-concurrency-race.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for race condition test");
 
         let proxy_url = "http://127.0.0.1:18080/test/file-0.txt";
         let expected_content = "Content of file 0";
@@ -333,7 +383,13 @@ fn test_connection_pooling_works_correctly() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-concurrency-pooling.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for connection pooling test");
 
         let proxy_url = "http://127.0.0.1:18080/test/file-0.txt";
         let expected_content = "Content of file 0";
@@ -432,7 +488,14 @@ fn test_memory_usage_stays_constant() {
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
-        // TODO: Start Yatagarasu proxy server here
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-concurrency-memory.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for memory stability test");
+
         // TODO: Get proxy process PID for memory monitoring
 
         let proxy_base_url = "http://127.0.0.1:18080/test";

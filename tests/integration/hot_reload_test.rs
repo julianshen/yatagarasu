@@ -12,6 +12,7 @@ use std::io::Write;
 use std::sync::Once;
 use std::time::Duration;
 use tempfile::NamedTempFile;
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -22,6 +23,41 @@ fn init_logging() {
             .filter_level(log::LevelFilter::Debug)
             .try_init();
     });
+}
+
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
 }
 
 #[test]
@@ -75,8 +111,13 @@ buckets:
 
         log::info!("Created initial config file: {:?}", config_file.path());
 
-        // TODO: Start Yatagarasu proxy with this config file
-        // let proxy_pid = start_proxy(config_file.path());
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-hotreload-1.yaml";
+        create_localstack_config("http://localhost:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for hot reload add bucket test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -238,7 +279,13 @@ buckets:
 
         log::info!("Created initial config with 2 buckets");
 
-        // TODO: Start proxy with this config
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-hotreload-2.yaml";
+        create_localstack_config("http://localhost:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for hot reload remove bucket test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -362,7 +409,13 @@ buckets:
 
         log::info!("Created config with old credentials");
 
-        // TODO: Start proxy
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-hotreload-3.yaml";
+        create_localstack_config("http://localhost:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for credential rotation test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -476,7 +529,13 @@ buckets:
 
         log::info!("Created valid initial config");
 
-        // TODO: Start proxy
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-hotreload-4.yaml";
+        create_localstack_config("http://localhost:9000", config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for invalid config rejection test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))

@@ -4,10 +4,12 @@
 // Tests that the proxy correctly routes requests to different S3 buckets
 // based on path prefixes, with isolated credentials per bucket.
 
+use std::fs;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -83,6 +85,186 @@ async fn setup_localstack_with_multiple_buckets(
     (container, endpoint, bucket_names)
 }
 
+// Helper: Create config file for LocalStack endpoint with multiple buckets
+fn create_multibucket_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "products-bucket"
+      access_key: "test"
+      secret_key: "test"
+  - name: "images"
+    path_prefix: "/images"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "images-bucket"
+      access_key: "test"
+      secret_key: "test"
+  - name: "videos"
+    path_prefix: "/videos"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "videos-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint, s3_endpoint, s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created multi-bucket config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
+// Helper: Create config file for overlapping path prefixes
+fn create_overlapping_paths_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "api"
+    path_prefix: "/api"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-api"
+      access_key: "test"
+      secret_key: "test"
+  - name: "api-v2"
+    path_prefix: "/api/v2"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-api-v2"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint, s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created overlapping paths config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
+// Helper: Create config file for credential isolation test
+fn create_credential_isolation_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "bucket1"
+    path_prefix: "/bucket1"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket1"
+      access_key: "valid_key"
+      secret_key: "valid_secret"
+  - name: "bucket2"
+    path_prefix: "/bucket2"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket2"
+      access_key: "invalid_key"
+      secret_key: "invalid_secret"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint, s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created credential isolation config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
+// Helper: Create config file for bucket isolation test
+fn create_bucket_isolation_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "app1"
+    path_prefix: "/app1"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket1"
+      access_key: "test"
+      secret_key: "test"
+  - name: "app2"
+    path_prefix: "/app2"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket2"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint, s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created bucket isolation config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
 #[test]
 #[ignore] // Requires Docker and running proxy
 fn test_multiple_buckets_with_different_path_prefixes() {
@@ -104,11 +286,13 @@ fn test_multiple_buckets_with_different_path_prefixes() {
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
         log::info!("Created buckets: {:?}", bucket_names);
 
-        // TODO: Start Yatagarasu proxy with multi-bucket configuration
-        // Config should map:
-        // - /products -> products-bucket
-        // - /images -> images-bucket
-        // - /videos -> videos-bucket
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-multibucket-1.yaml";
+        create_multibucket_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for multi-bucket routing test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -231,9 +415,13 @@ fn test_longest_prefix_match_when_paths_overlap() {
 
         log::info!("Created overlapping path buckets");
 
-        // TODO: Configure proxy with overlapping paths
-        // - /api -> bucket-api
-        // - /api/v2 -> bucket-api-v2
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-multibucket-2.yaml";
+        create_overlapping_paths_config(&endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for overlapping paths test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -283,10 +471,16 @@ fn test_request_to_unknown_path_returns_404() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint, _bucket_names) =
+        let (_container, s3_endpoint, _bucket_names) =
             setup_localstack_with_multiple_buckets(&docker).await;
 
-        // TODO: Start proxy with configured paths (/products, /images, /videos)
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-multibucket-3.yaml";
+        create_multibucket_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for unknown path test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -398,9 +592,13 @@ fn test_each_bucket_uses_isolated_s3_credentials() {
 
         log::info!("Created bucket1 with valid credentials");
 
-        // TODO: Configure proxy with:
-        // - /bucket1 -> bucket1 (valid credentials: valid_key/valid_secret)
-        // - /bucket2 -> bucket2 (invalid credentials: invalid_key/invalid_secret)
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-multibucket-4.yaml";
+        create_credential_isolation_config(&endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for credential isolation test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -502,9 +700,13 @@ fn test_bucket1_request_cannot_access_bucket2_objects() {
 
         log::info!("Created two buckets with same object key but different content");
 
-        // TODO: Configure proxy with:
-        // - /app1 -> bucket1
-        // - /app2 -> bucket2
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-multibucket-5.yaml";
+        create_bucket_isolation_config(&endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for bucket isolation test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))

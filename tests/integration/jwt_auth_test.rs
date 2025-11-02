@@ -7,10 +7,13 @@
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::sync::Once;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
+
+use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 
@@ -53,6 +56,41 @@ fn generate_jwt(secret: &str, exp_offset_seconds: i64, custom_claims: Option<Cla
     let encoding_key = EncodingKey::from_secret(secret.as_bytes());
 
     encode(&header, &claims, &encoding_key).expect("Failed to generate JWT")
+}
+
+// Helper: Create config file for LocalStack endpoint
+fn create_localstack_config(s3_endpoint: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write config file");
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
 }
 
 // Helper: Setup LocalStack with test bucket and file
@@ -113,11 +151,16 @@ fn test_request_with_valid_jwt_bearer_token_succeeds() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "private-bucket").await;
 
-        // TODO: Start proxy with JWT authentication enabled
-        // Config: bucket requires JWT, secret = "test-secret-key"
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-1.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for valid JWT bearer token test");
 
         let jwt_secret = "test-secret-key";
         let valid_token = generate_jwt(jwt_secret, 3600, None); // Valid for 1 hour
@@ -159,10 +202,16 @@ fn test_request_without_jwt_to_private_bucket_returns_401() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "private-bucket").await;
 
-        // TODO: Start proxy with JWT authentication enabled for /private
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-2.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for missing JWT test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -205,10 +254,16 @@ fn test_request_with_invalid_jwt_returns_403() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "private-bucket").await;
 
-        // TODO: Start proxy with JWT secret = "correct-secret"
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-3.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for invalid JWT test");
 
         // Generate JWT with WRONG secret
         let wrong_secret = "wrong-secret-key";
@@ -248,10 +303,16 @@ fn test_request_with_expired_jwt_returns_403() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "private-bucket").await;
 
-        // TODO: Start proxy with JWT authentication enabled
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-4.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for expired JWT test");
 
         let jwt_secret = "test-secret-key";
         // Generate JWT that expired 1 hour ago
@@ -293,10 +354,16 @@ fn test_request_with_jwt_in_query_parameter_succeeds() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "private-bucket").await;
 
-        // TODO: Start proxy with JWT token sources including query parameter "token"
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-5.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for JWT in query parameter test");
 
         let jwt_secret = "test-secret-key";
         let valid_token = generate_jwt(jwt_secret, 3600, None);
@@ -342,10 +409,16 @@ fn test_request_with_jwt_in_custom_header_succeeds() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "private-bucket").await;
 
-        // TODO: Start proxy with JWT token sources including custom header "X-API-Token"
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-6.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for JWT in custom header test");
 
         let jwt_secret = "test-secret-key";
         let valid_token = generate_jwt(jwt_secret, 3600, None);
@@ -425,9 +498,13 @@ fn test_public_bucket_accessible_without_jwt() {
 
         log::info!("Created public bucket");
 
-        // TODO: Start proxy with:
-        // - /private -> requires JWT (auth.enabled = true)
-        // - /public -> no JWT required (auth.enabled = false)
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-7.yaml";
+        create_localstack_config(&endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for public bucket access test");
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -467,11 +544,16 @@ fn test_custom_claims_validation() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, _s3_endpoint) =
+        let (_container, s3_endpoint) =
             setup_localstack_with_bucket(&docker, "products-bucket").await;
 
-        // TODO: Start proxy with custom claims validation:
-        // JWT must have claim: bucket = "products" to access /products
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-jwt-8.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for custom claims validation test");
 
         let jwt_secret = "test-secret-key";
 
