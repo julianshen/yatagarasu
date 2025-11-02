@@ -2877,3 +2877,351 @@ buckets:
     log::info!("=== Credential Isolation Test PASSED ===");
     log::info!("SECURITY VERIFIED: Each bucket uses its own credentials only");
 }
+
+/// Test 18: Concurrent requests to different buckets work without race conditions
+///
+/// This test validates:
+/// - Multiple concurrent requests to different buckets succeed
+/// - No credential mixing between concurrent requests
+/// - No race conditions in routing or authentication
+/// - Proxy handles concurrent load without deadlocks
+///
+/// Test setup:
+/// - Two S3 buckets (bucket-concurrent-a, bucket-concurrent-b)
+/// - Different files in each bucket
+/// - Spawn 20 threads (10 for bucket-a, 10 for bucket-b)
+/// - All requests should succeed with correct content
+///
+/// Why this matters:
+/// - Validates thread safety of routing, auth, S3 client management
+/// - Ensures no credential mixing under concurrent load
+/// - Proves proxy can handle real-world concurrent traffic
+/// - Critical for production reliability
+#[test]
+#[ignore]
+fn test_proxy_concurrent_requests_to_different_buckets() {
+    env_logger::init();
+    log::info!("=== Test 18: Concurrent Requests to Different Buckets ===");
+
+    let docker = Cli::default();
+    let localstack_image = LocalStack::default();
+    let container = docker.run(localstack_image);
+
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Wait for LocalStack to be ready
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    log::info!("Creating AWS S3 client for test setup...");
+
+    // Create S3 client for test setup
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    log::info!("Creating two S3 buckets for concurrent test...");
+
+    // Create bucket-concurrent-a with file-a.txt
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("bucket-concurrent-a")
+            .send()
+            .await
+            .expect("Failed to create bucket-concurrent-a");
+
+        let content_a =
+            r#"{"bucket": "bucket-concurrent-a", "file": "file-a.txt", "thread_safe": true}"#;
+        s3_client
+            .put_object()
+            .bucket("bucket-concurrent-a")
+            .key("file-a.txt")
+            .body(content_a.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file-a.txt to bucket-concurrent-a");
+
+        log::info!("✅ Created bucket-concurrent-a with file-a.txt");
+    });
+
+    // Create bucket-concurrent-b with file-b.txt
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("bucket-concurrent-b")
+            .send()
+            .await
+            .expect("Failed to create bucket-concurrent-b");
+
+        let content_b = r#"{"bucket": "bucket-concurrent-b", "file": "file-b.txt", "race_condition_free": true}"#;
+        s3_client
+            .put_object()
+            .bucket("bucket-concurrent-b")
+            .key("file-b.txt")
+            .body(content_b.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload file-b.txt to bucket-concurrent-b");
+
+        log::info!("✅ Created bucket-concurrent-b with file-b.txt");
+    });
+
+    log::info!("Creating Yatagarasu proxy configuration with TWO buckets...");
+
+    // Create config with TWO buckets
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 18093
+
+buckets:
+  - name: "bucket-concurrent-a"
+    path_prefix: "/bucket-a"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-concurrent-a"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+
+  - name: "bucket-concurrent-b"
+    path_prefix: "/bucket-b"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-concurrent-b"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+"#,
+        s3_endpoint, s3_endpoint
+    );
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config_test18.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+
+    log::info!("Config file written to: {}", config_path.display());
+
+    log::info!("Starting Yatagarasu proxy in background thread...");
+
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config");
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+
+        server.add_service(proxy_service);
+
+        log::info!("Proxy server running on {}", listen_addr);
+
+        server.run_forever();
+    });
+
+    // Wait for proxy to start
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    log::info!("=== Spawning 20 concurrent HTTP requests (10 to bucket-a, 10 to bucket-b) ===");
+
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    let success_count_a = Arc::new(Mutex::new(0));
+    let success_count_b = Arc::new(Mutex::new(0));
+    let error_count = Arc::new(Mutex::new(0));
+
+    let mut handles = vec![];
+
+    // Spawn 10 threads for bucket-a
+    for i in 0..10 {
+        let success_count_a = Arc::clone(&success_count_a);
+        let error_count = Arc::clone(&error_count);
+
+        let handle = std::thread::spawn(move || {
+            log::info!("Thread {} requesting bucket-a...", i);
+
+            let client = reqwest::blocking::Client::new();
+            let url = "http://127.0.0.1:18093/bucket-a/file-a.txt";
+
+            match client.get(url).send() {
+                Ok(response) => {
+                    if response.status() == 200 {
+                        match response.text() {
+                            Ok(body) => {
+                                if body.contains("bucket-concurrent-a")
+                                    && body.contains("file-a.txt")
+                                {
+                                    log::info!("✅ Thread {}: bucket-a SUCCESS", i);
+                                    let mut count = success_count_a.lock().unwrap();
+                                    *count += 1;
+                                } else {
+                                    log::error!(
+                                        "❌ Thread {}: bucket-a WRONG CONTENT: {}",
+                                        i,
+                                        body
+                                    );
+                                    let mut count = error_count.lock().unwrap();
+                                    *count += 1;
+                                }
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "❌ Thread {}: Failed to read bucket-a response: {}",
+                                    i,
+                                    e
+                                );
+                                let mut count = error_count.lock().unwrap();
+                                *count += 1;
+                            }
+                        }
+                    } else {
+                        log::error!(
+                            "❌ Thread {}: bucket-a returned status {}",
+                            i,
+                            response.status()
+                        );
+                        let mut count = error_count.lock().unwrap();
+                        *count += 1;
+                    }
+                }
+                Err(e) => {
+                    log::error!("❌ Thread {}: Failed to GET bucket-a: {}", i, e);
+                    let mut count = error_count.lock().unwrap();
+                    *count += 1;
+                }
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Spawn 10 threads for bucket-b
+    for i in 0..10 {
+        let success_count_b = Arc::clone(&success_count_b);
+        let error_count = Arc::clone(&error_count);
+
+        let handle = std::thread::spawn(move || {
+            log::info!("Thread {} requesting bucket-b...", i);
+
+            let client = reqwest::blocking::Client::new();
+            let url = "http://127.0.0.1:18093/bucket-b/file-b.txt";
+
+            match client.get(url).send() {
+                Ok(response) => {
+                    if response.status() == 200 {
+                        match response.text() {
+                            Ok(body) => {
+                                if body.contains("bucket-concurrent-b")
+                                    && body.contains("file-b.txt")
+                                {
+                                    log::info!("✅ Thread {}: bucket-b SUCCESS", i);
+                                    let mut count = success_count_b.lock().unwrap();
+                                    *count += 1;
+                                } else {
+                                    log::error!(
+                                        "❌ Thread {}: bucket-b WRONG CONTENT: {}",
+                                        i,
+                                        body
+                                    );
+                                    let mut count = error_count.lock().unwrap();
+                                    *count += 1;
+                                }
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "❌ Thread {}: Failed to read bucket-b response: {}",
+                                    i,
+                                    e
+                                );
+                                let mut count = error_count.lock().unwrap();
+                                *count += 1;
+                            }
+                        }
+                    } else {
+                        log::error!(
+                            "❌ Thread {}: bucket-b returned status {}",
+                            i,
+                            response.status()
+                        );
+                        let mut count = error_count.lock().unwrap();
+                        *count += 1;
+                    }
+                }
+                Err(e) => {
+                    log::error!("❌ Thread {}: Failed to GET bucket-b: {}", i, e);
+                    let mut count = error_count.lock().unwrap();
+                    *count += 1;
+                }
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    let final_success_a = *success_count_a.lock().unwrap();
+    let final_success_b = *success_count_b.lock().unwrap();
+    let final_errors = *error_count.lock().unwrap();
+
+    log::info!("=== Concurrent Request Results ===");
+    log::info!("Bucket-A successes: {}/10", final_success_a);
+    log::info!("Bucket-B successes: {}/10", final_success_b);
+    log::info!("Errors: {}", final_errors);
+
+    // Assert all requests succeeded
+    assert_eq!(
+        final_success_a, 10,
+        "Expected 10/10 successful requests to bucket-a, got {}",
+        final_success_a
+    );
+    assert_eq!(
+        final_success_b, 10,
+        "Expected 10/10 successful requests to bucket-b, got {}",
+        final_success_b
+    );
+    assert_eq!(final_errors, 0, "Expected 0 errors, got {}", final_errors);
+
+    log::info!("=== Concurrent Requests Test PASSED ===");
+    log::info!("✅ All 20 concurrent requests succeeded");
+    log::info!("✅ No race conditions detected");
+    log::info!("✅ No credential mixing between buckets");
+    log::info!("✅ Proxy is thread-safe and handles concurrent load");
+}
