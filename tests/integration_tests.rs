@@ -12,4 +12,5 @@ mod integration {
     mod multibucket_test;
     mod range_requests_test;
     mod server_basic_test;
+    mod streaming_test;
 }

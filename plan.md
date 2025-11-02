@@ -1372,11 +1372,11 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/concurrency_test.rs`
 
 ### Test: Streaming and performance
-- [ ] Test: Large file (100MB) streams correctly
-- [ ] Test: Streaming starts immediately (low TTFB)
-- [ ] Test: Client disconnect stops S3 transfer (no resource leak)
-- [ ] Test: Multiple concurrent large file downloads
-- [ ] File: `tests/integration_streaming.rs`
+- [x] Test: Large file (100MB) streams correctly
+- [x] Test: Streaming starts immediately (low TTFB)
+- [x] Test: Client disconnect stops S3 transfer (no resource leak)
+- [x] Test: Multiple concurrent large file downloads
+- [x] File: `tests/integration/streaming_test.rs`
 
 ### Test: Metrics validation
 - [ ] Test: /metrics endpoint returns Prometheus format
