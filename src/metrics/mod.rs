@@ -45,6 +45,12 @@ pub struct Metrics {
 
     // Authentication error counters by type (missing, invalid, expired, etc.)
     auth_errors: Mutex<HashMap<String, u64>>,
+
+    // S3 operation counters (GET, HEAD, etc.)
+    s3_operations: Mutex<HashMap<String, u64>>,
+
+    // S3 error counters by error code (NoSuchKey, AccessDenied, etc.)
+    s3_errors: Mutex<HashMap<String, u64>>,
 }
 
 impl Metrics {
@@ -62,6 +68,8 @@ impl Metrics {
             auth_failure: AtomicU64::new(0),
             auth_bypassed: AtomicU64::new(0),
             auth_errors: Mutex::new(HashMap::new()),
+            s3_operations: Mutex::new(HashMap::new()),
+            s3_errors: Mutex::new(HashMap::new()),
         }
     }
 
@@ -260,6 +268,40 @@ impl Metrics {
             .lock()
             .ok()
             .and_then(|errors| errors.get(error_type).copied())
+            .unwrap_or(0)
+    }
+
+    /// Increment counter for a specific S3 operation
+    pub fn increment_s3_operation(&self, operation: &str) {
+        if let Ok(mut operations) = self.s3_operations.lock() {
+            *operations.entry(operation.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    /// Increment counter for a specific S3 error code
+    pub fn increment_s3_error(&self, error_code: &str) {
+        if let Ok(mut errors) = self.s3_errors.lock() {
+            *errors.entry(error_code.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    /// Get count for specific S3 operation (for testing)
+    #[cfg(test)]
+    pub fn get_s3_operation_count(&self, operation: &str) -> u64 {
+        self.s3_operations
+            .lock()
+            .ok()
+            .and_then(|operations| operations.get(operation).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get count for specific S3 error code (for testing)
+    #[cfg(test)]
+    pub fn get_s3_error_count(&self, error_code: &str) -> u64 {
+        self.s3_errors
+            .lock()
+            .ok()
+            .and_then(|errors| errors.get(error_code).copied())
             .unwrap_or(0)
     }
 }
@@ -560,5 +602,65 @@ mod tests {
         metrics.increment_auth_error("missing");
         metrics.increment_auth_error("missing");
         assert_eq!(metrics.get_auth_error_count("missing"), 3);
+    }
+
+    // S3 operation metrics tests
+    #[test]
+    fn test_track_s3_requests_by_operation() {
+        // Test: Track S3 requests by operation (GET, HEAD)
+        let metrics = Metrics::new();
+
+        // Track different S3 operations
+        metrics.increment_s3_operation("GET");
+        assert_eq!(metrics.get_s3_operation_count("GET"), 1);
+
+        metrics.increment_s3_operation("HEAD");
+        assert_eq!(metrics.get_s3_operation_count("HEAD"), 1);
+
+        // Multiple GET requests
+        metrics.increment_s3_operation("GET");
+        metrics.increment_s3_operation("GET");
+        assert_eq!(metrics.get_s3_operation_count("GET"), 3);
+    }
+
+    #[test]
+    fn test_track_s3_errors_by_error_code() {
+        // Test: Track S3 errors by error code (NoSuchKey, AccessDenied, etc.)
+        let metrics = Metrics::new();
+
+        // Track different S3 error codes
+        metrics.increment_s3_error("NoSuchKey");
+        assert_eq!(metrics.get_s3_error_count("NoSuchKey"), 1);
+
+        metrics.increment_s3_error("AccessDenied");
+        assert_eq!(metrics.get_s3_error_count("AccessDenied"), 1);
+
+        metrics.increment_s3_error("InternalError");
+        assert_eq!(metrics.get_s3_error_count("InternalError"), 1);
+
+        // Multiple errors of same type
+        metrics.increment_s3_error("NoSuchKey");
+        metrics.increment_s3_error("NoSuchKey");
+        assert_eq!(metrics.get_s3_error_count("NoSuchKey"), 3);
+    }
+
+    #[test]
+    fn test_track_s3_request_duration() {
+        // Test: Track S3 request duration (already covered by record_s3_latency)
+        // This test verifies S3-specific latency tracking works correctly
+        let metrics = Metrics::new();
+
+        // Record S3 request durations
+        metrics.record_s3_latency(50.0); // 50ms
+        metrics.record_s3_latency(100.0); // 100ms
+        metrics.record_s3_latency(150.0); // 150ms
+
+        // Verify histogram calculation works
+        let histogram = metrics.get_s3_latency_histogram();
+        assert!(histogram.p50 > 0.0);
+        assert!(histogram.p95 > 0.0);
+
+        // P95 should be >= P50
+        assert!(histogram.p95 >= histogram.p50);
     }
 }

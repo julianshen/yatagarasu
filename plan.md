@@ -1204,9 +1204,9 @@ yatagarasu/
 - [x] Test: Track authentication errors by type (missing, invalid, expired)
 
 ### Test: S3 operation metrics
-- [ ] Test: Track S3 requests by operation (GET, HEAD)
-- [ ] Test: Track S3 errors by error code (NoSuchKey, AccessDenied, etc.)
-- [ ] Test: Track S3 request duration
+- [x] Test: Track S3 requests by operation (GET, HEAD)
+- [x] Test: Track S3 errors by error code (NoSuchKey, AccessDenied, etc.)
+- [x] Test: Track S3 request duration
 
 ### Test: System metrics
 - [ ] Test: Track active connections count
