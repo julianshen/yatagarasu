@@ -2318,3 +2318,281 @@ buckets:
 
     log::info!("=== Multi-Bucket Test: Bucket B PASSED ===");
 }
+
+/// Test 16: Proxy supports mixed public and private buckets
+///
+/// This test validates that public and private buckets can coexist in same proxy:
+/// 1. Create two S3 buckets (public-bucket, private-bucket) in LocalStack
+/// 2. Upload different files to each bucket
+/// 3. Configure proxy with mixed authentication:
+///    - /public/* -> No auth required (auth.enabled = false)
+///    - /private/* -> JWT auth required (auth.enabled = true)
+/// 4. Request GET /public/public.txt WITHOUT JWT -> 200 OK
+/// 5. Request GET /private/private.txt WITHOUT JWT -> 401 Unauthorized
+/// 6. Request GET /private/private.txt WITH valid JWT -> 200 OK
+///
+/// This validates:
+/// - Public and private buckets coexist without interference
+/// - Public bucket accessible without JWT
+/// - Private bucket requires JWT (401 without, 200 with valid JWT)
+/// - Authentication enforced per-bucket (not globally)
+#[test]
+#[ignore] // Requires Docker - run with: cargo test --test integration_tests -- --ignored
+fn test_proxy_mixed_public_private_buckets() {
+    init_logging();
+    log::info!("=== Starting Mixed Public/Private Buckets Test ===");
+
+    // Step 1: Start LocalStack container with S3
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+    log::info!(
+        "LocalStack started on port {} (S3 endpoint: {})",
+        port,
+        s3_endpoint
+    );
+
+    // Step 2: Create TWO S3 buckets (public and private)
+    let public_content = r#"{"bucket": "public", "accessible": "without JWT"}"#;
+    let private_content = r#"{"bucket": "private", "requires": "JWT token"}"#;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region("us-east-1")
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create public bucket and upload public file
+        s3_client
+            .create_bucket()
+            .bucket("public-bucket")
+            .send()
+            .await
+            .expect("Failed to create public-bucket");
+        log::info!("Created S3 bucket: public-bucket");
+
+        s3_client
+            .put_object()
+            .bucket("public-bucket")
+            .key("public.txt")
+            .body(public_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload public.txt");
+        log::info!("Uploaded public.txt to public-bucket");
+
+        // Create private bucket and upload private file
+        s3_client
+            .create_bucket()
+            .bucket("private-bucket")
+            .send()
+            .await
+            .expect("Failed to create private-bucket");
+        log::info!("Created S3 bucket: private-bucket");
+
+        s3_client
+            .put_object()
+            .bucket("private-bucket")
+            .key("private.txt")
+            .body(private_content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload private.txt");
+        log::info!("Uploaded private.txt to private-bucket");
+    });
+
+    // Step 3: Create proxy configuration with MIXED auth
+    let proxy_port = 18091; // Unique port for this test
+    let jwt_secret = "test-secret-key-min-32-characters-long";
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: {}
+
+jwt:
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "bearer_header"
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "public-bucket"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+
+  - name: "private"
+    path_prefix: "/private"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "private-bucket"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: true
+"#,
+        proxy_port, jwt_secret, s3_endpoint, s3_endpoint
+    );
+
+    // Write config to temporary file
+    let config_path = std::env::temp_dir().join(format!("yatagarasu_test_{}.yaml", proxy_port));
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+    log::info!("Wrote proxy config to: {:?}", config_path);
+
+    // Step 4: Start proxy in background thread
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config in proxy thread");
+        log::info!(
+            "Loaded config in proxy thread with {} buckets",
+            config.buckets.len()
+        );
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+        log::info!("Proxy listening on: {}", listen_addr);
+
+        server.add_service(proxy_service);
+        server.run_forever(); // This blocks
+    });
+
+    // Wait for proxy to start
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    log::info!("Proxy should be started now");
+
+    let client = reqwest::blocking::Client::new();
+
+    // Test Case 1: Public bucket accessible WITHOUT JWT
+    log::info!("Test Case 1: Public bucket WITHOUT JWT -> 200 OK");
+    let public_url = format!("http://127.0.0.1:{}/public/public.txt", proxy_port);
+    log::info!("Making request to: {}", public_url);
+
+    let response = client
+        .get(&public_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!(
+        "Response status: {}, headers: {:?}",
+        response.status(),
+        response.headers()
+    );
+
+    assert_eq!(
+        response.status(),
+        200,
+        "Expected 200 OK for public bucket without JWT, got {}",
+        response.status()
+    );
+
+    let body = response.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body);
+    assert_eq!(
+        body, public_content,
+        "Expected public content, got '{}'",
+        body
+    );
+
+    // Test Case 2: Private bucket REJECTS request WITHOUT JWT (401)
+    log::info!("Test Case 2: Private bucket WITHOUT JWT -> 401 Unauthorized");
+    let private_url = format!("http://127.0.0.1:{}/private/private.txt", proxy_port);
+    log::info!("Making request to: {}", private_url);
+
+    let response = client
+        .get(&private_url)
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+
+    assert_eq!(
+        response.status(),
+        401,
+        "Expected 401 Unauthorized for private bucket without JWT, got {}",
+        response.status()
+    );
+
+    // Test Case 3: Private bucket ACCEPTS request WITH valid JWT (200)
+    log::info!("Test Case 3: Private bucket WITH valid JWT -> 200 OK");
+
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        sub: String,
+        exp: usize,
+    }
+
+    let valid_claims = Claims {
+        sub: "user_mixed_test".to_string(),
+        exp: (chrono::Utc::now().timestamp() + 3600) as usize,
+    };
+
+    let valid_token = encode(
+        &Header::default(),
+        &valid_claims,
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .expect("Failed to create valid JWT");
+
+    log::info!("Created valid JWT token");
+
+    let response = client
+        .get(&private_url)
+        .header("Authorization", format!("Bearer {}", valid_token))
+        .send()
+        .expect("Failed to GET from proxy");
+
+    log::info!("Response status: {}", response.status());
+
+    assert_eq!(
+        response.status(),
+        200,
+        "Expected 200 OK for private bucket with valid JWT, got {}",
+        response.status()
+    );
+
+    let body = response.text().expect("Failed to read response body");
+    log::info!("Response body: {}", body);
+    assert_eq!(
+        body, private_content,
+        "Expected private content, got '{}'",
+        body
+    );
+
+    log::info!("=== Mixed Public/Private Buckets Test PASSED ===");
+}
