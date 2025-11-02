@@ -1345,15 +1345,15 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/multibucket_test.rs`
 
 ### Test: JWT authentication end-to-end
-- [ ] Test: Request with valid JWT Bearer token succeeds (200 OK)
-- [ ] Test: Request without JWT to private bucket returns 401 Unauthorized
-- [ ] Test: Request with invalid JWT returns 403 Forbidden
-- [ ] Test: Request with expired JWT returns 403 Forbidden
-- [ ] Test: Request with JWT in query parameter succeeds
-- [ ] Test: Request with JWT in custom header succeeds
-- [ ] Test: Public bucket accessible without JWT
-- [ ] Test: Custom claims validation (e.g., bucket=products claim required)
-- [ ] File: `tests/integration_jwt_auth.rs`
+- [x] Test: Request with valid JWT Bearer token succeeds (200 OK)
+- [x] Test: Request without JWT to private bucket returns 401 Unauthorized
+- [x] Test: Request with invalid JWT returns 403 Forbidden
+- [x] Test: Request with expired JWT returns 403 Forbidden
+- [x] Test: Request with JWT in query parameter succeeds
+- [x] Test: Request with JWT in custom header succeeds
+- [x] Test: Public bucket accessible without JWT
+- [x] Test: Custom claims validation (e.g., bucket=products claim required)
+- [x] File: `tests/integration/jwt_auth_test.rs`
 
 ### Test: Error handling and edge cases
 - [ ] Test: Request to non-existent S3 object returns 404 Not Found
