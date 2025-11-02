@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::auth::{authenticate_request, AuthError};
 use crate::config::Config;
+use crate::metrics::Metrics;
 use crate::pipeline::RequestContext;
 use crate::router::Router;
 use crate::s3::build_get_object_request;
@@ -20,16 +21,24 @@ use crate::s3::build_get_object_request;
 pub struct YatagarasuProxy {
     config: Arc<Config>,
     router: Router,
+    metrics: Arc<Metrics>,
 }
 
 impl YatagarasuProxy {
     /// Create a new YatagarasuProxy instance from configuration
     pub fn new(config: Config) -> Self {
         let router = Router::new(config.buckets.clone());
+        let metrics = Arc::new(Metrics::new());
         Self {
             config: Arc::new(config),
             router,
+            metrics,
         }
+    }
+
+    /// Get a reference to the metrics instance
+    pub fn metrics(&self) -> Arc<Metrics> {
+        Arc::clone(&self.metrics)
     }
 
     /// Extract headers from Pingora RequestHeader into HashMap
@@ -124,6 +133,31 @@ impl ProxyHttp for YatagarasuProxy {
         let path = req.uri.path().to_string();
         let method = req.method.to_string();
 
+        // Record request metrics
+        self.metrics.increment_request_count();
+        self.metrics.increment_method_count(&method);
+
+        // Special handling for /metrics endpoint (bypass auth, return Prometheus metrics)
+        if path == "/metrics" {
+            let metrics_output = self.metrics.export_prometheus();
+
+            let mut header = ResponseHeader::build(200, None)?;
+            header.insert_header("Content-Type", "text/plain; version=0.0.4")?;
+            header.insert_header("Content-Length", metrics_output.len().to_string())?;
+
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(metrics_output.into()), true)
+                .await?;
+
+            // Record metrics for /metrics endpoint itself
+            self.metrics.increment_status_count(200);
+
+            return Ok(true); // Short-circuit (response already sent)
+        }
+
         // Update context with request details
         ctx.set_method(method);
         ctx.set_path(path.clone());
@@ -140,12 +174,19 @@ impl ProxyHttp for YatagarasuProxy {
                 session
                     .write_response_header(Box::new(header), true)
                     .await?;
+
+                // Record 404 metrics
+                self.metrics.increment_status_count(404);
+
                 return Ok(true); // Short-circuit
             }
         };
 
         // Store bucket config in context
         ctx.set_bucket_config(bucket_config.clone());
+
+        // Record bucket metrics
+        self.metrics.increment_bucket_count(&bucket_config.name);
 
         // Check if authentication is required
         if let Some(auth_config) = &bucket_config.auth {
@@ -158,6 +199,8 @@ impl ProxyHttp for YatagarasuProxy {
                     match authenticate_request(headers, query_params, jwt_config) {
                         Ok(claims) => {
                             ctx.set_claims(claims);
+                            // Record successful authentication
+                            self.metrics.increment_auth_success();
                         }
                         Err(AuthError::MissingToken) => {
                             // Return 401 Unauthorized
@@ -167,6 +210,12 @@ impl ProxyHttp for YatagarasuProxy {
                             session
                                 .write_response_header(Box::new(header), true)
                                 .await?;
+
+                            // Record authentication failure
+                            self.metrics.increment_auth_failure();
+                            self.metrics.increment_auth_error("missing");
+                            self.metrics.increment_status_count(401);
+
                             return Ok(true); // Short-circuit
                         }
                         Err(_) => {
@@ -176,11 +225,20 @@ impl ProxyHttp for YatagarasuProxy {
                             session
                                 .write_response_header(Box::new(header), true)
                                 .await?;
+
+                            // Record authentication failure
+                            self.metrics.increment_auth_failure();
+                            self.metrics.increment_auth_error("invalid");
+                            self.metrics.increment_status_count(403);
+
                             return Ok(true); // Short-circuit
                         }
                     }
                 }
             }
+        } else {
+            // Authentication bypassed (public bucket - no auth config)
+            self.metrics.increment_auth_bypassed();
         }
 
         Ok(false) // Continue to upstream
@@ -317,6 +375,10 @@ impl ProxyHttp for YatagarasuProxy {
             )
         })?;
         upstream_request.set_uri(parsed_uri);
+
+        // Record S3 operation metrics
+        let method = ctx.method().to_uppercase();
+        self.metrics.increment_s3_operation(&method);
 
         Ok(())
     }

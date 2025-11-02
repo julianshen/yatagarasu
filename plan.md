@@ -1223,11 +1223,11 @@ yatagarasu/
 - [x] Test: Response time < 50ms even under load
 
 ### Integration with ProxyHttp
-- [ ] Implement: Add metrics field to YatagarasuProxy
-- [ ] Implement: Record metrics in request_filter (request received)
-- [ ] Implement: Record metrics in upstream_request_filter (S3 request)
+- [x] Implement: Add metrics field to YatagarasuProxy
+- [x] Implement: Record metrics in request_filter (request received)
+- [x] Implement: Record metrics in upstream_request_filter (S3 request)
 - [ ] Implement: Record metrics in logging (request completed)
-- [ ] Implement: Special handling for /metrics path (bypass auth, return metrics)
+- [x] Implement: Special handling for /metrics path (bypass auth, return metrics)
 - [ ] Test: Metrics increment correctly during proxy requests
 
 **Dependencies**: `prometheus` crate (or manual Prometheus format generation)
