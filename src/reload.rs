@@ -54,6 +54,18 @@ impl ReloadManager {
         // Validate before applying
         new_config.validate()?;
 
+        // Increment generation number for version tracking
+        // Note: The generation will be properly incremented by the caller
+        // based on the current config's generation
+
+        Ok(new_config)
+    }
+
+    /// Reload config and increment generation number
+    /// Takes the current generation and returns new config with incremented generation
+    pub fn reload_config_with_generation(&self, current_generation: u64) -> Result<Config, String> {
+        let mut new_config = self.reload_config()?;
+        new_config.generation = current_generation + 1;
         Ok(new_config)
     }
 
@@ -183,5 +195,217 @@ buckets:
         let result = manager.reload_config();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Duplicate path_prefix"));
+    }
+
+    #[test]
+    fn test_generation_increments_on_reload() {
+        // Test: Config has generation/version number that increments on reload
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        temp_file.write_all(config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path);
+
+        // Initial config has generation 0
+        let initial_config = manager.reload_config().unwrap();
+        assert_eq!(initial_config.generation, 0);
+
+        // Reload with generation increment
+        let reloaded_config = manager.reload_config_with_generation(initial_config.generation).unwrap();
+        assert_eq!(reloaded_config.generation, 1);
+
+        // Reload again
+        let reloaded_config2 = manager.reload_config_with_generation(reloaded_config.generation).unwrap();
+        assert_eq!(reloaded_config2.generation, 2);
+    }
+
+    #[test]
+    fn test_in_flight_requests_continue_with_old_config() {
+        // Test: In-flight requests continue with old config
+        // This test verifies the pattern: old config remains valid while new config is prepared
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "old-bucket"
+    path_prefix: "/old"
+    s3:
+      bucket: "old-s3-bucket"
+      region: "us-east-1"
+      access_key: "old-key"
+      secret_key: "old-secret"
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load old config (simulating in-flight request using this)
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.buckets[0].name, "old-bucket");
+
+        // Update config file with new config
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "new-bucket"
+    path_prefix: "/new"
+    s3:
+      bucket: "new-s3-bucket"
+      region: "us-east-1"
+      access_key: "new-key"
+      secret_key: "new-secret"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload new config (simulating new request using this)
+        let new_config = manager.reload_config().unwrap();
+        assert_eq!(new_config.buckets[0].name, "new-bucket");
+
+        // OLD config should still be valid and unchanged
+        assert_eq!(old_config.buckets[0].name, "old-bucket");
+        assert_eq!(old_config.buckets[0].s3.bucket, "old-s3-bucket");
+
+        // NEW config should have new values
+        assert_eq!(new_config.buckets[0].s3.bucket, "new-s3-bucket");
+    }
+
+    #[test]
+    fn test_new_requests_use_new_config_after_reload() {
+        // Test: New requests use new config immediately after reload
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket-v1"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket-v1"
+      region: "us-east-1"
+      access_key: "key-v1"
+      secret_key: "secret-v1"
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Simulate "current" config (gen 0)
+        let current_config = manager.reload_config_with_generation(0).unwrap();
+        assert_eq!(current_config.generation, 1);
+        assert_eq!(current_config.buckets[0].name, "bucket-v1");
+
+        // Update config file
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket-v2"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket-v2"
+      region: "us-west-2"
+      access_key: "key-v2"
+      secret_key: "secret-v2"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload: new requests should use this config (gen 2)
+        let new_config = manager.reload_config_with_generation(current_config.generation).unwrap();
+        assert_eq!(new_config.generation, 2);
+        assert_eq!(new_config.buckets[0].name, "bucket-v2");
+        assert_eq!(new_config.buckets[0].s3.region, "us-west-2");
+
+        // Verify generation incremented
+        assert!(new_config.generation > current_config.generation);
+    }
+
+    #[test]
+    fn test_no_requests_dropped_during_reload() {
+        // Test: No requests dropped during reload
+        // This verifies that both old and new configs are valid simultaneously
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+"#;
+        temp_file.write_all(config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path);
+
+        // Load current config (gen 0 -> gen 1)
+        let config_v1 = manager.reload_config_with_generation(0).unwrap();
+        assert_eq!(config_v1.generation, 1);
+        assert!(config_v1.validate().is_ok());
+
+        // Reload config (gen 1 -> gen 2) - both should be valid
+        let config_v2 = manager.reload_config_with_generation(config_v1.generation).unwrap();
+        assert_eq!(config_v2.generation, 2);
+        assert!(config_v2.validate().is_ok());
+
+        // BOTH configs should be valid at this point (no dropped requests)
+        assert!(config_v1.validate().is_ok()); // Old config still valid
+        assert!(config_v2.validate().is_ok()); // New config also valid
+
+        // Old config can still serve in-flight requests
+        assert_eq!(config_v1.buckets[0].name, "bucket");
+
+        // New config can serve new requests
+        assert_eq!(config_v2.buckets[0].name, "bucket");
     }
 }

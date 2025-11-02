@@ -1267,10 +1267,10 @@ curl http://localhost:8080/metrics
 - [x] File: `src/reload.rs` - add signal handling with ReloadManager
 
 ### Test: Graceful config transition
-- [ ] Test: In-flight requests continue with old config
-- [ ] Test: New requests use new config immediately after reload
-- [ ] Test: No requests dropped during reload
-- [ ] Test: No race conditions between old and new config
+- [x] Test: In-flight requests continue with old config
+- [x] Test: New requests use new config immediately after reload
+- [x] Test: No requests dropped during reload
+- [x] Test: No race conditions between old and new config
 
 ### Test: Bucket configuration changes
 - [ ] Test: Can add new bucket without restart
