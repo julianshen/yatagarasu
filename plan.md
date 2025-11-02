@@ -1144,10 +1144,13 @@ yatagarasu/
 - [ ] Performance: Small file (1KB) end-to-end < 10ms (P95)
 - [ ] Performance: Streaming latency < 100ms (TTFB)
 
-### Load Testing
-- [ ] Load: Handles 100 concurrent connections
-- [ ] Load: Handles 1,000 requests without errors
-- [ ] Stability: Runs for 1 hour under load without crashes
+### Load Testing Infrastructure
+- [x] K6 load testing scripts created (`scripts/load-testing/`)
+- [x] Test environment setup scripts (MinIO + test data)
+- [x] Documentation (README with usage instructions)
+- [ ] Run: Handles 100 concurrent connections (test-concurrent.js)
+- [ ] Run: Handles 1,000 requests without errors (test-basic.js)
+- [ ] Run: Stability test - 1 hour under load without crashes
 
 ### Memory & Resource Testing
 - [ ] Memory: Usage stays constant during streaming (no memory leaks)
@@ -1155,7 +1158,7 @@ yatagarasu/
 - [ ] CPU: Usage reasonable under load
 - [ ] File descriptors: No leaks
 
-**Tools**: wrk, hey, or similar load testing tools
+**Tools**: K6 (https://k6.io) for load testing, setup scripts in `scripts/load-testing/`
 
 **Expected Outcome**: Performance benchmarks documented, bottlenecks identified and optimized.
 
