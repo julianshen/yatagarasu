@@ -7,6 +7,7 @@ mod unit {
     mod auth_tests;
     mod config_tests;
     mod error_tests; // Phase 15: Error Handling & Logging
+    mod head_request_test; // HEAD request method support
     mod logging_tests;
     mod pipeline_tests; // Phase 13: Request Pipeline Integration
     mod proxy_tests;

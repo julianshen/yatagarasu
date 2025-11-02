@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::pipeline::RequestContext;
 use crate::router::Router;
-use crate::s3::build_get_object_request;
+use crate::s3::{build_get_object_request, build_head_object_request};
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
 /// Handles routing, authentication, and S3 proxying
@@ -280,9 +280,19 @@ impl ProxyHttp for YatagarasuProxy {
             )
         };
 
-        // Build S3 request
-        let s3_request =
-            build_get_object_request(&bucket_config.s3.bucket, &s3_key, &bucket_config.s3.region);
+        // Build S3 request with correct HTTP method
+        let s3_request = match ctx.method() {
+            "HEAD" => build_head_object_request(
+                &bucket_config.s3.bucket,
+                &s3_key,
+                &bucket_config.s3.region,
+            ),
+            _ => build_get_object_request(
+                &bucket_config.s3.bucket,
+                &s3_key,
+                &bucket_config.s3.region,
+            ),
+        };
 
         // Get signed headers with correct host for signature calculation
         let signed_headers = if bucket_config.s3.endpoint.is_some() {
