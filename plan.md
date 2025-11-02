@@ -1337,12 +1337,12 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/range_requests_test.rs`
 
 ### Test: Multi-bucket routing scenarios
-- [ ] Test: Multiple buckets with different path prefixes (/products, /images, /videos)
-- [ ] Test: Longest prefix match (correct bucket selected when paths overlap)
-- [ ] Test: Request to unknown path returns 404
-- [ ] Test: Each bucket uses isolated S3 credentials
-- [ ] Test: Bucket1 request cannot access Bucket2 objects
-- [ ] File: `tests/integration_multibucket.rs`
+- [x] Test: Multiple buckets with different path prefixes (/products, /images, /videos)
+- [x] Test: Longest prefix match (correct bucket selected when paths overlap)
+- [x] Test: Request to unknown path returns 404
+- [x] Test: Each bucket uses isolated S3 credentials
+- [x] Test: Bucket1 request cannot access Bucket2 objects
+- [x] File: `tests/integration/multibucket_test.rs`
 
 ### Test: JWT authentication end-to-end
 - [ ] Test: Request with valid JWT Bearer token succeeds (200 OK)
