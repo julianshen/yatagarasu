@@ -1365,11 +1365,11 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/error_scenarios_test.rs`
 
 ### Test: Concurrent request handling
-- [ ] Test: 100 concurrent requests all succeed
-- [ ] Test: No race conditions in request handling
-- [ ] Test: Connection pooling works correctly
-- [ ] Test: Memory usage stays constant (no leaks)
-- [ ] File: `tests/integration_concurrency.rs`
+- [x] Test: 100 concurrent requests all succeed
+- [x] Test: No race conditions in request handling
+- [x] Test: Connection pooling works correctly
+- [x] Test: Memory usage stays constant (no leaks)
+- [x] File: `tests/integration/concurrency_test.rs`
 
 ### Test: Streaming and performance
 - [ ] Test: Large file (100MB) streams correctly
