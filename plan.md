@@ -1171,46 +1171,350 @@ yatagarasu/
 
 ---
 
-## Phase 18: Production Features
+## Phase 18: Prometheus Metrics Endpoint
 
-**Objective**: Implement production-ready features for monitoring and operations
+**Objective**: Implement /metrics endpoint with Prometheus-compatible metrics
 
-**Goal**: Add metrics, health checks, and operational features.
+**Goal**: Production observability through standardized metrics format
 
-**Status**: ⏳ **NOT STARTED**
+**Status**: ⏳ **NOT STARTED** → **NEXT PRIORITY**
 
-### Metrics Endpoint
-- [ ] Implement: /metrics endpoint with Prometheus format
-- [ ] Export: Request count by status code
-- [ ] Export: Request duration histogram
-- [ ] Export: Requests per bucket
-- [ ] Export: Authentication success/failure rate
-- [ ] Export: S3 error rate
-- [ ] Test: Metrics endpoint returns valid Prometheus format
+**Rationale**: Metrics are essential for production operation - they enable monitoring, alerting, capacity planning, and performance analysis. Prometheus format is the industry standard.
 
-### Health Check Endpoint
-- [ ] Implement: /health endpoint
-- [ ] Check: Configuration loaded
-- [ ] Check: S3 connectivity (optional)
-- [ ] Response: JSON with health status
-- [ ] Test: Fast response time < 100ms
+### Test: Metrics module structure
+- [x] Test: Can create Metrics struct to track counters and histograms
+- [x] Test: Metrics struct has methods: increment_request_count(), record_duration()
+- [x] Test: Metrics can be shared across threads (Arc<Metrics>)
+- [x] File: `src/metrics/mod.rs` (new module - 95 lines with tests)
 
-### Hot Reload (Optional for v1.0)
-- [ ] Implement: SIGHUP signal handler
-- [ ] Implement: Configuration reload
-- [ ] Test: In-flight requests complete with old config
-- [ ] Test: New requests use new config
-- [ ] Test: Invalid config rejected without affecting service
+### Test: Request count metrics
+- [ ] Test: Track total HTTP requests received
+- [ ] Test: Track requests by status code (2xx, 3xx, 4xx, 5xx)
+- [ ] Test: Track requests by bucket name
+- [ ] Test: Track requests by HTTP method (GET, HEAD, POST, etc.)
 
-### Documentation Updates
-- [ ] Update README with working examples (curl commands that actually work)
-- [ ] Update GETTING_STARTED.md with real setup instructions
-- [ ] Add example config.yaml that works with examples
-- [ ] Add Docker deployment example
-- [ ] Add systemd service file example
-- [ ] Update IMPLEMENTATION_STATUS.md to show v0.2.0 complete
+### Test: Latency metrics
+- [ ] Test: Record request duration histogram (p50, p90, p95, p99)
+- [ ] Test: Record S3 backend latency separately from total latency
+- [ ] Test: Record latency by bucket
 
-**Expected Outcome**: Production-ready S3 proxy with monitoring and operational features.
+### Test: Authentication metrics
+- [ ] Test: Track JWT authentication attempts (success/failure)
+- [ ] Test: Track authentication bypassed (public buckets)
+- [ ] Test: Track authentication errors by type (missing, invalid, expired)
+
+### Test: S3 operation metrics
+- [ ] Test: Track S3 requests by operation (GET, HEAD)
+- [ ] Test: Track S3 errors by error code (NoSuchKey, AccessDenied, etc.)
+- [ ] Test: Track S3 request duration
+
+### Test: System metrics
+- [ ] Test: Track active connections count
+- [ ] Test: Track bytes sent/received
+- [ ] Test: Track memory usage (RSS)
+- [ ] Test: Track uptime
+
+### Test: /metrics HTTP endpoint
+- [ ] Test: GET /metrics returns 200 OK
+- [ ] Test: Response is text/plain with Prometheus format
+- [ ] Test: Response includes all tracked metrics
+- [ ] Test: Metric names follow Prometheus naming conventions (snake_case, _total suffix for counters)
+- [ ] Test: Metrics include help text and type annotations
+- [ ] Test: Response time < 50ms even under load
+
+### Integration with ProxyHttp
+- [ ] Implement: Add metrics field to YatagarasuProxy
+- [ ] Implement: Record metrics in request_filter (request received)
+- [ ] Implement: Record metrics in upstream_request_filter (S3 request)
+- [ ] Implement: Record metrics in logging (request completed)
+- [ ] Implement: Special handling for /metrics path (bypass auth, return metrics)
+- [ ] Test: Metrics increment correctly during proxy requests
+
+**Dependencies**: `prometheus` crate (or manual Prometheus format generation)
+
+**Expected Outcome**: Production-ready metrics endpoint accessible at `http://localhost:8080/metrics`
+
+**Verification**:
+```bash
+curl http://localhost:8080/metrics
+# Should return Prometheus-formatted metrics
+```
+
+---
+
+## Phase 19: Configuration Hot Reload
+
+**Objective**: Reload configuration without restarting the server
+
+**Goal**: Zero-downtime configuration updates for production deployments
+
+**Status**: ⏳ **NOT STARTED** → **AFTER PHASE 18**
+
+**Rationale**: Hot reload enables adding/removing buckets, updating credentials, and changing JWT secrets without dropping connections. Critical for production operations.
+
+### Test: Configuration reload infrastructure
+- [ ] Test: Config can be loaded from file path
+- [ ] Test: Config validation catches errors before applying
+- [ ] Test: Invalid config rejected without affecting running service
+- [ ] Test: Config has generation/version number that increments on reload
+- [ ] File: Extend `src/config/mod.rs` with reload support
+
+### Test: SIGHUP signal handler
+- [ ] Test: Process registers SIGHUP signal handler
+- [ ] Test: Receiving SIGHUP triggers config reload
+- [ ] Test: Signal handler works on Linux (signal_hook crate)
+- [ ] Test: Signal handler works on macOS (signal_hook crate)
+- [ ] File: `src/main.rs` - add signal handling
+
+### Test: Graceful config transition
+- [ ] Test: In-flight requests continue with old config
+- [ ] Test: New requests use new config immediately after reload
+- [ ] Test: No requests dropped during reload
+- [ ] Test: No race conditions between old and new config
+
+### Test: Bucket configuration changes
+- [ ] Test: Can add new bucket without restart
+- [ ] Test: Can remove bucket (new requests get 404, in-flight complete)
+- [ ] Test: Can update bucket credentials (new requests use new creds)
+- [ ] Test: Can change bucket path prefix
+
+### Test: JWT configuration changes
+- [ ] Test: Can rotate JWT secret (with grace period for old tokens)
+- [ ] Test: Can change JWT algorithm
+- [ ] Test: Can add/remove custom claims validation
+- [ ] Test: Can change token sources (header, query param, custom)
+
+### Test: Server configuration changes (requires restart)
+- [ ] Test: Changing server address requires restart (documented)
+- [ ] Test: Changing server port requires restart (documented)
+- [ ] Test: Changing TLS config requires restart (documented)
+- [ ] Document: Which configs support hot reload vs require restart
+
+### Test: Reload API endpoint (alternative to SIGHUP)
+- [ ] Test: POST /admin/reload triggers config reload
+- [ ] Test: Endpoint requires authentication (admin token)
+- [ ] Test: Returns 200 OK on success with reload details
+- [ ] Test: Returns 400 Bad Request if config invalid with error details
+- [ ] Test: Returns 401 if no admin token provided
+
+### Test: Metrics for reload operations
+- [ ] Test: Track successful reloads counter
+- [ ] Test: Track failed reload attempts counter
+- [ ] Test: Track current config generation number
+- [ ] Test: Expose reload metrics via /metrics endpoint
+
+**Dependencies**: `signal-hook` crate for POSIX signal handling
+
+**Expected Outcome**: Configuration can be reloaded via SIGHUP or API without downtime
+
+**Verification**:
+```bash
+# Edit config.yaml
+kill -HUP $(pidof yatagarasu)
+# New config applies immediately, no restart needed
+```
+
+---
+
+## Phase 20: Extended Integration Tests
+
+**Objective**: Comprehensive end-to-end integration testing with MinIO
+
+**Goal**: Validate all proxy features work correctly in realistic scenarios
+
+**Status**: ⏳ **NOT STARTED** → **AFTER PHASE 19**
+
+**Rationale**: While we have basic integration tests, we need comprehensive coverage of HTTP Range requests, multi-bucket routing, JWT authentication, error scenarios, and edge cases.
+
+### Test: HTTP Range request support
+- [ ] Test: GET with Range: bytes=0-1023 returns 206 Partial Content
+- [ ] Test: Response includes Content-Range header with correct range
+- [ ] Test: Response body contains correct byte range from S3 object
+- [ ] Test: Multiple ranges in single request (multipart/byteranges)
+- [ ] Test: Suffix range (Range: bytes=-1000) returns last 1000 bytes
+- [ ] Test: Open-ended range (Range: bytes=1000-) returns from offset to end
+- [ ] Test: Invalid range returns 416 Range Not Satisfiable
+- [ ] File: `tests/integration_range_requests.rs`
+
+### Test: Multi-bucket routing scenarios
+- [ ] Test: Multiple buckets with different path prefixes (/products, /images, /videos)
+- [ ] Test: Longest prefix match (correct bucket selected when paths overlap)
+- [ ] Test: Request to unknown path returns 404
+- [ ] Test: Each bucket uses isolated S3 credentials
+- [ ] Test: Bucket1 request cannot access Bucket2 objects
+- [ ] File: `tests/integration_multibucket.rs`
+
+### Test: JWT authentication end-to-end
+- [ ] Test: Request with valid JWT Bearer token succeeds (200 OK)
+- [ ] Test: Request without JWT to private bucket returns 401 Unauthorized
+- [ ] Test: Request with invalid JWT returns 403 Forbidden
+- [ ] Test: Request with expired JWT returns 403 Forbidden
+- [ ] Test: Request with JWT in query parameter succeeds
+- [ ] Test: Request with JWT in custom header succeeds
+- [ ] Test: Public bucket accessible without JWT
+- [ ] Test: Custom claims validation (e.g., bucket=products claim required)
+- [ ] File: `tests/integration_jwt_auth.rs`
+
+### Test: Error handling and edge cases
+- [ ] Test: Request to non-existent S3 object returns 404 Not Found
+- [ ] Test: S3 AccessDenied error returns 403 Forbidden
+- [ ] Test: Network error to S3 returns 502 Bad Gateway
+- [ ] Test: Malformed request returns 400 Bad Request
+- [ ] Test: Request timeout returns 504 Gateway Timeout
+- [ ] Test: Large file (100MB+) streams without buffering entire file
+- [ ] File: `tests/integration_error_scenarios.rs`
+
+### Test: Concurrent request handling
+- [ ] Test: 100 concurrent requests all succeed
+- [ ] Test: No race conditions in request handling
+- [ ] Test: Connection pooling works correctly
+- [ ] Test: Memory usage stays constant (no leaks)
+- [ ] File: `tests/integration_concurrency.rs`
+
+### Test: Streaming and performance
+- [ ] Test: Large file (100MB) streams correctly
+- [ ] Test: Streaming starts immediately (low TTFB)
+- [ ] Test: Client disconnect stops S3 transfer (no resource leak)
+- [ ] Test: Multiple concurrent large file downloads
+- [ ] File: `tests/integration_streaming.rs`
+
+### Test: Metrics validation
+- [ ] Test: /metrics endpoint returns Prometheus format
+- [ ] Test: Request counters increment correctly
+- [ ] Test: Latency histograms populated
+- [ ] Test: S3 error counters increment on S3 errors
+- [ ] File: `tests/integration_metrics.rs`
+
+### Test: Hot reload validation (requires Phase 19)
+- [ ] Test: Add new bucket via config reload (SIGHUP)
+- [ ] Test: Remove bucket via config reload (in-flight requests complete)
+- [ ] Test: Update bucket credentials via config reload
+- [ ] Test: Invalid config reload rejected without affecting service
+- [ ] File: `tests/integration_hot_reload.rs`
+
+**Test Infrastructure**:
+- Use MinIO container for S3 backend
+- Generate valid JWTs for authentication tests
+- Automated setup/teardown in test harness
+
+**Expected Outcome**: Comprehensive integration test suite covering all proxy features
+
+**Verification**:
+```bash
+cargo test --test 'integration_*' -- --test-threads=1
+# All integration tests pass with real MinIO backend
+```
+
+---
+
+## Phase 21: Production Hardening & Resilience
+
+**Objective**: Production-grade error recovery, resource management, and chaos testing
+
+**Goal**: Proxy handles failures gracefully and recovers from adverse conditions
+
+**Status**: ⏳ **NOT STARTED** → **AFTER PHASE 20**
+
+**Rationale**: Production systems must handle failures gracefully - network errors, S3 outages, resource exhaustion, and malicious traffic. This phase hardens the proxy for real-world operation.
+
+### Test: Connection pooling and limits
+- [ ] Test: Connection pool size configurable per bucket
+- [ ] Test: Pool reuses connections efficiently
+- [ ] Test: Connections released after request completes
+- [ ] Test: Max concurrent requests enforced (prevents resource exhaustion)
+- [ ] Test: Request queued when at max connections (fair scheduling)
+- [ ] Test: Requests fail fast if queue full (503 Service Unavailable)
+
+### Test: Timeout handling
+- [ ] Test: Request timeout configurable (default 30s)
+- [ ] Test: S3 request timeout separate from total timeout
+- [ ] Test: Slow S3 response returns 504 Gateway Timeout
+- [ ] Test: Timeout cancels S3 request (no resource leak)
+- [ ] Test: Partial response handling (connection closed mid-stream)
+
+### Test: Retry logic with backoff
+- [ ] Test: Transient S3 errors retried automatically (500, 503)
+- [ ] Test: Exponential backoff between retries (100ms, 200ms, 400ms)
+- [ ] Test: Max retry attempts configurable (default 3)
+- [ ] Test: Non-retriable errors fail fast (404, 403, 400)
+- [ ] Test: Retry metrics tracked (attempts, success, final failure)
+
+### Test: Circuit breaker pattern
+- [ ] Test: High S3 error rate opens circuit (fail fast)
+- [ ] Test: Circuit breaker timeout (try again after cooldown)
+- [ ] Test: Successful request closes circuit
+- [ ] Test: Circuit breaker state exposed via metrics
+- [ ] Test: Circuit breaker per bucket (isolation)
+
+### Test: Rate limiting (optional)
+- [ ] Test: Rate limit per bucket configurable
+- [ ] Test: Rate limit per client IP configurable
+- [ ] Test: Exceeded rate limit returns 429 Too Many Requests
+- [ ] Test: Rate limit window (sliding window vs fixed window)
+- [ ] Test: Rate limit metrics exposed
+
+### Test: Memory leak prevention
+- [ ] Test: 24 hour sustained load (no memory growth)
+- [ ] Test: Repeated config reloads (no memory leak)
+- [ ] Test: 1 million requests (memory stays constant)
+- [ ] Test: Large file uploads/downloads (no buffering leak)
+- [ ] Tool: Valgrind memcheck (Linux), Instruments (macOS)
+
+### Test: Resource exhaustion handling
+- [ ] Test: File descriptor limit reached returns 503
+- [ ] Test: Memory limit reached returns 503
+- [ ] Test: Graceful degradation under resource pressure
+- [ ] Test: Automatic recovery when resources available
+
+### Test: Malformed request handling
+- [ ] Test: Invalid HTTP returns 400 Bad Request
+- [ ] Test: Missing required headers returns 400
+- [ ] Test: Request too large returns 413 Payload Too Large
+- [ ] Test: Request header too large returns 431
+- [ ] Test: Malformed JWT returns 403 Forbidden (not crash)
+- [ ] Test: SQL injection in path returns 400 (not processed)
+- [ ] Test: Path traversal blocked (../, ..\, etc.)
+
+### Test: Chaos engineering scenarios
+- [ ] Test: S3 backend unreachable (network down) returns 502
+- [ ] Test: S3 backend slow (10s+ latency) times out correctly
+- [ ] Test: S3 backend returns invalid responses (handled gracefully)
+- [ ] Test: MinIO container killed mid-request (connection error)
+- [ ] Test: Network partition between proxy and S3
+
+### Test: Logging under failure
+- [ ] Test: All errors logged with sufficient context
+- [ ] Test: No sensitive data in error logs
+- [ ] Test: Structured error logs (JSON format)
+- [ ] Test: Error logs include request_id for correlation
+- [ ] Test: Stack traces included for unexpected errors
+
+### Test: Graceful shutdown
+- [ ] Test: SIGTERM initiates graceful shutdown
+- [ ] Test: In-flight requests complete before shutdown (up to timeout)
+- [ ] Test: New requests rejected during shutdown (503)
+- [ ] Test: S3 connections closed cleanly
+- [ ] Test: Metrics flushed before exit
+
+**Tools**:
+- K6 for sustained load testing
+- `wrk` or `hey` for high throughput testing
+- Docker for chaos testing (kill containers, network partition)
+- Valgrind/Instruments for memory leak detection
+
+**Expected Outcome**: Production-hardened proxy that handles failures gracefully
+
+**Verification**:
+```bash
+# 24 hour sustained load test
+k6 run --duration 24h test-sustained.js
+
+# Chaos test: kill S3 backend mid-request
+./chaos-test.sh
+
+# Memory leak test
+valgrind --leak-check=full ./target/release/yatagarasu
+```
 
 ---
 

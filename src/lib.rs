@@ -6,6 +6,7 @@ pub mod cache;
 pub mod config;
 pub mod error;
 pub mod logging;
+pub mod metrics; // Phase 18: Prometheus Metrics
 pub mod pipeline; // Phase 13: Request Pipeline Integration
 pub mod proxy;
 pub mod router;

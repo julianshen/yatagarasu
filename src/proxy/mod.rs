@@ -83,18 +83,36 @@ impl ProxyHttp for YatagarasuProxy {
             )
         })?;
 
-        // Build S3 endpoint
-        let endpoint = format!(
-            "{}.s3.{}.amazonaws.com",
-            bucket_config.s3.bucket, bucket_config.s3.region
-        );
+        // Build S3 endpoint - use custom endpoint if provided, otherwise use AWS
+        let (endpoint, port, use_tls) = if let Some(custom_endpoint) = &bucket_config.s3.endpoint {
+            // Parse custom endpoint (e.g., "http://localhost:9000")
+            let endpoint_str = custom_endpoint
+                .trim_start_matches("http://")
+                .trim_start_matches("https://");
+            let use_tls = custom_endpoint.starts_with("https://");
+
+            // Extract host and port
+            let (host, port) = if let Some((h, p)) = endpoint_str.split_once(':') {
+                (
+                    h.to_string(),
+                    p.parse::<u16>().unwrap_or(if use_tls { 443 } else { 80 }),
+                )
+            } else {
+                (endpoint_str.to_string(), if use_tls { 443 } else { 80 })
+            };
+
+            (host, port, use_tls)
+        } else {
+            // Default to AWS S3
+            let endpoint = format!(
+                "{}.s3.{}.amazonaws.com",
+                bucket_config.s3.bucket, bucket_config.s3.region
+            );
+            (endpoint, 443, true)
+        };
 
         // Create HttpPeer for S3 endpoint - need to clone endpoint for SNI
-        let peer = Box::new(HttpPeer::new(
-            (endpoint.clone(), 443),
-            true, // use_tls
-            endpoint,
-        ));
+        let peer = Box::new(HttpPeer::new((endpoint.clone(), port), use_tls, endpoint));
 
         Ok(peer)
     }
@@ -185,13 +203,42 @@ impl ProxyHttp for YatagarasuProxy {
         // Extract S3 key from path
         let s3_key = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
 
+        // Determine the correct host for this endpoint (without port for signature)
+        let host_for_signing = if let Some(custom_endpoint) = &bucket_config.s3.endpoint {
+            // For custom endpoints (MinIO), use the endpoint hostname WITHOUT port
+            // (AWS Signature v4 expects Host header without port)
+            custom_endpoint
+                .trim_start_matches("http://")
+                .trim_start_matches("https://")
+                .split(':')
+                .next()
+                .unwrap_or("localhost")
+                .to_string()
+        } else {
+            // For AWS S3, use the standard format
+            format!(
+                "{}.s3.{}.amazonaws.com",
+                bucket_config.s3.bucket, bucket_config.s3.region
+            )
+        };
+
         // Build S3 request
         let s3_request =
             build_get_object_request(&bucket_config.s3.bucket, &s3_key, &bucket_config.s3.region);
 
-        // Get signed headers
-        let signed_headers = s3_request
-            .get_signed_headers(&bucket_config.s3.access_key, &bucket_config.s3.secret_key);
+        // Get signed headers with correct host for signature calculation
+        let signed_headers = if bucket_config.s3.endpoint.is_some() {
+            // For custom endpoints, use the custom host in the signature
+            s3_request.get_signed_headers_with_host(
+                &bucket_config.s3.access_key,
+                &bucket_config.s3.secret_key,
+                &host_for_signing,
+            )
+        } else {
+            // For AWS, use the standard signing (AWS-style host)
+            s3_request
+                .get_signed_headers(&bucket_config.s3.access_key, &bucket_config.s3.secret_key)
+        };
 
         // Add signed headers to upstream request
         // Use append_header instead of insert_header to avoid lifetime issues
@@ -220,10 +267,23 @@ impl ProxyHttp for YatagarasuProxy {
         }
 
         // Update Host header to S3 endpoint
-        let host = format!(
-            "{}.s3.{}.amazonaws.com",
-            bucket_config.s3.bucket, bucket_config.s3.region
-        );
+        let host = if let Some(custom_endpoint) = &bucket_config.s3.endpoint {
+            // For custom endpoints (MinIO), use the endpoint hostname
+            custom_endpoint
+                .trim_start_matches("http://")
+                .trim_start_matches("https://")
+                .split(':')
+                .next()
+                .unwrap_or("localhost")
+                .to_string()
+        } else {
+            // For AWS S3, use the standard format
+            format!(
+                "{}.s3.{}.amazonaws.com",
+                bucket_config.s3.bucket, bucket_config.s3.region
+            )
+        };
+
         upstream_request.remove_header(&http::header::HOST);
         upstream_request
             .append_header(
@@ -242,8 +302,14 @@ impl ProxyHttp for YatagarasuProxy {
                 )
             })?;
 
-        // Update URI to S3 key
-        let uri = format!("/{}", s3_key);
+        // Update URI to S3 path - for MinIO use /bucket/key format, for AWS use /key
+        let uri = if bucket_config.s3.endpoint.is_some() {
+            // MinIO path-style: /bucket/key
+            format!("/{}/{}", bucket_config.s3.bucket, s3_key)
+        } else {
+            // AWS virtual-hosted style: /key (bucket is in Host header)
+            format!("/{}", s3_key)
+        };
         let parsed_uri = uri.parse().map_err(|e: http::uri::InvalidUri| {
             pingora_core::Error::explain(
                 pingora_core::ErrorType::InternalError,

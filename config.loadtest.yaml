@@ -1,0 +1,42 @@
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  # Public bucket (no authentication)
+  - name: "public"
+    path_prefix: "/test"
+    s3:
+      endpoint: "http://localhost:9000"
+      region: "us-east-1"
+      bucket: "test-public"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+  # Private bucket (with JWT authentication)
+  - name: "private"
+    path_prefix: "/private"
+    s3:
+      endpoint: "http://localhost:9000"
+      region: "us-east-1"
+      bucket: "test-private"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: true
+      jwt:
+        secret: "test-secret-key-for-load-testing-only"
+        algorithm: "HS256"
+        token_sources:
+          - source_type: "header"
+            name: "Authorization"
+            prefix: "Bearer "
+          - source_type: "query"
+            name: "token"
+        claims_verification: []
+
+logging:
+  level: "info"
+  format: "json"

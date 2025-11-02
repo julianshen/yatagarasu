@@ -131,6 +131,17 @@ impl S3Request {
         access_key: &str,
         secret_key: &str,
     ) -> std::collections::HashMap<String, String> {
+        let host = format!("{}.s3.{}.amazonaws.com", self.bucket, self.region);
+        self.get_signed_headers_with_host(access_key, secret_key, &host)
+    }
+
+    /// Returns signed headers with a custom host header (for MinIO/custom S3 endpoints)
+    pub fn get_signed_headers_with_host(
+        &self,
+        access_key: &str,
+        secret_key: &str,
+        host: &str,
+    ) -> std::collections::HashMap<String, String> {
         use std::collections::HashMap;
 
         // Generate current timestamp for AWS Signature V4
@@ -140,8 +151,7 @@ impl S3Request {
 
         // Build headers
         let mut headers = HashMap::new();
-        let host = format!("{}.s3.{}.amazonaws.com", self.bucket, self.region);
-        headers.insert("host".to_string(), host);
+        headers.insert("host".to_string(), host.to_string());
         headers.insert("x-amz-date".to_string(), datetime.to_string());
         headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
 
