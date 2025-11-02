@@ -368,7 +368,11 @@ fn test_each_bucket_uses_isolated_s3_credentials() {
             .endpoint_url(&endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
-                "valid_key", "valid_secret", None, None, "test",
+                "valid_key",
+                "valid_secret",
+                None,
+                None,
+                "test",
             ))
             .load()
             .await;

@@ -8,10 +8,10 @@
 // - Invalid config reload rejected without affecting service
 
 use std::fs;
+use std::io::Write;
 use std::sync::Once;
 use std::time::Duration;
 use tempfile::NamedTempFile;
-use std::io::Write;
 
 static INIT: Once = Once::new();
 
@@ -89,7 +89,10 @@ buckets:
             .send()
             .await;
 
-        log::info!("Initial request to bucket1: {:?}", response1.as_ref().map(|r| r.status()));
+        log::info!(
+            "Initial request to bucket1: {:?}",
+            response1.as_ref().map(|r| r.status())
+        );
 
         // Verify bucket2 doesn't exist yet (404 Not Found - unknown path)
         let response2 = client
@@ -131,8 +134,7 @@ buckets:
       endpoint_url: "http://localhost:9000"
 "#;
 
-        fs::write(config_file.path(), updated_config)
-            .expect("Failed to update config file");
+        fs::write(config_file.path(), updated_config).expect("Failed to update config file");
 
         log::info!("Updated config file to add bucket2");
 
@@ -161,10 +163,7 @@ buckets:
             "Bucket2 should exist after reload (not 404 for unknown path)"
         );
 
-        log::info!(
-            "Bucket2 exists after reload: {}",
-            response2_after.status()
-        );
+        log::info!("Bucket2 exists after reload: {}", response2_after.status());
 
         // Verify bucket1 still works (unchanged)
         let response1_after = client
@@ -172,7 +171,10 @@ buckets:
             .send()
             .await;
 
-        log::info!("Bucket1 still works after reload: {:?}", response1_after.as_ref().map(|r| r.status()));
+        log::info!(
+            "Bucket1 still works after reload: {:?}",
+            response1_after.as_ref().map(|r| r.status())
+        );
 
         log::info!("Hot reload add bucket test passed");
     });
@@ -272,8 +274,7 @@ buckets:
       endpoint_url: "http://localhost:9000"
 "#;
 
-        fs::write(config_file.path(), updated_config)
-            .expect("Failed to update config");
+        fs::write(config_file.path(), updated_config).expect("Failed to update config");
 
         log::info!("Updated config to remove bucket2");
 
@@ -303,7 +304,10 @@ buckets:
             .send()
             .await;
 
-        log::info!("Bucket1 still works: {:?}", response1.as_ref().map(|r| r.status()));
+        log::info!(
+            "Bucket1 still works: {:?}",
+            response1.as_ref().map(|r| r.status())
+        );
 
         log::info!("Hot reload remove bucket test passed");
     });
@@ -371,7 +375,10 @@ buckets:
             .send()
             .await;
 
-        log::info!("Request with old credentials: {:?}", response.as_ref().map(|r| r.status()));
+        log::info!(
+            "Request with old credentials: {:?}",
+            response.as_ref().map(|r| r.status())
+        );
 
         // Update config with new credentials (rotation)
         let updated_config = r#"
@@ -390,8 +397,7 @@ buckets:
       endpoint_url: "http://localhost:9000"
 "#;
 
-        fs::write(config_file.path(), updated_config)
-            .expect("Failed to update config");
+        fs::write(config_file.path(), updated_config).expect("Failed to update config");
 
         log::info!("Updated config with new credentials");
 
@@ -406,7 +412,10 @@ buckets:
             .send()
             .await;
 
-        log::info!("Request with new credentials: {:?}", response_after.as_ref().map(|r| r.status()));
+        log::info!(
+            "Request with new credentials: {:?}",
+            response_after.as_ref().map(|r| r.status())
+        );
 
         // Note: To fully test credential rotation, we'd need to:
         // 1. Configure S3 backend to accept only new credentials
@@ -480,7 +489,10 @@ buckets:
             .send()
             .await;
 
-        log::info!("Service working before reload: {:?}", response.as_ref().map(|r| r.status()));
+        log::info!(
+            "Service working before reload: {:?}",
+            response.as_ref().map(|r| r.status())
+        );
 
         // Update config with INVALID configuration (duplicate path_prefix)
         let invalid_config = r#"
@@ -507,8 +519,7 @@ buckets:
       endpoint_url: "http://localhost:9000"
 "#;
 
-        fs::write(config_file.path(), invalid_config)
-            .expect("Failed to write invalid config");
+        fs::write(config_file.path(), invalid_config).expect("Failed to write invalid config");
 
         log::info!("Updated config with INVALID configuration (duplicate path_prefix)");
 

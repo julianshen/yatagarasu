@@ -186,7 +186,11 @@ fn test_100_concurrent_requests_all_succeed() {
         // Verify no duplicates (each file requested exactly once)
         completed.sort();
         for i in 0..num_files {
-            assert_eq!(completed[i], i, "File {} should be requested exactly once", i);
+            assert_eq!(
+                completed[i], i,
+                "File {} should be requested exactly once",
+                i
+            );
         }
 
         log::info!("100 concurrent requests test passed");
@@ -465,10 +469,7 @@ fn test_memory_usage_stays_constant() {
 
             // Sample memory usage every 1000 requests
             if (i + 1) % 1000 == 0 {
-                log::info!(
-                    "Completed {} requests (TODO: measure memory)",
-                    i + 1
-                );
+                log::info!("Completed {} requests (TODO: measure memory)", i + 1);
                 // TODO: Measure current memory usage
                 // Assert memory hasn't grown significantly from baseline
             }

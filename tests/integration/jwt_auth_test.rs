@@ -26,8 +26,8 @@ fn init_logging() {
 // JWT Claims structure for testing
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
-    sub: String,           // Subject (user ID)
-    exp: u64,              // Expiration time (Unix timestamp)
+    sub: String, // Subject (user ID)
+    exp: u64,    // Expiration time (Unix timestamp)
     #[serde(skip_serializing_if = "Option::is_none")]
     bucket: Option<String>, // Custom claim: bucket access
     #[serde(skip_serializing_if = "Option::is_none")]

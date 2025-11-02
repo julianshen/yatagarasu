@@ -79,8 +79,7 @@ fn test_nonexistent_s3_object_returns_404() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, s3_endpoint) =
-            setup_localstack_with_bucket(&docker, "test-bucket").await;
+        let (_container, s3_endpoint) = setup_localstack_with_bucket(&docker, "test-bucket").await;
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
@@ -145,8 +144,7 @@ fn test_s3_access_denied_returns_403() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, s3_endpoint) =
-            setup_localstack_with_bucket(&docker, "test-bucket").await;
+        let (_container, s3_endpoint) = setup_localstack_with_bucket(&docker, "test-bucket").await;
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
@@ -388,8 +386,7 @@ fn test_large_file_streams_without_buffering() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async {
-        let (_container, s3_endpoint) =
-            setup_localstack_with_bucket(&docker, "test-bucket").await;
+        let (_container, s3_endpoint) = setup_localstack_with_bucket(&docker, "test-bucket").await;
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
@@ -480,8 +477,7 @@ fn test_large_file_streams_without_buffering() {
             "Downloaded {} bytes in {:?} ({:.2} MB/s)",
             received_bytes,
             download_time,
-            (received_bytes as f64 / (1024.0 * 1024.0))
-                / download_time.as_secs_f64()
+            (received_bytes as f64 / (1024.0 * 1024.0)) / download_time.as_secs_f64()
         );
 
         // Verify we received the complete file

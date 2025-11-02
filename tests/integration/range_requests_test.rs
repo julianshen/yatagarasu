@@ -94,8 +94,7 @@ fn test_range_request_returns_206_partial_content() {
         // Create test file with known content
         let test_content = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         let (_container, s3_endpoint) =
-            setup_localstack_with_test_file(&docker, "test-bucket", "test.txt", test_content)
-                .await;
+            setup_localstack_with_test_file(&docker, "test-bucket", "test.txt", test_content).await;
 
         log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
 
@@ -139,7 +138,10 @@ fn test_range_request_returns_206_partial_content() {
         );
 
         // Verify response body contains correct byte range
-        let body = response.bytes().await.expect("Failed to read response body");
+        let body = response
+            .bytes()
+            .await
+            .expect("Failed to read response body");
         assert_eq!(
             body.len(),
             10,
@@ -349,13 +351,9 @@ fn test_open_ended_range_returns_from_offset_to_end() {
         let test_content = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         let total_len = test_content.len();
 
-        let (_container, _s3_endpoint) = setup_localstack_with_test_file(
-            &docker,
-            "test-bucket",
-            "openended.txt",
-            test_content,
-        )
-        .await;
+        let (_container, _s3_endpoint) =
+            setup_localstack_with_test_file(&docker, "test-bucket", "openended.txt", test_content)
+                .await;
 
         let proxy_url = "http://127.0.0.1:18080/test/openended.txt";
 

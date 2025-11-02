@@ -83,7 +83,8 @@ fn test_metrics_endpoint_returns_prometheus_format() {
             .unwrap();
 
         assert!(
-            content_type.contains("text/plain") || content_type.contains("text/plain; version=0.0.4"),
+            content_type.contains("text/plain")
+                || content_type.contains("text/plain; version=0.0.4"),
             "Content-Type should be text/plain for Prometheus format, got: {}",
             content_type
         );
@@ -218,7 +219,10 @@ fn test_request_counters_increment_correctly() {
             delta
         );
 
-        log::info!("Request counter test passed: counter increased by {}", delta);
+        log::info!(
+            "Request counter test passed: counter increased by {}",
+            delta
+        );
     });
 }
 
@@ -431,7 +435,10 @@ fn test_s3_error_counters_increment_on_errors() {
             "Metrics should contain S3 error type labels"
         );
 
-        log::info!("S3 error counter test passed: errors increased by {}", delta);
+        log::info!(
+            "S3 error counter test passed: errors increased by {}",
+            delta
+        );
     });
 }
 

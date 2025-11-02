@@ -226,11 +226,15 @@ buckets:
         assert_eq!(initial_config.generation, 0);
 
         // Reload with generation increment
-        let reloaded_config = manager.reload_config_with_generation(initial_config.generation).unwrap();
+        let reloaded_config = manager
+            .reload_config_with_generation(initial_config.generation)
+            .unwrap();
         assert_eq!(reloaded_config.generation, 1);
 
         // Reload again
-        let reloaded_config2 = manager.reload_config_with_generation(reloaded_config.generation).unwrap();
+        let reloaded_config2 = manager
+            .reload_config_with_generation(reloaded_config.generation)
+            .unwrap();
         assert_eq!(reloaded_config2.generation, 2);
     }
 
@@ -353,7 +357,9 @@ buckets:
         temp_file.flush().unwrap();
 
         // Reload: new requests should use this config (gen 2)
-        let new_config = manager.reload_config_with_generation(current_config.generation).unwrap();
+        let new_config = manager
+            .reload_config_with_generation(current_config.generation)
+            .unwrap();
         assert_eq!(new_config.generation, 2);
         assert_eq!(new_config.buckets[0].name, "bucket-v2");
         assert_eq!(new_config.buckets[0].s3.region, "us-west-2");
@@ -394,7 +400,9 @@ buckets:
         assert!(config_v1.validate().is_ok());
 
         // Reload config (gen 1 -> gen 2) - both should be valid
-        let config_v2 = manager.reload_config_with_generation(config_v1.generation).unwrap();
+        let config_v2 = manager
+            .reload_config_with_generation(config_v1.generation)
+            .unwrap();
         assert_eq!(config_v2.generation, 2);
         assert!(config_v2.validate().is_ok());
 
@@ -741,7 +749,10 @@ jwt:
         // Load initial config with old JWT secret
         let old_config = manager.reload_config().unwrap();
         assert!(old_config.jwt.is_some());
-        assert_eq!(old_config.jwt.as_ref().unwrap().secret, "old_jwt_secret_key_12345");
+        assert_eq!(
+            old_config.jwt.as_ref().unwrap().secret,
+            "old_jwt_secret_key_12345"
+        );
 
         // Update config file with new JWT secret (rotation)
         let mut temp_file = std::fs::OpenOptions::new()
@@ -781,11 +792,17 @@ jwt:
 
         // Verify new JWT secret in new config
         assert!(new_config.jwt.is_some());
-        assert_eq!(new_config.jwt.as_ref().unwrap().secret, "new_jwt_secret_key_67890");
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().secret,
+            "new_jwt_secret_key_67890"
+        );
 
         // Old config still has old JWT secret (grace period for in-flight)
         assert!(old_config.jwt.is_some());
-        assert_eq!(old_config.jwt.as_ref().unwrap().secret, "old_jwt_secret_key_12345");
+        assert_eq!(
+            old_config.jwt.as_ref().unwrap().secret,
+            "old_jwt_secret_key_12345"
+        );
 
         // Algorithm unchanged
         assert_eq!(new_config.jwt.as_ref().unwrap().algorithm, "HS256");
@@ -964,9 +981,18 @@ jwt:
         // Verify claims were added in new config
         assert_eq!(new_config.jwt.as_ref().unwrap().claims.len(), 2);
         assert_eq!(new_config.jwt.as_ref().unwrap().claims[0].claim, "role");
-        assert_eq!(new_config.jwt.as_ref().unwrap().claims[0].operator, "equals");
-        assert_eq!(new_config.jwt.as_ref().unwrap().claims[1].claim, "permissions");
-        assert_eq!(new_config.jwt.as_ref().unwrap().claims[1].operator, "contains");
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().claims[0].operator,
+            "equals"
+        );
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().claims[1].claim,
+            "permissions"
+        );
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().claims[1].operator,
+            "contains"
+        );
 
         // Old config still has no claims (in-flight requests)
         assert_eq!(old_config.jwt.as_ref().unwrap().claims.len(), 0);
@@ -1011,7 +1037,10 @@ jwt:
         // Load initial config with header token source only
         let old_config = manager.reload_config().unwrap();
         assert_eq!(old_config.jwt.as_ref().unwrap().token_sources.len(), 1);
-        assert_eq!(old_config.jwt.as_ref().unwrap().token_sources[0].source_type, "header");
+        assert_eq!(
+            old_config.jwt.as_ref().unwrap().token_sources[0].source_type,
+            "header"
+        );
 
         // Update config file to add query parameter token source
         let mut temp_file = std::fs::OpenOptions::new()
@@ -1055,11 +1084,26 @@ jwt:
 
         // Verify token sources were updated in new config
         assert_eq!(new_config.jwt.as_ref().unwrap().token_sources.len(), 3);
-        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[0].source_type, "header");
-        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[1].source_type, "query");
-        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[1].name, Some("token".to_string()));
-        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[2].source_type, "header");
-        assert_eq!(new_config.jwt.as_ref().unwrap().token_sources[2].name, Some("X-API-Token".to_string()));
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().token_sources[0].source_type,
+            "header"
+        );
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().token_sources[1].source_type,
+            "query"
+        );
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().token_sources[1].name,
+            Some("token".to_string())
+        );
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().token_sources[2].source_type,
+            "header"
+        );
+        assert_eq!(
+            new_config.jwt.as_ref().unwrap().token_sources[2].name,
+            Some("X-API-Token".to_string())
+        );
 
         // Old config still has only 1 token source (in-flight requests)
         assert_eq!(old_config.jwt.as_ref().unwrap().token_sources.len(), 1);
