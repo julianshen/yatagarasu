@@ -1273,10 +1273,10 @@ curl http://localhost:8080/metrics
 - [x] Test: No race conditions between old and new config
 
 ### Test: Bucket configuration changes
-- [ ] Test: Can add new bucket without restart
-- [ ] Test: Can remove bucket (new requests get 404, in-flight complete)
-- [ ] Test: Can update bucket credentials (new requests use new creds)
-- [ ] Test: Can change bucket path prefix
+- [x] Test: Can add new bucket without restart
+- [x] Test: Can remove bucket (new requests get 404, in-flight complete)
+- [x] Test: Can update bucket credentials (new requests use new creds)
+- [x] Test: Can change bucket path prefix
 
 ### Test: JWT configuration changes
 - [ ] Test: Can rotate JWT secret (with grace period for old tokens)

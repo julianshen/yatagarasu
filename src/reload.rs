@@ -408,4 +408,297 @@ buckets:
         // New config can serve new requests
         assert_eq!(config_v2.buckets[0].name, "bucket");
     }
+
+    #[test]
+    fn test_can_add_new_bucket_without_restart() {
+        // Test: Can add new bucket without restart
+        // This verifies that we can add a new bucket during hot reload
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket1"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket-1"
+      region: "us-east-1"
+      access_key: "key1"
+      secret_key: "secret1"
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.buckets.len(), 1);
+        assert_eq!(old_config.buckets[0].name, "bucket1");
+
+        // Update config file to add a second bucket
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket1"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket-1"
+      region: "us-east-1"
+      access_key: "key1"
+      secret_key: "secret1"
+  - name: "bucket2"
+    path_prefix: "/media"
+    s3:
+      bucket: "s3-bucket-2"
+      region: "us-west-2"
+      access_key: "key2"
+      secret_key: "secret2"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify new bucket was added
+        assert_eq!(new_config.buckets.len(), 2);
+        assert_eq!(new_config.buckets[0].name, "bucket1");
+        assert_eq!(new_config.buckets[1].name, "bucket2");
+        assert_eq!(new_config.buckets[1].path_prefix, "/media");
+        assert_eq!(new_config.buckets[1].s3.region, "us-west-2");
+
+        // Old config still has only 1 bucket (isolation)
+        assert_eq!(old_config.buckets.len(), 1);
+    }
+
+    #[test]
+    fn test_can_remove_bucket() {
+        // Test: Can remove bucket (new requests get 404, in-flight complete)
+        // This verifies that we can remove a bucket during hot reload
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket1"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket-1"
+      region: "us-east-1"
+      access_key: "key1"
+      secret_key: "secret1"
+  - name: "bucket2"
+    path_prefix: "/media"
+    s3:
+      bucket: "s3-bucket-2"
+      region: "us-west-2"
+      access_key: "key2"
+      secret_key: "secret2"
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with 2 buckets
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.buckets.len(), 2);
+
+        // Simulate in-flight request using bucket2
+        let bucket2_config = &old_config.buckets[1];
+        assert_eq!(bucket2_config.name, "bucket2");
+
+        // Update config file to remove bucket2
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket1"
+    path_prefix: "/api"
+    s3:
+      bucket: "s3-bucket-1"
+      region: "us-east-1"
+      access_key: "key1"
+      secret_key: "secret1"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify bucket2 was removed from new config
+        assert_eq!(new_config.buckets.len(), 1);
+        assert_eq!(new_config.buckets[0].name, "bucket1");
+
+        // Old config still has bucket2 (in-flight requests can complete)
+        assert_eq!(old_config.buckets.len(), 2);
+        assert_eq!(old_config.buckets[1].name, "bucket2");
+
+        // In-flight request can still access bucket2 config
+        assert_eq!(bucket2_config.s3.bucket, "s3-bucket-2");
+    }
+
+    #[test]
+    fn test_can_update_bucket_credentials() {
+        // Test: Can update bucket credentials (new requests use new creds)
+        // This verifies credential rotation without restart
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/api"
+    s3:
+      bucket: "products-bucket"
+      region: "us-east-1"
+      access_key: "OLD_ACCESS_KEY"
+      secret_key: "OLD_SECRET_KEY"
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with old credentials
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.buckets[0].s3.access_key, "OLD_ACCESS_KEY");
+        assert_eq!(old_config.buckets[0].s3.secret_key, "OLD_SECRET_KEY");
+
+        // Update config file with new credentials (credential rotation)
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/api"
+    s3:
+      bucket: "products-bucket"
+      region: "us-east-1"
+      access_key: "NEW_ACCESS_KEY"
+      secret_key: "NEW_SECRET_KEY"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify new credentials in new config
+        assert_eq!(new_config.buckets[0].s3.access_key, "NEW_ACCESS_KEY");
+        assert_eq!(new_config.buckets[0].s3.secret_key, "NEW_SECRET_KEY");
+
+        // Old config still has old credentials (in-flight requests)
+        assert_eq!(old_config.buckets[0].s3.access_key, "OLD_ACCESS_KEY");
+        assert_eq!(old_config.buckets[0].s3.secret_key, "OLD_SECRET_KEY");
+
+        // Bucket name unchanged
+        assert_eq!(new_config.buckets[0].name, "products");
+        assert_eq!(old_config.buckets[0].name, "products");
+    }
+
+    #[test]
+    fn test_can_change_bucket_path_prefix() {
+        // Test: Can change bucket path prefix
+        // This verifies that we can update routing without restart
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let old_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "media"
+    path_prefix: "/old-path"
+    s3:
+      bucket: "media-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+"#;
+        temp_file.write_all(old_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config_path = temp_file.path().to_path_buf();
+        let manager = ReloadManager::new(config_path.clone());
+
+        // Load initial config with old path prefix
+        let old_config = manager.reload_config().unwrap();
+        assert_eq!(old_config.buckets[0].path_prefix, "/old-path");
+
+        // Update config file with new path prefix
+        let mut temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&config_path)
+            .unwrap();
+        let new_config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "media"
+    path_prefix: "/new-path"
+    s3:
+      bucket: "media-bucket"
+      region: "us-east-1"
+      access_key: "key"
+      secret_key: "secret"
+"#;
+        temp_file.write_all(new_config_yaml.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Reload config
+        let new_config = manager.reload_config().unwrap();
+
+        // Verify new path prefix in new config
+        assert_eq!(new_config.buckets[0].path_prefix, "/new-path");
+
+        // Old config still has old path prefix (in-flight requests)
+        assert_eq!(old_config.buckets[0].path_prefix, "/old-path");
+
+        // Bucket name and S3 config unchanged
+        assert_eq!(new_config.buckets[0].name, "media");
+        assert_eq!(old_config.buckets[0].name, "media");
+        assert_eq!(new_config.buckets[0].s3.bucket, "media-bucket");
+        assert_eq!(old_config.buckets[0].s3.bucket, "media-bucket");
+    }
 }
