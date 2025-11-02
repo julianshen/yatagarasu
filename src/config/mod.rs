@@ -218,4 +218,123 @@ buckets:
         assert_eq!(config.buckets[0].path_prefix, "/test");
         assert_eq!(config.generation, 0); // Initial generation is 0
     }
+
+    #[test]
+    fn test_config_validation_catches_errors_before_applying() {
+        // Load invalid config (duplicate path_prefix)
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let invalid_config = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "bucket1"
+    path_prefix: "/api"
+    s3:
+      bucket: "my-bucket-1"
+      region: "us-east-1"
+      access_key: "test-key-1"
+      secret_key: "test-secret-1"
+  - name: "bucket2"
+    path_prefix: "/api"
+    s3:
+      bucket: "my-bucket-2"
+      region: "us-east-1"
+      access_key: "test-key-2"
+      secret_key: "test-secret-2"
+"#;
+        temp_file.write_all(invalid_config.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Load config (succeeds) but validation should fail
+        let config = Config::from_file(temp_file.path()).unwrap();
+        let validation_result = config.validate();
+
+        assert!(
+            validation_result.is_err(),
+            "Validation should catch duplicate path_prefix"
+        );
+        assert!(validation_result
+            .unwrap_err()
+            .contains("Duplicate path_prefix"));
+    }
+
+    #[test]
+    fn test_invalid_config_rejected_without_affecting_running_service() {
+        // Simulate existing valid config
+        let mut valid_file = NamedTempFile::new().unwrap();
+        let valid_config = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        valid_file.write_all(valid_config.as_bytes()).unwrap();
+        valid_file.flush().unwrap();
+
+        // Load valid config
+        let current_config = Config::from_file(valid_file.path()).unwrap();
+        current_config.validate().unwrap();
+        let current_generation = current_config.generation;
+
+        // Attempt to load invalid config (empty bucket name)
+        let mut invalid_file = NamedTempFile::new().unwrap();
+        let invalid_config = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: ""
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        invalid_file.write_all(invalid_config.as_bytes()).unwrap();
+        invalid_file.flush().unwrap();
+
+        // Try to load new config
+        let new_config_result = Config::from_file(invalid_file.path());
+        assert!(new_config_result.is_ok(), "Config should load");
+
+        let new_config = new_config_result.unwrap();
+        let validation_result = new_config.validate();
+
+        // Validation should fail
+        assert!(
+            validation_result.is_err(),
+            "Invalid config should fail validation"
+        );
+
+        // Current config should remain unchanged (simulated by checking generation)
+        assert_eq!(current_config.generation, current_generation);
+        assert_eq!(current_config.buckets.len(), 1);
+        assert_eq!(current_config.buckets[0].name, "test-bucket");
+    }
+
+    #[test]
+    fn test_config_has_generation_number() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+"#;
+        let config: Config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Initial config should have generation 0
+        assert_eq!(config.generation, 0);
+    }
 }

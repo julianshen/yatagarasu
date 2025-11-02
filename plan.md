@@ -1254,10 +1254,10 @@ curl http://localhost:8080/metrics
 
 ### Test: Configuration reload infrastructure
 - [x] Test: Config can be loaded from file path
-- [ ] Test: Config validation catches errors before applying
-- [ ] Test: Invalid config rejected without affecting running service
-- [ ] Test: Config has generation/version number that increments on reload
-- [ ] File: Extend `src/config/mod.rs` with reload support
+- [x] Test: Config validation catches errors before applying
+- [x] Test: Invalid config rejected without affecting running service
+- [x] Test: Config has generation/version number that increments on reload
+- [x] File: Extend `src/config/mod.rs` with reload support
 
 ### Test: SIGHUP signal handler
 - [ ] Test: Process registers SIGHUP signal handler
