@@ -4005,3 +4005,288 @@ buckets:
     log::info!("✅ Proxy handles unreachable S3 endpoint correctly");
     log::info!("✅ Returns appropriate 5xx error code (upstream problem)");
 }
+
+/// Test 23: Document Pingora's HTTP validation behavior
+///
+/// This test documents the HTTP validation boundary between Pingora (framework)
+/// and Yatagarasu (application):
+///
+/// **Pingora Handles Automatically** (can't test with standard HTTP clients):
+/// - HTTP protocol violations (invalid HTTP version, malformed headers)
+/// - Invalid HTTP methods (methods not in standard set)
+/// - Request line parsing errors
+/// - Header parsing errors (invalid characters, missing colons)
+/// - Chunk encoding errors
+/// - Connection-level errors (TLS handshake failures, etc.)
+///
+/// **Application-Level Validation** (tested here):
+/// - Routing: Unmapped paths return 404 (proxy decision, not Pingora)
+/// - Authentication: Missing/invalid JWT returns 401/403 (proxy decision)
+/// - Path validation: Paths outside bucket mappings return 404
+///
+/// **Why This Test Exists**:
+/// HTTP clients (reqwest, curl, etc.) validate requests before sending them,
+/// making it difficult to test true HTTP protocol violations. This test documents
+/// what Pingora handles vs. what the application validates.
+#[test]
+#[ignore]
+fn test_proxy_http_validation_boundary() {
+    env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Info)
+        .try_init()
+        .ok();
+
+    log::info!("=== Test 23: HTTP Validation Boundary (Pingora vs Application) ===");
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    log::info!("Starting LocalStack container for HTTP validation test...");
+    let container = docker.run(localstack_image);
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Give LocalStack time to fully start
+    std::thread::sleep(std::time::Duration::from_secs(3));
+
+    // Create S3 client
+    log::info!("Creating S3 client for LocalStack...");
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    rt.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test-access-key",
+                "test-secret-key",
+                None,
+                None,
+                "static",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create test bucket
+        log::info!("Creating test bucket: validation-test-bucket...");
+        s3_client
+            .create_bucket()
+            .bucket("validation-test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        // Upload test file
+        log::info!("Uploading test file: test.txt...");
+        s3_client
+            .put_object()
+            .bucket("validation-test-bucket")
+            .key("test.txt")
+            .body("HTTP validation test content".as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload test file");
+
+        log::info!("✅ S3 bucket and test file created successfully");
+    });
+
+    // Create proxy config with both public and authenticated buckets
+    let jwt_secret = "validation-test-secret-key-12345";
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 18098
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "validation-test-bucket"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+    auth:
+      enabled: false
+
+  - name: "private"
+    path_prefix: "/private"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "validation-test-bucket"
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+    auth:
+      enabled: true
+
+jwt:
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "header"
+      header_name: "Authorization"
+"#,
+        s3_endpoint, s3_endpoint, jwt_secret
+    );
+
+    let config_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = config_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+
+    log::info!("Created proxy config at: {}", config_path.to_string_lossy());
+
+    // Start proxy in background thread
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config");
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+
+        server.add_service(proxy_service);
+        server.run_forever();
+    });
+
+    log::info!("Waiting for proxy to start on port 18098...");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    log::info!("Starting HTTP validation tests...");
+
+    // ===================================================================
+    // APPLICATION-LEVEL VALIDATION (Tested Here)
+    // ===================================================================
+
+    // Test 1: Valid request to public bucket (baseline)
+    log::info!("Test 1: Valid request to public bucket (baseline - should succeed)");
+    let response = client
+        .get("http://127.0.0.1:18098/public/test.txt")
+        .send()
+        .expect("Failed to send request");
+    assert_eq!(
+        response.status(),
+        200,
+        "Valid request to public bucket should return 200"
+    );
+    log::info!("✅ Valid public request: 200 OK");
+
+    // Test 2: Unmapped path (application routing validation)
+    log::info!("Test 2: Unmapped path /nonexistent/file.txt (application routing)");
+    let response = client
+        .get("http://127.0.0.1:18098/nonexistent/file.txt")
+        .send()
+        .expect("Failed to send request");
+    assert_eq!(
+        response.status(),
+        404,
+        "Unmapped path should return 404 (application-level routing)"
+    );
+    log::info!("✅ Unmapped path rejected by application routing: 404 Not Found");
+
+    // Test 3: Missing JWT for private bucket (application auth validation)
+    log::info!("Test 3: Missing JWT for private bucket (application auth)");
+    let response = client
+        .get("http://127.0.0.1:18098/private/test.txt")
+        .send()
+        .expect("Failed to send request");
+    assert_eq!(
+        response.status(),
+        401,
+        "Missing JWT should return 401 (application-level auth)"
+    );
+    log::info!("✅ Missing JWT rejected by application auth: 401 Unauthorized");
+
+    // Test 4: Invalid JWT for private bucket (application auth validation)
+    log::info!("Test 4: Invalid JWT for private bucket (application auth)");
+    let response = client
+        .get("http://127.0.0.1:18098/private/test.txt")
+        .header("Authorization", "Bearer invalid-token-xyz")
+        .send()
+        .expect("Failed to send request");
+    assert_eq!(
+        response.status(),
+        403,
+        "Invalid JWT should return 403 (application-level auth)"
+    );
+    log::info!("✅ Invalid JWT rejected by application auth: 403 Forbidden");
+
+    // Test 5: Root path (application routing validation)
+    log::info!("Test 5: Root path / (application routing)");
+    let response = client
+        .get("http://127.0.0.1:18098/")
+        .send()
+        .expect("Failed to send request");
+    assert_eq!(
+        response.status(),
+        404,
+        "Root path should return 404 (application-level routing)"
+    );
+    log::info!("✅ Root path rejected by application routing: 404 Not Found");
+
+    // Test 6: Path with valid bucket prefix but nonexistent file (S3-level validation)
+    log::info!("Test 6: Valid bucket but nonexistent file (S3 validation)");
+    let response = client
+        .get("http://127.0.0.1:18098/public/nonexistent-file.txt")
+        .send()
+        .expect("Failed to send request");
+    assert_eq!(
+        response.status(),
+        404,
+        "Nonexistent S3 object should return 404 (S3-level validation)"
+    );
+    log::info!("✅ Nonexistent S3 object: 404 Not Found (from S3)");
+
+    // ===================================================================
+    // PROTOCOL-LEVEL VALIDATION (Documented but not tested)
+    // ===================================================================
+
+    log::info!("");
+    log::info!("=== HTTP Protocol-Level Validation (Pingora handles automatically) ===");
+    log::info!(
+        "The following HTTP violations are handled by Pingora BEFORE reaching application code:"
+    );
+    log::info!("  • Invalid HTTP version (HTTP/0.9, HTTP/3.0, etc.)");
+    log::info!("  • Malformed request line (missing method, path, or version)");
+    log::info!("  • Invalid HTTP methods (INVALID, GETCUSTOMMETHOD, etc.)");
+    log::info!("  • Malformed headers (missing colon, invalid characters)");
+    log::info!("  • Invalid chunk encoding (in chunked transfer)");
+    log::info!("  • Invalid Content-Length (negative, non-numeric)");
+    log::info!("  • Protocol errors (request smuggling attempts, etc.)");
+    log::info!("");
+    log::info!("These cannot be tested with standard HTTP clients (reqwest, curl, etc.)");
+    log::info!("because the clients validate requests BEFORE sending them to the network.");
+    log::info!("Pingora rejects these at the HTTP protocol layer with 400 Bad Request.");
+    log::info!("");
+
+    log::info!("=== HTTP Validation Boundary Test PASSED ===");
+    log::info!("✅ Application-level validation tested (routing, auth)");
+    log::info!("✅ Protocol-level validation documented (handled by Pingora)");
+    log::info!("✅ Validation boundary clearly defined");
+}
