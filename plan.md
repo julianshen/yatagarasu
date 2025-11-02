@@ -1209,10 +1209,10 @@ yatagarasu/
 - [x] Test: Track S3 request duration
 
 ### Test: System metrics
-- [ ] Test: Track active connections count
-- [ ] Test: Track bytes sent/received
-- [ ] Test: Track memory usage (RSS)
-- [ ] Test: Track uptime
+- [x] Test: Track active connections count
+- [x] Test: Track bytes sent/received
+- [x] Test: Track memory usage (RSS)
+- [x] Test: Track uptime
 
 ### Test: /metrics HTTP endpoint
 - [ ] Test: GET /metrics returns 200 OK

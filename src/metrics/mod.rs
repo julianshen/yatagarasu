@@ -49,6 +49,13 @@ pub struct Metrics {
     // S3 operation counters (GET, HEAD, etc.)
     s3_operations: Mutex<HashMap<String, u64>>,
 
+    // System metrics
+    active_connections: AtomicU64,
+    bytes_sent: AtomicU64,
+    bytes_received: AtomicU64,
+    memory_usage: AtomicU64,
+    uptime_seconds: AtomicU64,
+
     // S3 error counters by error code (NoSuchKey, AccessDenied, etc.)
     s3_errors: Mutex<HashMap<String, u64>>,
 }
@@ -69,6 +76,11 @@ impl Metrics {
             auth_bypassed: AtomicU64::new(0),
             auth_errors: Mutex::new(HashMap::new()),
             s3_operations: Mutex::new(HashMap::new()),
+            active_connections: AtomicU64::new(0),
+            bytes_sent: AtomicU64::new(0),
+            bytes_received: AtomicU64::new(0),
+            memory_usage: AtomicU64::new(0),
+            uptime_seconds: AtomicU64::new(0),
             s3_errors: Mutex::new(HashMap::new()),
         }
     }
@@ -303,6 +315,68 @@ impl Metrics {
             .ok()
             .and_then(|errors| errors.get(error_code).copied())
             .unwrap_or(0)
+    }
+
+    // System metrics methods
+
+    /// Increment active connections count (new client connected)
+    pub fn increment_active_connections(&self) {
+        self.active_connections.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Decrement active connections count (client disconnected)
+    pub fn decrement_active_connections(&self) {
+        self.active_connections.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// Add bytes sent to client
+    pub fn add_bytes_sent(&self, bytes: u64) {
+        self.bytes_sent.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Add bytes received from client
+    pub fn add_bytes_received(&self, bytes: u64) {
+        self.bytes_received.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Update memory usage (RSS in bytes)
+    pub fn update_memory_usage(&self, bytes: u64) {
+        self.memory_usage.store(bytes, Ordering::Relaxed);
+    }
+
+    /// Update uptime (seconds since start)
+    pub fn update_uptime(&self, seconds: u64) {
+        self.uptime_seconds.store(seconds, Ordering::Relaxed);
+    }
+
+    /// Get active connections count (for testing)
+    #[cfg(test)]
+    pub fn get_active_connections(&self) -> u64 {
+        self.active_connections.load(Ordering::Relaxed)
+    }
+
+    /// Get bytes sent (for testing)
+    #[cfg(test)]
+    pub fn get_bytes_sent(&self) -> u64 {
+        self.bytes_sent.load(Ordering::Relaxed)
+    }
+
+    /// Get bytes received (for testing)
+    #[cfg(test)]
+    pub fn get_bytes_received(&self) -> u64 {
+        self.bytes_received.load(Ordering::Relaxed)
+    }
+
+    /// Get memory usage (for testing)
+    #[cfg(test)]
+    pub fn get_memory_usage(&self) -> u64 {
+        self.memory_usage.load(Ordering::Relaxed)
+    }
+
+    /// Get uptime in seconds (for testing)
+    #[cfg(test)]
+    pub fn get_uptime_seconds(&self) -> u64 {
+        self.uptime_seconds.load(Ordering::Relaxed)
     }
 }
 
@@ -662,5 +736,90 @@ mod tests {
 
         // P95 should be >= P50
         assert!(histogram.p95 >= histogram.p50);
+    }
+
+    // System metrics tests
+    #[test]
+    fn test_track_active_connections_count() {
+        // Test: Track active connections count
+        let metrics = Metrics::new();
+
+        // Start with zero connections
+        assert_eq!(metrics.get_active_connections(), 0);
+
+        // Increment connections (new client connected)
+        metrics.increment_active_connections();
+        assert_eq!(metrics.get_active_connections(), 1);
+
+        metrics.increment_active_connections();
+        assert_eq!(metrics.get_active_connections(), 2);
+
+        // Decrement connections (client disconnected)
+        metrics.decrement_active_connections();
+        assert_eq!(metrics.get_active_connections(), 1);
+
+        metrics.decrement_active_connections();
+        assert_eq!(metrics.get_active_connections(), 0);
+    }
+
+    #[test]
+    fn test_track_bytes_sent_received() {
+        // Test: Track bytes sent/received
+        let metrics = Metrics::new();
+
+        // Start with zero bytes
+        assert_eq!(metrics.get_bytes_sent(), 0);
+        assert_eq!(metrics.get_bytes_received(), 0);
+
+        // Track bytes sent (response to client)
+        metrics.add_bytes_sent(1024); // 1KB
+        assert_eq!(metrics.get_bytes_sent(), 1024);
+
+        metrics.add_bytes_sent(2048); // 2KB
+        assert_eq!(metrics.get_bytes_sent(), 3072); // 3KB total
+
+        // Track bytes received (request from client)
+        metrics.add_bytes_received(512); // 512 bytes
+        assert_eq!(metrics.get_bytes_received(), 512);
+
+        metrics.add_bytes_received(256); // 256 bytes
+        assert_eq!(metrics.get_bytes_received(), 768); // 768 bytes total
+    }
+
+    #[test]
+    fn test_track_memory_usage() {
+        // Test: Track memory usage (RSS)
+        let metrics = Metrics::new();
+
+        // Update memory usage (in bytes)
+        metrics.update_memory_usage(1024 * 1024 * 100); // 100 MB
+        assert_eq!(metrics.get_memory_usage(), 1024 * 1024 * 100);
+
+        // Memory usage can increase
+        metrics.update_memory_usage(1024 * 1024 * 150); // 150 MB
+        assert_eq!(metrics.get_memory_usage(), 1024 * 1024 * 150);
+
+        // Memory usage can decrease (after GC)
+        metrics.update_memory_usage(1024 * 1024 * 80); // 80 MB
+        assert_eq!(metrics.get_memory_usage(), 1024 * 1024 * 80);
+    }
+
+    #[test]
+    fn test_track_uptime() {
+        // Test: Track uptime (seconds since start)
+        let metrics = Metrics::new();
+
+        // Uptime starts at 0
+        assert_eq!(metrics.get_uptime_seconds(), 0);
+
+        // Update uptime
+        metrics.update_uptime(60); // 1 minute
+        assert_eq!(metrics.get_uptime_seconds(), 60);
+
+        metrics.update_uptime(3600); // 1 hour
+        assert_eq!(metrics.get_uptime_seconds(), 3600);
+
+        metrics.update_uptime(86400); // 1 day
+        assert_eq!(metrics.get_uptime_seconds(), 86400);
     }
 }
