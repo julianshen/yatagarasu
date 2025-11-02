@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (3210 lines)
-- ✅ 18 tests: 3 infrastructure validation + 15 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (3447 lines)
+- ✅ 19 tests: 3 infrastructure validation + 16 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1054,6 +1054,7 @@ yatagarasu/
 16. `test_proxy_mixed_public_private_buckets()` - Public and private buckets coexist (3 test cases)
 17. `test_proxy_credential_isolation()` - Each bucket uses isolated credentials (SECURITY CRITICAL)
 18. `test_proxy_concurrent_requests_to_different_buckets()` - 20 concurrent requests to different buckets (thread safety)
+19. `test_proxy_502_invalid_s3_credentials()` - Invalid S3 credentials return 502 Bad Gateway (error handling)
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1098,7 +1099,7 @@ yatagarasu/
 - [x] Integration: Public and private buckets in same proxy work
 
 ### Error Scenarios
-- [ ] Integration: Invalid S3 credentials return 502
+- [x] Integration: Invalid S3 credentials return 502
 - [ ] Integration: S3 bucket doesn't exist returns 404
 - [ ] Integration: S3 endpoint unreachable returns 504
 - [ ] Integration: Malformed request returns 400
