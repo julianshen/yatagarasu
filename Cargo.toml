@@ -87,11 +87,11 @@ codegen-units = 1
 [profile.bench]
 inherits = "release"
 
-# Benchmarks will be added as features are implemented
-# [[bench]]
-# name = "jwt_validation"
-# harness = false
-#
+# Benchmarks for performance testing
+[[bench]]
+name = "jwt_validation"
+harness = false
+
 # [[bench]]
 # name = "routing"
 # harness = false
