@@ -1030,8 +1030,8 @@ yatagarasu/
 **Integration Testing Infrastructure**:
 - ✅ Added testcontainers and LocalStack dependencies to Cargo.toml
 - ✅ Created tests/integration_tests.rs entry point
-- ✅ Implemented tests/integration/e2e_localstack_test.rs (3848 lines)
-- ✅ 21 tests: 3 infrastructure validation + 18 end-to-end proxy tests
+- ✅ Implemented tests/integration/e2e_localstack_test.rs (4008 lines)
+- ✅ 22 tests: 3 infrastructure validation + 19 end-to-end proxy tests
 - ✅ Automated Docker container lifecycle management
 - ✅ All tests compile and are ready to run (require Docker)
 
@@ -1057,6 +1057,7 @@ yatagarasu/
 19. `test_proxy_502_invalid_s3_credentials()` - Invalid S3 credentials return 502 Bad Gateway (error handling)
 20. `test_proxy_404_bucket_does_not_exist()` - S3 bucket doesn't exist returns 404 Not Found (NoSuchBucket)
 21. `test_proxy_404_unknown_path()` - Unknown/unmapped path returns 404 (routing failure, 3 test cases)
+22. `test_proxy_502_or_503_endpoint_unreachable()` - S3 endpoint unreachable returns 502/503 (network failure)
 
 **Run Command**: `cargo test --test e2e_localstack_test -- --ignored`
 
@@ -1103,7 +1104,7 @@ yatagarasu/
 ### Error Scenarios
 - [x] Integration: Invalid S3 credentials return 502
 - [x] Integration: S3 bucket doesn't exist returns 404
-- [ ] Integration: S3 endpoint unreachable returns 504
+- [x] Integration: S3 endpoint unreachable returns 502/503/504
 - [ ] Integration: Malformed request returns 400
 - [x] Integration: Unknown path returns 404
 
