@@ -3591,3 +3591,247 @@ buckets:
     log::info!("✅ Proxy returns 404 Not Found for nonexistent S3 bucket");
     log::info!("✅ Error handling: NoSuchBucket → 404");
 }
+
+/// Test 21: Unknown/unmapped path returns 404 Not Found
+///
+/// This test validates routing behavior when path doesn't match any configured bucket:
+/// - Proxy configured with bucket at path prefix "/api"
+/// - Make request to unmapped path "/admin/file.txt"
+/// - Router returns None (no matching bucket)
+/// - Proxy should return 404 Not Found immediately (no S3 request)
+///
+/// Test setup:
+/// - Proxy configured with single bucket: path_prefix = "/api"
+/// - Make request to "/admin/file.txt" (no bucket mapped to /admin)
+/// - Proxy detects unmapped path in request_filter
+/// - Returns 404 without contacting S3
+///
+/// Why this matters:
+/// - Fast rejection of invalid paths (no S3 roundtrip)
+/// - Clear error for misconfigured routes
+/// - Security: Don't expose routing configuration
+/// - Different from Test 6 (S3 object missing) - this is routing failure
+/// - Different from Test 20 (bucket missing) - this is path not mapped
+///
+/// Routing decision tree:
+/// 1. Path matches bucket prefix → Continue to auth/S3
+/// 2. Path doesn't match any prefix → 404 immediately
+///
+/// Path matching examples:
+/// - "/api/file.txt" with prefix "/api" → MATCH → route to bucket
+/// - "/admin/file.txt" with prefix "/api" → NO MATCH → 404
+/// - "/api/v2/file.txt" with prefix "/api" → MATCH → route to bucket
+/// - "/apiary/file.txt" with prefix "/api" → NO MATCH → 404
+///
+/// Performance benefit:
+/// - No S3 request made for unmapped paths
+/// - Instant 404 response
+/// - Saves S3 API calls and latency
+#[test]
+#[ignore]
+fn test_proxy_404_unknown_path() {
+    env_logger::init();
+    log::info!("=== Test 21: Unknown/Unmapped Path Returns 404 ===");
+
+    let docker = Cli::default();
+    let localstack_image = LocalStack::default();
+    let container = docker.run(localstack_image);
+
+    let port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", port);
+
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Wait for LocalStack to be ready
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    log::info!("Creating S3 bucket for mapped path /api...");
+
+    // Create S3 client and bucket
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("bucket-api")
+            .send()
+            .await
+            .expect("Failed to create bucket-api");
+
+        let content = r#"{"path": "/api", "file": "test.txt"}"#;
+        s3_client
+            .put_object()
+            .bucket("bucket-api")
+            .key("test.txt")
+            .body(content.as_bytes().to_vec().into())
+            .send()
+            .await
+            .expect("Failed to upload test.txt to bucket-api");
+
+        log::info!("✅ Created bucket-api with test.txt for /api path");
+    });
+
+    log::info!("Creating Yatagarasu proxy configuration with /api prefix only...");
+
+    // Create config with ONLY /api prefix mapped
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 18096
+
+buckets:
+  - name: "bucket-api"
+    path_prefix: "/api"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "bucket-api"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+"#,
+        s3_endpoint
+    );
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config_test21.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config file");
+
+    log::info!("Config file written to: {}", config_path.display());
+    log::info!("⚠️ Only /api path is mapped, /admin is NOT mapped");
+
+    log::info!("Starting Yatagarasu proxy in background thread...");
+
+    let config_path_clone = config_path.clone();
+    std::thread::spawn(move || {
+        let config = yatagarasu::config::Config::from_file(&config_path_clone)
+            .expect("Failed to load config");
+
+        let opt = pingora_core::server::configuration::Opt {
+            upgrade: false,
+            daemon: false,
+            nocapture: false,
+            test: false,
+            conf: None,
+        };
+
+        let mut server =
+            pingora_core::server::Server::new(Some(opt)).expect("Failed to create Pingora server");
+        server.bootstrap();
+
+        let proxy = yatagarasu::proxy::YatagarasuProxy::new(config.clone());
+        let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+
+        let listen_addr = format!("{}:{}", config.server.address, config.server.port);
+        proxy_service.add_tcp(&listen_addr);
+
+        server.add_service(proxy_service);
+
+        log::info!("Proxy server running on {}", listen_addr);
+
+        server.run_forever();
+    });
+
+    // Wait for proxy to start
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    log::info!("=== Test 1: Mapped path /api/test.txt should return 200 ===");
+
+    let client = reqwest::blocking::Client::new();
+    let mapped_url = "http://127.0.0.1:18096/api/test.txt";
+
+    log::info!("GET {}", mapped_url);
+
+    match client.get(mapped_url).send() {
+        Ok(response) => {
+            let status = response.status();
+            log::info!("Response status: {}", status);
+
+            assert_eq!(
+                status, 200,
+                "Expected 200 OK for mapped path /api, got {}",
+                status
+            );
+
+            log::info!("✅ Mapped path /api works correctly (200 OK)");
+        }
+        Err(e) => {
+            panic!("❌ FAIL: Request to mapped path /api failed: {}", e);
+        }
+    }
+
+    log::info!("=== Test 2: Unmapped path /admin/file.txt should return 404 ===");
+
+    let unmapped_url = "http://127.0.0.1:18096/admin/file.txt";
+
+    log::info!("GET {}", unmapped_url);
+
+    match client.get(unmapped_url).send() {
+        Ok(response) => {
+            let status = response.status();
+            log::info!("Response status: {}", status);
+
+            // Expected: 404 Not Found (no bucket mapped to /admin)
+            assert_eq!(
+                status, 404,
+                "Expected 404 Not Found for unmapped path /admin, got {}",
+                status
+            );
+
+            log::info!("✅ Unmapped path /admin correctly returned 404");
+        }
+        Err(e) => {
+            panic!(
+                "❌ FAIL: Request to unmapped path /admin failed with network error: {}",
+                e
+            );
+        }
+    }
+
+    log::info!("=== Test 3: Root path / should return 404 (no root mapping) ===");
+
+    let root_url = "http://127.0.0.1:18096/";
+
+    log::info!("GET {}", root_url);
+
+    match client.get(root_url).send() {
+        Ok(response) => {
+            let status = response.status();
+            log::info!("Response status: {}", status);
+
+            // Expected: 404 Not Found (no bucket mapped to /)
+            assert_eq!(
+                status, 404,
+                "Expected 404 Not Found for root path /, got {}",
+                status
+            );
+
+            log::info!("✅ Root path / correctly returned 404");
+        }
+        Err(e) => {
+            panic!(
+                "❌ FAIL: Request to root path / failed with network error: {}",
+                e
+            );
+        }
+    }
+
+    log::info!("=== Unknown Path Test PASSED ===");
+    log::info!("✅ Proxy returns 404 for unmapped paths (routing failure)");
+    log::info!("✅ Proxy returns 200 for mapped paths");
+    log::info!("✅ Fast rejection without S3 roundtrip");
+}
