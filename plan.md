@@ -1194,9 +1194,9 @@ yatagarasu/
 - [x] Test: Track requests by HTTP method (GET, HEAD, POST, etc.)
 
 ### Test: Latency metrics
-- [ ] Test: Record request duration histogram (p50, p90, p95, p99)
-- [ ] Test: Record S3 backend latency separately from total latency
-- [ ] Test: Record latency by bucket
+- [x] Test: Record request duration histogram (p50, p90, p95, p99)
+- [x] Test: Record S3 backend latency separately from total latency
+- [x] Test: Record latency by bucket
 
 ### Test: Authentication metrics
 - [ ] Test: Track JWT authentication attempts (success/failure)

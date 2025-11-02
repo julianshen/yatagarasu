@@ -5,6 +5,15 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+/// Histogram represents percentile statistics for latency measurements
+#[derive(Debug, Clone, Copy)]
+pub struct Histogram {
+    pub p50: f64,
+    pub p90: f64,
+    pub p95: f64,
+    pub p99: f64,
+}
+
 /// Metrics struct tracks counters and histograms for Prometheus export
 /// Thread-safe via atomic operations and mutexes
 pub struct Metrics {
@@ -22,6 +31,12 @@ pub struct Metrics {
 
     // Duration tracking (stored in microseconds as u64)
     durations: Mutex<Vec<u64>>,
+
+    // S3 backend latency tracking (stored in microseconds as u64)
+    s3_latencies: Mutex<Vec<u64>>,
+
+    // Per-bucket latency tracking (stored in microseconds as u64)
+    bucket_latencies: Mutex<HashMap<String, Vec<u64>>>,
 }
 
 impl Metrics {
@@ -33,6 +48,8 @@ impl Metrics {
             bucket_counts: Mutex::new(HashMap::new()),
             method_counts: Mutex::new(HashMap::new()),
             durations: Mutex::new(Vec::new()),
+            s3_latencies: Mutex::new(Vec::new()),
+            bucket_latencies: Mutex::new(HashMap::new()),
         }
     }
 
@@ -109,6 +126,108 @@ impl Metrics {
             .ok()
             .and_then(|counts| counts.get(method).copied())
             .unwrap_or(0)
+    }
+
+    /// Record S3 backend latency in milliseconds
+    pub fn record_s3_latency(&self, duration_ms: f64) {
+        let duration_us = (duration_ms * 1000.0) as u64;
+        if let Ok(mut latencies) = self.s3_latencies.lock() {
+            latencies.push(duration_us);
+        }
+    }
+
+    /// Record latency for a specific bucket in milliseconds
+    pub fn record_bucket_latency(&self, bucket_name: &str, duration_ms: f64) {
+        let duration_us = (duration_ms * 1000.0) as u64;
+        if let Ok(mut latencies) = self.bucket_latencies.lock() {
+            latencies
+                .entry(bucket_name.to_string())
+                .or_insert_with(Vec::new)
+                .push(duration_us);
+        }
+    }
+
+    /// Calculate histogram from duration samples (for testing)
+    #[cfg(test)]
+    pub fn get_duration_histogram(&self) -> Histogram {
+        if let Ok(durations) = self.durations.lock() {
+            calculate_histogram(&durations)
+        } else {
+            Histogram {
+                p50: 0.0,
+                p90: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            }
+        }
+    }
+
+    /// Calculate histogram from S3 latency samples (for testing)
+    #[cfg(test)]
+    pub fn get_s3_latency_histogram(&self) -> Histogram {
+        if let Ok(latencies) = self.s3_latencies.lock() {
+            calculate_histogram(&latencies)
+        } else {
+            Histogram {
+                p50: 0.0,
+                p90: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            }
+        }
+    }
+
+    /// Calculate histogram for specific bucket (for testing)
+    #[cfg(test)]
+    pub fn get_bucket_latency_histogram(&self, bucket_name: &str) -> Histogram {
+        if let Ok(latencies) = self.bucket_latencies.lock() {
+            if let Some(bucket_samples) = latencies.get(bucket_name) {
+                calculate_histogram(bucket_samples)
+            } else {
+                Histogram {
+                    p50: 0.0,
+                    p90: 0.0,
+                    p95: 0.0,
+                    p99: 0.0,
+                }
+            }
+        } else {
+            Histogram {
+                p50: 0.0,
+                p90: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            }
+        }
+    }
+}
+
+/// Calculate percentiles from a sorted vector of samples (in microseconds)
+#[cfg(test)]
+fn calculate_histogram(samples: &[u64]) -> Histogram {
+    if samples.is_empty() {
+        return Histogram {
+            p50: 0.0,
+            p90: 0.0,
+            p95: 0.0,
+            p99: 0.0,
+        };
+    }
+
+    let mut sorted: Vec<u64> = samples.to_vec();
+    sorted.sort_unstable();
+
+    let p50_idx = (sorted.len() as f64 * 0.50) as usize;
+    let p90_idx = (sorted.len() as f64 * 0.90) as usize;
+    let p95_idx = (sorted.len() as f64 * 0.95) as usize;
+    let p99_idx = (sorted.len() as f64 * 0.99) as usize;
+
+    // Convert from microseconds to milliseconds
+    Histogram {
+        p50: sorted.get(p50_idx.saturating_sub(1)).copied().unwrap_or(0) as f64 / 1000.0,
+        p90: sorted.get(p90_idx.saturating_sub(1)).copied().unwrap_or(0) as f64 / 1000.0,
+        p95: sorted.get(p95_idx.saturating_sub(1)).copied().unwrap_or(0) as f64 / 1000.0,
+        p99: sorted.get(p99_idx.saturating_sub(1)).copied().unwrap_or(0) as f64 / 1000.0,
     }
 }
 
@@ -251,5 +370,74 @@ mod tests {
         metrics.increment_method_count("GET");
         metrics.increment_method_count("GET");
         assert_eq!(metrics.get_method_count("GET"), 3);
+    }
+
+    // Latency metrics tests
+    #[test]
+    fn test_record_request_duration_histogram() {
+        // Test: Record request duration histogram (p50, p90, p95, p99)
+        let metrics = Metrics::new();
+
+        // Record various request durations (in milliseconds)
+        metrics.record_duration(10.5); // 10.5ms
+        metrics.record_duration(25.0); // 25ms
+        metrics.record_duration(50.0); // 50ms
+        metrics.record_duration(100.0); // 100ms
+        metrics.record_duration(200.0); // 200ms
+
+        // Calculate percentiles
+        let histogram = metrics.get_duration_histogram();
+        assert!(histogram.p50 > 0.0);
+        assert!(histogram.p90 > 0.0);
+        assert!(histogram.p95 > 0.0);
+        assert!(histogram.p99 > 0.0);
+
+        // P99 should be >= P95 >= P90 >= P50
+        assert!(histogram.p99 >= histogram.p95);
+        assert!(histogram.p95 >= histogram.p90);
+        assert!(histogram.p90 >= histogram.p50);
+    }
+
+    #[test]
+    fn test_record_s3_backend_latency_separately() {
+        // Test: Record S3 backend latency separately from total latency
+        let metrics = Metrics::new();
+
+        // Record total request latency (client -> proxy -> S3 -> proxy -> client)
+        metrics.record_duration(100.0); // 100ms total
+
+        // Record S3 backend latency only (proxy -> S3 -> proxy)
+        metrics.record_s3_latency(80.0); // 80ms S3 backend
+
+        // Should be able to retrieve both metrics separately
+        let total_histogram = metrics.get_duration_histogram();
+        let s3_histogram = metrics.get_s3_latency_histogram();
+
+        assert!(total_histogram.p50 > 0.0);
+        assert!(s3_histogram.p50 > 0.0);
+
+        // S3 latency should typically be less than total latency
+        // (total includes proxy overhead + network to client)
+    }
+
+    #[test]
+    fn test_record_latency_by_bucket() {
+        // Test: Record latency by bucket
+        let metrics = Metrics::new();
+
+        // Record latencies for different buckets
+        metrics.record_bucket_latency("products", 50.0); // 50ms for products
+        metrics.record_bucket_latency("products", 60.0); // 60ms for products
+        metrics.record_bucket_latency("images", 100.0); // 100ms for images
+
+        // Should be able to retrieve per-bucket latency histograms
+        let products_histogram = metrics.get_bucket_latency_histogram("products");
+        let images_histogram = metrics.get_bucket_latency_histogram("images");
+
+        assert!(products_histogram.p50 > 0.0);
+        assert!(images_histogram.p50 > 0.0);
+
+        // Products bucket should have lower latency than images bucket
+        assert!(products_histogram.p50 < images_histogram.p50);
     }
 }
