@@ -95,7 +95,7 @@ harness = false
 [[bench]]
 name = "routing"
 harness = false
-#
-# [[bench]]
-# name = "s3_signature"
-# harness = false
+
+[[bench]]
+name = "s3_signature"
+harness = false
