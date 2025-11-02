@@ -1,9 +1,9 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use yatagarasu::auth::authenticate_request;
 use yatagarasu::config::{JwtConfig, TokenSource};
-use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
