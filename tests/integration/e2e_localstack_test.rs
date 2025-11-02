@@ -1732,9 +1732,9 @@ fn test_proxy_jwt_from_custom_header() {
     let test_content = r#"{"message": "JWT from custom header works!", "method": "custom_header"}"#;
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let config = aws_config::from_env()
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(&s3_endpoint)
-            .region("us-east-1")
+            .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
                 "test", "test", None, None, "test",
             ))
@@ -1935,9 +1935,9 @@ fn test_proxy_multi_bucket_a() {
     let content_b = r#"{"bucket": "bucket-b", "file": "file-b.txt"}"#;
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let config = aws_config::from_env()
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(&s3_endpoint)
-            .region("us-east-1")
+            .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
                 "test", "test", None, None, "test",
             ))
@@ -2147,9 +2147,9 @@ fn test_proxy_multi_bucket_b() {
     let content_b = r#"{"bucket": "bucket-b", "file": "file-b.txt"}"#;
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let config = aws_config::from_env()
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(&s3_endpoint)
-            .region("us-east-1")
+            .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
                 "test", "test", None, None, "test",
             ))
@@ -2360,9 +2360,9 @@ fn test_proxy_mixed_public_private_buckets() {
     let private_content = r#"{"bucket": "private", "requires": "JWT token"}"#;
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let config = aws_config::from_env()
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(&s3_endpoint)
-            .region("us-east-1")
+            .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
                 "test", "test", None, None, "test",
             ))
@@ -2642,9 +2642,9 @@ fn test_proxy_credential_isolation() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         // Create bucket-secure-a with credentials-a
-        let config_a = aws_config::from_env()
+        let config_a = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(&s3_endpoint)
-            .region("us-east-1")
+            .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
                 "user-a-access-key",
                 "user-a-secret-key",
@@ -2676,9 +2676,9 @@ fn test_proxy_credential_isolation() {
         log::info!("Uploaded file.txt to bucket-secure-a");
 
         // Create bucket-secure-b with credentials-b
-        let config_b = aws_config::from_env()
+        let config_b = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .endpoint_url(&s3_endpoint)
-            .region("us-east-1")
+            .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_credential_types::Credentials::new(
                 "user-b-access-key",
                 "user-b-secret-key",
