@@ -92,9 +92,9 @@ inherits = "release"
 name = "jwt_validation"
 harness = false
 
-# [[bench]]
-# name = "routing"
-# harness = false
+[[bench]]
+name = "routing"
+harness = false
 #
 # [[bench]]
 # name = "s3_signature"

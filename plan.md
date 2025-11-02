@@ -1114,7 +1114,7 @@ yatagarasu/
 ### Performance & Stability
 - [ ] Performance: Baseline throughput > 1,000 req/s (single core)
 - [x] Performance: JWT validation < 1ms (P95) - Benchmark implemented
-- [ ] Performance: Path routing < 10μs (P95)
+- [x] Performance: Path routing < 10μs (P95) - Benchmark implemented
 - [ ] Performance: Small file (1KB) end-to-end < 10ms (P95)
 - [ ] Performance: Streaming latency < 100ms (TTFB)
 - [ ] Memory: Usage stays constant during streaming (no memory leaks)
@@ -1133,12 +1133,12 @@ yatagarasu/
 
 **Goal**: Meet performance baselines for throughput, latency, and resource usage.
 
-**Status**: 🚧 **IN PROGRESS** - JWT validation benchmark implemented
+**Status**: 🚧 **IN PROGRESS** - JWT validation and routing benchmarks implemented
 
 ### Performance Benchmarks
 - [ ] Performance: Baseline throughput > 1,000 req/s (single core)
 - [x] Performance: JWT validation < 1ms (P95) - Benchmark implemented: `benches/jwt_validation.rs`
-- [ ] Performance: Path routing < 10μs (P95)
+- [x] Performance: Path routing < 10μs (P95) - Benchmark implemented: `benches/routing.rs`
 - [ ] Performance: Small file (1KB) end-to-end < 10ms (P95)
 - [ ] Performance: Streaming latency < 100ms (TTFB)
 
