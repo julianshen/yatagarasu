@@ -37,6 +37,14 @@ pub struct Metrics {
 
     // Per-bucket latency tracking (stored in microseconds as u64)
     bucket_latencies: Mutex<HashMap<String, Vec<u64>>>,
+
+    // Authentication metrics
+    auth_success: AtomicU64,
+    auth_failure: AtomicU64,
+    auth_bypassed: AtomicU64,
+
+    // Authentication error counters by type (missing, invalid, expired, etc.)
+    auth_errors: Mutex<HashMap<String, u64>>,
 }
 
 impl Metrics {
@@ -50,6 +58,10 @@ impl Metrics {
             durations: Mutex::new(Vec::new()),
             s3_latencies: Mutex::new(Vec::new()),
             bucket_latencies: Mutex::new(HashMap::new()),
+            auth_success: AtomicU64::new(0),
+            auth_failure: AtomicU64::new(0),
+            auth_bypassed: AtomicU64::new(0),
+            auth_errors: Mutex::new(HashMap::new()),
         }
     }
 
@@ -199,6 +211,56 @@ impl Metrics {
                 p99: 0.0,
             }
         }
+    }
+
+    /// Increment successful authentication counter
+    pub fn increment_auth_success(&self) {
+        self.auth_success.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment failed authentication counter
+    pub fn increment_auth_failure(&self) {
+        self.auth_failure.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment authentication bypassed counter (public buckets)
+    pub fn increment_auth_bypassed(&self) {
+        self.auth_bypassed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment counter for a specific authentication error type
+    pub fn increment_auth_error(&self, error_type: &str) {
+        if let Ok(mut errors) = self.auth_errors.lock() {
+            *errors.entry(error_type.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    /// Get successful authentication count (for testing)
+    #[cfg(test)]
+    pub fn get_auth_success_count(&self) -> u64 {
+        self.auth_success.load(Ordering::Relaxed)
+    }
+
+    /// Get failed authentication count (for testing)
+    #[cfg(test)]
+    pub fn get_auth_failure_count(&self) -> u64 {
+        self.auth_failure.load(Ordering::Relaxed)
+    }
+
+    /// Get authentication bypassed count (for testing)
+    #[cfg(test)]
+    pub fn get_auth_bypassed_count(&self) -> u64 {
+        self.auth_bypassed.load(Ordering::Relaxed)
+    }
+
+    /// Get count for specific auth error type (for testing)
+    #[cfg(test)]
+    pub fn get_auth_error_count(&self, error_type: &str) -> u64 {
+        self.auth_errors
+            .lock()
+            .ok()
+            .and_then(|errors| errors.get(error_type).copied())
+            .unwrap_or(0)
     }
 }
 
@@ -439,5 +501,64 @@ mod tests {
 
         // Products bucket should have lower latency than images bucket
         assert!(products_histogram.p50 < images_histogram.p50);
+    }
+
+    // Authentication metrics tests
+    #[test]
+    fn test_track_jwt_authentication_attempts() {
+        // Test: Track JWT authentication attempts (success/failure)
+        let metrics = Metrics::new();
+
+        // Track successful authentication
+        metrics.increment_auth_success();
+        assert_eq!(metrics.get_auth_success_count(), 1);
+
+        // Track failed authentication
+        metrics.increment_auth_failure();
+        assert_eq!(metrics.get_auth_failure_count(), 1);
+
+        // Multiple authentications
+        metrics.increment_auth_success();
+        metrics.increment_auth_success();
+        assert_eq!(metrics.get_auth_success_count(), 3);
+
+        metrics.increment_auth_failure();
+        assert_eq!(metrics.get_auth_failure_count(), 2);
+    }
+
+    #[test]
+    fn test_track_authentication_bypassed() {
+        // Test: Track authentication bypassed (public buckets)
+        let metrics = Metrics::new();
+
+        // Track requests to public buckets (no auth required)
+        metrics.increment_auth_bypassed();
+        assert_eq!(metrics.get_auth_bypassed_count(), 1);
+
+        // Multiple public bucket requests
+        metrics.increment_auth_bypassed();
+        metrics.increment_auth_bypassed();
+        assert_eq!(metrics.get_auth_bypassed_count(), 3);
+    }
+
+    #[test]
+    fn test_track_authentication_errors_by_type() {
+        // Test: Track authentication errors by type (missing, invalid, expired)
+        let metrics = Metrics::new();
+
+        // Track different error types
+        metrics.increment_auth_error("missing");
+        assert_eq!(metrics.get_auth_error_count("missing"), 1);
+
+        metrics.increment_auth_error("invalid");
+        assert_eq!(metrics.get_auth_error_count("invalid"), 1);
+
+        metrics.increment_auth_error("expired");
+        assert_eq!(metrics.get_auth_error_count("expired"), 1);
+
+        // Multiple errors of same type
+        metrics.increment_auth_error("missing");
+        metrics.increment_auth_error("missing");
+        assert_eq!(metrics.get_auth_error_count("missing"), 3);
     }
 }

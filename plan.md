@@ -1199,9 +1199,9 @@ yatagarasu/
 - [x] Test: Record latency by bucket
 
 ### Test: Authentication metrics
-- [ ] Test: Track JWT authentication attempts (success/failure)
-- [ ] Test: Track authentication bypassed (public buckets)
-- [ ] Test: Track authentication errors by type (missing, invalid, expired)
+- [x] Test: Track JWT authentication attempts (success/failure)
+- [x] Test: Track authentication bypassed (public buckets)
+- [x] Test: Track authentication errors by type (missing, invalid, expired)
 
 ### Test: S3 operation metrics
 - [ ] Test: Track S3 requests by operation (GET, HEAD)
