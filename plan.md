@@ -1356,13 +1356,13 @@ kill -HUP $(pidof yatagarasu)
 - [x] File: `tests/integration/jwt_auth_test.rs`
 
 ### Test: Error handling and edge cases
-- [ ] Test: Request to non-existent S3 object returns 404 Not Found
-- [ ] Test: S3 AccessDenied error returns 403 Forbidden
-- [ ] Test: Network error to S3 returns 502 Bad Gateway
-- [ ] Test: Malformed request returns 400 Bad Request
-- [ ] Test: Request timeout returns 504 Gateway Timeout
-- [ ] Test: Large file (100MB+) streams without buffering entire file
-- [ ] File: `tests/integration_error_scenarios.rs`
+- [x] Test: Request to non-existent S3 object returns 404 Not Found
+- [x] Test: S3 AccessDenied error returns 403 Forbidden
+- [x] Test: Network error to S3 returns 502 Bad Gateway
+- [x] Test: Malformed request returns 400 Bad Request
+- [x] Test: Request timeout returns 504 Gateway Timeout
+- [x] Test: Large file (100MB+) streams without buffering entire file
+- [x] File: `tests/integration/error_scenarios_test.rs`
 
 ### Test: Concurrent request handling
 - [ ] Test: 100 concurrent requests all succeed
