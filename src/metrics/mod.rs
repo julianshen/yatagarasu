@@ -378,6 +378,140 @@ impl Metrics {
     pub fn get_uptime_seconds(&self) -> u64 {
         self.uptime_seconds.load(Ordering::Relaxed)
     }
+
+    /// Export metrics in Prometheus text format
+    /// Returns metrics as text/plain content for /metrics endpoint
+    pub fn export_prometheus(&self) -> String {
+        let mut output = String::new();
+
+        // Request metrics
+        output.push_str("# HELP http_requests_total Total number of HTTP requests received\n");
+        output.push_str("# TYPE http_requests_total counter\n");
+        output.push_str(&format!(
+            "http_requests_total {}\n",
+            self.request_count.load(Ordering::Relaxed)
+        ));
+
+        // Status code metrics
+        output.push_str("\n# HELP http_requests_by_status_total HTTP requests by status code\n");
+        output.push_str("# TYPE http_requests_by_status_total counter\n");
+        if let Ok(counts) = self.status_counts.lock() {
+            for (status, count) in counts.iter() {
+                output.push_str(&format!(
+                    "http_requests_by_status_total{{status=\"{}\"}} {}\n",
+                    status, count
+                ));
+            }
+        }
+
+        // Bucket metrics
+        output.push_str("\n# HELP http_requests_by_bucket_total HTTP requests by S3 bucket\n");
+        output.push_str("# TYPE http_requests_by_bucket_total counter\n");
+        if let Ok(counts) = self.bucket_counts.lock() {
+            for (bucket, count) in counts.iter() {
+                output.push_str(&format!(
+                    "http_requests_by_bucket_total{{bucket=\"{}\"}} {}\n",
+                    bucket, count
+                ));
+            }
+        }
+
+        // HTTP method metrics
+        output.push_str("\n# HELP http_requests_by_method_total HTTP requests by method\n");
+        output.push_str("# TYPE http_requests_by_method_total counter\n");
+        if let Ok(counts) = self.method_counts.lock() {
+            for (method, count) in counts.iter() {
+                output.push_str(&format!(
+                    "http_requests_by_method_total{{method=\"{}\"}} {}\n",
+                    method, count
+                ));
+            }
+        }
+
+        // Authentication metrics
+        output.push_str("\n# HELP auth_success_total Successful authentication attempts\n");
+        output.push_str("# TYPE auth_success_total counter\n");
+        output.push_str(&format!(
+            "auth_success_total {}\n",
+            self.auth_success.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP auth_failure_total Failed authentication attempts\n");
+        output.push_str("# TYPE auth_failure_total counter\n");
+        output.push_str(&format!(
+            "auth_failure_total {}\n",
+            self.auth_failure.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP auth_bypassed_total Authentication bypassed (public buckets)\n");
+        output.push_str("# TYPE auth_bypassed_total counter\n");
+        output.push_str(&format!(
+            "auth_bypassed_total {}\n",
+            self.auth_bypassed.load(Ordering::Relaxed)
+        ));
+
+        // S3 operation metrics
+        output.push_str("\n# HELP s3_operations_total S3 operations by type\n");
+        output.push_str("# TYPE s3_operations_total counter\n");
+        if let Ok(ops) = self.s3_operations.lock() {
+            for (operation, count) in ops.iter() {
+                output.push_str(&format!(
+                    "s3_operations_total{{operation=\"{}\"}} {}\n",
+                    operation, count
+                ));
+            }
+        }
+
+        // S3 error metrics
+        output.push_str("\n# HELP s3_errors_total S3 errors by error code\n");
+        output.push_str("# TYPE s3_errors_total counter\n");
+        if let Ok(errors) = self.s3_errors.lock() {
+            for (error_code, count) in errors.iter() {
+                output.push_str(&format!(
+                    "s3_errors_total{{error_code=\"{}\"}} {}\n",
+                    error_code, count
+                ));
+            }
+        }
+
+        // System metrics
+        output.push_str("\n# HELP active_connections Current number of active connections\n");
+        output.push_str("# TYPE active_connections gauge\n");
+        output.push_str(&format!(
+            "active_connections {}\n",
+            self.active_connections.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP bytes_sent_total Total bytes sent to clients\n");
+        output.push_str("# TYPE bytes_sent_total counter\n");
+        output.push_str(&format!(
+            "bytes_sent_total {}\n",
+            self.bytes_sent.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP bytes_received_total Total bytes received from clients\n");
+        output.push_str("# TYPE bytes_received_total counter\n");
+        output.push_str(&format!(
+            "bytes_received_total {}\n",
+            self.bytes_received.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP memory_usage_bytes Current memory usage (RSS)\n");
+        output.push_str("# TYPE memory_usage_bytes gauge\n");
+        output.push_str(&format!(
+            "memory_usage_bytes {}\n",
+            self.memory_usage.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP uptime_seconds Proxy uptime in seconds\n");
+        output.push_str("# TYPE uptime_seconds gauge\n");
+        output.push_str(&format!(
+            "uptime_seconds {}\n",
+            self.uptime_seconds.load(Ordering::Relaxed)
+        ));
+
+        output
+    }
 }
 
 /// Calculate percentiles from a sorted vector of samples (in microseconds)
@@ -821,5 +955,134 @@ mod tests {
 
         metrics.update_uptime(86400); // 1 day
         assert_eq!(metrics.get_uptime_seconds(), 86400);
+    }
+
+    // /metrics endpoint tests
+    #[test]
+    fn test_export_prometheus_format() {
+        // Test: export_prometheus() returns valid Prometheus text format
+        let metrics = Metrics::new();
+
+        // Add some sample data
+        metrics.increment_request_count();
+        metrics.increment_status_count(200);
+        metrics.increment_bucket_count("products");
+
+        let output = metrics.export_prometheus();
+
+        // Should contain HELP and TYPE annotations
+        assert!(output.contains("# HELP http_requests_total"));
+        assert!(output.contains("# TYPE http_requests_total counter"));
+
+        // Should contain actual metric values
+        assert!(output.contains("http_requests_total 1"));
+        assert!(output.contains("http_requests_by_status_total{status=\"200\"} 1"));
+        assert!(output.contains("http_requests_by_bucket_total{bucket=\"products\"} 1"));
+    }
+
+    #[test]
+    fn test_export_includes_all_metric_types() {
+        // Test: Response includes all tracked metrics
+        let metrics = Metrics::new();
+
+        // Populate various metrics
+        metrics.increment_request_count();
+        metrics.increment_auth_success();
+        metrics.increment_s3_operation("GET");
+        metrics.increment_active_connections();
+        metrics.add_bytes_sent(1024);
+
+        let output = metrics.export_prometheus();
+
+        // Verify all metric categories are present
+        assert!(output.contains("http_requests_total"));
+        assert!(output.contains("auth_success_total"));
+        assert!(output.contains("s3_operations_total"));
+        assert!(output.contains("active_connections"));
+        assert!(output.contains("bytes_sent_total"));
+    }
+
+    #[test]
+    fn test_metric_names_follow_prometheus_conventions() {
+        // Test: Metric names follow Prometheus naming conventions (snake_case, _total suffix)
+        let metrics = Metrics::new();
+        let output = metrics.export_prometheus();
+
+        // Counter metrics should have _total suffix
+        assert!(output.contains("http_requests_total"));
+        assert!(output.contains("auth_success_total"));
+        assert!(output.contains("s3_operations_total"));
+        assert!(output.contains("bytes_sent_total"));
+
+        // Gauge metrics should NOT have _total suffix
+        assert!(output.contains("active_connections "));
+        assert!(output.contains("memory_usage_bytes "));
+        assert!(output.contains("uptime_seconds "));
+
+        // All metric names should be snake_case (no camelCase, PascalCase, etc.)
+        // The output should not contain invalid metric name characters
+        assert!(!output.contains("httpRequestsTotal")); // camelCase - bad
+        assert!(!output.contains("HttpRequestsTotal")); // PascalCase - bad
+    }
+
+    #[test]
+    fn test_metrics_include_help_and_type_annotations() {
+        // Test: Metrics include help text and type annotations
+        let metrics = Metrics::new();
+        let output = metrics.export_prometheus();
+
+        // Every metric should have HELP and TYPE
+        // Check a sample of metrics
+        assert!(
+            output.contains("# HELP http_requests_total Total number of HTTP requests received")
+        );
+        assert!(output.contains("# TYPE http_requests_total counter"));
+
+        assert!(output.contains("# HELP active_connections Current number of active connections"));
+        assert!(output.contains("# TYPE active_connections gauge"));
+
+        assert!(output.contains("# HELP s3_operations_total S3 operations by type"));
+        assert!(output.contains("# TYPE s3_operations_total counter"));
+
+        // Count HELP lines (should have many)
+        let help_count = output.matches("# HELP").count();
+        assert!(help_count >= 10, "Should have at least 10 HELP annotations");
+
+        // Count TYPE lines (should match HELP count)
+        let type_count = output.matches("# TYPE").count();
+        assert_eq!(
+            help_count, type_count,
+            "Every HELP should have matching TYPE"
+        );
+    }
+
+    #[test]
+    fn test_export_prometheus_performance() {
+        // Test: Response time < 50ms even under load (simulated with many metrics)
+        let metrics = Metrics::new();
+
+        // Populate with many metrics
+        for i in 0..100 {
+            metrics.increment_status_count(200 + (i % 100) as u16);
+            metrics.increment_bucket_count(&format!("bucket{}", i));
+            metrics.increment_method_count("GET");
+            metrics.increment_s3_operation("GET");
+        }
+
+        // Time the export
+        let start = std::time::Instant::now();
+        let output = metrics.export_prometheus();
+        let elapsed = start.elapsed();
+
+        // Should be fast (< 50ms even with 100+ metrics)
+        assert!(
+            elapsed.as_millis() < 50,
+            "Export took {}ms, should be < 50ms",
+            elapsed.as_millis()
+        );
+
+        // Output should still be valid
+        assert!(output.contains("# HELP"));
+        assert!(output.contains("# TYPE"));
     }
 }

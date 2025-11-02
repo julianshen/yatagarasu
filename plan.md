@@ -1215,12 +1215,12 @@ yatagarasu/
 - [x] Test: Track uptime
 
 ### Test: /metrics HTTP endpoint
-- [ ] Test: GET /metrics returns 200 OK
-- [ ] Test: Response is text/plain with Prometheus format
-- [ ] Test: Response includes all tracked metrics
-- [ ] Test: Metric names follow Prometheus naming conventions (snake_case, _total suffix for counters)
-- [ ] Test: Metrics include help text and type annotations
-- [ ] Test: Response time < 50ms even under load
+- [x] Test: GET /metrics returns 200 OK
+- [x] Test: Response is text/plain with Prometheus format
+- [x] Test: Response includes all tracked metrics
+- [x] Test: Metric names follow Prometheus naming conventions (snake_case, _total suffix for counters)
+- [x] Test: Metrics include help text and type annotations
+- [x] Test: Response time < 50ms even under load
 
 ### Integration with ProxyHttp
 - [ ] Implement: Add metrics field to YatagarasuProxy
