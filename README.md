@@ -4,7 +4,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-504%20passing-green.svg)](plan.md)
+[![Tests](https://img.shields.io/badge/tests-507%20passing-green.svg)](plan.md)
 [![Coverage](https://img.shields.io/badge/coverage-98.43%25-brightgreen.svg)](coverage/)
 [![Status](https://img.shields.io/badge/status-HTTP%20server%20FUNCTIONAL-green.svg)](IMPLEMENTATION_STATUS.md)
 
@@ -14,16 +14,18 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 
 **Current State**: Core library modules complete and **HTTP server is now FUNCTIONAL!** (v0.2.0)
 
-**✅ What Works Now** (as of 2025-11-02):
+**✅ What Works Now** (as of 2025-11-03):
 - ✅ **HTTP Server**: Accepts connections and proxies requests to S3!
 - ✅ **Routing**: Requests to /bucket-prefix/* route to correct S3 bucket
 - ✅ **Authentication**: JWT token validation with 401/403 responses
-- ✅ **S3 Proxying**: AWS Signature V4 signing and request forwarding
+- ✅ **S3 Proxying**: AWS Signature V4 signing and request forwarding (GET and HEAD)
+- ✅ **HEAD request support**: Fixed AWS signature bug for HEAD requests
 - ✅ **Configuration**: YAML parsing with environment variables
 - ✅ **Multi-bucket routing**: Longest prefix matching
 - ✅ **Request tracing**: UUID request_id for distributed tracing
 - ✅ **Error handling**: 404 for unknown paths, 401 for missing tokens, 403 for invalid tokens
-- ✅ **504 passing tests** with 98.43% coverage
+- ✅ **Integration test infrastructure**: ProxyTestHarness for automated testing
+- ✅ **507 passing tests** with 98.43% coverage
 
 **⏳ What's Still Being Worked On**:
 - ⏳ Integration testing with real S3/MinIO (code complete, testing needed)
@@ -39,6 +41,8 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 
 **✅ Recently Completed**:
 - ✅ **Phase 17**: Performance benchmarking infrastructure (Criterion + K6) - ALL TARGETS EXCEEDED!
+- ✅ **Phase 16**: Integration test infrastructure with ProxyTestHarness
+- ✅ **Phase 0**: HEAD request support - Fixed AWS Signature V4 bug
 
 **Progress**: ~75% toward v1.0 (Phase 17 performance testing complete!)
 
@@ -76,7 +80,7 @@ cd yatagarasu
 # Build the proxy
 cargo build --release
 
-# Run comprehensive test suite (504 tests)
+# Run comprehensive test suite (507 tests)
 cargo test
 
 # Run the proxy server
@@ -738,32 +742,36 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 **Progress**:
 
 - **Tests written**: 500+ tests
-- **Tests passing**: 504 (100%)
+- **Tests passing**: 507 (100%)
 - **Test coverage**: 98.43% (314/319 lines)
-- **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 10% (Phases 6-16 🚧)
+- **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 75% (Phases 12-17 ✅)
 
 **Completed Milestones**:
 - ✅ Phase 1-2: Foundation and Configuration (50 tests)
 - ✅ Phase 3: Path Routing (26 tests)
 - ✅ Phase 4: JWT Authentication (49 tests)
 - ✅ Phase 5: S3 Client & Signature (73 tests)
+- ✅ Phase 0: Critical bug fixes (timestamp, JWT algorithm, HEAD request support)
+- ✅ Phase 12: Pingora HTTP server implementation
+- ✅ Phase 13: ProxyHttp trait implementation (234 lines)
+- ✅ Phase 15: Structured logging with tracing
+- ✅ Phase 16: Integration test infrastructure
+- ✅ Phase 17: Performance benchmarking
 
-**Current Sprint**: Phase 0 + Phase 12 - Critical Fixes and Server Integration
-- **Phase 0**: Fix S3 timestamp bug, JWT algorithm vulnerability, add missing dependencies
-- **Phase 12**: Implement Pingora ProxyHttp trait (currently empty proxy/mod.rs)
-- Wire up main.rs to start event loop
-- Connect router → auth → S3 pipeline
+**Current Sprint**: Integration Testing and Production Features
+- **Phase 18**: Execute full integration test suite with MinIO/LocalStack
+- **Phase 19-20**: Metrics endpoint, hot reload, production hardening
 
 **Next Milestones**:
-- Phase 13: Request Pipeline Integration
-- Phase 14: S3 Proxying Implementation
-- Phase 15: Error Handling & Logging
-- Phase 16: Final Integration & Testing with MinIO
+- Phase 18: Full integration testing with real S3
+- Phase 19: Prometheus metrics endpoint
+- Phase 20: Configuration hot reload
+- Phase 21-22: Docker images and CI/CD
 
 **Known Issues**:
-- ⚠️ S3 timestamp hardcoded to 2013 (causes 403 Forbidden on all S3 requests)
-- ⚠️ JWT algorithm mismatch vulnerability
-- ⚠️ proxy/mod.rs is empty (2 lines) - core blocker for HTTP functionality
+- ⏳ Integration tests need Docker/LocalStack environment
+- ⏳ Metrics endpoint not yet implemented
+- ⏳ Hot reload not yet implemented
 
 See [plan.md](plan.md) for detailed test checklist and [ROADMAP.md](ROADMAP.md) for implementation roadmap.
 
