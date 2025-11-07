@@ -1228,7 +1228,7 @@ yatagarasu/
 - [x] Implement: Add metrics field to YatagarasuProxy
 - [x] Implement: Record metrics in request_filter (request received)
 - [x] Implement: Record metrics in upstream_request_filter (S3 request)
-- [ ] Implement: Record metrics in logging (request completed)
+- [x] Implement: Record metrics in logging (request completed)
 - [x] Implement: Special handling for /metrics path (bypass auth, return metrics)
 - [ ] Test: Metrics increment correctly during proxy requests
 

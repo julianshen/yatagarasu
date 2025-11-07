@@ -396,15 +396,43 @@ impl ProxyHttp for YatagarasuProxy {
     /// Log request completion for metrics and debugging
     async fn logging(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         _e: Option<&pingora_core::Error>,
         ctx: &mut Self::CTX,
     ) {
+        // Get status code from response header
+        let status_code = if let Some(resp) = session.response_written() {
+            resp.status.as_u16()
+        } else {
+            500 // Default to 500 if no response written
+        };
+
+        // Calculate request duration
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as f64;
+        let start = ctx.timestamp() as f64 * 1000.0; // Convert seconds to milliseconds
+        let duration_ms = now - start;
+
+        // Record metrics
+        self.metrics.increment_status_count(status_code);
+        self.metrics.increment_method_count(ctx.method());
+        self.metrics.record_duration(duration_ms);
+
+        // Record bucket-specific metrics if bucket was identified
+        if let Some(bucket_config) = ctx.bucket_config() {
+            self.metrics.increment_bucket_count(&bucket_config.name);
+            self.metrics.record_bucket_latency(&bucket_config.name, duration_ms);
+        }
+
         // Log request completion with request ID for tracing
         tracing::info!(
             request_id = %ctx.request_id(),
             method = %ctx.method(),
             path = %ctx.path(),
+            status_code = status_code,
+            duration_ms = duration_ms,
             "Request completed"
         );
     }
