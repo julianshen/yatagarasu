@@ -792,6 +792,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -957,6 +958,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -1170,6 +1172,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -1359,6 +1362,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -1549,6 +1553,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -1742,6 +1747,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -2388,6 +2394,7 @@ server:
   port: {}
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
@@ -4095,6 +4102,7 @@ buckets:
       enabled: true
 
 jwt:
+  enabled: true
   secret: "{}"
   algorithm: "HS256"
   token_sources:
