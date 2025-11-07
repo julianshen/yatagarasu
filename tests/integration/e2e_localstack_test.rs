@@ -796,7 +796,7 @@ jwt:
   secret: "{}"
   algorithm: "HS256"
   token_sources:
-    - type: "bearer_header"
+    - type: "bearer"
 
 buckets:
   - name: "private"
@@ -962,7 +962,7 @@ jwt:
   secret: "{}"
   algorithm: "HS256"
   token_sources:
-    - type: "bearer_header"
+    - type: "bearer"
 
 buckets:
   - name: "private"
@@ -1176,7 +1176,7 @@ jwt:
   secret: "{}"
   algorithm: "HS256"
   token_sources:
-    - type: "bearer_header"
+    - type: "bearer"
 
 buckets:
   - name: "private"
@@ -1366,7 +1366,7 @@ jwt:
   secret: "{}"
   algorithm: "HS256"
   token_sources:
-    - type: "bearer_header"
+    - type: "bearer"
   claims:
     - claim: "role"
       operator: "equals"
@@ -2398,7 +2398,7 @@ jwt:
   secret: "{}"
   algorithm: "HS256"
   token_sources:
-    - type: "bearer_header"
+    - type: "bearer"
 
 buckets:
   - name: "public"
