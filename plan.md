@@ -1576,7 +1576,7 @@ Before releasing v0.2.0, verify:
 - [x] No credentials or tokens in logs (security tests pass)
 - [x] Error responses are user-friendly (404 tested in e2e)
 - [ ] Memory usage stays constant during streaming (needs load testing)
-- [ ] Documentation updated with working examples
+- [x] Documentation updated with working examples ✅ **README.md updated 2025-11-09**
 - [x] Can run proxy with LocalStack (verified in integration tests)
 
 **Performance Baseline** 🚧:
