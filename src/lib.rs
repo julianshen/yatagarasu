@@ -10,6 +10,7 @@ pub mod logging;
 pub mod metrics; // Phase 18: Prometheus Metrics
 pub mod pipeline; // Phase 13: Request Pipeline Integration
 pub mod proxy;
+pub mod rate_limit; // Phase 21: Rate Limiting
 pub mod reload; // Phase 19: Configuration Hot Reload
 pub mod resources; // Phase 21: Resource Monitoring & Exhaustion Prevention
 pub mod router;

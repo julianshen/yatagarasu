@@ -172,6 +172,8 @@ pub struct ServerConfig {
     pub request_timeout: u64,
     #[serde(default = "default_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimitConfigYaml>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +199,8 @@ pub struct S3Config {
     pub connection_pool_size: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<CircuitBreakerConfigYaml>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<BucketRateLimitConfigYaml>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,6 +279,41 @@ impl CircuitBreakerConfigYaml {
             half_open_max_requests: self.half_open_max_requests,
         }
     }
+}
+
+/// Rate limiting configuration for server (global and per-IP)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfigYaml {
+    /// Enable rate limiting
+    #[serde(default)]
+    pub enabled: bool,
+    /// Global rate limit (requests per second across all buckets)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global: Option<GlobalRateLimitConfigYaml>,
+    /// Per-IP rate limit (requests per second per client IP)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_ip: Option<PerIpRateLimitConfigYaml>,
+}
+
+/// Global rate limit configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalRateLimitConfigYaml {
+    /// Requests per second (global limit)
+    pub requests_per_second: u32,
+}
+
+/// Per-IP rate limit configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerIpRateLimitConfigYaml {
+    /// Requests per second per IP address
+    pub requests_per_second: u32,
+}
+
+/// Per-bucket rate limit configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BucketRateLimitConfigYaml {
+    /// Requests per second for this bucket
+    pub requests_per_second: u32,
 }
 
 #[cfg(test)]

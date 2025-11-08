@@ -16,6 +16,7 @@ use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::pipeline::RequestContext;
+use crate::rate_limit::RateLimitManager;
 use crate::reload::ReloadManager;
 use crate::resources::ResourceMonitor;
 use crate::router::Router;
@@ -32,6 +33,7 @@ pub struct YatagarasuProxy {
     resource_monitor: Arc<ResourceMonitor>,
     request_semaphore: Arc<Semaphore>,
     circuit_breakers: Arc<HashMap<String, Arc<CircuitBreaker>>>,
+    rate_limit_manager: Option<Arc<RateLimitManager>>,
 }
 
 impl YatagarasuProxy {
@@ -53,6 +55,37 @@ impl YatagarasuProxy {
             }
         }
 
+        // Initialize rate limit manager if enabled
+        let rate_limit_manager = if let Some(ref rate_limit_config) = config.server.rate_limit {
+            if rate_limit_config.enabled {
+                let global_rps = rate_limit_config
+                    .global
+                    .as_ref()
+                    .map(|g| g.requests_per_second);
+                let per_ip_rps = rate_limit_config
+                    .per_ip
+                    .as_ref()
+                    .map(|p| p.requests_per_second);
+                let manager = RateLimitManager::new(global_rps, per_ip_rps);
+
+                // Add per-bucket rate limiters
+                for bucket in &config.buckets {
+                    if let Some(ref bucket_rate_limit) = bucket.s3.rate_limit {
+                        manager.add_bucket_limiter(
+                            bucket.name.clone(),
+                            bucket_rate_limit.requests_per_second,
+                        );
+                    }
+                }
+
+                Some(Arc::new(manager))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Self {
             config: Arc::new(config),
             router,
@@ -61,6 +94,7 @@ impl YatagarasuProxy {
             resource_monitor,
             request_semaphore,
             circuit_breakers: Arc::new(circuit_breakers),
+            rate_limit_manager,
         }
     }
 
@@ -83,6 +117,37 @@ impl YatagarasuProxy {
             }
         }
 
+        // Initialize rate limit manager if enabled
+        let rate_limit_manager = if let Some(ref rate_limit_config) = config.server.rate_limit {
+            if rate_limit_config.enabled {
+                let global_rps = rate_limit_config
+                    .global
+                    .as_ref()
+                    .map(|g| g.requests_per_second);
+                let per_ip_rps = rate_limit_config
+                    .per_ip
+                    .as_ref()
+                    .map(|p| p.requests_per_second);
+                let manager = RateLimitManager::new(global_rps, per_ip_rps);
+
+                // Add per-bucket rate limiters
+                for bucket in &config.buckets {
+                    if let Some(ref bucket_rate_limit) = bucket.s3.rate_limit {
+                        manager.add_bucket_limiter(
+                            bucket.name.clone(),
+                            bucket_rate_limit.requests_per_second,
+                        );
+                    }
+                }
+
+                Some(Arc::new(manager))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Self {
             config: Arc::new(config),
             router,
@@ -91,6 +156,7 @@ impl YatagarasuProxy {
             resource_monitor,
             request_semaphore,
             circuit_breakers: Arc::new(circuit_breakers),
+            rate_limit_manager,
         }
     }
 
@@ -534,7 +600,56 @@ impl ProxyHttp for YatagarasuProxy {
         // Record bucket metrics
         self.metrics.increment_bucket_count(&bucket_config.name);
 
-        // THIRD: Check circuit breaker for this bucket (if configured)
+        // THIRD: Check rate limits (if enabled)
+        if let Some(ref rate_limit_manager) = self.rate_limit_manager {
+            // Get client IP from session
+            let client_ip = session
+                .client_addr()
+                .and_then(|addr| addr.as_inet().map(|inet| inet.ip()));
+
+            // Check all rate limits (global, per-IP, per-bucket)
+            if let Err(rate_limit_error) =
+                rate_limit_manager.check_all(&bucket_config.name, client_ip)
+            {
+                tracing::warn!(
+                    bucket = %bucket_config.name,
+                    client_ip = ?client_ip,
+                    error = %rate_limit_error,
+                    "Rate limit exceeded"
+                );
+
+                // Increment rate limit exceeded metrics
+                self.metrics
+                    .increment_rate_limit_exceeded(&bucket_config.name);
+
+                let mut header = ResponseHeader::build(429, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Retry-After", "1")?; // Suggest retry after 1 second
+
+                let error_body = serde_json::json!({
+                    "error": "Too Many Requests",
+                    "message": rate_limit_error.to_string(),
+                    "status": 429
+                })
+                .to_string();
+
+                header.insert_header("Content-Length", error_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(error_body.into()), true)
+                    .await?;
+
+                // Record 429 status
+                self.metrics.increment_status_count(429);
+
+                return Ok(true); // Request handled
+            }
+        }
+
+        // FOURTH: Check circuit breaker for this bucket (if configured)
         if let Some(circuit_breaker) = self.circuit_breakers.get(&bucket_config.name) {
             // Check if circuit breaker allows request
             if !circuit_breaker.should_allow_request() {
