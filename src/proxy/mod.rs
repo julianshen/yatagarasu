@@ -8,6 +8,7 @@ use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_proxy::{ProxyHttp, Session};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::auth::{authenticate_request, AuthError};
 use crate::config::Config;
@@ -137,8 +138,30 @@ impl ProxyHttp for YatagarasuProxy {
             (endpoint, 443, true)
         };
 
+        // Store endpoint for logging before moving it
+        let endpoint_for_logging = endpoint.clone();
+
         // Create HttpPeer for S3 endpoint - need to clone endpoint for SNI
-        let peer = Box::new(HttpPeer::new((endpoint.clone(), port), use_tls, endpoint));
+        let mut peer = Box::new(HttpPeer::new((endpoint.clone(), port), use_tls, endpoint));
+
+        // Configure timeouts from S3Config
+        let timeout_duration = Duration::from_secs(bucket_config.s3.timeout);
+
+        // Set connection timeout (how long to wait to establish connection)
+        peer.options.connection_timeout = Some(timeout_duration);
+
+        // Set read timeout (how long to wait for data from upstream)
+        peer.options.read_timeout = Some(timeout_duration);
+
+        // Set write timeout (how long to wait to send data to upstream)
+        peer.options.write_timeout = Some(timeout_duration);
+
+        tracing::debug!(
+            bucket = %bucket_config.name,
+            timeout_seconds = bucket_config.s3.timeout,
+            endpoint = %endpoint_for_logging,
+            "Configured S3 peer with timeout"
+        );
 
         Ok(peer)
     }
