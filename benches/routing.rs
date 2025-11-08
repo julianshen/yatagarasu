@@ -287,6 +287,7 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
                     bucket: format!("bucket-{}", i),
                     access_key: "test-key".to_string(),
                     secret_key: "test-secret".to_string(),
+                    timeout: 20,
                 },
                 auth: None,
             })
