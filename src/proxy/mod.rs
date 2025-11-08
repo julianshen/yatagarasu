@@ -540,12 +540,15 @@ impl ProxyHttp for YatagarasuProxy {
             return Ok(true); // Short-circuit
         }
 
-        // 4. Check for path traversal attempts
-        if let Err(security_error) = security::check_path_traversal(&path) {
+        // 4. Check for path traversal attempts (check RAW URI before normalization)
+        // CRITICAL: Must check raw URI because path libraries normalize paths
+        // /test/../etc/passwd gets normalized to /etc/passwd by uri.path()
+        // We need to detect the attack BEFORE normalization
+        if let Err(security_error) = security::check_path_traversal(&uri_str) {
             tracing::warn!(
-                path = %path,
+                uri = %uri_str,
                 error = %security_error,
-                "Path traversal attempt detected"
+                "Path traversal attempt detected in raw URI"
             );
 
             let mut header = ResponseHeader::build(400, None)?;
