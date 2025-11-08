@@ -1287,10 +1287,10 @@ curl http://localhost:8080/metrics
 - [x] Test: Can change token sources (header, query param, custom)
 
 ### Test: Server configuration changes (requires restart)
-- [ ] Test: Changing server address requires restart (documented)
-- [ ] Test: Changing server port requires restart (documented)
-- [ ] Test: Changing TLS config requires restart (documented)
-- [ ] Document: Which configs support hot reload vs require restart
+- [x] Test: Changing server address requires restart (documented) - docs/CONFIG_RELOAD.md
+- [x] Test: Changing server port requires restart (documented) - docs/CONFIG_RELOAD.md
+- [x] Test: Changing TLS config requires restart (documented) - docs/CONFIG_RELOAD.md
+- [x] Document: Which configs support hot reload vs require restart - docs/CONFIG_RELOAD.md
 
 ### Test: Reload API endpoint (alternative to SIGHUP)
 - [x] Test: POST /admin/reload triggers config reload (manual test verified - returns 200 OK with JSON)
