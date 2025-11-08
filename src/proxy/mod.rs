@@ -35,9 +35,8 @@ impl YatagarasuProxy {
     pub fn new(config: Config) -> Self {
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
-        // Initialize resource monitor with reasonable defaults
-        // 1024 file descriptors, 1GB memory limit
-        let resource_monitor = Arc::new(ResourceMonitor::new(1024, 1024 * 1024 * 1024));
+        // Initialize resource monitor with auto-detected system limits
+        let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
         Self {
             config: Arc::new(config),
             router,
@@ -52,9 +51,8 @@ impl YatagarasuProxy {
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
         let reload_manager = Arc::new(ReloadManager::new(config_path));
-        // Initialize resource monitor with reasonable defaults
-        // 1024 file descriptors, 1GB memory limit
-        let resource_monitor = Arc::new(ResourceMonitor::new(1024, 1024 * 1024 * 1024));
+        // Initialize resource monitor with auto-detected system limits
+        let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
         Self {
             config: Arc::new(config),
             router,

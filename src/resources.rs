@@ -40,6 +40,107 @@ pub enum ResourceLevel {
     Exhausted,
 }
 
+/// Detect file descriptor limit from the operating system
+///
+/// Returns the soft limit for RLIMIT_NOFILE (number of open files).
+/// Falls back to 10240 if detection fails or limit is unlimited.
+pub fn detect_fd_limit() -> u64 {
+    #[cfg(unix)]
+    {
+        // Use libc to get rlimit on Unix systems
+        unsafe {
+            let mut rlim = std::mem::zeroed::<libc::rlimit>();
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0 {
+                // Check if soft limit is unlimited (RLIM_INFINITY)
+                if rlim.rlim_cur == libc::RLIM_INFINITY {
+                    // Use hard limit if it's reasonable, otherwise use default
+                    if rlim.rlim_max != libc::RLIM_INFINITY && rlim.rlim_max > 0 {
+                        let limit = rlim.rlim_max as u64;
+                        tracing::debug!(
+                            limit = limit,
+                            "FD soft limit is unlimited, using hard limit"
+                        );
+                        return limit;
+                    } else {
+                        tracing::debug!("FD limit is unlimited, using default 10240");
+                        return 10240;
+                    }
+                }
+
+                // Use soft limit (can be changed by process)
+                let limit = rlim.rlim_cur as u64;
+                tracing::debug!(limit = limit, "Detected file descriptor soft limit");
+                return limit;
+            } else {
+                tracing::warn!("Failed to detect FD limit via getrlimit, using default 10240");
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tracing::warn!("FD limit detection not supported on this platform, using default 10240");
+    }
+
+    10240 // Default fallback (10K file descriptors)
+}
+
+/// Detect memory limit from the operating system
+///
+/// Returns total system memory. Falls back to 1GB if detection fails.
+pub fn detect_memory_limit() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, read from /proc/meminfo
+        if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+            for line in content.lines() {
+                if line.starts_with("MemTotal:") {
+                    // Format: "MemTotal:       16384000 kB"
+                    if let Some(kb_str) = line.split_whitespace().nth(1) {
+                        if let Ok(kb) = kb_str.parse::<u64>() {
+                            let bytes = kb * 1024;
+                            tracing::debug!(bytes = bytes, "Detected system memory from /proc/meminfo");
+                            return bytes;
+                        }
+                    }
+                }
+            }
+        }
+        tracing::warn!("Failed to read /proc/meminfo, using default 1GB");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, use sysctl to get hw.memsize
+        unsafe {
+            let mut size: u64 = 0;
+            let mut len = std::mem::size_of::<u64>();
+            let name = b"hw.memsize\0".as_ptr() as *const i8;
+
+            if libc::sysctlbyname(
+                name,
+                &mut size as *mut u64 as *mut libc::c_void,
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            ) == 0
+            {
+                tracing::debug!(bytes = size, "Detected system memory from sysctl");
+                return size;
+            } else {
+                tracing::warn!("Failed to detect memory via sysctl, using default 1GB");
+            }
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        tracing::warn!("Memory detection not supported on this platform, using default 1GB");
+    }
+
+    1024 * 1024 * 1024 // 1GB default fallback
+}
+
 impl ResourceMonitor {
     /// Create a new resource monitor with system limits
     pub fn new(fd_limit: u64, memory_limit: u64) -> Self {
@@ -50,6 +151,20 @@ impl ResourceMonitor {
             memory_limit: Arc::new(AtomicU64::new(memory_limit)),
             metrics_enabled: Arc::new(AtomicBool::new(true)),
         }
+    }
+
+    /// Create a new resource monitor with auto-detected system limits
+    pub fn new_auto_detect() -> Self {
+        let fd_limit = detect_fd_limit();
+        let memory_limit = detect_memory_limit();
+
+        tracing::info!(
+            fd_limit = fd_limit,
+            memory_limit = memory_limit,
+            "Auto-detected system resource limits"
+        );
+
+        Self::new(fd_limit, memory_limit)
     }
 
     /// Update current file descriptor count
@@ -320,5 +435,69 @@ mod tests {
         // Drop to 75%
         monitor.update_fd_count(750);
         assert!(monitor.metrics_enabled());
+    }
+
+    #[test]
+    fn test_system_fd_limit_detected() {
+        let fd_limit = detect_fd_limit();
+
+        // Should return a reasonable value (at least 256, typically 1024+)
+        assert!(
+            fd_limit >= 256,
+            "FD limit should be at least 256, got {}",
+            fd_limit
+        );
+
+        // Should be less than a million (sanity check)
+        assert!(
+            fd_limit < 1_000_000,
+            "FD limit seems unreasonably high: {}",
+            fd_limit
+        );
+    }
+
+    #[test]
+    fn test_system_memory_limit_detected() {
+        let mem_limit = detect_memory_limit();
+
+        // Should return at least 512MB
+        assert!(
+            mem_limit >= 512 * 1024 * 1024,
+            "Memory limit should be at least 512MB, got {} bytes",
+            mem_limit
+        );
+
+        // Should be less than 1TB (sanity check)
+        assert!(
+            mem_limit < 1024u64 * 1024 * 1024 * 1024,
+            "Memory limit seems unreasonably high: {} bytes",
+            mem_limit
+        );
+    }
+
+    #[test]
+    fn test_new_with_auto_detection() {
+        let monitor = ResourceMonitor::new_auto_detect();
+
+        // Verify it created successfully
+        assert_eq!(monitor.resource_level(), ResourceLevel::Normal);
+        assert!(monitor.should_accept_request());
+        assert!(monitor.metrics_enabled());
+
+        // Verify limits are reasonable (from auto-detection)
+        let fd_percent = monitor.fd_usage_percent();
+        let mem_percent = monitor.memory_usage_percent();
+
+        // Initial usage should be low
+        assert!(
+            fd_percent < 50.0,
+            "Initial FD usage should be low, got {}%",
+            fd_percent
+        );
+        assert!(
+            mem_percent < 50.0,
+            "Initial memory usage should be low, got {}%",
+            mem_percent
+        );
     }
 }
