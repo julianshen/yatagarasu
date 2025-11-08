@@ -1438,12 +1438,21 @@ cargo test --test 'integration_*' -- --test-threads=1
   - Returns 503 Service Unavailable when circuit open
   - State exposed via Prometheus metrics
 
-**❌ NOT YET INTEGRATED**:
-- **Retry Logic** ([src/proxy/mod.rs:97-107](src/proxy/mod.rs#L97-L107))
-  - Retry policies initialized from config
-  - Exponential backoff logic exists in retry module
-  - **Blocked**: Requires Pingora-level integration (TODO at line 40)
-  - **Future work**: Explore Pingora's native retry mechanisms
+**✅ WORKING (Pingora Built-in)**:
+- **Basic Retry Logic** - Pingora has built-in retry loop!
+  - Automatic retries for connection failures
+  - Automatic retries for reused connection errors
+  - Configured via `ServerConf::max_retries` (defaults likely 3)
+  - See [docs/RETRY_INTEGRATION.md](docs/RETRY_INTEGRATION.md) for complete details
+
+**🔄 FUTURE ENHANCEMENT (v1.1)**:
+- **Custom Retry Hooks** ([src/proxy/mod.rs](src/proxy/mod.rs))
+  - Implement `fail_to_connect()` hook for connection errors
+  - Implement `error_while_proxy()` hook for S3 500/503 errors
+  - Add per-bucket retry policies (config already parsed)
+  - Add retry metrics (attempts, successes, failures)
+  - **NOT recommended**: Exponential backoff (conflicts with Pingora design)
+  - **Better**: Use circuit breaker + rate limiting (already implemented)
 
 ### Test: Connection pooling and limits
 - [ ] Test: Connection pool size configurable per bucket
