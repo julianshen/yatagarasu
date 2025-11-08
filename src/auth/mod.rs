@@ -60,7 +60,7 @@ pub fn try_extract_token(
     sources: &[crate::config::TokenSource],
 ) -> Option<String> {
     for source in sources {
-        log::debug!(
+        tracing::debug!(
             "Attempting to extract JWT from source type: {}",
             source.source_type
         );
@@ -91,7 +91,7 @@ pub fn try_extract_token(
                 }
             }
             _ => {
-                log::warn!(
+                tracing::warn!(
                     "Unknown token source type '{}' - this should have been caught by config validation",
                     source.source_type
                 );
@@ -100,21 +100,21 @@ pub fn try_extract_token(
         };
 
         if let Some(ref token_value) = token {
-            log::debug!(
+            tracing::debug!(
                 "Successfully extracted JWT token from source type '{}' (length: {} chars)",
                 source.source_type,
                 token_value.len()
             );
             return token;
         } else {
-            log::debug!(
+            tracing::debug!(
                 "No token found in source type '{}'",
                 source.source_type
             );
         }
     }
 
-    log::debug!("JWT token not found in any configured source");
+    tracing::debug!("JWT token not found in any configured source");
     None
 }
 
@@ -205,24 +205,24 @@ pub fn authenticate_request(
         .ok_or(AuthError::MissingToken)?;
 
     // Validate JWT with configured algorithm
-    log::debug!("Validating JWT signature with algorithm: {}", jwt_config.algorithm);
+    tracing::debug!("Validating JWT signature with algorithm: {}", jwt_config.algorithm);
     let claims = validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm).map_err(|e| {
-        log::warn!("JWT signature validation failed: {}", e);
+        tracing::warn!("JWT signature validation failed: {}", e);
         AuthError::InvalidToken(e.to_string())
     })?;
 
-    log::debug!("JWT signature valid, checking claims");
+    tracing::debug!("JWT signature valid, checking claims");
 
     // Verify claims if rules are configured
     if !jwt_config.claims.is_empty() {
-        log::debug!("Verifying {} custom claim rules", jwt_config.claims.len());
+        tracing::debug!("Verifying {} custom claim rules", jwt_config.claims.len());
         if !verify_claims(&claims, &jwt_config.claims) {
-            log::warn!("JWT claims verification failed");
+            tracing::warn!("JWT claims verification failed");
             return Err(AuthError::ClaimsVerificationFailed);
         }
-        log::debug!("All JWT claims verified successfully");
+        tracing::debug!("All JWT claims verified successfully");
     }
 
-    log::debug!("JWT authentication successful");
+    tracing::debug!("JWT authentication successful");
     Ok(claims)
 }
