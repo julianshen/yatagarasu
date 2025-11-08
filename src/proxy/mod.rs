@@ -19,6 +19,7 @@ use crate::pipeline::RequestContext;
 use crate::rate_limit::RateLimitManager;
 use crate::reload::ReloadManager;
 use crate::resources::ResourceMonitor;
+use crate::retry::RetryPolicy;
 use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
 use std::path::PathBuf;
@@ -34,6 +35,10 @@ pub struct YatagarasuProxy {
     request_semaphore: Arc<Semaphore>,
     circuit_breakers: Arc<HashMap<String, Arc<CircuitBreaker>>>,
     rate_limit_manager: Option<Arc<RateLimitManager>>,
+    /// Retry policies per bucket (configured but not yet integrated with Pingora's request flow)
+    /// TODO: Integrate retry logic when we have direct control over HTTP client lifecycle
+    #[allow(dead_code)]
+    retry_policies: Arc<HashMap<String, RetryPolicy>>,
 }
 
 impl YatagarasuProxy {
@@ -86,6 +91,18 @@ impl YatagarasuProxy {
             None
         };
 
+        // Initialize retry policies for buckets that have retry config
+        let mut retry_policies = HashMap::new();
+        for bucket in &config.buckets {
+            if let Some(ref retry_config) = bucket.s3.retry {
+                let policy = retry_config.to_retry_policy();
+                retry_policies.insert(bucket.name.clone(), policy);
+            } else {
+                // Use default retry policy if not configured
+                retry_policies.insert(bucket.name.clone(), RetryPolicy::default());
+            }
+        }
+
         Self {
             config: Arc::new(config),
             router,
@@ -95,6 +112,7 @@ impl YatagarasuProxy {
             request_semaphore,
             circuit_breakers: Arc::new(circuit_breakers),
             rate_limit_manager,
+            retry_policies: Arc::new(retry_policies),
         }
     }
 
@@ -148,6 +166,18 @@ impl YatagarasuProxy {
             None
         };
 
+        // Initialize retry policies for buckets that have retry config
+        let mut retry_policies = HashMap::new();
+        for bucket in &config.buckets {
+            if let Some(ref retry_config) = bucket.s3.retry {
+                let policy = retry_config.to_retry_policy();
+                retry_policies.insert(bucket.name.clone(), policy);
+            } else {
+                // Use default retry policy if not configured
+                retry_policies.insert(bucket.name.clone(), RetryPolicy::default());
+            }
+        }
+
         Self {
             config: Arc::new(config),
             router,
@@ -157,6 +187,7 @@ impl YatagarasuProxy {
             request_semaphore,
             circuit_breakers: Arc::new(circuit_breakers),
             rate_limit_manager,
+            retry_policies: Arc::new(retry_policies),
         }
     }
 

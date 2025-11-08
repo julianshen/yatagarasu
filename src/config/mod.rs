@@ -201,6 +201,8 @@ pub struct S3Config {
     pub circuit_breaker: Option<CircuitBreakerConfigYaml>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<BucketRateLimitConfigYaml>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryConfigYaml>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +316,43 @@ pub struct PerIpRateLimitConfigYaml {
 pub struct BucketRateLimitConfigYaml {
     /// Requests per second for this bucket
     pub requests_per_second: u32,
+}
+
+/// Retry configuration (YAML format)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfigYaml {
+    /// Maximum number of retry attempts (including initial attempt)
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u32,
+    /// Initial backoff delay in milliseconds
+    #[serde(default = "default_initial_backoff_ms")]
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff delay in milliseconds
+    #[serde(default = "default_max_backoff_ms")]
+    pub max_backoff_ms: u64,
+}
+
+fn default_max_attempts() -> u32 {
+    3
+}
+
+fn default_initial_backoff_ms() -> u64 {
+    100
+}
+
+fn default_max_backoff_ms() -> u64 {
+    1000
+}
+
+impl RetryConfigYaml {
+    /// Convert to RetryPolicy from retry module
+    pub fn to_retry_policy(&self) -> crate::retry::RetryPolicy {
+        crate::retry::RetryPolicy::new(
+            self.max_attempts,
+            self.initial_backoff_ms,
+            self.max_backoff_ms,
+        )
+    }
 }
 
 #[cfg(test)]

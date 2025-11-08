@@ -49,6 +49,7 @@ pub struct RateLimitManager {
     /// Global rate limiter (all requests)
     global: Option<Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock>>>,
     /// Per-bucket rate limiters (keyed by bucket name)
+    #[allow(clippy::type_complexity)]
     buckets: Arc<
         RwLock<
             HashMap<
@@ -58,6 +59,7 @@ pub struct RateLimitManager {
         >,
     >,
     /// Per-IP rate limiters (keyed by IP address)
+    #[allow(clippy::type_complexity)]
     ips: Arc<
         RwLock<
             HashMap<

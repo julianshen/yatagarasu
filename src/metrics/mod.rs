@@ -69,6 +69,11 @@ pub struct Metrics {
 
     // Rate limiting metrics (per-bucket)
     rate_limit_exceeded: Mutex<HashMap<String, u64>>,
+
+    // Retry metrics (per-bucket)
+    s3_retry_attempts: Mutex<HashMap<String, u64>>,
+    s3_retry_success: Mutex<HashMap<String, u64>>,
+    s3_retry_exhausted: Mutex<HashMap<String, u64>>,
 }
 
 impl Metrics {
@@ -98,6 +103,9 @@ impl Metrics {
             config_generation: AtomicU64::new(0),
             concurrency_limit_rejections: AtomicU64::new(0),
             rate_limit_exceeded: Mutex::new(HashMap::new()),
+            s3_retry_attempts: Mutex::new(HashMap::new()),
+            s3_retry_success: Mutex::new(HashMap::new()),
+            s3_retry_exhausted: Mutex::new(HashMap::new()),
         }
     }
 
@@ -424,6 +432,24 @@ impl Metrics {
         *rate_limit_exceeded.entry(bucket.to_string()).or_insert(0) += 1;
     }
 
+    /// Increment S3 retry attempt counter for a specific bucket
+    pub fn increment_s3_retry_attempt(&self, bucket: &str) {
+        let mut s3_retry_attempts = self.s3_retry_attempts.lock().unwrap();
+        *s3_retry_attempts.entry(bucket.to_string()).or_insert(0) += 1;
+    }
+
+    /// Increment S3 retry success counter for a specific bucket (eventually succeeded after retry)
+    pub fn increment_s3_retry_success(&self, bucket: &str) {
+        let mut s3_retry_success = self.s3_retry_success.lock().unwrap();
+        *s3_retry_success.entry(bucket.to_string()).or_insert(0) += 1;
+    }
+
+    /// Increment S3 retry exhausted counter for a specific bucket (all attempts failed)
+    pub fn increment_s3_retry_exhausted(&self, bucket: &str) {
+        let mut s3_retry_exhausted = self.s3_retry_exhausted.lock().unwrap();
+        *s3_retry_exhausted.entry(bucket.to_string()).or_insert(0) += 1;
+    }
+
     /// Get successful reload count (for testing)
     #[cfg(test)]
     pub fn get_reload_success_count(&self) -> u64 {
@@ -619,6 +645,37 @@ impl Metrics {
         for (bucket, count) in rate_limit_exceeded.iter() {
             output.push_str(&format!(
                 "rate_limit_exceeded_total{{bucket=\"{}\"}} {}\n",
+                bucket, count
+            ));
+        }
+
+        // Retry metrics
+        output.push_str("\n# HELP s3_retry_attempts_total Total retry attempts per bucket\n");
+        output.push_str("# TYPE s3_retry_attempts_total counter\n");
+        let s3_retry_attempts = self.s3_retry_attempts.lock().unwrap();
+        for (bucket, count) in s3_retry_attempts.iter() {
+            output.push_str(&format!(
+                "s3_retry_attempts_total{{bucket=\"{}\"}} {}\n",
+                bucket, count
+            ));
+        }
+
+        output.push_str("\n# HELP s3_retry_success_total Successful retries per bucket (eventually succeeded)\n");
+        output.push_str("# TYPE s3_retry_success_total counter\n");
+        let s3_retry_success = self.s3_retry_success.lock().unwrap();
+        for (bucket, count) in s3_retry_success.iter() {
+            output.push_str(&format!(
+                "s3_retry_success_total{{bucket=\"{}\"}} {}\n",
+                bucket, count
+            ));
+        }
+
+        output.push_str("\n# HELP s3_retry_exhausted_total Retries exhausted per bucket (all attempts failed)\n");
+        output.push_str("# TYPE s3_retry_exhausted_total counter\n");
+        let s3_retry_exhausted = self.s3_retry_exhausted.lock().unwrap();
+        for (bucket, count) in s3_retry_exhausted.iter() {
+            output.push_str(&format!(
+                "s3_retry_exhausted_total{{bucket=\"{}\"}} {}\n",
                 bucket, count
             ));
         }

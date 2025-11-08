@@ -13,6 +13,7 @@ pub mod proxy;
 pub mod rate_limit; // Phase 21: Rate Limiting
 pub mod reload; // Phase 19: Configuration Hot Reload
 pub mod resources; // Phase 21: Resource Monitoring & Exhaustion Prevention
+pub mod retry; // Phase 21: Retry Logic with Exponential Backoff
 pub mod router;
 pub mod s3;
 pub mod server; // Phase 12: Pingora Server Setup // Phase 15: Error Handling & Logging
