@@ -8,6 +8,7 @@ fn test_can_create_empty_config_struct() {
         server: ServerConfig {
             address: String::from("127.0.0.1"),
             port: 8080,
+            request_timeout: 30,
         },
         buckets: vec![],
         jwt: None,

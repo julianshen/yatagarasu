@@ -9,6 +9,7 @@ fn bench_routing_single_bucket(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            request_timeout: 30,
         },
         buckets: vec![BucketConfig {
             name: "test-bucket".to_string(),
@@ -19,6 +20,7 @@ fn bench_routing_single_bucket(c: &mut Criterion) {
                 bucket: "test-bucket".to_string(),
                 access_key: "test-key".to_string(),
                 secret_key: "test-secret".to_string(),
+                timeout: 20,
             },
             auth: None,
         }],
@@ -46,6 +48,7 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
                 bucket: format!("bucket-{}", i),
                 access_key: "test-key".to_string(),
                 secret_key: "test-secret".to_string(),
+                timeout: 20,
             },
             auth: None,
         })
@@ -55,6 +58,7 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            request_timeout: 30,
         },
         buckets,
         jwt: None,
@@ -94,6 +98,7 @@ fn bench_routing_path_lengths(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            request_timeout: 30,
         },
         buckets: vec![BucketConfig {
             name: "test-bucket".to_string(),
@@ -104,6 +109,7 @@ fn bench_routing_path_lengths(c: &mut Criterion) {
                 bucket: "test-bucket".to_string(),
                 access_key: "test-key".to_string(),
                 secret_key: "test-secret".to_string(),
+                timeout: 20,
             },
             auth: None,
         }],
@@ -143,6 +149,7 @@ fn bench_s3_key_extraction(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            request_timeout: 30,
         },
         buckets: vec![BucketConfig {
             name: "test-bucket".to_string(),
@@ -153,6 +160,7 @@ fn bench_s3_key_extraction(c: &mut Criterion) {
                 bucket: "test-bucket".to_string(),
                 access_key: "test-key".to_string(),
                 secret_key: "test-secret".to_string(),
+                timeout: 20,
             },
             auth: None,
         }],
@@ -193,6 +201,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            request_timeout: 30,
         },
         buckets: vec![
             BucketConfig {
@@ -204,6 +213,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                     bucket: "bucket-short".to_string(),
                     access_key: "test-key".to_string(),
                     secret_key: "test-secret".to_string(),
+                    timeout: 20,
                 },
                 auth: None,
             },
@@ -216,6 +226,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                     bucket: "bucket-medium".to_string(),
                     access_key: "test-key".to_string(),
                     secret_key: "test-secret".to_string(),
+                    timeout: 20,
                 },
                 auth: None,
             },
@@ -228,6 +239,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                     bucket: "bucket-long".to_string(),
                     access_key: "test-key".to_string(),
                     secret_key: "test-secret".to_string(),
+                    timeout: 20,
                 },
                 auth: None,
             },
@@ -284,6 +296,7 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
             server: ServerConfig {
                 address: "127.0.0.1".to_string(),
                 port: 8080,
+                request_timeout: 30,
             },
             buckets,
             jwt: None,

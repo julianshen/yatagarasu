@@ -21,6 +21,7 @@ fn test_can_create_s3_client_with_valid_credentials() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result = create_s3_client(&config);
@@ -49,6 +50,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result1 = create_s3_client(&config1);
@@ -62,6 +64,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result2 = create_s3_client(&config2);
@@ -75,6 +78,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result3 = create_s3_client(&config3);
@@ -88,6 +92,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result4 = create_s3_client(&config4);
@@ -104,6 +109,7 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         access_key: "minioadmin".to_string(),
         secret_key: "minioadmin".to_string(),
         endpoint: Some("http://localhost:9000".to_string()),
+        timeout: 20,
     };
 
     let result = create_s3_client(&minio_config);
@@ -123,6 +129,7 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         access_key: "test".to_string(),
         secret_key: "test".to_string(),
         endpoint: Some("http://localhost:4566".to_string()),
+        timeout: 20,
     };
 
     let result2 = create_s3_client(&localstack_config);
@@ -145,6 +152,7 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         access_key: "test".to_string(),
         secret_key: "test".to_string(),
         endpoint: Some("https://s3-compatible.example.com".to_string()),
+        timeout: 20,
     };
 
     let result3 = create_s3_client(&https_config);
@@ -170,6 +178,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         access_key: "".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result1 = create_s3_client(&config_empty_access_key);
@@ -186,6 +195,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result2 = create_s3_client(&config_empty_secret_key);
@@ -202,6 +212,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result3 = create_s3_client(&config_empty_region);
@@ -218,6 +229,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
         secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result4 = create_s3_client(&config_empty_bucket);
@@ -234,6 +246,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         access_key: "".to_string(),
         secret_key: "".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     let result5 = create_s3_client(&config_all_empty);
@@ -249,6 +262,7 @@ fn test_can_create_multiple_independent_s3_clients() {
         access_key: "AKIAPRODUCTS1234567".to_string(),
         secret_key: "ProductsSecretKey123456789".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     // Create config for users bucket
@@ -258,6 +272,7 @@ fn test_can_create_multiple_independent_s3_clients() {
         access_key: "AKIAUSERS7654321ABC".to_string(),
         secret_key: "UsersSecretKeyXYZ987654321".to_string(),
         endpoint: None,
+        timeout: 20,
     };
 
     // Create config for images bucket with custom endpoint (MinIO)
@@ -267,6 +282,7 @@ fn test_can_create_multiple_independent_s3_clients() {
         access_key: "minioadmin".to_string(),
         secret_key: "minioadmin".to_string(),
         endpoint: Some("http://localhost:9000".to_string()),
+        timeout: 20,
     };
 
     // Create all three clients
@@ -8060,6 +8076,7 @@ fn test_can_create_s3_http_client_from_bucket_config() {
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: None, // Public bucket
     };
@@ -8116,6 +8133,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             access_key: "AKIAPRODUCTS12345".to_string(),
             secret_key: "products-secret-key-abc123".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: None,
     };
@@ -8129,6 +8147,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             access_key: "AKIAPRIVATE67890".to_string(),
             secret_key: "private-secret-key-xyz789".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: Some(yatagarasu::config::AuthConfig { enabled: true }),
     };
@@ -8142,6 +8161,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             access_key: "AKIAARCHIVE99999".to_string(),
             secret_key: "archive-secret-key-def456".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: None,
     };
@@ -8248,6 +8268,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             access_key: "minioadmin".to_string(),
             secret_key: "minioadmin".to_string(),
             endpoint: Some("http://localhost:9000".to_string()), // Custom endpoint
+            timeout: 20,
         },
         auth: None,
     };
@@ -8271,6 +8292,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
             endpoint: None, // No custom endpoint - use AWS default
+            timeout: 20,
         },
         auth: None,
     };
@@ -8293,6 +8315,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             access_key: "test".to_string(),
             secret_key: "test".to_string(),
             endpoint: Some("http://localhost:4566".to_string()), // LocalStack endpoint
+            timeout: 20,
         },
         auth: None,
     };
@@ -8344,6 +8367,7 @@ fn test_s3_client_generates_valid_aws_signature_v4() {
             access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: None,
     };
@@ -8411,6 +8435,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             access_key: "AKIAPRODUCTS12345".to_string(),
             secret_key: "products-secret-key".to_string(),
             endpoint: None, // AWS S3
+            timeout: 20,
         },
         auth: None, // Public bucket
     };
@@ -8425,6 +8450,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             access_key: "AKIAPRIVATE67890".to_string(),
             secret_key: "private-secret-key".to_string(),
             endpoint: None, // AWS S3
+            timeout: 20,
         },
         auth: Some(yatagarasu::config::AuthConfig {
             enabled: true, // Requires JWT
@@ -8441,6 +8467,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             access_key: "minioadmin".to_string(),
             secret_key: "minioadmin".to_string(),
             endpoint: Some("http://localhost:9000".to_string()), // MinIO
+            timeout: 20,
         },
         auth: None,
     };
@@ -8564,6 +8591,7 @@ fn test_get_request_to_products_image_fetches_from_s3() {
             access_key: "AKIAPRODUCTS12345".to_string(),
             secret_key: "products-secret-key".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: None, // Public bucket
     }];
@@ -9393,6 +9421,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             access_key: "AKIA_PRODUCTS_READONLY".to_string(),
             secret_key: "products_readonly_secret_123".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: None, // Public bucket, no JWT required
     };
@@ -9407,6 +9436,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             access_key: "AKIA_PRIVATE_FULLACCESS".to_string(),
             secret_key: "private_fullaccess_secret_xyz".to_string(),
             endpoint: None,
+            timeout: 20,
         },
         auth: Some(AuthConfig { enabled: true }),
     };
@@ -9421,6 +9451,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             access_key: "AKIA_ARCHIVE_RESTORE".to_string(),
             secret_key: "archive_restore_secret_abc".to_string(),
             endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+            timeout: 20,
         },
         auth: None,
     };
