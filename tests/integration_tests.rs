@@ -13,6 +13,7 @@ mod integration {
     mod metrics_test;
     mod multibucket_test;
     mod range_requests_test;
+    mod security_test;
     mod server_basic_test;
     mod streaming_test;
     pub mod test_harness;
