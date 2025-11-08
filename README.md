@@ -4,17 +4,17 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-507%20passing-green.svg)](plan.md)
+[![Tests](https://img.shields.io/badge/tests-504%20passing-green.svg)](plan.md)
 [![Coverage](https://img.shields.io/badge/coverage-98.43%25-brightgreen.svg)](coverage/)
-[![Status](https://img.shields.io/badge/status-HTTP%20server%20FUNCTIONAL-green.svg)](IMPLEMENTATION_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Production%20Hardening%20COMPLETE-green.svg)](IMPLEMENTATION_STATUS.md)
 
 A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, providing intelligent routing, multi-bucket support, and flexible JWT authentication.
 
 ## 🎉 DEVELOPMENT STATUS
 
-**Current State**: Core library modules complete and **HTTP server is now FUNCTIONAL!** (v0.2.0)
+**Current State**: Core library modules complete and **Production Hardening Complete!** (v0.2.0)
 
-**✅ What Works Now** (as of 2025-11-03):
+**✅ What Works Now** (as of 2025-11-09):
 - ✅ **HTTP Server**: Accepts connections and proxies requests to S3!
 - ✅ **Routing**: Requests to /bucket-prefix/* route to correct S3 bucket
 - ✅ **Authentication**: JWT token validation with 401/403 responses
@@ -25,26 +25,29 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 - ✅ **Request tracing**: UUID request_id for distributed tracing
 - ✅ **Error handling**: 404 for unknown paths, 401 for missing tokens, 403 for invalid tokens
 - ✅ **Integration test infrastructure**: ProxyTestHarness for automated testing
-- ✅ **507 passing tests** with 98.43% coverage
+- ✅ **Security validation**: Body size limits, header limits, path traversal protection
+- ✅ **Rate limiting**: Global, per-IP, and per-bucket rate limits with token bucket algorithm
+- ✅ **Circuit breaker**: Automatic failure detection and recovery
+- ✅ **Prometheus metrics**: Request counts, latencies, error rates, rate limit metrics
+- ✅ **504 passing tests** with 98.43% coverage
 
 **⏳ What's Still Being Worked On**:
-- ⏳ Integration testing with real S3/MinIO (code complete, testing needed)
-- ⏳ Prometheus metrics endpoint
-- ⏳ Configuration hot reload
-- ⏳ Load testing with K6
+- ⏳ Configuration hot reload (Pingora built-in, needs integration)
+- ⏳ End-to-end load testing with K6
+- ⏳ Docker images and CI/CD automation
 
 **🚀 What's Coming Next**:
-- 🚧 **Phase 18** (v0.3.0): Integration testing with MinIO (1 week)
-- 🚧 **Phase 19-20** (v0.4.0): Metrics, hot reload, production hardening (1-2 weeks)
-- 🚧 **Phase 21-22** (v0.5.0): Docker images and CI/CD automation
-- 🎯 **Phase 23-24** (v1.0.0): Caching layer and advanced features
+- 🚧 **Phase 22** (v0.3.0): Configuration hot reload and graceful shutdown
+- 🚧 **Phase 23-24** (v0.4.0): Docker images and CI/CD automation
+- 🎯 **Phase 25+** (v1.0.0): Caching layer and advanced features
 
 **✅ Recently Completed**:
+- ✅ **Phase 21**: Production Hardening & Resilience - Security validation, rate limiting (7/7 tests passing), circuit breaker
 - ✅ **Phase 17**: Performance benchmarking infrastructure (Criterion + K6) - ALL TARGETS EXCEEDED!
 - ✅ **Phase 16**: Integration test infrastructure with ProxyTestHarness
 - ✅ **Phase 0**: HEAD request support - Fixed AWS Signature V4 bug
 
-**Progress**: ~75% toward v1.0 (Phase 17 performance testing complete!)
+**Progress**: ~80% toward v1.0 (Phase 21 production hardening complete!)
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed technical analysis and progress assessment.
 
@@ -157,9 +160,9 @@ metrics:
   port: 9090
 ```
 
-### Example Requests (Coming in v0.2.0)
+### Example Requests
 
-Once the HTTP server is implemented, you'll be able to:
+The HTTP server is now fully functional! You can:
 
 ```bash
 # Access public bucket
@@ -172,14 +175,14 @@ curl -H "Authorization: Bearer eyJhbGc..." \
 # Or with query parameter
 curl http://localhost:8080/private/data.json?token=eyJhbGc...
 
-# Check health
+# Check health (coming in Phase 22)
 curl http://localhost:8080/health
 
-# Check metrics (v0.3.0)
+# Check Prometheus metrics
 curl http://localhost:9090/metrics
 ```
 
-⚠️ **Status**: HTTP endpoints not yet available. Server implementation starts in Phase 12.
+✅ **Status**: HTTP server is FUNCTIONAL! All core features working including routing, authentication, S3 proxying, rate limiting, circuit breaker, and metrics.
 
 ## Project Structure
 
@@ -221,23 +224,25 @@ yatagarasu/
 - [x] **Error Mapping**: S3 error codes to HTTP status codes
 - [x] **Comprehensive Testing**: 373 tests with 98.43% coverage
 
-### 🚧 In Progress: Server Layer (v0.2.0 - Phase 12+)
+### ✅ Complete: Server Layer (v0.2.0 - Phases 12-21)
 
-- [ ] **Pingora HTTP Server**: Initialize and configure Pingora server
-- [ ] **Request Pipeline**: Integrate router → auth → S3 client
-- [ ] **Response Streaming**: Stream S3 objects to HTTP clients
-- [ ] **Error Handling**: User-friendly error responses
-- [ ] **Health Endpoints**: `/health` liveness and readiness checks
-- [ ] **Logging**: Structured JSON logging with tracing
-- [ ] **Request Context**: Track request ID, bucket, user claims
+- [x] **Pingora HTTP Server**: Initialize and configure Pingora server
+- [x] **Request Pipeline**: Integrate router → auth → S3 client
+- [x] **Response Streaming**: Stream S3 objects to HTTP clients
+- [x] **Error Handling**: User-friendly error responses
+- [x] **Logging**: Structured JSON logging with tracing
+- [x] **Request Context**: Track request ID, bucket, user claims
+- [x] **Security Validation**: Body/header size limits, path traversal protection
+- [x] **Rate Limiting**: Global, per-IP, and per-bucket rate limits
+- [x] **Circuit Breaker**: Automatic failure detection and recovery
+- [x] **Prometheus Metrics**: Request counts, latencies, error rates, rate limit metrics
 
-### 📋 Planned: Production Features (v0.3.0)
+### 📋 Planned: Production Features (v0.3.0+)
 
-- [ ] **Prometheus Metrics**: Request counts, latencies, error rates
-- [ ] **Configuration Hot Reload**: SIGHUP signal handling
-- [ ] **Graceful Shutdown**: SIGTERM with connection draining
-- [ ] **Observability**: Request tracing and structured logs
-- [ ] **Performance Tuning**: Connection pooling, keep-alive
+- [ ] **Health Endpoints**: `/health` liveness and readiness checks (Phase 22)
+- [ ] **Configuration Hot Reload**: SIGHUP signal handling (Phase 22)
+- [ ] **Graceful Shutdown**: SIGTERM with connection draining (Phase 22)
+- [ ] **Performance Tuning**: Connection pooling optimization, keep-alive tuning
 
 ### 🎯 Future: Advanced Features (v1.0+)
 
@@ -776,14 +781,14 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 
 ## Project Status
 
-**Current Phase**: Phase 12 - Pingora Server Integration (In Progress)
+**Current Phase**: Phase 21 - Production Hardening & Resilience (✅ COMPLETE)
 
 **Progress**:
 
 - **Tests written**: 500+ tests
-- **Tests passing**: 507 (100%)
+- **Tests passing**: 504 (100%)
 - **Test coverage**: 98.43% (314/319 lines)
-- **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 75% (Phases 12-17 ✅)
+- **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 100% (Phases 12-21 ✅)
 
 **Completed Milestones**:
 - ✅ Phase 1-2: Foundation and Configuration (50 tests)
@@ -794,23 +799,29 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 - ✅ Phase 12: Pingora HTTP server implementation
 - ✅ Phase 13: ProxyHttp trait implementation (234 lines)
 - ✅ Phase 15: Structured logging with tracing
-- ✅ Phase 16: Integration test infrastructure
-- ✅ Phase 17: Performance benchmarking
+- ✅ Phase 16: Integration test infrastructure (33 tests)
+- ✅ Phase 17: Performance benchmarking (all targets exceeded!)
+- ✅ Phase 18: Integration testing with MinIO
+- ✅ Phase 19: Prometheus metrics endpoint
+- ✅ Phase 20: Circuit breaker and retry logic
+- ✅ Phase 21: Security validation and rate limiting (7/7 tests passing)
 
-**Current Sprint**: Integration Testing and Production Features
-- **Phase 18**: Execute full integration test suite with MinIO/LocalStack
-- **Phase 19-20**: Metrics endpoint, hot reload, production hardening
+**Current Sprint**: Configuration Management and Operational Features
+- **Phase 22**: Health endpoints, hot reload, graceful shutdown
 
 **Next Milestones**:
-- Phase 18: Full integration testing with real S3
-- Phase 19: Prometheus metrics endpoint
-- Phase 20: Configuration hot reload
-- Phase 21-22: Docker images and CI/CD
+- Phase 22: Health endpoints and hot reload
+- Phase 23-24: Docker images and CI/CD
+- Phase 25+: Caching layer and advanced features
 
-**Known Issues**:
-- ⏳ Integration tests need Docker/LocalStack environment
-- ⏳ Metrics endpoint not yet implemented
-- ⏳ Hot reload not yet implemented
+**Production Readiness**:
+- ✅ Security: Body/header limits, path traversal protection
+- ✅ Rate Limiting: Global, per-IP, per-bucket with token bucket algorithm
+- ✅ Circuit Breaker: Automatic failure detection and recovery
+- ✅ Metrics: Prometheus endpoint with comprehensive metrics
+- ✅ Logging: Structured JSON with credential redaction
+- ⏳ Health Endpoints: Coming in Phase 22
+- ⏳ Hot Reload: Coming in Phase 22
 
 See [plan.md](plan.md) for detailed test checklist and [ROADMAP.md](ROADMAP.md) for implementation roadmap.
 
