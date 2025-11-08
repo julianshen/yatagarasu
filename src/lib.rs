@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod cache;
+pub mod circuit_breaker; // Phase 21: Circuit Breaker Pattern
 pub mod config;
 pub mod error;
 pub mod logging;

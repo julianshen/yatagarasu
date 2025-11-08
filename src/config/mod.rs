@@ -195,6 +195,8 @@ pub struct S3Config {
     pub timeout: u64,
     #[serde(default = "default_connection_pool_size")]
     pub connection_pool_size: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker: Option<CircuitBreakerConfigYaml>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,6 +230,51 @@ pub struct ClaimRule {
     pub claim: String,
     pub operator: String,
     pub value: serde_json::Value,
+}
+
+/// Circuit breaker configuration (YAML format)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CircuitBreakerConfigYaml {
+    /// Number of consecutive failures to open circuit
+    #[serde(default = "default_failure_threshold")]
+    pub failure_threshold: u32,
+    /// Number of successes in half-open to close circuit
+    #[serde(default = "default_success_threshold")]
+    pub success_threshold: u32,
+    /// How long to wait before trying again (seconds)
+    #[serde(default = "default_timeout_seconds")]
+    pub timeout_seconds: u64,
+    /// Max concurrent test requests in half-open state
+    #[serde(default = "default_half_open_max_requests")]
+    pub half_open_max_requests: u32,
+}
+
+fn default_failure_threshold() -> u32 {
+    5
+}
+
+fn default_success_threshold() -> u32 {
+    2
+}
+
+fn default_timeout_seconds() -> u64 {
+    60
+}
+
+fn default_half_open_max_requests() -> u32 {
+    3
+}
+
+impl CircuitBreakerConfigYaml {
+    /// Convert to CircuitBreakerConfig from circuit_breaker module
+    pub fn to_circuit_breaker_config(&self) -> crate::circuit_breaker::CircuitBreakerConfig {
+        crate::circuit_breaker::CircuitBreakerConfig {
+            failure_threshold: self.failure_threshold,
+            success_threshold: self.success_threshold,
+            timeout_duration: std::time::Duration::from_secs(self.timeout_seconds),
+            half_open_max_requests: self.half_open_max_requests,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -546,5 +593,78 @@ buckets:
             config.buckets[0].s3.connection_pool_size, 100,
             "S3Config should use explicit connection_pool_size value"
         );
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_loaded_from_yaml() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+      circuit_breaker:
+        failure_threshold: 3
+        success_threshold: 1
+        timeout_seconds: 30
+        half_open_max_requests: 5
+"#;
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Verify circuit breaker config loaded
+        let cb_config = config.buckets[0].s3.circuit_breaker.as_ref().unwrap();
+        assert_eq!(cb_config.failure_threshold, 3);
+        assert_eq!(cb_config.success_threshold, 1);
+        assert_eq!(cb_config.timeout_seconds, 30);
+        assert_eq!(cb_config.half_open_max_requests, 5);
+    }
+
+    #[test]
+    fn test_circuit_breaker_uses_defaults_when_omitted() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Verify circuit breaker is None when not specified
+        assert!(config.buckets[0].s3.circuit_breaker.is_none());
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_conversion() {
+        let yaml_config = CircuitBreakerConfigYaml {
+            failure_threshold: 10,
+            success_threshold: 3,
+            timeout_seconds: 120,
+            half_open_max_requests: 2,
+        };
+
+        let cb_config = yaml_config.to_circuit_breaker_config();
+
+        assert_eq!(cb_config.failure_threshold, 10);
+        assert_eq!(cb_config.success_threshold, 3);
+        assert_eq!(
+            cb_config.timeout_duration,
+            std::time::Duration::from_secs(120)
+        );
+        assert_eq!(cb_config.half_open_max_requests, 2);
     }
 }

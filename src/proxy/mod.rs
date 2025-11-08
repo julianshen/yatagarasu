@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use crate::auth::{authenticate_request, AuthError};
+use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::pipeline::RequestContext;
@@ -30,6 +31,7 @@ pub struct YatagarasuProxy {
     reload_manager: Option<Arc<ReloadManager>>,
     resource_monitor: Arc<ResourceMonitor>,
     request_semaphore: Arc<Semaphore>,
+    circuit_breakers: Arc<HashMap<String, Arc<CircuitBreaker>>>,
 }
 
 impl YatagarasuProxy {
@@ -41,6 +43,16 @@ impl YatagarasuProxy {
         let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
         // Initialize request semaphore with max concurrent requests limit
         let request_semaphore = Arc::new(Semaphore::new(config.server.max_concurrent_requests));
+
+        // Initialize circuit breakers for buckets that have circuit_breaker config
+        let mut circuit_breakers = HashMap::new();
+        for bucket in &config.buckets {
+            if let Some(ref cb_config) = bucket.s3.circuit_breaker {
+                let breaker = CircuitBreaker::new(cb_config.to_circuit_breaker_config());
+                circuit_breakers.insert(bucket.name.clone(), Arc::new(breaker));
+            }
+        }
+
         Self {
             config: Arc::new(config),
             router,
@@ -48,6 +60,7 @@ impl YatagarasuProxy {
             reload_manager: None,
             resource_monitor,
             request_semaphore,
+            circuit_breakers: Arc::new(circuit_breakers),
         }
     }
 
@@ -60,6 +73,16 @@ impl YatagarasuProxy {
         let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
         // Initialize request semaphore with max concurrent requests limit
         let request_semaphore = Arc::new(Semaphore::new(config.server.max_concurrent_requests));
+
+        // Initialize circuit breakers for buckets that have circuit_breaker config
+        let mut circuit_breakers = HashMap::new();
+        for bucket in &config.buckets {
+            if let Some(ref cb_config) = bucket.s3.circuit_breaker {
+                let breaker = CircuitBreaker::new(cb_config.to_circuit_breaker_config());
+                circuit_breakers.insert(bucket.name.clone(), Arc::new(breaker));
+            }
+        }
+
         Self {
             config: Arc::new(config),
             router,
@@ -67,6 +90,7 @@ impl YatagarasuProxy {
             reload_manager: Some(reload_manager),
             resource_monitor,
             request_semaphore,
+            circuit_breakers: Arc::new(circuit_breakers),
         }
     }
 
@@ -100,6 +124,49 @@ impl YatagarasuProxy {
             }
         }
         params
+    }
+
+    /// Export circuit breaker metrics for Prometheus
+    fn export_circuit_breaker_metrics(&self) -> String {
+        let mut output = String::new();
+
+        // Circuit breaker state metric (gauge: 0=closed, 1=open, 2=half-open)
+        output.push_str("\n# HELP circuit_breaker_state Circuit breaker state per bucket (0=closed, 1=open, 2=half-open)\n");
+        output.push_str("# TYPE circuit_breaker_state gauge\n");
+
+        for (bucket_name, circuit_breaker) in self.circuit_breakers.iter() {
+            let state_value = circuit_breaker.state() as u8;
+            output.push_str(&format!(
+                "circuit_breaker_state{{bucket=\"{}\"}} {}\n",
+                bucket_name, state_value
+            ));
+        }
+
+        // Circuit breaker failure count metric (gauge)
+        output.push_str("\n# HELP circuit_breaker_failures Current consecutive failure count\n");
+        output.push_str("# TYPE circuit_breaker_failures gauge\n");
+
+        for (bucket_name, circuit_breaker) in self.circuit_breakers.iter() {
+            output.push_str(&format!(
+                "circuit_breaker_failures{{bucket=\"{}\"}} {}\n",
+                bucket_name,
+                circuit_breaker.failure_count()
+            ));
+        }
+
+        // Circuit breaker success count in half-open state (gauge)
+        output.push_str("\n# HELP circuit_breaker_successes Success count in half-open state\n");
+        output.push_str("# TYPE circuit_breaker_successes gauge\n");
+
+        for (bucket_name, circuit_breaker) in self.circuit_breakers.iter() {
+            output.push_str(&format!(
+                "circuit_breaker_successes{{bucket=\"{}\"}} {}\n",
+                bucket_name,
+                circuit_breaker.success_count()
+            ));
+        }
+
+        output
     }
 }
 
@@ -258,7 +325,10 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Special handling for /metrics endpoint (bypass auth, return Prometheus metrics)
         if path == "/metrics" {
-            let metrics_output = self.metrics.export_prometheus();
+            let mut metrics_output = self.metrics.export_prometheus();
+
+            // Append circuit breaker metrics for each bucket
+            metrics_output.push_str(&self.export_circuit_breaker_metrics());
 
             let mut header = ResponseHeader::build(200, None)?;
             header.insert_header("Content-Type", "text/plain; version=0.0.4")?;
@@ -463,6 +533,46 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Record bucket metrics
         self.metrics.increment_bucket_count(&bucket_config.name);
+
+        // THIRD: Check circuit breaker for this bucket (if configured)
+        if let Some(circuit_breaker) = self.circuit_breakers.get(&bucket_config.name) {
+            // Check if circuit breaker allows request
+            if !circuit_breaker.should_allow_request() {
+                tracing::warn!(
+                    bucket = %bucket_config.name,
+                    state = ?circuit_breaker.state(),
+                    "Circuit breaker rejecting request (circuit open)"
+                );
+
+                let mut header = ResponseHeader::build(503, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Retry-After", "60")?; // Suggest retry after circuit timeout
+
+                let error_body = serde_json::json!({
+                    "error": "Service Temporarily Unavailable",
+                    "message": "S3 backend is experiencing issues. Circuit breaker is open.",
+                    "bucket": bucket_config.name,
+                    "status": 503
+                })
+                .to_string();
+
+                header.insert_header("Content-Length", error_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(error_body.into()), true)
+                    .await?;
+
+                self.metrics.increment_status_count(503);
+
+                return Ok(true); // Request handled (circuit breaker rejected)
+            }
+
+            // If we're in half-open state, increment request counter
+            circuit_breaker.start_half_open_request();
+        }
 
         // Check if authentication is required
         if let Some(auth_config) = &bucket_config.auth {
@@ -701,6 +811,29 @@ impl ProxyHttp for YatagarasuProxy {
             self.metrics.increment_bucket_count(&bucket_config.name);
             self.metrics
                 .record_bucket_latency(&bucket_config.name, duration_ms);
+
+            // Record circuit breaker success/failure if circuit breaker is configured
+            if let Some(circuit_breaker) = self.circuit_breakers.get(&bucket_config.name) {
+                // 2xx: Success - record success
+                // 5xx: Server error (S3 backend failure) - record failure
+                // 4xx/3xx: Client error/redirect - don't affect circuit breaker
+                if (200..300).contains(&status_code) {
+                    circuit_breaker.record_success();
+                    tracing::debug!(
+                        bucket = %bucket_config.name,
+                        status_code = status_code,
+                        "Circuit breaker recorded success"
+                    );
+                } else if status_code >= 500 {
+                    circuit_breaker.record_failure();
+                    tracing::warn!(
+                        bucket = %bucket_config.name,
+                        status_code = status_code,
+                        failure_count = circuit_breaker.failure_count(),
+                        "Circuit breaker recorded failure"
+                    );
+                }
+            }
         }
 
         // Log request completion with request ID for tracing

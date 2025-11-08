@@ -60,6 +60,7 @@ chrono = "0.4"
 urlencoding = "2.1"
 signal-hook = "0.3"
 libc = "0.2"
+parking_lot = "0.12"
 
 # Cryptography
 sha2 = "0.10"
