@@ -561,7 +561,9 @@ impl Metrics {
             self.reload_success.load(Ordering::Relaxed)
         ));
 
-        output.push_str("\n# HELP config_reload_failure_total Failed configuration reload attempts\n");
+        output.push_str(
+            "\n# HELP config_reload_failure_total Failed configuration reload attempts\n",
+        );
         output.push_str("# TYPE config_reload_failure_total counter\n");
         output.push_str(&format!(
             "config_reload_failure_total {}\n",

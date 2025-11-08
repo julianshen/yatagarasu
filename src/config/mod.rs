@@ -146,10 +146,21 @@ impl Config {
     }
 }
 
+// Default timeout values
+fn default_request_timeout() -> u64 {
+    30 // 30 seconds
+}
+
+fn default_s3_timeout() -> u64 {
+    20 // 20 seconds
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub address: String,
     pub port: u16,
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +180,8 @@ pub struct S3Config {
     pub secret_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    #[serde(default = "default_s3_timeout")]
+    pub timeout: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,5 +373,85 @@ buckets: []
 
         // Initial config should have generation 0
         assert_eq!(config.generation, 0);
+    }
+
+    #[test]
+    fn test_server_config_has_request_timeout_with_default() {
+        // Test 1: Config without request_timeout should use default (30s)
+        let yaml_without_timeout = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml_without_timeout).unwrap();
+
+        // Should default to 30 seconds
+        assert_eq!(
+            config.server.request_timeout, 30,
+            "ServerConfig should default to 30 second request timeout"
+        );
+
+        // Test 2: Config with explicit request_timeout should use that value
+        let yaml_with_timeout = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+  request_timeout: 60
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml_with_timeout).unwrap();
+
+        assert_eq!(
+            config.server.request_timeout, 60,
+            "ServerConfig should use explicit request_timeout value"
+        );
+    }
+
+    #[test]
+    fn test_s3_config_has_timeout_with_default() {
+        // Test 1: S3 config without timeout should use default (20s)
+        let yaml_without_timeout = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        let config = Config::from_yaml_with_env(yaml_without_timeout).unwrap();
+
+        // Should default to 20 seconds
+        assert_eq!(
+            config.buckets[0].s3.timeout, 20,
+            "S3Config should default to 20 second timeout"
+        );
+
+        // Test 2: S3 config with explicit timeout should use that value
+        let yaml_with_timeout = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+      timeout: 45
+"#;
+        let config = Config::from_yaml_with_env(yaml_with_timeout).unwrap();
+
+        assert_eq!(
+            config.buckets[0].s3.timeout, 45,
+            "S3Config should use explicit timeout value"
+        );
     }
 }

@@ -576,9 +576,13 @@ fn test_multiple_ranges_returns_multipart_byteranges() {
         }
         // Total: 1300 bytes (50 * 26)
 
-        let (_container, s3_endpoint) =
-            setup_localstack_with_test_file(&docker, "test-bucket", "multirange.txt", &test_content)
-                .await;
+        let (_container, s3_endpoint) = setup_localstack_with_test_file(
+            &docker,
+            "test-bucket",
+            "multirange.txt",
+            &test_content,
+        )
+        .await;
 
         // Create dynamic config for this LocalStack instance
         let config_path = "/tmp/yatagarasu-range-multipart.yaml";
@@ -702,8 +706,7 @@ fn test_multiple_ranges_returns_multipart_byteranges() {
         // Position 100 = 3*26 + 22 = alphabet[22..26] + alphabet[0..6] = "WXYZABCDEF"
         let expected_part3_content = &test_content[100..110];
         assert_eq!(
-            expected_part3_content,
-            b"WXYZABCDEF",
+            expected_part3_content, b"WXYZABCDEF",
             "Part 3 should contain bytes 100-109"
         );
 
