@@ -63,6 +63,9 @@ pub struct Metrics {
     reload_success: AtomicU64,
     reload_failure: AtomicU64,
     config_generation: AtomicU64,
+
+    // Concurrency limiting metrics
+    concurrency_limit_rejections: AtomicU64,
 }
 
 impl Metrics {
@@ -90,6 +93,7 @@ impl Metrics {
             reload_success: AtomicU64::new(0),
             reload_failure: AtomicU64::new(0),
             config_generation: AtomicU64::new(0),
+            concurrency_limit_rejections: AtomicU64::new(0),
         }
     }
 
@@ -404,6 +408,12 @@ impl Metrics {
         self.config_generation.store(generation, Ordering::Relaxed);
     }
 
+    /// Increment concurrency limit rejection counter (503 responses)
+    pub fn increment_concurrency_limit_rejection(&self) {
+        self.concurrency_limit_rejections
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Get successful reload count (for testing)
     #[cfg(test)]
     pub fn get_reload_success_count(&self) -> u64 {
@@ -420,6 +430,12 @@ impl Metrics {
     #[cfg(test)]
     pub fn get_config_generation(&self) -> u64 {
         self.config_generation.load(Ordering::Relaxed)
+    }
+
+    /// Get concurrency limit rejection count (for testing)
+    #[cfg(test)]
+    pub fn get_concurrency_limit_rejections(&self) -> u64 {
+        self.concurrency_limit_rejections.load(Ordering::Relaxed)
     }
 
     /// Export metrics in Prometheus text format
@@ -575,6 +591,15 @@ impl Metrics {
         output.push_str(&format!(
             "config_generation {}\n",
             self.config_generation.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP concurrency_limit_rejections_total Requests rejected due to concurrency limit (503)\n",
+        );
+        output.push_str("# TYPE concurrency_limit_rejections_total counter\n");
+        output.push_str(&format!(
+            "concurrency_limit_rejections_total {}\n",
+            self.concurrency_limit_rejections.load(Ordering::Relaxed)
         ));
 
         output

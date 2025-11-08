@@ -190,6 +190,9 @@ impl ProxyHttp for YatagarasuProxy {
             Err(_) => {
                 tracing::warn!("Rejecting request due to max concurrent requests reached");
 
+                // Increment metrics counter for concurrency limit rejections
+                self.metrics.increment_concurrency_limit_rejection();
+
                 let mut header = ResponseHeader::build(503, None)?;
                 header.insert_header("Content-Type", "application/json")?;
                 header.insert_header("Retry-After", "5")?; // Suggest retry after 5 seconds
