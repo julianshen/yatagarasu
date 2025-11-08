@@ -5,6 +5,7 @@
 #[allow(unused)]
 #[allow(clippy::all)]
 mod integration {
+    mod circuit_breaker_test;
     mod concurrency_test;
     mod e2e_localstack_test;
     mod error_scenarios_test;
@@ -13,6 +14,8 @@ mod integration {
     mod metrics_test;
     mod multibucket_test;
     mod range_requests_test;
+    mod rate_limit_test;
+    mod retry_test;
     mod security_test;
     mod server_basic_test;
     mod streaming_test;
