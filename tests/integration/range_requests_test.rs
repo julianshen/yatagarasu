@@ -4,12 +4,12 @@
 // Tests that the proxy correctly handles HTTP Range requests (RFC 7233)
 // for partial content delivery, video seeking, and parallel downloads.
 
+use super::test_harness::ProxyTestHarness;
 use std::fs;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
-use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 

@@ -7,10 +7,10 @@
 // - Latency histograms populated
 // - S3 error counters increment on S3 errors
 
+use super::test_harness::ProxyTestHarness;
 use std::fs;
 use std::sync::Once;
 use std::time::Duration;
-use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 

@@ -5,7 +5,6 @@
 #[allow(unused)]
 #[allow(clippy::all)]
 mod integration {
-    pub mod test_harness; // Test utilities for starting/stopping proxy
     mod concurrency_test;
     mod e2e_localstack_test;
     mod error_scenarios_test;
@@ -16,4 +15,5 @@ mod integration {
     mod range_requests_test;
     mod server_basic_test;
     mod streaming_test;
+    pub mod test_harness; // Test utilities for starting/stopping proxy
 }

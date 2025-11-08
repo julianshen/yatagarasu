@@ -76,14 +76,20 @@ impl ProxyTestHarness {
             }
 
             if attempt < 5 {
-                log::debug!("Attempt {} to connect to proxy failed, retrying...", attempt);
+                log::debug!(
+                    "Attempt {} to connect to proxy failed, retrying...",
+                    attempt
+                );
                 thread::sleep(Duration::from_millis(500));
             }
         }
 
         // If we get here, proxy didn't start properly
         let _ = child.kill();
-        Err(format!("Proxy did not respond after 5 attempts on port {}", port))
+        Err(format!(
+            "Proxy did not respond after 5 attempts on port {}",
+            port
+        ))
     }
 
     /// Get the base URL for making requests

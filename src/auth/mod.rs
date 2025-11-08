@@ -107,10 +107,7 @@ pub fn try_extract_token(
             );
             return token;
         } else {
-            tracing::debug!(
-                "No token found in source type '{}'",
-                source.source_type
-            );
+            tracing::debug!("No token found in source type '{}'", source.source_type);
         }
     }
 
@@ -205,7 +202,10 @@ pub fn authenticate_request(
         .ok_or(AuthError::MissingToken)?;
 
     // Validate JWT with configured algorithm
-    tracing::debug!("Validating JWT signature with algorithm: {}", jwt_config.algorithm);
+    tracing::debug!(
+        "Validating JWT signature with algorithm: {}",
+        jwt_config.algorithm
+    );
     let claims = validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm).map_err(|e| {
         tracing::warn!("JWT signature validation failed: {}", e);
         AuthError::InvalidToken(e.to_string())

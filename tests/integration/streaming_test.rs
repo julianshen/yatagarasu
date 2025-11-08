@@ -54,7 +54,11 @@ jwt:
     );
 
     fs::write(config_path, config_content).expect("Failed to write config file");
-    log::info!("Created config file at {} for endpoint {}", config_path, s3_endpoint);
+    log::info!(
+        "Created config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
 }
 
 // Helper: Setup LocalStack with large test file

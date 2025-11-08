@@ -7,12 +7,12 @@
 // - Update bucket credentials via config reload
 // - Invalid config reload rejected without affecting service
 
+use super::test_harness::ProxyTestHarness;
 use std::fs;
 use std::io::Write;
 use std::sync::Once;
 use std::time::Duration;
 use tempfile::NamedTempFile;
-use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 

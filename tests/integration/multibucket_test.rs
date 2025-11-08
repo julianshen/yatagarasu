@@ -4,12 +4,12 @@
 // Tests that the proxy correctly routes requests to different S3 buckets
 // based on path prefixes, with isolated credentials per bucket.
 
+use super::test_harness::ProxyTestHarness;
 use std::fs;
 use std::sync::Once;
 use std::time::Duration;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
-use super::test_harness::ProxyTestHarness;
 
 static INIT: Once = Once::new();
 

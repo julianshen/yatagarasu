@@ -5249,3 +5249,131 @@ buckets:
     log::info!("  - Response contains reload details (message, config_generation)");
     log::info!("");
 }
+
+#[tokio::test]
+#[ignore]
+async fn test_proxy_admin_reload_requires_authentication() {
+    init_logging();
+
+    log::info!("");
+    log::info!("=====================================================");
+    log::info!("  TEST: /admin/reload Requires Authentication");
+    log::info!("=====================================================");
+    log::info!("");
+    log::info!("Goal: Verify /admin/reload returns 401 without auth token");
+    log::info!("");
+
+    // JWT secret for testing
+    let jwt_secret = "test-admin-secret-key-12345";
+
+    // Create config with JWT enabled and admin role requirement
+    let config_yaml = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 19092
+  threads: 2
+
+jwt:
+  enabled: true
+  secret: "{}"
+  algorithm: "HS256"
+  token_sources:
+    - type: "bearer"
+  claims:
+    - claim: "role"
+      operator: "equals"
+      value: "admin"
+
+buckets:
+  - name: test_bucket
+    path_prefix: "/test"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      endpoint: "http://localhost:9000"
+"#,
+        jwt_secret
+    );
+
+    // Write config to temp file
+    let config_path = "/tmp/yatagarasu-test/config-reload-auth.yaml";
+    std::fs::write(config_path, config_yaml).expect("Failed to write config file");
+
+    log::info!("Starting proxy server on port 19092 with JWT auth enabled...");
+
+    // Start proxy in background
+    let proxy_handle = std::process::Command::new("cargo")
+        .args(&["run", "--", "--config", config_path])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("Failed to start proxy");
+
+    let proxy_pid = proxy_handle.id();
+    log::info!("Proxy started with PID: {}", proxy_pid);
+
+    // Wait for proxy to be ready
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    let client = reqwest::Client::new();
+
+    // Test 1: Request without token should return 401
+    log::info!("");
+    log::info!("Test 1: Making POST request without auth token...");
+    let response = client
+        .post("http://127.0.0.1:19092/admin/reload")
+        .send()
+        .await
+        .expect("POST /admin/reload failed");
+
+    log::info!("Response status: {}", response.status());
+
+    let status = response.status();
+    let body = response.text().await.expect("Failed to read response body");
+
+    log::info!("Response body: {}", body);
+
+    // Kill proxy
+    let _ = std::process::Command::new("kill")
+        .arg(proxy_pid.to_string())
+        .output();
+
+    // Wait for cleanup
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Assertions
+    assert_eq!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED,
+        "Expected 401 Unauthorized from /admin/reload without token, got {}",
+        status
+    );
+
+    // Parse JSON response
+    let json: serde_json::Value =
+        serde_json::from_str(&body).expect("Response body should be valid JSON");
+
+    // Verify error response
+    assert_eq!(
+        json.get("status").and_then(|v| v.as_str()),
+        Some("error"),
+        "Expected status: error in response"
+    );
+
+    assert!(
+        json.get("message").is_some(),
+        "Expected message field in error response"
+    );
+
+    log::info!("");
+    log::info!("=== Admin Reload Authentication Test PASSED ===");
+    log::info!("");
+    log::info!("Verified:");
+    log::info!("  - POST /admin/reload without token returns 401 Unauthorized");
+    log::info!("  - Response contains error status and message");
+    log::info!("  - Admin endpoint properly protected by JWT authentication");
+    log::info!("");
+}

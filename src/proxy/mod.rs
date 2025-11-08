@@ -178,6 +178,55 @@ impl ProxyHttp for YatagarasuProxy {
         // Special handling for /admin/reload endpoint (config hot reload)
         if path == "/admin/reload" && method == "POST" {
             if let Some(reload_manager) = &self.reload_manager {
+                // Check authentication if JWT is enabled
+                if let Some(jwt_config) = &self.config.jwt {
+                    if jwt_config.enabled {
+                        // Extract headers and query params
+                        let headers = Self::extract_headers(req);
+                        let query_params = Self::extract_query_params(req);
+
+                        // Authenticate request
+                        match authenticate_request(&headers, &query_params, jwt_config) {
+                            Ok(_claims) => {
+                                tracing::debug!("Admin reload request authenticated successfully");
+                            }
+                            Err(auth_error) => {
+                                tracing::warn!(
+                                    "Admin reload authentication failed: {}",
+                                    auth_error
+                                );
+
+                                // Build 401 Unauthorized response
+                                let response_json = serde_json::json!({
+                                    "status": "error",
+                                    "message": format!("Authentication required: {}", auth_error),
+                                });
+
+                                let response_body = response_json.to_string();
+
+                                let mut header = ResponseHeader::build(401, None)?;
+                                header.insert_header("Content-Type", "application/json")?;
+                                header.insert_header(
+                                    "Content-Length",
+                                    response_body.len().to_string(),
+                                )?;
+
+                                session
+                                    .write_response_header(Box::new(header), false)
+                                    .await?;
+                                session
+                                    .write_response_body(Some(response_body.into()), true)
+                                    .await?;
+
+                                // Record metrics
+                                self.metrics.increment_status_count(401);
+
+                                return Ok(true); // Short-circuit
+                            }
+                        }
+                    }
+                }
+
                 // Attempt to reload configuration
                 let current_generation = self.config.generation;
                 match reload_manager.reload_config_with_generation(current_generation) {
