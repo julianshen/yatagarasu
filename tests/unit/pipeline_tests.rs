@@ -233,6 +233,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
                 secret_key: "test".to_string(),
                 endpoint: None,
                 timeout: 20,
+                connection_pool_size: 50,
             },
             auth: None,
         },
@@ -246,6 +247,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
                 secret_key: "test".to_string(),
                 endpoint: None,
                 timeout: 20,
+                connection_pool_size: 50,
             },
             auth: None,
         },
@@ -282,6 +284,7 @@ fn test_requests_to_products_route_to_products_bucket() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: None,
     }];
@@ -325,6 +328,7 @@ fn test_requests_to_private_route_to_private_bucket() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: None,
     }];
@@ -369,6 +373,7 @@ fn test_longest_prefix_matching_works() {
                 secret_key: "test".to_string(),
                 endpoint: None,
                 timeout: 20,
+                connection_pool_size: 50,
             },
             auth: None,
         },
@@ -382,6 +387,7 @@ fn test_longest_prefix_matching_works() {
                 secret_key: "test".to_string(),
                 endpoint: None,
                 timeout: 20,
+                connection_pool_size: 50,
             },
             auth: None,
         },
@@ -430,6 +436,7 @@ fn test_unmapped_paths_return_none() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: None,
     }];
@@ -473,6 +480,7 @@ fn test_s3_key_is_extracted_from_path() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: None,
     }];
@@ -524,6 +532,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: None,
     };
@@ -563,6 +572,7 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: false }),
     };
@@ -612,6 +622,7 @@ fn test_auth_middleware_validates_jwt_for_private_buckets() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: true }),
     };
@@ -1071,6 +1082,7 @@ fn test_missing_jwt_on_private_bucket_returns_401() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: true }),
     };
@@ -1469,6 +1481,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: true }),
     }];
@@ -1601,6 +1614,7 @@ fn test_middleware_can_short_circuit_request() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: true }),
     }];
@@ -1693,6 +1707,7 @@ fn test_short_circuit_prevents_handler_execution() {
             secret_key: "test".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: true }),
     }];
@@ -1758,6 +1773,7 @@ fn test_middleware_can_modify_request_context() {
             secret_key: "test-secret".to_string(),
             endpoint: None,
             timeout: 20,
+            connection_pool_size: 50,
         },
         auth: Some(AuthConfig { enabled: true }),
     }];
@@ -1914,6 +1930,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
                 secret_key: "test".to_string(),
                 endpoint: None,
                 timeout: 20,
+                connection_pool_size: 50,
             },
             auth: None, // Public bucket
         },
@@ -1927,6 +1944,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
                 secret_key: "test".to_string(),
                 endpoint: None,
                 timeout: 20,
+                connection_pool_size: 50,
             },
             auth: Some(AuthConfig { enabled: true }),
         },

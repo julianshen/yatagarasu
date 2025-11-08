@@ -99,7 +99,10 @@ pub fn detect_memory_limit() -> u64 {
                     if let Some(kb_str) = line.split_whitespace().nth(1) {
                         if let Ok(kb) = kb_str.parse::<u64>() {
                             let bytes = kb * 1024;
-                            tracing::debug!(bytes = bytes, "Detected system memory from /proc/meminfo");
+                            tracing::debug!(
+                                bytes = bytes,
+                                "Detected system memory from /proc/meminfo"
+                            );
                             return bytes;
                         }
                     }

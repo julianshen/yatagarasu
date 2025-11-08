@@ -9,6 +9,7 @@ use pingora_proxy::{ProxyHttp, Session};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 use crate::auth::{authenticate_request, AuthError};
 use crate::config::Config;
@@ -28,6 +29,7 @@ pub struct YatagarasuProxy {
     metrics: Arc<Metrics>,
     reload_manager: Option<Arc<ReloadManager>>,
     resource_monitor: Arc<ResourceMonitor>,
+    request_semaphore: Arc<Semaphore>,
 }
 
 impl YatagarasuProxy {
@@ -37,12 +39,15 @@ impl YatagarasuProxy {
         let metrics = Arc::new(Metrics::new());
         // Initialize resource monitor with auto-detected system limits
         let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
+        // Initialize request semaphore with max concurrent requests limit
+        let request_semaphore = Arc::new(Semaphore::new(config.server.max_concurrent_requests));
         Self {
             config: Arc::new(config),
             router,
             metrics,
             reload_manager: None,
             resource_monitor,
+            request_semaphore,
         }
     }
 
@@ -53,12 +58,15 @@ impl YatagarasuProxy {
         let reload_manager = Arc::new(ReloadManager::new(config_path));
         // Initialize resource monitor with auto-detected system limits
         let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
+        // Initialize request semaphore with max concurrent requests limit
+        let request_semaphore = Arc::new(Semaphore::new(config.server.max_concurrent_requests));
         Self {
             config: Arc::new(config),
             router,
             metrics,
             reload_manager: Some(reload_manager),
             resource_monitor,
+            request_semaphore,
         }
     }
 
@@ -176,7 +184,38 @@ impl ProxyHttp for YatagarasuProxy {
 
     /// Filter and process incoming requests (routing and authentication)
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        // Check resource exhaustion FIRST - reject requests if resources exhausted
+        // Check concurrency limit FIRST - reject if at max concurrent requests
+        let _permit = match self.request_semaphore.try_acquire() {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::warn!("Rejecting request due to max concurrent requests reached");
+
+                let mut header = ResponseHeader::build(503, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Retry-After", "5")?; // Suggest retry after 5 seconds
+
+                let error_body = serde_json::json!({
+                    "error": "Service Temporarily Unavailable",
+                    "message": "Server has reached maximum concurrent request limit. Please retry after 5 seconds.",
+                    "status": 503
+                })
+                .to_string();
+
+                header.insert_header("Content-Length", error_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(error_body.into()), true)
+                    .await?;
+
+                return Ok(true); // Request handled
+            }
+        };
+        // Permit will be automatically released when _permit is dropped at end of function
+
+        // Check resource exhaustion SECOND - reject requests if resources exhausted
         if !self.resource_monitor.should_accept_request() {
             tracing::warn!("Rejecting request due to resource exhaustion");
 
