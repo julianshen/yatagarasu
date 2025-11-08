@@ -4853,11 +4853,7 @@ async fn test_proxy_metrics_increment_correctly() {
     let test_bucket = "metrics-test-bucket";
 
     // Create test bucket (ignore if already exists)
-    let _ = s3_client
-        .create_bucket()
-        .bucket(test_bucket)
-        .send()
-        .await;
+    let _ = s3_client.create_bucket().bucket(test_bucket).send().await;
 
     // Upload test file
     let test_content = "Metrics test content";
@@ -4996,69 +4992,110 @@ buckets:
         "Expected http_requests_total >= 4, got {:?}",
         request_count
     );
-    log::info!("✅ Total request count: {} (expected >= 4)", request_count.unwrap());
+    log::info!(
+        "✅ Total request count: {} (expected >= 4)",
+        request_count.unwrap()
+    );
 
     // 2. Verify 200 status count (should be at least 2: GET + HEAD)
-    let status_200_count = extract_metric_value(&metrics_body, "http_requests_by_status_total{status=\"200\"}");
+    let status_200_count = extract_metric_value(
+        &metrics_body,
+        "http_requests_by_status_total{status=\"200\"}",
+    );
     assert!(
         status_200_count.is_some() && status_200_count.unwrap() >= 2.0,
         "Expected 200 status count >= 2, got {:?}",
         status_200_count
     );
-    log::info!("✅ 200 status count: {} (expected >= 2)", status_200_count.unwrap());
+    log::info!(
+        "✅ 200 status count: {} (expected >= 2)",
+        status_200_count.unwrap()
+    );
 
     // 3. Verify 404 status count (should be at least 2: nonexistent file + wrong path)
-    let status_404_count = extract_metric_value(&metrics_body, "http_requests_by_status_total{status=\"404\"}");
+    let status_404_count = extract_metric_value(
+        &metrics_body,
+        "http_requests_by_status_total{status=\"404\"}",
+    );
     assert!(
         status_404_count.is_some() && status_404_count.unwrap() >= 2.0,
         "Expected 404 status count >= 2, got {:?}",
         status_404_count
     );
-    log::info!("✅ 404 status count: {} (expected >= 2)", status_404_count.unwrap());
+    log::info!(
+        "✅ 404 status count: {} (expected >= 2)",
+        status_404_count.unwrap()
+    );
 
     // 4. Verify GET method count (should be at least 2: valid + nonexistent)
-    let get_count = extract_metric_value(&metrics_body, "http_requests_by_method_total{method=\"GET\"}");
+    let get_count = extract_metric_value(
+        &metrics_body,
+        "http_requests_by_method_total{method=\"GET\"}",
+    );
     assert!(
         get_count.is_some() && get_count.unwrap() >= 2.0,
         "Expected GET count >= 2, got {:?}",
         get_count
     );
-    log::info!("✅ GET method count: {} (expected >= 2)", get_count.unwrap());
+    log::info!(
+        "✅ GET method count: {} (expected >= 2)",
+        get_count.unwrap()
+    );
 
     // 5. Verify HEAD method count (should be at least 1)
-    let head_count = extract_metric_value(&metrics_body, "http_requests_by_method_total{method=\"HEAD\"}");
+    let head_count = extract_metric_value(
+        &metrics_body,
+        "http_requests_by_method_total{method=\"HEAD\"}",
+    );
     assert!(
         head_count.is_some() && head_count.unwrap() >= 1.0,
         "Expected HEAD count >= 1, got {:?}",
         head_count
     );
-    log::info!("✅ HEAD method count: {} (expected >= 1)", head_count.unwrap());
+    log::info!(
+        "✅ HEAD method count: {} (expected >= 1)",
+        head_count.unwrap()
+    );
 
     // 6. Verify bucket-specific counter (should be at least 3: GET + HEAD + 404)
-    let bucket_count = extract_metric_value(&metrics_body, "http_requests_by_bucket_total{bucket=\"metrics_bucket\"}");
+    let bucket_count = extract_metric_value(
+        &metrics_body,
+        "http_requests_by_bucket_total{bucket=\"metrics_bucket\"}",
+    );
     assert!(
         bucket_count.is_some() && bucket_count.unwrap() >= 3.0,
         "Expected bucket count >= 3, got {:?}",
         bucket_count
     );
-    log::info!("✅ Bucket 'metrics_bucket' count: {} (expected >= 3)", bucket_count.unwrap());
+    log::info!(
+        "✅ Bucket 'metrics_bucket' count: {} (expected >= 3)",
+        bucket_count.unwrap()
+    );
 
     // 7. Verify S3 operation counter (should be at least 3: GET + HEAD + nonexistent)
-    let s3_get_count = extract_metric_value(&metrics_body, "s3_operations_total{operation=\"GET\"}");
+    let s3_get_count =
+        extract_metric_value(&metrics_body, "s3_operations_total{operation=\"GET\"}");
     assert!(
         s3_get_count.is_some() && s3_get_count.unwrap() >= 2.0,
         "Expected S3 GET count >= 2, got {:?}",
         s3_get_count
     );
-    log::info!("✅ S3 GET operation count: {} (expected >= 2)", s3_get_count.unwrap());
+    log::info!(
+        "✅ S3 GET operation count: {} (expected >= 2)",
+        s3_get_count.unwrap()
+    );
 
-    let s3_head_count = extract_metric_value(&metrics_body, "s3_operations_total{operation=\"HEAD\"}");
+    let s3_head_count =
+        extract_metric_value(&metrics_body, "s3_operations_total{operation=\"HEAD\"}");
     assert!(
         s3_head_count.is_some() && s3_head_count.unwrap() >= 1.0,
         "Expected S3 HEAD count >= 1, got {:?}",
         s3_head_count
     );
-    log::info!("✅ S3 HEAD operation count: {} (expected >= 1)", s3_head_count.unwrap());
+    log::info!(
+        "✅ S3 HEAD operation count: {} (expected >= 1)",
+        s3_head_count.unwrap()
+    );
 
     // 8. Verify latency histogram exists (should have buckets and count)
     assert!(
@@ -5083,11 +5120,7 @@ buckets:
         .key("metrics-test.txt")
         .send()
         .await;
-    let _ = s3_client
-        .delete_bucket()
-        .bucket(test_bucket)
-        .send()
-        .await;
+    let _ = s3_client.delete_bucket().bucket(test_bucket).send().await;
 
     log::info!("");
     log::info!("=== Metrics Increment Test PASSED ===");
@@ -5100,4 +5133,119 @@ buckets:
     log::info!("");
     log::info!("This confirms the /metrics endpoint provides accurate");
     log::info!("observability data for production monitoring and alerting.");
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_proxy_admin_reload_endpoint() {
+    init_logging();
+
+    log::info!("");
+    log::info!("===========================================");
+    log::info!("  TEST: POST /admin/reload Endpoint");
+    log::info!("===========================================");
+    log::info!("");
+    log::info!("Goal: Verify /admin/reload triggers config reload");
+    log::info!("");
+
+    // Create initial config YAML
+    let config_yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 19091
+  threads: 2
+
+buckets:
+  - name: test_bucket
+    path_prefix: "/test"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      endpoint: "http://localhost:9000"
+"#;
+
+    // Write config to temp file
+    let config_path = "/tmp/yatagarasu-test/config-reload.yaml";
+    std::fs::write(config_path, config_yaml).expect("Failed to write config file");
+
+    log::info!("Starting proxy server on port 19091...");
+
+    // Start proxy in background
+    let proxy_handle = std::process::Command::new("cargo")
+        .args(&["run", "--", "--config", config_path])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("Failed to start proxy");
+
+    let proxy_pid = proxy_handle.id();
+    log::info!("Proxy started with PID: {}", proxy_pid);
+
+    // Wait for proxy to be ready
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // Make POST request to /admin/reload
+    let client = reqwest::Client::new();
+
+    log::info!("Making POST request to /admin/reload...");
+    let response = client
+        .post("http://127.0.0.1:19091/admin/reload")
+        .send()
+        .await
+        .expect("POST /admin/reload failed");
+
+    log::info!("Response status: {}", response.status());
+
+    let status = response.status();
+    let body = response.text().await.expect("Failed to read response body");
+
+    log::info!("Response body: {}", body);
+
+    // Kill proxy
+    let _ = std::process::Command::new("kill")
+        .arg(proxy_pid.to_string())
+        .output();
+
+    // Wait for cleanup
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Assertions
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "Expected 200 OK from /admin/reload, got {}",
+        status
+    );
+
+    // Parse JSON response
+    let json: serde_json::Value =
+        serde_json::from_str(&body).expect("Response body should be valid JSON");
+
+    // Verify response fields
+    assert_eq!(
+        json.get("status").and_then(|v| v.as_str()),
+        Some("success"),
+        "Expected status: success in response"
+    );
+
+    assert!(
+        json.get("message").is_some(),
+        "Expected message field in response"
+    );
+
+    assert!(
+        json.get("config_generation").is_some(),
+        "Expected config_generation field in response"
+    );
+
+    log::info!("");
+    log::info!("=== Admin Reload Endpoint Test PASSED ===");
+    log::info!("");
+    log::info!("Verified:");
+    log::info!("  - POST /admin/reload returns 200 OK");
+    log::info!("  - Response contains status: success");
+    log::info!("  - Response contains reload details (message, config_generation)");
+    log::info!("");
 }

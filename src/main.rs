@@ -61,8 +61,8 @@ fn main() {
     let mut server = Server::new(Some(opt)).expect("Failed to create Pingora server");
     server.bootstrap();
 
-    // Create YatagarasuProxy instance
-    let proxy = YatagarasuProxy::new(config.clone());
+    // Create YatagarasuProxy instance with reload support
+    let proxy = YatagarasuProxy::with_reload(config.clone(), args.config.clone());
 
     // Create HTTP proxy service
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);

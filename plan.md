@@ -1293,9 +1293,9 @@ curl http://localhost:8080/metrics
 - [ ] Document: Which configs support hot reload vs require restart
 
 ### Test: Reload API endpoint (alternative to SIGHUP)
-- [ ] Test: POST /admin/reload triggers config reload
+- [x] Test: POST /admin/reload triggers config reload (manual test verified - returns 200 OK with JSON)
 - [ ] Test: Endpoint requires authentication (admin token)
-- [ ] Test: Returns 200 OK on success with reload details
+- [x] Test: Returns 200 OK on success with reload details (verified: config_generation, message, status, timestamp)
 - [ ] Test: Returns 400 Bad Request if config invalid with error details
 - [ ] Test: Returns 401 if no admin token provided
 

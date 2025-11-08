@@ -13,8 +13,10 @@ use crate::auth::{authenticate_request, AuthError};
 use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::pipeline::RequestContext;
+use crate::reload::ReloadManager;
 use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
+use std::path::PathBuf;
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
 /// Handles routing, authentication, and S3 proxying
@@ -22,6 +24,7 @@ pub struct YatagarasuProxy {
     config: Arc<Config>,
     router: Router,
     metrics: Arc<Metrics>,
+    reload_manager: Option<Arc<ReloadManager>>,
 }
 
 impl YatagarasuProxy {
@@ -33,6 +36,20 @@ impl YatagarasuProxy {
             config: Arc::new(config),
             router,
             metrics,
+            reload_manager: None,
+        }
+    }
+
+    /// Create a new YatagarasuProxy with reload support
+    pub fn with_reload(config: Config, config_path: PathBuf) -> Self {
+        let router = Router::new(config.buckets.clone());
+        let metrics = Arc::new(Metrics::new());
+        let reload_manager = Arc::new(ReloadManager::new(config_path));
+        Self {
+            config: Arc::new(config),
+            router,
+            metrics,
+            reload_manager: Some(reload_manager),
         }
     }
 
@@ -156,6 +173,107 @@ impl ProxyHttp for YatagarasuProxy {
             self.metrics.increment_status_count(200);
 
             return Ok(true); // Short-circuit (response already sent)
+        }
+
+        // Special handling for /admin/reload endpoint (config hot reload)
+        if path == "/admin/reload" && method == "POST" {
+            if let Some(reload_manager) = &self.reload_manager {
+                // Attempt to reload configuration
+                let current_generation = self.config.generation;
+                match reload_manager.reload_config_with_generation(current_generation) {
+                    Ok(new_config) => {
+                        tracing::info!(
+                            old_generation = current_generation,
+                            new_generation = new_config.generation,
+                            "Configuration reloaded successfully"
+                        );
+
+                        // Build success response JSON
+                        let response_json = serde_json::json!({
+                            "status": "success",
+                            "message": "Configuration reloaded successfully",
+                            "config_generation": new_config.generation,
+                            "timestamp": std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(200, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+
+                        // Record metrics
+                        self.metrics.increment_status_count(200);
+
+                        return Ok(true); // Short-circuit
+                    }
+                    Err(error_msg) => {
+                        tracing::error!(
+                            error = %error_msg,
+                            "Configuration reload failed"
+                        );
+
+                        // Build error response JSON
+                        let response_json = serde_json::json!({
+                            "status": "error",
+                            "message": "Configuration reload failed",
+                            "error": error_msg,
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(400, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+
+                        // Record metrics
+                        self.metrics.increment_status_count(400);
+
+                        return Ok(true); // Short-circuit
+                    }
+                }
+            } else {
+                // Reload manager not configured
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Hot reload not enabled",
+                });
+
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(503, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+
+                // Record metrics
+                self.metrics.increment_status_count(503);
+
+                return Ok(true); // Short-circuit
+            }
         }
 
         // Update context with request details
@@ -423,7 +541,8 @@ impl ProxyHttp for YatagarasuProxy {
         // Record bucket-specific metrics if bucket was identified
         if let Some(bucket_config) = ctx.bucket_config() {
             self.metrics.increment_bucket_count(&bucket_config.name);
-            self.metrics.record_bucket_latency(&bucket_config.name, duration_ms);
+            self.metrics
+                .record_bucket_latency(&bucket_config.name, duration_ms);
         }
 
         // Log request completion with request ID for tracing
