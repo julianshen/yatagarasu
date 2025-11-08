@@ -16,4 +16,5 @@ pub mod resources; // Phase 21: Resource Monitoring & Exhaustion Prevention
 pub mod retry; // Phase 21: Retry Logic with Exponential Backoff
 pub mod router;
 pub mod s3;
+pub mod security; // Phase 21: Security Validations (request size, headers, path traversal)
 pub mod server; // Phase 12: Pingora Server Setup // Phase 15: Error Handling & Logging
