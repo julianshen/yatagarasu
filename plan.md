@@ -1300,10 +1300,10 @@ curl http://localhost:8080/metrics
 - [x] Test: Returns 401 if no admin token provided - manual test verified: returns 401 Unauthorized JSON error
 
 ### Test: Metrics for reload operations
-- [ ] Test: Track successful reloads counter
-- [ ] Test: Track failed reload attempts counter
-- [ ] Test: Track current config generation number
-- [ ] Test: Expose reload metrics via /metrics endpoint
+- [x] Test: Track successful reloads counter - test_track_successful_config_reloads passes
+- [x] Test: Track failed reload attempts counter - test_track_failed_config_reloads passes
+- [x] Test: Track current config generation number - test_track_config_generation passes
+- [x] Test: Expose reload metrics via /metrics endpoint - metrics included in export_prometheus (lines 556-576)
 
 **Dependencies**: `signal-hook` crate for POSIX signal handling
 

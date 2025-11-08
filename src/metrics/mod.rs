@@ -58,6 +58,11 @@ pub struct Metrics {
 
     // S3 error counters by error code (NoSuchKey, AccessDenied, etc.)
     s3_errors: Mutex<HashMap<String, u64>>,
+
+    // Configuration reload metrics
+    reload_success: AtomicU64,
+    reload_failure: AtomicU64,
+    config_generation: AtomicU64,
 }
 
 impl Metrics {
@@ -82,6 +87,9 @@ impl Metrics {
             memory_usage: AtomicU64::new(0),
             uptime_seconds: AtomicU64::new(0),
             s3_errors: Mutex::new(HashMap::new()),
+            reload_success: AtomicU64::new(0),
+            reload_failure: AtomicU64::new(0),
+            config_generation: AtomicU64::new(0),
         }
     }
 
@@ -379,6 +387,41 @@ impl Metrics {
         self.uptime_seconds.load(Ordering::Relaxed)
     }
 
+    // Configuration reload metrics methods
+
+    /// Increment successful config reload counter
+    pub fn increment_reload_success(&self) {
+        self.reload_success.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment failed config reload counter
+    pub fn increment_reload_failure(&self) {
+        self.reload_failure.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Set current config generation number
+    pub fn set_config_generation(&self, generation: u64) {
+        self.config_generation.store(generation, Ordering::Relaxed);
+    }
+
+    /// Get successful reload count (for testing)
+    #[cfg(test)]
+    pub fn get_reload_success_count(&self) -> u64 {
+        self.reload_success.load(Ordering::Relaxed)
+    }
+
+    /// Get failed reload count (for testing)
+    #[cfg(test)]
+    pub fn get_reload_failure_count(&self) -> u64 {
+        self.reload_failure.load(Ordering::Relaxed)
+    }
+
+    /// Get current config generation (for testing)
+    #[cfg(test)]
+    pub fn get_config_generation(&self) -> u64 {
+        self.config_generation.load(Ordering::Relaxed)
+    }
+
     /// Export metrics in Prometheus text format
     /// Returns metrics as text/plain content for /metrics endpoint
     pub fn export_prometheus(&self) -> String {
@@ -508,6 +551,28 @@ impl Metrics {
         output.push_str(&format!(
             "uptime_seconds {}\n",
             self.uptime_seconds.load(Ordering::Relaxed)
+        ));
+
+        // Configuration reload metrics
+        output.push_str("\n# HELP config_reload_success_total Successful configuration reloads\n");
+        output.push_str("# TYPE config_reload_success_total counter\n");
+        output.push_str(&format!(
+            "config_reload_success_total {}\n",
+            self.reload_success.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP config_reload_failure_total Failed configuration reload attempts\n");
+        output.push_str("# TYPE config_reload_failure_total counter\n");
+        output.push_str(&format!(
+            "config_reload_failure_total {}\n",
+            self.reload_failure.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP config_generation Current configuration generation number\n");
+        output.push_str("# TYPE config_generation gauge\n");
+        output.push_str(&format!(
+            "config_generation {}\n",
+            self.config_generation.load(Ordering::Relaxed)
         ));
 
         output
@@ -1054,6 +1119,63 @@ mod tests {
             help_count, type_count,
             "Every HELP should have matching TYPE"
         );
+    }
+
+    #[test]
+    fn test_track_successful_config_reloads() {
+        // Test: Track successful config reload attempts
+        let metrics = Metrics::new();
+
+        // Start with zero successful reloads
+        assert_eq!(metrics.get_reload_success_count(), 0);
+
+        // Increment successful reload count
+        metrics.increment_reload_success();
+        assert_eq!(metrics.get_reload_success_count(), 1);
+
+        // Multiple successful reloads
+        metrics.increment_reload_success();
+        metrics.increment_reload_success();
+        assert_eq!(metrics.get_reload_success_count(), 3);
+    }
+
+    #[test]
+    fn test_track_failed_config_reloads() {
+        // Test: Track failed config reload attempts
+        let metrics = Metrics::new();
+
+        // Start with zero failed reloads
+        assert_eq!(metrics.get_reload_failure_count(), 0);
+
+        // Increment failed reload count
+        metrics.increment_reload_failure();
+        assert_eq!(metrics.get_reload_failure_count(), 1);
+
+        // Multiple failed reloads
+        metrics.increment_reload_failure();
+        metrics.increment_reload_failure();
+        assert_eq!(metrics.get_reload_failure_count(), 3);
+    }
+
+    #[test]
+    fn test_track_config_generation() {
+        // Test: Track current config generation number
+        let metrics = Metrics::new();
+
+        // Start with zero (initial generation)
+        assert_eq!(metrics.get_config_generation(), 0);
+
+        // Set config generation
+        metrics.set_config_generation(1);
+        assert_eq!(metrics.get_config_generation(), 1);
+
+        // Update to new generation
+        metrics.set_config_generation(5);
+        assert_eq!(metrics.get_config_generation(), 5);
+
+        // Generation can increase by any amount
+        metrics.set_config_generation(42);
+        assert_eq!(metrics.get_config_generation(), 42);
     }
 
     #[test]

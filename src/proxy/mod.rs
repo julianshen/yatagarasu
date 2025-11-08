@@ -237,6 +237,10 @@ impl ProxyHttp for YatagarasuProxy {
                             "Configuration reloaded successfully"
                         );
 
+                        // Record reload metrics
+                        self.metrics.increment_reload_success();
+                        self.metrics.set_config_generation(new_config.generation);
+
                         // Build success response JSON
                         let response_json = serde_json::json!({
                             "status": "success",
@@ -271,6 +275,9 @@ impl ProxyHttp for YatagarasuProxy {
                             error = %error_msg,
                             "Configuration reload failed"
                         );
+
+                        // Record reload failure metrics
+                        self.metrics.increment_reload_failure();
 
                         // Build error response JSON
                         let response_json = serde_json::json!({
