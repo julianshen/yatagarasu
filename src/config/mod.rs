@@ -155,12 +155,23 @@ fn default_s3_timeout() -> u64 {
     20 // 20 seconds
 }
 
+// Default connection pool values
+fn default_max_concurrent_requests() -> usize {
+    1000 // 1000 concurrent requests
+}
+
+fn default_connection_pool_size() -> usize {
+    50 // 50 connections per S3 bucket
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub address: String,
     pub port: u16,
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +193,8 @@ pub struct S3Config {
     pub endpoint: Option<String>,
     #[serde(default = "default_s3_timeout")]
     pub timeout: u64,
+    #[serde(default = "default_connection_pool_size")]
+    pub connection_pool_size: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -452,6 +465,86 @@ buckets:
         assert_eq!(
             config.buckets[0].s3.timeout, 45,
             "S3Config should use explicit timeout value"
+        );
+    }
+
+    #[test]
+    fn test_server_config_has_max_concurrent_requests_with_default() {
+        // Test 1: Config without max_concurrent_requests should use default (1000)
+        let yaml_without_limit = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml_without_limit).unwrap();
+
+        // Should default to 1000 concurrent requests
+        assert_eq!(
+            config.server.max_concurrent_requests, 1000,
+            "ServerConfig should default to 1000 max concurrent requests"
+        );
+
+        // Test 2: Config with explicit max_concurrent_requests should use that value
+        let yaml_with_limit = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+  max_concurrent_requests: 5000
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml_with_limit).unwrap();
+
+        assert_eq!(
+            config.server.max_concurrent_requests, 5000,
+            "ServerConfig should use explicit max_concurrent_requests value"
+        );
+    }
+
+    #[test]
+    fn test_s3_config_has_connection_pool_size_with_default() {
+        // Test 1: S3 config without connection_pool_size should use default (50)
+        let yaml_without_pool = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        let config = Config::from_yaml_with_env(yaml_without_pool).unwrap();
+
+        // Should default to 50 connections
+        assert_eq!(
+            config.buckets[0].s3.connection_pool_size, 50,
+            "S3Config should default to 50 connection pool size"
+        );
+
+        // Test 2: S3 config with explicit connection_pool_size should use that value
+        let yaml_with_pool = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+      connection_pool_size: 100
+"#;
+        let config = Config::from_yaml_with_env(yaml_with_pool).unwrap();
+
+        assert_eq!(
+            config.buckets[0].s3.connection_pool_size, 100,
+            "S3Config should use explicit connection_pool_size value"
         );
     }
 }
