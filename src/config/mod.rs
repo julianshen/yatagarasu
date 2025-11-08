@@ -131,13 +131,13 @@ impl Config {
                 }
 
                 // Validate that 'header' and 'query' types have 'name' field
-                if matches!(source.source_type.as_str(), "header" | "query") {
-                    if source.name.is_none() {
-                        return Err(format!(
-                            "Token source type '{}' at index {} requires 'name' field",
-                            source.source_type, idx
-                        ));
-                    }
+                if matches!(source.source_type.as_str(), "header" | "query")
+                    && source.name.is_none()
+                {
+                    return Err(format!(
+                        "Token source type '{}' at index {} requires 'name' field",
+                        source.source_type, idx
+                    ));
                 }
             }
         }
