@@ -116,6 +116,30 @@ impl Config {
                     ));
                 }
             }
+
+            // Validate token source types and required fields
+            const VALID_SOURCE_TYPES: &[&str] = &["bearer", "header", "query"];
+            for (idx, source) in jwt.token_sources.iter().enumerate() {
+                // Validate source type
+                if !VALID_SOURCE_TYPES.contains(&source.source_type.as_str()) {
+                    return Err(format!(
+                        "Invalid token source type '{}' at index {}. Supported types: {}",
+                        source.source_type,
+                        idx,
+                        VALID_SOURCE_TYPES.join(", ")
+                    ));
+                }
+
+                // Validate that 'header' and 'query' types have 'name' field
+                if matches!(source.source_type.as_str(), "header" | "query") {
+                    if source.name.is_none() {
+                        return Err(format!(
+                            "Token source type '{}' at index {} requires 'name' field",
+                            source.source_type, idx
+                        ));
+                    }
+                }
+            }
         }
 
         Ok(())

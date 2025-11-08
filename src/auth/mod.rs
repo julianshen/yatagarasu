@@ -60,6 +60,11 @@ pub fn try_extract_token(
     sources: &[crate::config::TokenSource],
 ) -> Option<String> {
     for source in sources {
+        log::debug!(
+            "Attempting to extract JWT from source type: {}",
+            source.source_type
+        );
+
         let token = match source.source_type.as_str() {
             "bearer" => extract_bearer_token(headers),
             "header" => {
@@ -85,14 +90,31 @@ pub fn try_extract_token(
                     None
                 }
             }
-            _ => None,
+            _ => {
+                log::warn!(
+                    "Unknown token source type '{}' - this should have been caught by config validation",
+                    source.source_type
+                );
+                None
+            }
         };
 
-        if token.is_some() {
+        if let Some(ref token_value) = token {
+            log::debug!(
+                "Successfully extracted JWT token from source type '{}' (length: {} chars)",
+                source.source_type,
+                token_value.len()
+            );
             return token;
+        } else {
+            log::debug!(
+                "No token found in source type '{}'",
+                source.source_type
+            );
         }
     }
 
+    log::debug!("JWT token not found in any configured source");
     None
 }
 
@@ -183,13 +205,24 @@ pub fn authenticate_request(
         .ok_or(AuthError::MissingToken)?;
 
     // Validate JWT with configured algorithm
-    let claims = validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm)
-        .map_err(|e| AuthError::InvalidToken(e.to_string()))?;
+    log::debug!("Validating JWT signature with algorithm: {}", jwt_config.algorithm);
+    let claims = validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm).map_err(|e| {
+        log::warn!("JWT signature validation failed: {}", e);
+        AuthError::InvalidToken(e.to_string())
+    })?;
+
+    log::debug!("JWT signature valid, checking claims");
 
     // Verify claims if rules are configured
-    if !verify_claims(&claims, &jwt_config.claims) {
-        return Err(AuthError::ClaimsVerificationFailed);
+    if !jwt_config.claims.is_empty() {
+        log::debug!("Verifying {} custom claim rules", jwt_config.claims.len());
+        if !verify_claims(&claims, &jwt_config.claims) {
+            log::warn!("JWT claims verification failed");
+            return Err(AuthError::ClaimsVerificationFailed);
+        }
+        log::debug!("All JWT claims verified successfully");
     }
 
+    log::debug!("JWT authentication successful");
     Ok(claims)
 }

@@ -578,6 +578,45 @@ buckets:
       max_size: "1GB" # Maximum cache size
 ```
 
+### JWT Authentication Configuration
+
+**Global JWT configuration (applies to all buckets with `auth.enabled: true`)**:
+
+```yaml
+jwt:
+  enabled: true
+  secret: "${JWT_SECRET}" # JWT signing secret (environment variable recommended)
+  algorithm: "HS256" # Supported: HS256, HS384, HS512
+  token_sources: # Checked in order until token found
+    - type: "bearer" # Authorization: Bearer {token}
+    - type: "header" # Custom header
+      name: "X-Auth-Token"
+      prefix: "Token " # Optional: strip this prefix before validation
+    - type: "query" # Query parameter
+      name: "token" # ?token={token}
+  claims: # Optional: verify custom claims
+    - claim: "role"
+      operator: "equals" # Supported: equals, in, contains, gt, lt, gte, lte
+      value: "admin"
+```
+
+**Valid token source types**:
+- `bearer`: Extract from `Authorization: Bearer {token}` header
+- `header`: Extract from custom header (requires `name` field)
+- `query`: Extract from query parameter (requires `name` field)
+
+**Important**:
+- Token sources are checked in order until a token is found
+- The `name` field is **required** for `header` and `query` types
+- The `prefix` field is optional for `header` types (strips prefix before validation)
+- Configuration validation will catch invalid source types or missing required fields
+
+**Common Pitfalls**:
+- ❌ Don't use `type: "bearer_header"` - use `type: "bearer"`
+- ❌ Don't use `param_name` or `header_name` - use `name` for both
+- ✅ Ensure secret is at least 32 characters for HS256
+- ✅ Use environment variables for secrets (never commit secrets to config files)
+
 ### Logging Configuration
 
 ```yaml
