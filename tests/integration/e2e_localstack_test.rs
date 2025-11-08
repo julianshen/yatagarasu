@@ -1558,7 +1558,7 @@ jwt:
   algorithm: "HS256"
   token_sources:
     - type: "query"
-      param_name: "token"
+      name: "token"
 
 buckets:
   - name: "private"
@@ -1752,7 +1752,7 @@ jwt:
   algorithm: "HS256"
   token_sources:
     - type: "header"
-      header_name: "X-Auth-Token"
+      name: "X-Auth-Token"
 
 buckets:
   - name: "private"
