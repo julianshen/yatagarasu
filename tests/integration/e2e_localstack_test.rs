@@ -4805,3 +4805,299 @@ buckets:
     log::info!("request the same file simultaneously, proving it can handle");
     log::info!("popular files in production (CDN origin, shared assets, etc.).");
 }
+
+/// Test: Metrics increment correctly during proxy requests
+///
+/// This test verifies that the /metrics endpoint correctly tracks all request activity:
+/// - Total request count increments
+/// - Status code counters increment (200, 404)
+/// - HTTP method counters increment (GET, HEAD)
+/// - Bucket-specific counters increment
+/// - Latency histograms record request durations
+/// - S3 operation counters increment
+///
+/// Why this matters:
+/// - Production monitoring depends on accurate metrics
+/// - Alerting rules trigger on metric thresholds
+/// - Capacity planning uses historical metrics
+/// - Debugging uses metrics to identify bottlenecks
+#[tokio::test]
+#[ignore]
+async fn test_proxy_metrics_increment_correctly() {
+    init_logging();
+
+    log::info!("");
+    log::info!("===========================================");
+    log::info!("  TEST: Metrics Increment Correctly");
+    log::info!("===========================================");
+    log::info!("");
+    log::info!("Goal: Verify /metrics endpoint tracks all proxy activity");
+    log::info!("");
+
+    // Create S3 client for MinIO (already running on localhost:9000)
+    let s3_endpoint = "http://127.0.0.1:9000";
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .endpoint_url(s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_credential_types::Credentials::new(
+            "minioadmin",
+            "minioadmin",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    let test_bucket = "metrics-test-bucket";
+
+    // Create test bucket (ignore if already exists)
+    let _ = s3_client
+        .create_bucket()
+        .bucket(test_bucket)
+        .send()
+        .await;
+
+    // Upload test file
+    let test_content = "Metrics test content";
+    s3_client
+        .put_object()
+        .bucket(test_bucket)
+        .key("metrics-test.txt")
+        .body(test_content.as_bytes().to_vec().into())
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    log::info!("Uploaded metrics-test.txt to MinIO");
+
+    // Create config YAML
+    let config_yaml = format!(
+        r#"
+server:
+  address: "127.0.0.1"
+  port: 19090
+  threads: 2
+
+buckets:
+  - name: metrics_bucket
+    path_prefix: "/metrics-test"
+    s3:
+      bucket: "{}"
+      region: "us-east-1"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      endpoint: "http://localhost:9000"
+"#,
+        test_bucket
+    );
+
+    // Write config to temp file
+    let config_path = "/tmp/yatagarasu-test/config-metrics.yaml";
+    std::fs::write(config_path, config_yaml).expect("Failed to write config file");
+
+    // Start proxy in background
+    log::info!("Starting proxy server on port 19090...");
+    let proxy_handle = std::process::Command::new("cargo")
+        .args(&["run", "--", "--config", config_path])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("Failed to start proxy");
+
+    let proxy_pid = proxy_handle.id();
+    log::info!("Proxy started with PID: {}", proxy_pid);
+
+    // Wait for proxy to be ready
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // Make several requests to generate metrics
+    let client = reqwest::Client::new();
+
+    log::info!("Making test requests to generate metrics...");
+
+    // 1. Successful GET request (200 OK)
+    let response = client
+        .get("http://127.0.0.1:19090/metrics-test/metrics-test.txt")
+        .send()
+        .await
+        .expect("GET request failed");
+    assert_eq!(response.status(), 200, "Expected 200 OK for valid file");
+    log::info!("✅ GET request succeeded (200 OK)");
+
+    // 2. Successful HEAD request (200 OK)
+    let response = client
+        .head("http://127.0.0.1:19090/metrics-test/metrics-test.txt")
+        .send()
+        .await
+        .expect("HEAD request failed");
+    assert_eq!(response.status(), 200, "Expected 200 OK for HEAD request");
+    log::info!("✅ HEAD request succeeded (200 OK)");
+
+    // 3. File not found (404)
+    let response = client
+        .get("http://127.0.0.1:19090/metrics-test/nonexistent.txt")
+        .send()
+        .await
+        .expect("404 request failed");
+    assert_eq!(response.status(), 404, "Expected 404 for nonexistent file");
+    log::info!("✅ 404 request succeeded (not found)");
+
+    // 4. No bucket match (404)
+    let response = client
+        .get("http://127.0.0.1:19090/wrong-path/test.txt")
+        .send()
+        .await
+        .expect("No bucket match request failed");
+    assert_eq!(response.status(), 404, "Expected 404 for wrong path");
+    log::info!("✅ No bucket match returned 404");
+
+    // Now query /metrics endpoint
+    log::info!("");
+    log::info!("Querying /metrics endpoint...");
+    let metrics_response = client
+        .get("http://127.0.0.1:19090/metrics")
+        .send()
+        .await
+        .expect("Failed to fetch /metrics");
+
+    assert_eq!(metrics_response.status(), 200, "Expected 200 from /metrics");
+
+    let metrics_body = metrics_response
+        .text()
+        .await
+        .expect("Failed to read metrics body");
+
+    log::info!("");
+    log::info!("=== Metrics Output ===");
+    log::info!("{}", metrics_body);
+    log::info!("======================");
+    log::info!("");
+
+    // Parse and verify metrics
+    log::info!("Verifying metric values...");
+
+    // Helper function to extract metric value
+    fn extract_metric_value(metrics: &str, metric_name: &str) -> Option<f64> {
+        metrics
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            .find(|line| line.starts_with(metric_name))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|value| value.parse::<f64>().ok())
+    }
+
+    // 1. Verify total request count (should be at least 4: GET, HEAD, 404, wrong-path)
+    //    Note: May be 5 if /metrics request itself is counted
+    let request_count = extract_metric_value(&metrics_body, "http_requests_total");
+    assert!(
+        request_count.is_some() && request_count.unwrap() >= 4.0,
+        "Expected http_requests_total >= 4, got {:?}",
+        request_count
+    );
+    log::info!("✅ Total request count: {} (expected >= 4)", request_count.unwrap());
+
+    // 2. Verify 200 status count (should be at least 2: GET + HEAD)
+    let status_200_count = extract_metric_value(&metrics_body, "http_requests_by_status_total{status=\"200\"}");
+    assert!(
+        status_200_count.is_some() && status_200_count.unwrap() >= 2.0,
+        "Expected 200 status count >= 2, got {:?}",
+        status_200_count
+    );
+    log::info!("✅ 200 status count: {} (expected >= 2)", status_200_count.unwrap());
+
+    // 3. Verify 404 status count (should be at least 2: nonexistent file + wrong path)
+    let status_404_count = extract_metric_value(&metrics_body, "http_requests_by_status_total{status=\"404\"}");
+    assert!(
+        status_404_count.is_some() && status_404_count.unwrap() >= 2.0,
+        "Expected 404 status count >= 2, got {:?}",
+        status_404_count
+    );
+    log::info!("✅ 404 status count: {} (expected >= 2)", status_404_count.unwrap());
+
+    // 4. Verify GET method count (should be at least 2: valid + nonexistent)
+    let get_count = extract_metric_value(&metrics_body, "http_requests_by_method_total{method=\"GET\"}");
+    assert!(
+        get_count.is_some() && get_count.unwrap() >= 2.0,
+        "Expected GET count >= 2, got {:?}",
+        get_count
+    );
+    log::info!("✅ GET method count: {} (expected >= 2)", get_count.unwrap());
+
+    // 5. Verify HEAD method count (should be at least 1)
+    let head_count = extract_metric_value(&metrics_body, "http_requests_by_method_total{method=\"HEAD\"}");
+    assert!(
+        head_count.is_some() && head_count.unwrap() >= 1.0,
+        "Expected HEAD count >= 1, got {:?}",
+        head_count
+    );
+    log::info!("✅ HEAD method count: {} (expected >= 1)", head_count.unwrap());
+
+    // 6. Verify bucket-specific counter (should be at least 3: GET + HEAD + 404)
+    let bucket_count = extract_metric_value(&metrics_body, "http_requests_by_bucket_total{bucket=\"metrics_bucket\"}");
+    assert!(
+        bucket_count.is_some() && bucket_count.unwrap() >= 3.0,
+        "Expected bucket count >= 3, got {:?}",
+        bucket_count
+    );
+    log::info!("✅ Bucket 'metrics_bucket' count: {} (expected >= 3)", bucket_count.unwrap());
+
+    // 7. Verify S3 operation counter (should be at least 3: GET + HEAD + nonexistent)
+    let s3_get_count = extract_metric_value(&metrics_body, "s3_operations_total{operation=\"GET\"}");
+    assert!(
+        s3_get_count.is_some() && s3_get_count.unwrap() >= 2.0,
+        "Expected S3 GET count >= 2, got {:?}",
+        s3_get_count
+    );
+    log::info!("✅ S3 GET operation count: {} (expected >= 2)", s3_get_count.unwrap());
+
+    let s3_head_count = extract_metric_value(&metrics_body, "s3_operations_total{operation=\"HEAD\"}");
+    assert!(
+        s3_head_count.is_some() && s3_head_count.unwrap() >= 1.0,
+        "Expected S3 HEAD count >= 1, got {:?}",
+        s3_head_count
+    );
+    log::info!("✅ S3 HEAD operation count: {} (expected >= 1)", s3_head_count.unwrap());
+
+    // 8. Verify latency histogram exists (should have buckets and count)
+    assert!(
+        metrics_body.contains("http_request_duration_seconds"),
+        "Expected http_request_duration_seconds histogram in metrics"
+    );
+    log::info!("✅ Request duration histogram present");
+
+    // Cleanup
+    log::info!("");
+    log::info!("Stopping proxy (PID: {})...", proxy_pid);
+    std::process::Command::new("kill")
+        .arg(proxy_pid.to_string())
+        .output()
+        .expect("Failed to kill proxy");
+
+    // Clean up S3 bucket
+    log::info!("Deleting test bucket...");
+    let _ = s3_client
+        .delete_object()
+        .bucket(test_bucket)
+        .key("metrics-test.txt")
+        .send()
+        .await;
+    let _ = s3_client
+        .delete_bucket()
+        .bucket(test_bucket)
+        .send()
+        .await;
+
+    log::info!("");
+    log::info!("=== Metrics Increment Test PASSED ===");
+    log::info!("✅ Total request counter verified");
+    log::info!("✅ Status code counters verified (200, 404)");
+    log::info!("✅ HTTP method counters verified (GET, HEAD)");
+    log::info!("✅ Bucket-specific counter verified");
+    log::info!("✅ S3 operation counters verified");
+    log::info!("✅ Latency histogram present");
+    log::info!("");
+    log::info!("This confirms the /metrics endpoint provides accurate");
+    log::info!("observability data for production monitoring and alerting.");
+}
