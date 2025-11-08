@@ -164,6 +164,54 @@ fn default_connection_pool_size() -> usize {
     50 // 50 connections per S3 bucket
 }
 
+// Default security limit values
+fn default_max_body_size() -> usize {
+    10 * 1024 * 1024 // 10 MB
+}
+
+fn default_max_header_size() -> usize {
+    64 * 1024 // 64 KB
+}
+
+fn default_max_uri_length() -> usize {
+    8192 // 8 KB
+}
+
+/// Security validation limits configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityLimitsConfig {
+    /// Maximum request body size in bytes (default: 10 MB)
+    #[serde(default = "default_max_body_size")]
+    pub max_body_size: usize,
+    /// Maximum total header size in bytes (default: 64 KB)
+    #[serde(default = "default_max_header_size")]
+    pub max_header_size: usize,
+    /// Maximum URI length in bytes (default: 8 KB)
+    #[serde(default = "default_max_uri_length")]
+    pub max_uri_length: usize,
+}
+
+impl Default for SecurityLimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_body_size: default_max_body_size(),
+            max_header_size: default_max_header_size(),
+            max_uri_length: default_max_uri_length(),
+        }
+    }
+}
+
+impl SecurityLimitsConfig {
+    /// Convert to SecurityLimits from security module
+    pub fn to_security_limits(&self) -> crate::security::SecurityLimits {
+        crate::security::SecurityLimits {
+            max_body_size: self.max_body_size,
+            max_header_size: self.max_header_size,
+            max_uri_length: self.max_uri_length,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub address: String,
@@ -174,6 +222,8 @@ pub struct ServerConfig {
     pub max_concurrent_requests: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimitConfigYaml>,
+    #[serde(default)]
+    pub security_limits: SecurityLimitsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

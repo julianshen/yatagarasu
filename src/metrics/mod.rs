@@ -74,6 +74,12 @@ pub struct Metrics {
     s3_retry_attempts: Mutex<HashMap<String, u64>>,
     s3_retry_success: Mutex<HashMap<String, u64>>,
     s3_retry_exhausted: Mutex<HashMap<String, u64>>,
+
+    // Security validation metrics
+    security_payload_too_large: AtomicU64,
+    security_headers_too_large: AtomicU64,
+    security_uri_too_long: AtomicU64,
+    security_path_traversal_blocked: AtomicU64,
 }
 
 impl Metrics {
@@ -106,6 +112,10 @@ impl Metrics {
             s3_retry_attempts: Mutex::new(HashMap::new()),
             s3_retry_success: Mutex::new(HashMap::new()),
             s3_retry_exhausted: Mutex::new(HashMap::new()),
+            security_payload_too_large: AtomicU64::new(0),
+            security_headers_too_large: AtomicU64::new(0),
+            security_uri_too_long: AtomicU64::new(0),
+            security_path_traversal_blocked: AtomicU64::new(0),
         }
     }
 
@@ -450,6 +460,29 @@ impl Metrics {
         *s3_retry_exhausted.entry(bucket.to_string()).or_insert(0) += 1;
     }
 
+    /// Increment security validation: payload too large (413 responses)
+    pub fn increment_security_payload_too_large(&self) {
+        self.security_payload_too_large
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment security validation: headers too large (431 responses)
+    pub fn increment_security_headers_too_large(&self) {
+        self.security_headers_too_large
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment security validation: URI too long (414 responses)
+    pub fn increment_security_uri_too_long(&self) {
+        self.security_uri_too_long.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment security validation: path traversal blocked (400 responses)
+    pub fn increment_security_path_traversal_blocked(&self) {
+        self.security_path_traversal_blocked
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Get successful reload count (for testing)
     #[cfg(test)]
     pub fn get_reload_success_count(&self) -> u64 {
@@ -679,6 +712,35 @@ impl Metrics {
                 bucket, count
             ));
         }
+
+        // Security validation metrics
+        output.push_str("\n# HELP security_payload_too_large_total Requests rejected due to payload size exceeding limit (413)\n");
+        output.push_str("# TYPE security_payload_too_large_total counter\n");
+        output.push_str(&format!(
+            "security_payload_too_large_total {}\n",
+            self.security_payload_too_large.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP security_headers_too_large_total Requests rejected due to headers size exceeding limit (431)\n");
+        output.push_str("# TYPE security_headers_too_large_total counter\n");
+        output.push_str(&format!(
+            "security_headers_too_large_total {}\n",
+            self.security_headers_too_large.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP security_uri_too_long_total Requests rejected due to URI length exceeding limit (414)\n");
+        output.push_str("# TYPE security_uri_too_long_total counter\n");
+        output.push_str(&format!(
+            "security_uri_too_long_total {}\n",
+            self.security_uri_too_long.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP security_path_traversal_blocked_total Requests blocked due to path traversal attempt (400)\n");
+        output.push_str("# TYPE security_path_traversal_blocked_total counter\n");
+        output.push_str(&format!(
+            "security_path_traversal_blocked_total {}\n",
+            self.security_path_traversal_blocked.load(Ordering::Relaxed)
+        ));
 
         output
     }

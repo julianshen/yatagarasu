@@ -22,6 +22,7 @@ use crate::resources::ResourceMonitor;
 use crate::retry::RetryPolicy;
 use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
+use crate::security::{self, SecurityLimits};
 use std::path::PathBuf;
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
@@ -39,6 +40,8 @@ pub struct YatagarasuProxy {
     /// TODO: Integrate retry logic when we have direct control over HTTP client lifecycle
     #[allow(dead_code)]
     retry_policies: Arc<HashMap<String, RetryPolicy>>,
+    /// Security validation limits (request size, headers, URI, path traversal)
+    security_limits: SecurityLimits,
 }
 
 impl YatagarasuProxy {
@@ -103,6 +106,8 @@ impl YatagarasuProxy {
             }
         }
 
+        let security_limits = config.server.security_limits.to_security_limits();
+
         Self {
             config: Arc::new(config),
             router,
@@ -113,6 +118,7 @@ impl YatagarasuProxy {
             circuit_breakers: Arc::new(circuit_breakers),
             rate_limit_manager,
             retry_policies: Arc::new(retry_policies),
+            security_limits,
         }
     }
 
@@ -178,6 +184,8 @@ impl YatagarasuProxy {
             }
         }
 
+        let security_limits = config.server.security_limits.to_security_limits();
+
         Self {
             config: Arc::new(config),
             router,
@@ -188,6 +196,7 @@ impl YatagarasuProxy {
             circuit_breakers: Arc::new(circuit_breakers),
             rate_limit_manager,
             retry_policies: Arc::new(retry_policies),
+            security_limits,
         }
     }
 
@@ -413,6 +422,154 @@ impl ProxyHttp for YatagarasuProxy {
         let req = session.req_header();
         let path = req.uri.path().to_string();
         let method = req.method.to_string();
+
+        // SECURITY VALIDATIONS (check early before routing)
+
+        // 1. Validate URI length
+        let uri_str = req.uri.to_string();
+        if let Err(security_error) =
+            security::validate_uri_length(&uri_str, self.security_limits.max_uri_length)
+        {
+            tracing::warn!(
+                uri_length = uri_str.len(),
+                limit = self.security_limits.max_uri_length,
+                error = %security_error,
+                "URI too long"
+            );
+
+            let mut header = ResponseHeader::build(414, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+
+            let error_body = serde_json::json!({
+                "error": "URI Too Long",
+                "message": security_error.to_string(),
+                "status": 414
+            })
+            .to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(error_body.into()), true)
+                .await?;
+
+            self.metrics.increment_status_count(414);
+            self.metrics.increment_security_uri_too_long();
+            return Ok(true); // Short-circuit
+        }
+
+        // 2. Validate total header size
+        let total_header_size: usize = req
+            .headers
+            .iter()
+            .map(|(name, value)| name.as_str().len() + value.len())
+            .sum();
+
+        if let Err(security_error) =
+            security::validate_header_size(total_header_size, self.security_limits.max_header_size)
+        {
+            tracing::warn!(
+                header_size = total_header_size,
+                limit = self.security_limits.max_header_size,
+                error = %security_error,
+                "Headers too large"
+            );
+
+            let mut header = ResponseHeader::build(431, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+
+            let error_body = serde_json::json!({
+                "error": "Request Header Fields Too Large",
+                "message": security_error.to_string(),
+                "status": 431
+            })
+            .to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(error_body.into()), true)
+                .await?;
+
+            self.metrics.increment_status_count(431);
+            self.metrics.increment_security_headers_too_large();
+            return Ok(true); // Short-circuit
+        }
+
+        // 3. Validate request body size (from Content-Length header)
+        let content_length = req
+            .headers
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok());
+
+        if let Err(security_error) =
+            security::validate_body_size(content_length, self.security_limits.max_body_size)
+        {
+            tracing::warn!(
+                content_length = ?content_length,
+                limit = self.security_limits.max_body_size,
+                error = %security_error,
+                "Request payload too large"
+            );
+
+            let mut header = ResponseHeader::build(413, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+
+            let error_body = serde_json::json!({
+                "error": "Payload Too Large",
+                "message": security_error.to_string(),
+                "status": 413
+            })
+            .to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(error_body.into()), true)
+                .await?;
+
+            self.metrics.increment_status_count(413);
+            self.metrics.increment_security_payload_too_large();
+            return Ok(true); // Short-circuit
+        }
+
+        // 4. Check for path traversal attempts
+        if let Err(security_error) = security::check_path_traversal(&path) {
+            tracing::warn!(
+                path = %path,
+                error = %security_error,
+                "Path traversal attempt detected"
+            );
+
+            let mut header = ResponseHeader::build(400, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+
+            let error_body = serde_json::json!({
+                "error": "Bad Request",
+                "message": security_error.to_string(),
+                "status": 400
+            })
+            .to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(error_body.into()), true)
+                .await?;
+
+            self.metrics.increment_status_count(400);
+            self.metrics.increment_security_path_traversal_blocked();
+            return Ok(true); // Short-circuit
+        }
 
         // Record request metrics (conditionally based on resource pressure)
         if self.resource_monitor.metrics_enabled() {
