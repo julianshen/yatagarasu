@@ -1296,7 +1296,7 @@ curl http://localhost:8080/metrics
 - [x] Test: POST /admin/reload triggers config reload (manual test verified - returns 200 OK with JSON)
 - [x] Test: Endpoint requires authentication (admin token) - manual test verified with valid JWT
 - [x] Test: Returns 200 OK on success with reload details (verified: config_generation, message, status, timestamp)
-- [ ] Test: Returns 400 Bad Request if config invalid with error details
+- [x] Test: Returns 400 Bad Request if config invalid with error details - verified: {"error":"Duplicate path_prefix...","message":"Configuration reload failed","status":"error"}
 - [x] Test: Returns 401 if no admin token provided - manual test verified: returns 401 Unauthorized JSON error
 
 ### Test: Metrics for reload operations
