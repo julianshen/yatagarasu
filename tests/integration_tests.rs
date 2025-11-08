@@ -15,5 +15,6 @@ mod integration {
     mod range_requests_test;
     mod server_basic_test;
     mod streaming_test;
-    pub mod test_harness; // Test utilities for starting/stopping proxy
+    pub mod test_harness;
+    mod timeout_test; // Test utilities for starting/stopping proxy
 }
