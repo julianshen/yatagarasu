@@ -547,3 +547,172 @@ fn test_invalid_range_returns_416_range_not_satisfiable() {
         log::info!("Invalid range test passed: returned 416 as expected");
     });
 }
+
+#[test]
+#[ignore] // Requires Docker and running proxy
+fn test_multiple_ranges_returns_multipart_byteranges() {
+    init_logging();
+
+    // RED PHASE: Test multiple byte ranges in single request (RFC 7233 Section 4.1)
+    // Format: "Range: bytes=0-50, 100-150, 200-250"
+    // Response should be multipart/byteranges with each part containing:
+    // - Content-Range header indicating which bytes
+    // - The actual byte content
+    //
+    // This feature is used by:
+    // - Parallel video segment downloads (download multiple chunks simultaneously)
+    // - Efficient sparse file access (only download needed sections)
+    // - Resume interrupted downloads from multiple points
+
+    let docker = Cli::default();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    runtime.block_on(async {
+        // Create test file with identifiable content
+        // Use alphabet repeated: "ABCDEFGH..." for easy verification
+        let mut test_content = Vec::new();
+        for _ in 0..50 {
+            test_content.extend_from_slice(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        }
+        // Total: 1300 bytes (50 * 26)
+
+        let (_container, s3_endpoint) =
+            setup_localstack_with_test_file(&docker, "test-bucket", "multirange.txt", &test_content)
+                .await;
+
+        // Create dynamic config for this LocalStack instance
+        let config_path = "/tmp/yatagarasu-range-multipart.yaml";
+        create_localstack_config(&s3_endpoint, config_path);
+
+        // Start proxy with test harness
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for multipart range test");
+
+        let proxy_url = "http://127.0.0.1:18080/test/multirange.txt";
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+
+        // Request three byte ranges:
+        // - bytes 0-9: First 10 bytes ("ABCDEFGHIJ")
+        // - bytes 26-35: Second alphabet sequence ("ABCDEFGHIJ")
+        // - bytes 100-109: Fourth alphabet sequence, offset 22 ("WXYZABCDEF")
+        let response = client
+            .get(proxy_url)
+            .header("Range", "bytes=0-9, 26-35, 100-109")
+            .send()
+            .await
+            .expect("Failed to send multi-range request");
+
+        // Verify response status is 206 Partial Content
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::PARTIAL_CONTENT,
+            "Multi-range request should return 206 Partial Content"
+        );
+
+        // Verify Content-Type is multipart/byteranges
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .expect("Response should include Content-Type header")
+            .to_str()
+            .unwrap();
+
+        assert!(
+            content_type.starts_with("multipart/byteranges"),
+            "Content-Type should be multipart/byteranges, got: {}",
+            content_type
+        );
+
+        // Extract boundary from Content-Type header
+        // Format: "multipart/byteranges; boundary=<boundary-string>"
+        let boundary = content_type
+            .split("boundary=")
+            .nth(1)
+            .expect("Content-Type should include boundary parameter")
+            .trim()
+            .to_string(); // Clone to avoid borrow issues
+
+        log::info!(
+            "Multi-range response Content-Type: {}, boundary: {}",
+            content_type,
+            boundary
+        );
+
+        // Get response body
+        let body = response
+            .bytes()
+            .await
+            .expect("Failed to read multipart response body");
+
+        let body_str = String::from_utf8_lossy(&body);
+
+        log::info!("Multipart response body:\n{}", body_str);
+
+        // Verify multipart structure
+        // Each part should be separated by "--<boundary>"
+        // Final boundary is "--<boundary>--"
+
+        let boundary_marker = format!("--{}", boundary);
+
+        // Split by boundary to get parts
+        let parts: Vec<&str> = body_str.split(&boundary_marker).collect();
+
+        // Expect: empty prefix, 3 parts, empty suffix
+        // Total: 5 elements (prefix, part1, part2, part3, suffix)
+        assert!(
+            parts.len() >= 4,
+            "Multipart response should have at least 3 parts, got: {}",
+            parts.len()
+        );
+
+        // Verify Part 1: bytes 0-9
+        let part1 = parts[1];
+        assert!(
+            part1.contains("Content-Range: bytes 0-9"),
+            "Part 1 should have Content-Range: bytes 0-9"
+        );
+        assert!(
+            part1.contains("ABCDEFGHIJ"),
+            "Part 1 should contain first 10 bytes"
+        );
+
+        // Verify Part 2: bytes 26-35
+        let part2 = parts[2];
+        assert!(
+            part2.contains("Content-Range: bytes 26-35"),
+            "Part 2 should have Content-Range: bytes 26-35"
+        );
+        assert!(
+            part2.contains("ABCDEFGHIJ"),
+            "Part 2 should contain second alphabet sequence (bytes 26-35)"
+        );
+
+        // Verify Part 3: bytes 100-109
+        let part3 = parts[3];
+        assert!(
+            part3.contains("Content-Range: bytes 100-109"),
+            "Part 3 should have Content-Range: bytes 100-109"
+        );
+
+        // bytes 100-109 from the content:
+        // Position 100 = 3*26 + 22 = alphabet[22..26] + alphabet[0..6] = "WXYZABCDEF"
+        let expected_part3_content = &test_content[100..110];
+        assert_eq!(
+            expected_part3_content,
+            b"WXYZABCDEF",
+            "Part 3 should contain bytes 100-109"
+        );
+
+        // Verify final boundary marker (--boundary--)
+        assert!(
+            body_str.ends_with("--\r\n") || body_str.ends_with("--"),
+            "Multipart response should end with final boundary --"
+        );
+
+        log::info!("Multi-range test passed: received valid multipart/byteranges response");
+    });
+}

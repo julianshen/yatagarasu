@@ -1332,7 +1332,7 @@ kill -HUP $(pidof yatagarasu)
 - [x] Test: GET with Range: bytes=0-1023 returns 206 Partial Content
 - [x] Test: Response includes Content-Range header with correct range
 - [x] Test: Response body contains correct byte range from S3 object
-- [ ] Test: Multiple ranges in single request (multipart/byteranges)
+- [x] Test: Multiple ranges in single request (multipart/byteranges) - test_multiple_ranges_returns_multipart_byteranges
 - [x] Test: Suffix range (Range: bytes=-1000) returns last 1000 bytes
 - [x] Test: Open-ended range (Range: bytes=1000-) returns from offset to end
 - [x] Test: Invalid range returns 416 Range Not Satisfiable
