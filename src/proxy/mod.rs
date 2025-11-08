@@ -15,6 +15,7 @@ use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::pipeline::RequestContext;
 use crate::reload::ReloadManager;
+use crate::resources::ResourceMonitor;
 use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
 use std::path::PathBuf;
@@ -26,6 +27,7 @@ pub struct YatagarasuProxy {
     router: Router,
     metrics: Arc<Metrics>,
     reload_manager: Option<Arc<ReloadManager>>,
+    resource_monitor: Arc<ResourceMonitor>,
 }
 
 impl YatagarasuProxy {
@@ -33,11 +35,15 @@ impl YatagarasuProxy {
     pub fn new(config: Config) -> Self {
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
+        // Initialize resource monitor with reasonable defaults
+        // 1024 file descriptors, 1GB memory limit
+        let resource_monitor = Arc::new(ResourceMonitor::new(1024, 1024 * 1024 * 1024));
         Self {
             config: Arc::new(config),
             router,
             metrics,
             reload_manager: None,
+            resource_monitor,
         }
     }
 
@@ -46,11 +52,15 @@ impl YatagarasuProxy {
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
         let reload_manager = Arc::new(ReloadManager::new(config_path));
+        // Initialize resource monitor with reasonable defaults
+        // 1024 file descriptors, 1GB memory limit
+        let resource_monitor = Arc::new(ResourceMonitor::new(1024, 1024 * 1024 * 1024));
         Self {
             config: Arc::new(config),
             router,
             metrics,
             reload_manager: Some(reload_manager),
+            resource_monitor,
         }
     }
 
@@ -168,14 +178,43 @@ impl ProxyHttp for YatagarasuProxy {
 
     /// Filter and process incoming requests (routing and authentication)
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        // Check resource exhaustion FIRST - reject requests if resources exhausted
+        if !self.resource_monitor.should_accept_request() {
+            tracing::warn!("Rejecting request due to resource exhaustion");
+
+            let mut header = ResponseHeader::build(503, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+            header.insert_header("Retry-After", "10")?; // Suggest retry after 10 seconds
+
+            let error_body = serde_json::json!({
+                "error": "Service Temporarily Unavailable",
+                "message": "Server is under heavy load. Please retry after 10 seconds.",
+                "status": 503
+            })
+            .to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(error_body.into()), true)
+                .await?;
+
+            return Ok(true); // Short-circuit (503 response sent)
+        }
+
         // Extract request information
         let req = session.req_header();
         let path = req.uri.path().to_string();
         let method = req.method.to_string();
 
-        // Record request metrics
-        self.metrics.increment_request_count();
-        self.metrics.increment_method_count(&method);
+        // Record request metrics (conditionally based on resource pressure)
+        if self.resource_monitor.metrics_enabled() {
+            self.metrics.increment_request_count();
+            self.metrics.increment_method_count(&method);
+        }
 
         // Special handling for /metrics endpoint (bypass auth, return Prometheus metrics)
         if path == "/metrics" {
