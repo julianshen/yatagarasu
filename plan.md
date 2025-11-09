@@ -1647,7 +1647,7 @@ kill -TERM <pid>
 - [x] Test: Request duration logged on completion - *logging_filter logs duration_ms*
 - [x] Test: Client IP logged (X-Forwarded-For aware) - *get_client_ip() checks X-Forwarded-For header, added to all security/request logs*
 - [x] File: Update `src/proxy/mod.rs` with request_id and structured logging - *Added request_id + client_ip to 15+ log statements*
-- [ ] File: `tests/integration/logging_test.rs`
+- [x] File: `tests/integration/logging_test.rs` - *Created with 6 integration tests for X-Request-ID header verification*
 
 **Example**:
 ```json
