@@ -236,6 +236,53 @@ impl YatagarasuProxy {
         params
     }
 
+    /// Check S3 backend health by attempting to connect to the endpoint
+    ///
+    /// Performs a simple TCP connectivity check with a timeout.
+    /// Returns true if the endpoint is reachable, false otherwise.
+    async fn check_s3_health(&self, endpoint: &str) -> bool {
+        // Parse endpoint URL to get host and port
+        let url = match endpoint.parse::<hyper::Uri>() {
+            Ok(uri) => uri,
+            Err(_) => return false,
+        };
+
+        let host = match url.host() {
+            Some(h) => h,
+            None => return false,
+        };
+
+        let port = url
+            .port_u16()
+            .unwrap_or(if url.scheme_str() == Some("https") {
+                443
+            } else {
+                80
+            });
+
+        // Try to establish TCP connection with 2 second timeout
+        let addr = format!("{}:{}", host, port);
+        let connect_future = tokio::net::TcpStream::connect(&addr);
+        let timeout_duration = Duration::from_secs(2);
+
+        match tokio::time::timeout(timeout_duration, connect_future).await {
+            Ok(Ok(_stream)) => {
+                // Connection successful
+                true
+            }
+            Ok(Err(_)) => {
+                // Connection failed
+                tracing::warn!(endpoint = %endpoint, "S3 health check failed: connection error");
+                false
+            }
+            Err(_) => {
+                // Timeout
+                tracing::warn!(endpoint = %endpoint, "S3 health check failed: timeout");
+                false
+            }
+        }
+    }
+
     /// Export circuit breaker metrics for Prometheus
     fn export_circuit_breaker_metrics(&self) -> String {
         let mut output = String::new();
@@ -640,6 +687,57 @@ impl ProxyHttp for YatagarasuProxy {
 
             // Record metrics for /health endpoint itself
             self.metrics.increment_status_count(200);
+
+            return Ok(true); // Short-circuit (response already sent)
+        }
+
+        // Special handling for /ready endpoint (bypass auth, check S3 backend health)
+        if path == "/ready" {
+            // Check health of all S3 backends
+            let mut backends_health = serde_json::Map::new();
+            let mut all_healthy = true;
+
+            for bucket_config in &self.config.buckets {
+                // Check if S3 endpoint is reachable with a simple connectivity check
+                let is_healthy = if let Some(endpoint) = &bucket_config.s3.endpoint {
+                    self.check_s3_health(endpoint).await
+                } else {
+                    // If no endpoint specified, assume AWS S3 is used (always healthy for this check)
+                    // We can't check AWS S3 connectivity without region-specific endpoints
+                    true
+                };
+
+                backends_health.insert(
+                    bucket_config.name.clone(),
+                    serde_json::Value::String(if is_healthy {
+                        "healthy".to_string()
+                    } else {
+                        all_healthy = false;
+                        "unhealthy".to_string()
+                    }),
+                );
+            }
+
+            let status_code: u16 = if all_healthy { 200 } else { 503 };
+            let ready_response = serde_json::json!({
+                "status": if all_healthy { "ready" } else { "unavailable" },
+                "backends": backends_health
+            })
+            .to_string();
+
+            let mut header = ResponseHeader::build(status_code, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+            header.insert_header("Content-Length", ready_response.len().to_string())?;
+
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(ready_response.into()), true)
+                .await?;
+
+            // Record metrics for /ready endpoint itself
+            self.metrics.increment_status_count(status_code);
 
             return Ok(true); // Short-circuit (response already sent)
         }
