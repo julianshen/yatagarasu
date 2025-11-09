@@ -1557,6 +1557,188 @@ valgrind --leak-check=full ./target/release/yatagarasu
 
 ---
 
+## Phase 22: Graceful Shutdown & Observability
+
+**Objective**: Production-grade lifecycle management, health checks, and operational observability
+
+**Goal**: Proxy handles startup, shutdown, and operational monitoring gracefully with comprehensive observability
+
+**Status**: 📋 **NOT STARTED**
+
+**Rationale**: Production systems need graceful lifecycle management (clean startup/shutdown), health endpoints for orchestration (Kubernetes/Docker), and enhanced observability (structured logging, request correlation) for troubleshooting. This phase makes the proxy production-ready for container orchestration and operations teams.
+
+### Test: Health and readiness endpoints
+
+**Why**: Container orchestrators (Kubernetes, Docker Swarm, ECS) need health endpoints to determine if the proxy is alive and ready to serve traffic.
+
+- [ ] Test: /health endpoint returns 200 OK when proxy is running
+- [ ] Test: /health response includes basic status (uptime, version)
+- [ ] Test: /health bypasses authentication (always accessible)
+- [ ] Test: /ready endpoint returns 200 when all backends reachable
+- [ ] Test: /ready endpoint returns 503 when any backend unreachable
+- [ ] Test: /ready checks S3 connectivity with HEAD request
+- [ ] Test: /ready includes dependency health (S3 per bucket)
+- [ ] File: `src/health.rs`
+- [ ] File: `tests/integration/health_test.rs`
+
+**Example**:
+```bash
+# Liveness probe (is proxy alive?)
+curl http://localhost:8080/health
+# {"status": "healthy", "uptime_seconds": 12345, "version": "0.3.0"}
+
+# Readiness probe (can proxy serve traffic?)
+curl http://localhost:8080/ready
+# {"status": "ready", "backends": {"products": "healthy", "media": "healthy"}}
+```
+
+### Test: Graceful shutdown
+
+**Why**: In-flight requests must complete before shutdown to prevent data loss and client errors. Resources must be released cleanly.
+
+- [ ] Test: SIGTERM initiates graceful shutdown sequence
+- [ ] Test: In-flight requests complete successfully during shutdown
+- [ ] Test: New requests rejected with 503 during shutdown
+- [ ] Test: Shutdown timeout configurable (default 30s)
+- [ ] Test: Force shutdown after timeout (SIGKILL behavior)
+- [ ] Test: S3 connections closed cleanly (no broken pipes)
+- [ ] Test: Connection pool drained before exit
+- [ ] Test: Metrics flushed to /metrics before exit
+- [ ] Test: Shutdown logged with reason and timing
+- [ ] File: `src/shutdown.rs`
+- [ ] File: `tests/integration/shutdown_test.rs`
+
+**Example**:
+```bash
+# Graceful shutdown
+kill -TERM <pid>
+# Proxy logs: "Received SIGTERM, initiating graceful shutdown"
+# Proxy logs: "Waiting for 3 in-flight requests to complete"
+# Proxy logs: "All requests completed, closing connections"
+# Proxy logs: "Shutdown complete in 2.3s"
+```
+
+### Test: Structured logging and request correlation
+
+**Why**: Operators need to correlate logs across requests for debugging. Structured logs (JSON) enable automated log aggregation and querying.
+
+- [ ] Test: All logs in JSON format (structured logging)
+- [ ] Test: Every request gets unique request_id (UUID v4)
+- [ ] Test: request_id included in all logs for that request
+- [ ] Test: request_id returned in X-Request-ID response header
+- [ ] Test: Log fields include: timestamp, level, message, request_id, bucket, path, status
+- [ ] Test: Errors include error_type, error_message, bucket, request_id
+- [ ] Test: No sensitive data in logs (JWT tokens, credentials redacted)
+- [ ] Test: S3 errors logged with AWS error code and message
+- [ ] Test: Request duration logged on completion
+- [ ] Test: Client IP logged (X-Forwarded-For aware)
+- [ ] File: Update `src/proxy/mod.rs` with request_id and structured logging
+- [ ] File: `tests/integration/logging_test.rs`
+
+**Example**:
+```json
+{"timestamp":"2025-11-09T12:34:56Z","level":"INFO","message":"Request started","request_id":"550e8400-e29b-41d4-a716-446655440000","method":"GET","path":"/products/image.jpg","client_ip":"192.168.1.100"}
+{"timestamp":"2025-11-09T12:34:56Z","level":"INFO","message":"Request completed","request_id":"550e8400-e29b-41d4-a716-446655440000","status":200,"duration_ms":45,"bytes_sent":1048576}
+```
+
+### Test: Chaos engineering scenarios
+
+**Why**: Production systems must handle partial failures gracefully. Chaos testing validates error handling under adverse conditions.
+
+- [ ] Test: S3 backend unreachable (network down) returns 502 Bad Gateway
+- [ ] Test: S3 backend slow (10s+ latency) times out with 504 Gateway Timeout
+- [ ] Test: S3 returns 500 Internal Server Error (proxied correctly)
+- [ ] Test: S3 returns 503 Service Unavailable (triggers circuit breaker)
+- [ ] Test: S3 returns invalid XML (handled gracefully, 502 returned)
+- [ ] Test: S3 connection reset mid-stream (client gets partial response)
+- [ ] Test: DNS resolution failure for S3 endpoint (502 Bad Gateway)
+- [ ] Test: Network partition between proxy and S3 (timeout, 504)
+- [ ] Test: Proxy continues serving cached content when S3 down (if cache enabled)
+- [ ] File: `tests/integration/chaos_test.rs`
+
+**Tools**:
+- Toxiproxy for network chaos (latency, timeouts, resets)
+- Docker network manipulation (`docker network disconnect`)
+- MinIO container stop/start mid-request
+
+### Test: Resource exhaustion handling
+
+**Why**: Systems must degrade gracefully when resources are exhausted, not crash.
+
+- [ ] Test: File descriptor limit reached returns 503 Service Unavailable
+- [ ] Test: Memory limit approached triggers warning logs
+- [ ] Test: Connection pool exhausted queues requests (backpressure)
+- [ ] Test: Too many concurrent requests returns 503 (load shedding)
+- [ ] Test: Graceful degradation under resource pressure (metrics disabled first)
+- [ ] Test: Automatic recovery when resources become available
+- [ ] Test: Resource exhaustion logged with metrics
+- [ ] File: `src/resource_monitor.rs` (already exists, enhance)
+- [ ] File: `tests/integration/resource_exhaustion_test.rs`
+
+### Test: Startup validation
+
+**Why**: Catch configuration errors at startup, not at first request.
+
+- [ ] Test: Invalid config prevents startup (exit code 1)
+- [ ] Test: Missing config file prevents startup with clear error
+- [ ] Test: S3 backend unreachable at startup logs warning but continues (fail open)
+- [ ] Test: Invalid S3 credentials detected at startup (optional preflight check)
+- [ ] Test: Port already in use prevents startup with clear error
+- [ ] Test: Startup logs proxy version, config path, listen address
+- [ ] Test: Startup validation takes <5s (fast startup)
+- [ ] File: Update `src/main.rs` with startup validation
+
+**Example**:
+```bash
+$ ./yatagarasu --config invalid.yaml
+Error: Invalid configuration: buckets[0].s3.endpoint is required
+$ echo $?
+1
+```
+
+### Test: Metrics enhancements
+
+**Why**: Operators need comprehensive metrics for monitoring and alerting.
+
+- [ ] Test: Request duration histogram (p50, p95, p99)
+- [ ] Test: In-flight requests gauge (current concurrent requests)
+- [ ] Test: Backend health gauge (1=healthy, 0=unhealthy per bucket)
+- [ ] Test: Graceful shutdown metrics (in_flight_requests, shutdown_duration_seconds)
+- [ ] Test: Request correlation metrics (request_id in trace context)
+- [ ] File: Update `src/metrics/mod.rs`
+
+**Tools**:
+- Prometheus for metrics collection
+- Grafana for visualization (sample dashboard in `docs/grafana-dashboard.json`)
+
+**Expected Outcome**: Production-ready proxy with graceful lifecycle management, health checks, and comprehensive observability
+
+**Verification**:
+```bash
+# Test graceful shutdown
+cargo run &
+PID=$!
+curl http://localhost:8080/health  # 200 OK
+kill -TERM $PID
+# Wait for graceful shutdown
+# Check logs for clean shutdown
+
+# Test health endpoints
+curl http://localhost:8080/health  # 200 OK
+curl http://localhost:8080/ready   # 200 OK (all backends healthy)
+# Stop MinIO
+docker stop minio
+curl http://localhost:8080/ready   # 503 Service Unavailable
+
+# Test chaos scenarios
+cargo test --test chaos_test
+
+# Test structured logging
+cargo run 2>&1 | jq .  # Verify JSON output
+```
+
+---
+
 ## v0.2.0 Release Criteria
 
 Before releasing v0.2.0, verify:

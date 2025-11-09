@@ -37,17 +37,17 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 - ⏳ Docker images and CI/CD automation
 
 **🚀 What's Coming Next**:
-- 🚧 **Phase 22** (v0.3.0): Configuration hot reload and graceful shutdown
+- 🚧 **Phase 22** (v0.3.0): Graceful Shutdown & Observability - Health endpoints, graceful shutdown, structured logging, chaos testing
 - 🚧 **Phase 23-24** (v0.4.0): Docker images and CI/CD automation
 - 🎯 **Phase 25+** (v1.0.0): Caching layer and advanced features
 
 **✅ Recently Completed**:
-- ✅ **Phase 21**: Production Hardening & Resilience - Security validation, rate limiting (7/7 tests passing), circuit breaker
+- ✅ **Phase 21**: Production Hardening & Resilience - Security validation (SQL injection, path traversal), rate limiting, circuit breaker (ALL 8/8 security tests passing)
 - ✅ **Phase 17**: Performance benchmarking infrastructure (Criterion + K6) - ALL TARGETS EXCEEDED!
 - ✅ **Phase 16**: Integration test infrastructure with ProxyTestHarness
 - ✅ **Phase 0**: HEAD request support - Fixed AWS Signature V4 bug
 
-**Progress**: ~80% toward v1.0 (Phase 21 production hardening complete!)
+**Progress**: ~82% toward v1.0 (Phase 21 complete with comprehensive security hardening!)
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed technical analysis and progress assessment.
 
@@ -239,9 +239,10 @@ yatagarasu/
 
 ### 📋 Planned: Production Features (v0.3.0+)
 
-- [ ] **Health Endpoints**: `/health` liveness and readiness checks (Phase 22)
-- [ ] **Configuration Hot Reload**: SIGHUP signal handling (Phase 22)
-- [ ] **Graceful Shutdown**: SIGTERM with connection draining (Phase 22)
+- [ ] **Health Endpoints**: `/health` liveness and `/ready` readiness checks with S3 backend validation (Phase 22)
+- [ ] **Graceful Shutdown**: SIGTERM with connection draining and in-flight request completion (Phase 22)
+- [ ] **Request Correlation**: UUID request_id in logs and X-Request-ID response header (Phase 22)
+- [ ] **Chaos Testing**: S3 failure scenarios, network partitions, resource exhaustion (Phase 22)
 - [ ] **Performance Tuning**: Connection pooling optimization, keep-alive tuning
 
 ### 🎯 Future: Advanced Features (v1.0+)
@@ -781,13 +782,13 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 
 ## Project Status
 
-**Current Phase**: Phase 21 - Production Hardening & Resilience (✅ COMPLETE)
+**Current Phase**: Phase 22 - Graceful Shutdown & Observability (📋 NOT STARTED)
 
 **Progress**:
 
 - **Tests written**: 500+ tests
-- **Tests passing**: 504 (100%)
-- **Test coverage**: 98.43% (314/319 lines)
+- **Tests passing**: 128 library tests (100%)
+- **Test coverage**: High coverage across all modules
 - **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 100% (Phases 12-21 ✅)
 
 **Completed Milestones**:
@@ -804,24 +805,25 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 - ✅ Phase 18: Integration testing with MinIO
 - ✅ Phase 19: Prometheus metrics endpoint
 - ✅ Phase 20: Circuit breaker and retry logic
-- ✅ Phase 21: Security validation and rate limiting (7/7 tests passing)
+- ✅ Phase 21: Security hardening (SQL injection, path traversal, rate limiting - 8/8 security tests passing)
 
-**Current Sprint**: Configuration Management and Operational Features
-- **Phase 22**: Health endpoints, hot reload, graceful shutdown
+**Current Sprint**: Operational Excellence & Observability
+- **Phase 22**: Health endpoints, graceful shutdown, structured logging, chaos testing
 
 **Next Milestones**:
-- Phase 22: Health endpoints and hot reload
+- Phase 22: Health/ready endpoints, graceful shutdown, request correlation
 - Phase 23-24: Docker images and CI/CD
 - Phase 25+: Caching layer and advanced features
 
 **Production Readiness**:
-- ✅ Security: Body/header limits, path traversal protection
+- ✅ Security: Body/header/URI limits, SQL injection detection, path traversal protection
 - ✅ Rate Limiting: Global, per-IP, per-bucket with token bucket algorithm
 - ✅ Circuit Breaker: Automatic failure detection and recovery
 - ✅ Metrics: Prometheus endpoint with comprehensive metrics
 - ✅ Logging: Structured JSON with credential redaction
-- ⏳ Health Endpoints: Coming in Phase 22
-- ⏳ Hot Reload: Coming in Phase 22
+- 📋 Health Endpoints: Phase 22 in progress
+- 📋 Graceful Shutdown: Phase 22 in progress
+- 📋 Request Correlation: Phase 22 in progress
 
 See [plan.md](plan.md) for detailed test checklist and [ROADMAP.md](ROADMAP.md) for implementation roadmap.
 
