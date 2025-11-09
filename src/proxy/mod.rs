@@ -283,6 +283,32 @@ impl YatagarasuProxy {
         }
     }
 
+    /// Extract client IP address from session (X-Forwarded-For aware)
+    ///
+    /// Checks X-Forwarded-For header first (for proxies/load balancers),
+    /// then falls back to direct connection IP from session.
+    fn get_client_ip(&self, session: &Session) -> String {
+        // Check X-Forwarded-For header first (common in reverse proxy setups)
+        if let Some(forwarded_for) = session
+            .req_header()
+            .headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+        {
+            // X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+            // The first IP is the original client
+            if let Some(client_ip) = forwarded_for.split(',').next() {
+                return client_ip.trim().to_string();
+            }
+        }
+
+        // Fall back to direct connection IP
+        session
+            .client_addr()
+            .map(|addr| addr.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
     /// Export circuit breaker metrics for Prometheus
     fn export_circuit_breaker_metrics(&self) -> String {
         let mut output = String::new();
@@ -483,6 +509,9 @@ impl ProxyHttp for YatagarasuProxy {
         let path = req.uri.path().to_string();
         let method = req.method.to_string();
 
+        // Extract client IP for logging (X-Forwarded-For aware)
+        let client_ip = self.get_client_ip(session);
+
         // SECURITY VALIDATIONS (check early before routing)
 
         // 1. Validate URI length
@@ -492,6 +521,7 @@ impl ProxyHttp for YatagarasuProxy {
         {
             tracing::warn!(
                 request_id = %ctx.request_id(),
+                client_ip = %client_ip,
                 uri_length = uri_str.len(),
                 limit = self.security_limits.max_uri_length,
                 error = %security_error,
@@ -533,6 +563,7 @@ impl ProxyHttp for YatagarasuProxy {
         {
             tracing::warn!(
                 request_id = %ctx.request_id(),
+                client_ip = %client_ip,
                 header_size = total_header_size,
                 limit = self.security_limits.max_header_size,
                 error = %security_error,
@@ -574,6 +605,7 @@ impl ProxyHttp for YatagarasuProxy {
         {
             tracing::warn!(
                 request_id = %ctx.request_id(),
+                client_ip = %client_ip,
                 content_length = ?content_length,
                 limit = self.security_limits.max_body_size,
                 error = %security_error,
@@ -610,6 +642,7 @@ impl ProxyHttp for YatagarasuProxy {
         if let Err(security_error) = security::check_path_traversal(&uri_str) {
             tracing::warn!(
                 request_id = %ctx.request_id(),
+                client_ip = %client_ip,
                 uri = %uri_str,
                 error = %security_error,
                 "Path traversal attempt detected in raw URI"
@@ -642,6 +675,7 @@ impl ProxyHttp for YatagarasuProxy {
         if let Err(security_error) = security::check_sql_injection(&uri_str) {
             tracing::warn!(
                 request_id = %ctx.request_id(),
+                client_ip = %client_ip,
                 uri = %uri_str,
                 error = %security_error,
                 "SQL injection attempt detected in raw URI"
@@ -978,7 +1012,11 @@ impl ProxyHttp for YatagarasuProxy {
 
         // THIRD: Check rate limits (if enabled)
         if let Some(ref rate_limit_manager) = self.rate_limit_manager {
-            // Get client IP from session
+            // Get client IP from session (X-Forwarded-For aware for logging)
+            let client_ip_str = self.get_client_ip(session);
+
+            // Get IP for rate limiting (uses direct connection IP for security)
+            // Note: For rate limiting, we use direct connection IP to prevent spoofing
             let client_ip = session
                 .client_addr()
                 .and_then(|addr| addr.as_inet().map(|inet| inet.ip()));
@@ -990,7 +1028,8 @@ impl ProxyHttp for YatagarasuProxy {
                 tracing::warn!(
                     request_id = %ctx.request_id(),
                     bucket = %bucket_config.name,
-                    client_ip = ?client_ip,
+                    client_ip = %client_ip_str,
+                    direct_ip = ?client_ip,
                     error = %rate_limit_error,
                     "Rate limit exceeded"
                 );
@@ -1334,9 +1373,13 @@ impl ProxyHttp for YatagarasuProxy {
         // Decrement active connections (request completed)
         self.metrics.decrement_active_connections();
 
+        // Extract client IP for logging
+        let client_ip = self.get_client_ip(session);
+
         // Log request completion with request ID for tracing
         tracing::info!(
             request_id = %ctx.request_id(),
+            client_ip = %client_ip,
             method = %ctx.method(),
             path = %ctx.path(),
             status_code = status_code,

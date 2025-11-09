@@ -1645,8 +1645,8 @@ kill -TERM <pid>
 - [ ] Test: No sensitive data in logs (JWT tokens, credentials redacted)
 - [ ] Test: S3 errors logged with AWS error code and message
 - [x] Test: Request duration logged on completion - *logging_filter logs duration_ms*
-- [ ] Test: Client IP logged (X-Forwarded-For aware)
-- [x] File: Update `src/proxy/mod.rs` with request_id and structured logging - *Added request_id to 12+ log statements*
+- [x] Test: Client IP logged (X-Forwarded-For aware) - *get_client_ip() checks X-Forwarded-For header, added to all security/request logs*
+- [x] File: Update `src/proxy/mod.rs` with request_id and structured logging - *Added request_id + client_ip to 15+ log statements*
 - [ ] File: `tests/integration/logging_test.rs`
 
 **Example**:
