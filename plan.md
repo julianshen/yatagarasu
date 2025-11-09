@@ -1882,6 +1882,221 @@ Before releasing v0.3.0, verify:
 
 ---
 
+## Phase 23: High Availability Bucket Replication
+
+**Objective**: Support multiple replicated S3 buckets per endpoint with automatic failover for high availability
+
+**Goal**: Enable zero-downtime operation when S3 buckets fail by automatically failing over to replica buckets
+
+**Status**: 📋 **NOT STARTED**
+
+**Rationale**: Production deployments need resilience against S3 bucket/region failures. By supporting multiple replicated buckets per endpoint with priority-based failover, the proxy can continue serving requests even when primary buckets are unavailable. This enables multi-region DR, cross-cloud HA, and read scaling.
+
+**PRD**: See [docs/PRD_HA_BUCKET_REPLICATION.md](docs/PRD_HA_BUCKET_REPLICATION.md) for complete requirements and design
+
+### Test: Configuration Parsing and Validation
+
+**Why**: Validate replica configuration format and detect misconfigurations at startup
+
+- [ ] Test: Can parse single bucket config (backward compatibility)
+- [ ] Test: Can parse replica set with multiple replicas
+- [ ] Test: Replicas sorted by priority (1, 2, 3...)
+- [ ] Test: Replica priority must be unique within bucket
+- [ ] Test: Replica priority must be >= 1
+- [ ] Test: Replica name must be unique within bucket
+- [ ] Test: At least one replica required per bucket
+- [ ] Test: Each replica has required fields (bucket, region, access_key, secret_key, priority)
+- [ ] Test: Optional replica timeout overrides default
+- [ ] Test: Invalid replica config fails validation with clear error
+- [ ] Test: Single bucket config converted to single-replica format internally
+- [ ] File: Update `src/config/mod.rs` with S3ReplicaSet and S3Replica structs
+
+**Example**:
+```yaml
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          priority: 1
+        - name: "replica-eu"
+          bucket: "products-eu-west-1"
+          region: "eu-west-1"
+          priority: 2
+```
+
+### Test: Replica Set Initialization
+
+**Why**: Create S3 clients and circuit breakers for each replica
+
+- [ ] Test: Create S3 client for each replica
+- [ ] Test: Create circuit breaker for each replica
+- [ ] Test: Replicas stored in priority order
+- [ ] Test: Each replica has independent credentials
+- [ ] Test: Each replica has independent timeout
+- [ ] Test: Replica set can be cloned (for reload)
+- [ ] Test: Single-bucket config creates one-replica set
+- [ ] File: Create `src/replica_set/mod.rs`
+
+### Test: Failover Logic
+
+**Why**: Automatically try replicas in priority order when failures occur
+
+- [ ] Test: Request succeeds from first (highest priority) replica
+- [ ] Test: Connection error triggers failover to next replica
+- [ ] Test: Timeout triggers failover to next replica
+- [ ] Test: HTTP 500 triggers failover to next replica
+- [ ] Test: HTTP 502 triggers failover to next replica
+- [ ] Test: HTTP 503 triggers failover to next replica
+- [ ] Test: HTTP 504 triggers failover to next replica
+- [ ] Test: HTTP 403 (Forbidden) does NOT trigger failover - return to client
+- [ ] Test: HTTP 404 (Not Found) does NOT trigger failover - return to client
+- [ ] Test: All replicas failed returns 502 Bad Gateway
+- [ ] Test: Failover respects retry budget (max 2 failovers = 3 total tries)
+- [ ] Test: Failover skips unhealthy replicas (circuit breaker open)
+- [ ] Test: Failover logs replica name and reason
+- [ ] File: Update `src/replica_set/mod.rs` with failover logic
+
+**Example**:
+```rust
+// Try replicas in priority order
+for replica in replica_set.replicas() {
+    if !replica.is_healthy() {
+        continue; // Skip unhealthy
+    }
+    match try_replica(replica).await {
+        Ok(response) => return Ok(response),
+        Err(e) if is_retriable(e) => continue,
+        Err(e) => return Err(e), // Non-retriable, return immediately
+    }
+}
+```
+
+### Test: Health Checks per Replica
+
+**Why**: Track health status per replica for circuit breaker and observability
+
+- [ ] Test: Each replica has independent circuit breaker
+- [ ] Test: Unhealthy replica is skipped during failover
+- [ ] Test: Circuit breaker opens after failure threshold
+- [ ] Test: Circuit breaker transitions to half-open
+- [ ] Test: Circuit breaker closes after success in half-open
+- [ ] Test: `/ready` endpoint shows per-replica health
+- [ ] Test: `/ready` returns 200 if any replica healthy
+- [ ] Test: `/ready` returns 503 if all replicas unhealthy
+- [ ] Test: `/ready` shows "degraded" status if some replicas unhealthy
+- [ ] File: Update `src/proxy/mod.rs` with replica health checks
+
+**Example `/ready` response**:
+```json
+{
+  "status": "degraded",
+  "backends": {
+    "products": {
+      "status": "degraded",
+      "replicas": {
+        "primary": "unhealthy",
+        "replica-eu": "healthy",
+        "replica-minio": "healthy"
+      }
+    }
+  }
+}
+```
+
+### Test: Metrics per Replica
+
+**Why**: Observe request distribution and failover events
+
+- [ ] Test: Request count per replica
+- [ ] Test: Error count per replica
+- [ ] Test: Latency per replica
+- [ ] Test: Failover event counter (from → to)
+- [ ] Test: Replica health gauge (1=healthy, 0=unhealthy)
+- [ ] Test: Active replica gauge (which replica currently serving)
+- [ ] Test: Metrics exported to Prometheus format
+- [ ] File: Update `src/metrics/mod.rs` with replica metrics
+
+**Example metrics**:
+```
+http_requests_total{bucket="products",replica="primary"} 1000
+http_requests_total{bucket="products",replica="replica-eu"} 50
+
+bucket_failovers_total{bucket="products",from="primary",to="replica-eu"} 3
+
+replica_health{bucket="products",replica="primary"} 0
+replica_health{bucket="products",replica="replica-eu"} 1
+```
+
+### Test: Enhanced Logging
+
+**Why**: Track failover events and replica usage for troubleshooting
+
+- [ ] Test: Log successful request with replica name
+- [ ] Test: Log failover event with from/to replica names
+- [ ] Test: Log all replicas failed with error details
+- [ ] Test: Log replica skip due to circuit breaker
+- [ ] Test: All logs include request_id for correlation
+- [ ] File: Update `src/proxy/mod.rs` with replica logging
+
+**Example logs**:
+```
+INFO  Request served from replica 'primary'
+      request_id=550e8400-..., bucket=products, replica=primary, duration_ms=45
+
+WARN  Failover: primary → replica-eu
+      request_id=550e8400-..., bucket=products, reason=ConnectionTimeout, attempt=2
+
+ERROR All replicas failed
+      request_id=550e8400-..., bucket=products, attempted=3,
+      errors=[ConnectionTimeout, ConnectionTimeout, 500InternalError]
+```
+
+### Test: Integration Tests
+
+**Why**: Verify end-to-end failover behavior with real S3 backends
+
+- [ ] Test: Failover to replica when primary S3 unavailable
+- [ ] Test: Skip unhealthy replica during failover
+- [ ] Test: Return 502 when all replicas fail
+- [ ] Test: `/ready` endpoint shows per-replica health
+- [ ] Test: Metrics track replica usage and failover
+- [ ] Test: No failover on 404 (return to client immediately)
+- [ ] Test: Backward compatibility - single bucket config works
+- [ ] File: Create `tests/integration/replica_set_test.rs`
+
+### Test: Documentation
+
+**Why**: Guide users on configuring HA bucket replication
+
+- [ ] File: Update `README.md` with replica set example
+- [ ] File: Create `docs/HA_BUCKET_REPLICATION.md` user guide
+- [ ] File: Update `config.example.yaml` with replica examples
+
+**Estimated Effort**: 3-5 days (following TDD methodology)
+
+**Test Count**: 60+ tests (12 config + 7 init + 14 failover + 9 health + 7 metrics + 5 logging + 7 integration)
+
+**Expected Outcome**: Production-ready HA support with automatic failover, comprehensive observability, and backward compatibility
+
+**Verification**:
+```bash
+# Test failover with LocalStack
+./scripts/test-ha-failover.sh
+
+# Verify metrics show replica distribution
+curl http://localhost:9090/metrics | grep replica_health
+
+# Test backward compatibility
+cargo test --lib
+cargo test --test integration_tests
+```
+
+---
+
 ## Notes and Decisions
 
 ### Design Decisions
@@ -1898,8 +2113,29 @@ Before releasing v0.3.0, verify:
 **Decision:** Read-only S3 operations for v1.0  
 **Rationale:** Simpler implementation, most use cases are read-heavy
 
-**Decision:** Synchronous config reload (not automatic file watching)  
+**Decision:** Synchronous config reload (not automatic file watching)
 **Rationale:** More predictable, operator controls when reload happens
+
+**Decision:** Priority-based replica failover (lower number = higher priority)
+**Rationale:** Simple, deterministic ordering; operators can explicitly control failover preference
+
+**Decision:** Per-replica circuit breakers (not per-bucket)
+**Rationale:** More granular health tracking; one unhealthy replica doesn't block others
+
+**Decision:** Retriable vs non-retriable errors (5xx/timeout trigger failover, 404/403 return immediately)
+**Rationale:** 404/403 are client errors that won't be fixed by trying another replica; 5xx/timeout indicate backend issues
+
+**Decision:** Backward compatibility (single bucket config → single replica)
+**Rationale:** Zero migration effort for existing deployments; opt-in HA by adding replicas
+
+**Decision:** Accept eventual consistency between replicas
+**Rationale:** S3 replication has inherent lag; proxy doesn't enforce consistency, operators must handle via replication strategy
+
+**Decision:** Failover budget (max 2 failovers = 3 total tries per request)
+**Rationale:** Prevents excessive latency from trying all replicas; fail fast principle
+
+**Decision:** Read-only initially (write operations deferred to Phase 24)
+**Rationale:** Simpler HA logic without write quorum/consensus; most use cases are read-heavy
 
 ### Technical Decisions
 
