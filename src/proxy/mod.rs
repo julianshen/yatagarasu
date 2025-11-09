@@ -445,6 +445,9 @@ impl ProxyHttp for YatagarasuProxy {
         };
         // Permit will be automatically released when _permit is dropped at end of function
 
+        // Track active connections (in-flight requests gauge)
+        self.metrics.increment_active_connections();
+
         // Check resource exhaustion SECOND - reject requests if resources exhausted
         if !self.resource_monitor.should_accept_request() {
             tracing::warn!(
@@ -717,6 +720,9 @@ impl ProxyHttp for YatagarasuProxy {
                     // We can't check AWS S3 connectivity without region-specific endpoints
                     true
                 };
+
+                // Record backend health in metrics (for Prometheus export)
+                self.metrics.set_backend_health(&bucket_config.name, is_healthy);
 
                 backends_health.insert(
                     bucket_config.name.clone(),
@@ -1324,6 +1330,9 @@ impl ProxyHttp for YatagarasuProxy {
                 }
             }
         }
+
+        // Decrement active connections (request completed)
+        self.metrics.decrement_active_connections();
 
         // Log request completion with request ID for tracing
         tracing::info!(

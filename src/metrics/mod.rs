@@ -81,6 +81,9 @@ pub struct Metrics {
     security_uri_too_long: AtomicU64,
     security_path_traversal_blocked: AtomicU64,
     security_sql_injection_blocked: AtomicU64,
+
+    // Backend health per bucket (1=healthy, 0=unhealthy)
+    backend_health: Mutex<HashMap<String, bool>>,
 }
 
 impl Metrics {
@@ -118,6 +121,7 @@ impl Metrics {
             security_uri_too_long: AtomicU64::new(0),
             security_path_traversal_blocked: AtomicU64::new(0),
             security_sql_injection_blocked: AtomicU64::new(0),
+            backend_health: Mutex::new(HashMap::new()),
         }
     }
 
@@ -215,8 +219,7 @@ impl Metrics {
         }
     }
 
-    /// Calculate histogram from duration samples (for testing)
-    #[cfg(test)]
+    /// Calculate histogram from duration samples
     pub fn get_duration_histogram(&self) -> Histogram {
         if let Ok(durations) = self.durations.lock() {
             calculate_histogram(&durations)
@@ -491,6 +494,22 @@ impl Metrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Set backend health status for a bucket (1=healthy, 0=unhealthy)
+    pub fn set_backend_health(&self, bucket_name: &str, is_healthy: bool) {
+        if let Ok(mut health) = self.backend_health.lock() {
+            health.insert(bucket_name.to_string(), is_healthy);
+        }
+    }
+
+    /// Get backend health status for all buckets
+    pub fn get_backend_health(&self) -> HashMap<String, bool> {
+        if let Ok(health) = self.backend_health.lock() {
+            health.clone()
+        } else {
+            HashMap::new()
+        }
+    }
+
     /// Get successful reload count (for testing)
     #[cfg(test)]
     pub fn get_reload_success_count(&self) -> u64 {
@@ -757,12 +776,45 @@ impl Metrics {
             self.security_sql_injection_blocked.load(Ordering::Relaxed)
         ));
 
+        // Request duration histogram (p50, p95, p99)
+        let histogram = self.get_duration_histogram();
+        output.push_str("\n# HELP http_request_duration_seconds Request duration in seconds\n");
+        output.push_str("# TYPE http_request_duration_seconds summary\n");
+        output.push_str(&format!(
+            "http_request_duration_seconds{{quantile=\"0.5\"}} {:.3}\n",
+            histogram.p50 / 1000.0 // Convert ms to seconds
+        ));
+        output.push_str(&format!(
+            "http_request_duration_seconds{{quantile=\"0.9\"}} {:.3}\n",
+            histogram.p90 / 1000.0
+        ));
+        output.push_str(&format!(
+            "http_request_duration_seconds{{quantile=\"0.95\"}} {:.3}\n",
+            histogram.p95 / 1000.0
+        ));
+        output.push_str(&format!(
+            "http_request_duration_seconds{{quantile=\"0.99\"}} {:.3}\n",
+            histogram.p99 / 1000.0
+        ));
+
+        // Backend health per bucket (1=healthy, 0=unhealthy)
+        output.push_str("\n# HELP backend_health Backend health status per bucket (1=healthy, 0=unhealthy)\n");
+        output.push_str("# TYPE backend_health gauge\n");
+        if let Ok(health) = self.backend_health.lock() {
+            for (bucket, is_healthy) in health.iter() {
+                output.push_str(&format!(
+                    "backend_health{{bucket=\"{}\"}} {}\n",
+                    bucket,
+                    if *is_healthy { 1 } else { 0 }
+                ));
+            }
+        }
+
         output
     }
 }
 
 /// Calculate percentiles from a sorted vector of samples (in microseconds)
-#[cfg(test)]
 fn calculate_histogram(samples: &[u64]) -> Histogram {
     if samples.is_empty() {
         return Histogram {

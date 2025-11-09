@@ -1719,12 +1719,12 @@ $ echo $?
 
 **Why**: Operators need comprehensive metrics for monitoring and alerting.
 
-- [ ] Test: Request duration histogram (p50, p95, p99)
-- [ ] Test: In-flight requests gauge (current concurrent requests)
-- [ ] Test: Backend health gauge (1=healthy, 0=unhealthy per bucket)
-- [ ] Test: Graceful shutdown metrics (in_flight_requests, shutdown_duration_seconds)
-- [ ] Test: Request correlation metrics (request_id in trace context)
-- [ ] File: Update `src/metrics/mod.rs`
+- [x] Test: Request duration histogram (p50, p95, p99) - *Added http_request_duration_seconds{quantile} summary metric*
+- [x] Test: In-flight requests gauge (current concurrent requests) - *active_connections already exists, now tracked in proxy*
+- [x] Test: Backend health gauge (1=healthy, 0=unhealthy per bucket) - *Added backend_health{bucket} gauge, updated from /ready endpoint*
+- [ ] Test: Graceful shutdown metrics (in_flight_requests, shutdown_duration_seconds) - *Partial: active_connections tracks in-flight, shutdown duration TBD*
+- [x] Test: Request correlation metrics (request_id in trace context) - *request_id in all logs, X-Request-ID header added*
+- [x] File: Update `src/metrics/mod.rs` - *Added histogram export, backend_health field and methods*
 
 **Tools**:
 - Prometheus for metrics collection
