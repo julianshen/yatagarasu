@@ -235,11 +235,31 @@ pub struct BucketConfig {
     pub auth: Option<AuthConfig>,
 }
 
+/// S3 Replica configuration (for HA bucket replication)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct S3Config {
+pub struct S3Replica {
+    pub name: String,
     pub bucket: String,
     pub region: String,
     pub access_key: String,
+    pub secret_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    pub priority: u8,
+    #[serde(default = "default_s3_timeout")]
+    pub timeout: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3Config {
+    // Legacy single-bucket fields (for backward compatibility - kept as non-optional to avoid breaking existing code)
+    #[serde(default)]
+    pub bucket: String,
+    #[serde(default)]
+    pub region: String,
+    #[serde(default)]
+    pub access_key: String,
+    #[serde(default)]
     pub secret_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
@@ -253,6 +273,10 @@ pub struct S3Config {
     pub rate_limit: Option<BucketRateLimitConfigYaml>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry: Option<RetryConfigYaml>,
+
+    // New replica set field (for HA - optional, mutually exclusive with legacy fields)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replicas: Option<Vec<S3Replica>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -828,7 +852,7 @@ buckets:
         assert_eq!(config.buckets[0].name, "products");
         assert_eq!(config.buckets[0].path_prefix, "/products");
 
-        // Verify S3 config fields
+        // Verify S3 config fields (legacy format)
         let s3_config = &config.buckets[0].s3;
         assert_eq!(s3_config.bucket, "my-products-bucket");
         assert_eq!(s3_config.region, "us-west-2");
@@ -836,6 +860,90 @@ buckets:
         assert_eq!(s3_config.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
         assert_eq!(s3_config.endpoint, Some("https://s3.us-west-2.amazonaws.com".to_string()));
         assert_eq!(s3_config.timeout, 30);
+
+        // Verify replicas field is None for legacy config
+        assert!(s3_config.replicas.is_none(), "Legacy config should not have replicas");
+
+        // Validation should pass
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn test_can_parse_replica_set_with_multiple_replicas() {
+        // Test: New replica set format with multiple S3 buckets
+        // This enables HA failover with priority-based replica selection
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          endpoint: "https://s3.us-west-2.amazonaws.com"
+          priority: 1
+          timeout: 30
+        - name: "replica-eu"
+          bucket: "products-eu-west-1"
+          region: "eu-west-1"
+          access_key: "AKIAIOSFODNN7EXAMPLE2"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+          endpoint: "https://s3.eu-west-1.amazonaws.com"
+          priority: 2
+          timeout: 25
+        - name: "replica-minio"
+          bucket: "products-backup"
+          region: "us-east-1"
+          access_key: "minioadmin"
+          secret_key: "minioadmin"
+          endpoint: "https://minio.example.com"
+          priority: 3
+          timeout: 20
+"#;
+
+        // Parse config - should succeed with replica set
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Verify bucket loaded
+        assert_eq!(config.buckets.len(), 1);
+        assert_eq!(config.buckets[0].name, "products");
+
+        // Verify replica set structure exists
+        let s3_config = &config.buckets[0].s3;
+        assert!(s3_config.replicas.is_some(), "Replicas field should be present");
+
+        let replicas = s3_config.replicas.as_ref().unwrap();
+        assert_eq!(replicas.len(), 3, "Should have 3 replicas");
+
+        // Verify first replica (primary)
+        let primary = &replicas[0];
+        assert_eq!(primary.name, "primary");
+        assert_eq!(primary.bucket, "products-us-west-2");
+        assert_eq!(primary.region, "us-west-2");
+        assert_eq!(primary.access_key, "AKIAIOSFODNN7EXAMPLE1");
+        assert_eq!(primary.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1");
+        assert_eq!(primary.endpoint, Some("https://s3.us-west-2.amazonaws.com".to_string()));
+        assert_eq!(primary.priority, 1);
+        assert_eq!(primary.timeout, 30);
+
+        // Verify second replica (EU)
+        let replica_eu = &replicas[1];
+        assert_eq!(replica_eu.name, "replica-eu");
+        assert_eq!(replica_eu.priority, 2);
+        assert_eq!(replica_eu.timeout, 25);
+
+        // Verify third replica (MinIO)
+        let replica_minio = &replicas[2];
+        assert_eq!(replica_minio.name, "replica-minio");
+        assert_eq!(replica_minio.priority, 3);
+        assert_eq!(replica_minio.timeout, 20);
 
         // Validation should pass
         config.validate().unwrap();

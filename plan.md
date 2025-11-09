@@ -1899,7 +1899,7 @@ Before releasing v0.3.0, verify:
 **Why**: Validate replica configuration format and detect misconfigurations at startup
 
 - [x] Test: Can parse single bucket config (backward compatibility) (src/config/mod.rs:802-842 - test_can_parse_single_bucket_config_backward_compatibility)
-- [ ] Test: Can parse replica set with multiple replicas
+- [x] Test: Can parse replica set with multiple replicas (src/config/mod.rs:844-923 - test_can_parse_replica_set_with_multiple_replicas; S3Replica struct at lines 239-251, S3Config.replicas field at line 279)
 - [ ] Test: Replicas sorted by priority (1, 2, 3...)
 - [ ] Test: Replica priority must be unique within bucket
 - [ ] Test: Replica priority must be >= 1
@@ -1909,7 +1909,7 @@ Before releasing v0.3.0, verify:
 - [ ] Test: Optional replica timeout overrides default
 - [ ] Test: Invalid replica config fails validation with clear error
 - [ ] Test: Single bucket config converted to single-replica format internally
-- [ ] File: Update `src/config/mod.rs` with S3ReplicaSet and S3Replica structs
+- [x] File: Update `src/config/mod.rs` with S3Replica struct (lines 239-251) and S3Config.replicas field (line 279)
 
 **Example**:
 ```yaml
