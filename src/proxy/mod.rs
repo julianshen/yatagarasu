@@ -8,7 +8,7 @@ use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_proxy::{ProxyHttp, Session};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 use crate::auth::{authenticate_request, AuthError};
@@ -42,6 +42,8 @@ pub struct YatagarasuProxy {
     retry_policies: Arc<HashMap<String, RetryPolicy>>,
     /// Security validation limits (request size, headers, URI, path traversal)
     security_limits: SecurityLimits,
+    /// Proxy start time (for uptime calculation in /health endpoint)
+    start_time: Instant,
 }
 
 impl YatagarasuProxy {
@@ -119,6 +121,7 @@ impl YatagarasuProxy {
             rate_limit_manager,
             retry_policies: Arc::new(retry_policies),
             security_limits,
+            start_time: Instant::now(),
         }
     }
 
@@ -197,6 +200,7 @@ impl YatagarasuProxy {
             rate_limit_manager,
             retry_policies: Arc::new(retry_policies),
             security_limits,
+            start_time: Instant::now(),
         }
     }
 
@@ -609,6 +613,35 @@ impl ProxyHttp for YatagarasuProxy {
         if self.resource_monitor.metrics_enabled() {
             self.metrics.increment_request_count();
             self.metrics.increment_method_count(&method);
+        }
+
+        // Special handling for /health endpoint (bypass auth, return health status)
+        if path == "/health" {
+            let uptime_seconds = self.start_time.elapsed().as_secs();
+            let version = env!("CARGO_PKG_VERSION");
+
+            let health_response = serde_json::json!({
+                "status": "healthy",
+                "uptime_seconds": uptime_seconds,
+                "version": version
+            })
+            .to_string();
+
+            let mut header = ResponseHeader::build(200, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+            header.insert_header("Content-Length", health_response.len().to_string())?;
+
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(health_response.into()), true)
+                .await?;
+
+            // Record metrics for /health endpoint itself
+            self.metrics.increment_status_count(200);
+
+            return Ok(true); // Short-circuit (response already sent)
         }
 
         // Special handling for /metrics endpoint (bypass auth, return Prometheus metrics)

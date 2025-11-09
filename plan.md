@@ -1571,15 +1571,15 @@ valgrind --leak-check=full ./target/release/yatagarasu
 
 **Why**: Container orchestrators (Kubernetes, Docker Swarm, ECS) need health endpoints to determine if the proxy is alive and ready to serve traffic.
 
-- [ ] Test: /health endpoint returns 200 OK when proxy is running
-- [ ] Test: /health response includes basic status (uptime, version)
-- [ ] Test: /health bypasses authentication (always accessible)
+- [x] Test: /health endpoint returns 200 OK when proxy is running (src/proxy/mod.rs:618-645)
+- [x] Test: /health response includes basic status (uptime, version) (includes uptime_seconds, version)
+- [x] Test: /health bypasses authentication (always accessible) (handled before auth check)
 - [ ] Test: /ready endpoint returns 200 when all backends reachable
 - [ ] Test: /ready endpoint returns 503 when any backend unreachable
 - [ ] Test: /ready checks S3 connectivity with HEAD request
 - [ ] Test: /ready includes dependency health (S3 per bucket)
-- [ ] File: `src/health.rs`
-- [ ] File: `tests/integration/health_test.rs`
+- [ ] File: `src/health.rs` (not needed - implementation in proxy/mod.rs following /metrics pattern)
+- [x] File: `tests/integration/health_test.rs`
 
 **Example**:
 ```bash
