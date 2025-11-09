@@ -45,7 +45,9 @@ prometheus = "0.13"
 
 # HTTP
 hyper = "1.0"
+hyper-util = { version = "0.1", features = ["tokio", "client", "client-legacy", "http1"] }
 http = "1.0"
+http-body-util = "0.1"
 
 # Error Handling
 anyhow = "1.0"

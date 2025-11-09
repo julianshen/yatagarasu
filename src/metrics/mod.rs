@@ -80,6 +80,7 @@ pub struct Metrics {
     security_headers_too_large: AtomicU64,
     security_uri_too_long: AtomicU64,
     security_path_traversal_blocked: AtomicU64,
+    security_sql_injection_blocked: AtomicU64,
 }
 
 impl Metrics {
@@ -116,6 +117,7 @@ impl Metrics {
             security_headers_too_large: AtomicU64::new(0),
             security_uri_too_long: AtomicU64::new(0),
             security_path_traversal_blocked: AtomicU64::new(0),
+            security_sql_injection_blocked: AtomicU64::new(0),
         }
     }
 
@@ -483,6 +485,12 @@ impl Metrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Increment security validation: SQL injection blocked (400 responses)
+    pub fn increment_security_sql_injection_blocked(&self) {
+        self.security_sql_injection_blocked
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Get successful reload count (for testing)
     #[cfg(test)]
     pub fn get_reload_success_count(&self) -> u64 {
@@ -740,6 +748,13 @@ impl Metrics {
         output.push_str(&format!(
             "security_path_traversal_blocked_total {}\n",
             self.security_path_traversal_blocked.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP security_sql_injection_blocked_total Requests blocked due to SQL injection attempt (400)\n");
+        output.push_str("# TYPE security_sql_injection_blocked_total counter\n");
+        output.push_str(&format!(
+            "security_sql_injection_blocked_total {}\n",
+            self.security_sql_injection_blocked.load(Ordering::Relaxed)
         ));
 
         output

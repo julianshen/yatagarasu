@@ -23,6 +23,9 @@ fn test_can_create_s3_client_with_valid_credentials() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result = create_s3_client(&config);
@@ -53,6 +56,9 @@ fn test_can_create_s3_client_with_region_configuration() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result1 = create_s3_client(&config1);
@@ -68,6 +74,9 @@ fn test_can_create_s3_client_with_region_configuration() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result2 = create_s3_client(&config2);
@@ -83,6 +92,9 @@ fn test_can_create_s3_client_with_region_configuration() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result3 = create_s3_client(&config3);
@@ -98,6 +110,9 @@ fn test_can_create_s3_client_with_region_configuration() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result4 = create_s3_client(&config4);
@@ -116,6 +131,9 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         endpoint: Some("http://localhost:9000".to_string()),
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result = create_s3_client(&minio_config);
@@ -137,6 +155,9 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         endpoint: Some("http://localhost:4566".to_string()),
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result2 = create_s3_client(&localstack_config);
@@ -161,6 +182,9 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         endpoint: Some("https://s3-compatible.example.com".to_string()),
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result3 = create_s3_client(&https_config);
@@ -188,6 +212,9 @@ fn test_client_creation_fails_with_empty_credentials() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result1 = create_s3_client(&config_empty_access_key);
@@ -206,6 +233,9 @@ fn test_client_creation_fails_with_empty_credentials() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result2 = create_s3_client(&config_empty_secret_key);
@@ -224,6 +254,9 @@ fn test_client_creation_fails_with_empty_credentials() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result3 = create_s3_client(&config_empty_region);
@@ -242,6 +275,9 @@ fn test_client_creation_fails_with_empty_credentials() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result4 = create_s3_client(&config_empty_bucket);
@@ -260,6 +296,9 @@ fn test_client_creation_fails_with_empty_credentials() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     let result5 = create_s3_client(&config_all_empty);
@@ -277,6 +316,9 @@ fn test_can_create_multiple_independent_s3_clients() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     // Create config for users bucket
@@ -288,6 +330,9 @@ fn test_can_create_multiple_independent_s3_clients() {
         endpoint: None,
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     // Create config for images bucket with custom endpoint (MinIO)
@@ -299,6 +344,9 @@ fn test_can_create_multiple_independent_s3_clients() {
         endpoint: Some("http://localhost:9000".to_string()),
         timeout: 20,
         connection_pool_size: 50,
+        rate_limit: None,
+        circuit_breaker: None,
+        retry: None,
     };
 
     // Create all three clients
@@ -8094,6 +8142,9 @@ fn test_can_create_s3_http_client_from_bucket_config() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None, // Public bucket
     };
@@ -8152,6 +8203,9 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8167,6 +8221,9 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: Some(yatagarasu::config::AuthConfig { enabled: true }),
     };
@@ -8182,6 +8239,9 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8290,6 +8350,9 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             endpoint: Some("http://localhost:9000".to_string()), // Custom endpoint
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8315,6 +8378,9 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             endpoint: None, // No custom endpoint - use AWS default
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8339,6 +8405,9 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             endpoint: Some("http://localhost:4566".to_string()), // LocalStack endpoint
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8392,6 +8461,9 @@ fn test_s3_client_generates_valid_aws_signature_v4() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8461,6 +8533,9 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             endpoint: None, // AWS S3
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None, // Public bucket
     };
@@ -8477,6 +8552,9 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             endpoint: None, // AWS S3
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: Some(yatagarasu::config::AuthConfig {
             enabled: true, // Requires JWT
@@ -8495,6 +8573,9 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             endpoint: Some("http://localhost:9000".to_string()), // MinIO
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };
@@ -8620,6 +8701,9 @@ fn test_get_request_to_products_image_fetches_from_s3() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None, // Public bucket
     }];
@@ -9451,6 +9535,9 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None, // Public bucket, no JWT required
     };
@@ -9467,6 +9554,9 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             endpoint: None,
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: Some(AuthConfig { enabled: true }),
     };
@@ -9483,6 +9573,9 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
             timeout: 20,
             connection_pool_size: 50,
+            rate_limit: None,
+            circuit_breaker: None,
+            retry: None,
         },
         auth: None,
     };

@@ -1511,7 +1511,7 @@ cargo test --test 'integration_*' -- --test-threads=1
 - [x] Test: Request too large returns 413 Payload Too Large (security::validate_body_size)
 - [x] Test: Request header too large returns 431 (security::validate_header_size)
 - [x] Test: Malformed JWT returns 403 Forbidden (not crash) (auth module graceful handling)
-- [ ] Test: SQL injection in path returns 400 (not processed)
+- [x] Test: SQL injection in path returns 400 (not processed) (security::check_sql_injection)
 - [x] Test: Path traversal blocked (../, ..\, etc.) (security::check_path_traversal - **CRITICAL BUG FIXED**)
 
 ### Test: Chaos engineering scenarios

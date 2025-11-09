@@ -574,6 +574,37 @@ impl ProxyHttp for YatagarasuProxy {
             return Ok(true); // Short-circuit
         }
 
+        // 5. Check for SQL injection attempts (check RAW URI before processing)
+        if let Err(security_error) = security::check_sql_injection(&uri_str) {
+            tracing::warn!(
+                uri = %uri_str,
+                error = %security_error,
+                "SQL injection attempt detected in raw URI"
+            );
+
+            let mut header = ResponseHeader::build(400, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+
+            let error_body = serde_json::json!({
+                "error": "Bad Request",
+                "message": security_error.to_string(),
+                "status": 400
+            })
+            .to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session
+                .write_response_body(Some(error_body.into()), true)
+                .await?;
+
+            self.metrics.increment_status_count(400);
+            self.metrics.increment_security_sql_injection_blocked();
+            return Ok(true); // Short-circuit
+        }
+
         // Record request metrics (conditionally based on resource pressure)
         if self.resource_monitor.metrics_enabled() {
             self.metrics.increment_request_count();

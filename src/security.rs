@@ -24,6 +24,8 @@ pub enum SecurityError {
     PathTraversal { path: String },
     /// URI too long (414)
     UriTooLong { length: usize, limit: usize },
+    /// SQL injection attempt detected (400)
+    SqlInjection { path: String },
 }
 
 impl std::fmt::Display for SecurityError {
@@ -44,6 +46,9 @@ impl std::fmt::Display for SecurityError {
             }
             SecurityError::UriTooLong { length, limit } => {
                 write!(f, "URI length {} exceeds limit {}", length, limit)
+            }
+            SecurityError::SqlInjection { path } => {
+                write!(f, "SQL injection attempt detected: {}", path)
             }
         }
     }
@@ -143,6 +148,79 @@ pub fn check_path_traversal(path: &str) -> Result<(), SecurityError> {
                 });
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Check for SQL injection attempts
+///
+/// Detects patterns like:
+/// - SQL keywords with quotes: ' OR ', ' AND ', ' UNION SELECT
+/// - SQL comment terminators: --, /*, #
+/// - DROP, DELETE, INSERT, UPDATE statements
+/// - URL-encoded versions: %27 ('), %20 (space)
+///
+/// Legitimate filenames with apostrophes (e.g., "user's_document.txt") are allowed
+/// Only blocks when SQL injection patterns are detected
+pub fn check_sql_injection(path: &str) -> Result<(), SecurityError> {
+    let path_lower = path.to_lowercase();
+
+    // Decode URL encoding to catch encoded SQL injection
+    let decoded =
+        urlencoding::decode(&path_lower).unwrap_or(std::borrow::Cow::Borrowed(&path_lower));
+    let decoded_str = decoded.as_ref();
+
+    // SQL injection patterns - must have quote + SQL keyword/operator
+    let sql_patterns = [
+        "' or '",
+        "' and '",
+        "' union ",
+        "' select ",
+        " or 1=1",
+        " or '1'='1",
+        "'; drop ",
+        "'; delete ",
+        "'; insert ",
+        "'; update ",
+        "' having ",
+        "' group by ",
+        "' order by ",
+        " union select ",
+        " union all select ",
+    ];
+
+    // Check for SQL keyword patterns (require quote + keyword)
+    for pattern in &sql_patterns {
+        if decoded_str.contains(pattern) {
+            return Err(SecurityError::SqlInjection {
+                path: path.to_string(),
+            });
+        }
+    }
+
+    // Check for SQL comment terminators (with quote before)
+    if decoded_str.contains("'--")
+        || decoded_str.contains("' --")
+        || decoded_str.contains("'#")
+        || decoded_str.contains("' #")
+        || decoded_str.contains("'/*")
+        || decoded_str.contains("' /*")
+    {
+        return Err(SecurityError::SqlInjection {
+            path: path.to_string(),
+        });
+    }
+
+    // Check for hex-encoded SQL injection: 0x... (bypass quote filters)
+    if decoded_str.contains("0x")
+        && (decoded_str.contains(" or ")
+            || decoded_str.contains(" and ")
+            || decoded_str.contains(" union "))
+    {
+        return Err(SecurityError::SqlInjection {
+            path: path.to_string(),
+        });
     }
 
     Ok(())
@@ -295,5 +373,86 @@ mod tests {
             limit: 8192,
         };
         assert_eq!(err.to_string(), "URI length 10000 exceeds limit 8192");
+
+        let err = SecurityError::SqlInjection {
+            path: "/test/file' OR '1'='1".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "SQL injection attempt detected: /test/file' OR '1'='1"
+        );
+    }
+
+    // SQL Injection Detection Tests
+    #[test]
+    fn test_check_sql_injection_clean_path() {
+        let path = "/products/image.jpg";
+        let result = check_sql_injection(path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_sql_injection_apostrophe_filename() {
+        // Legitimate filename with apostrophe should NOT be blocked
+        let path = "/documents/user's_document.txt";
+        let result = check_sql_injection(path);
+        assert!(
+            result.is_ok(),
+            "Legitimate filename with apostrophe should be allowed"
+        );
+    }
+
+    #[test]
+    fn test_check_sql_injection_or_pattern() {
+        let path = "/test/file' OR '1'='1.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SecurityError::SqlInjection { .. }
+        ));
+    }
+
+    #[test]
+    fn test_check_sql_injection_and_pattern() {
+        let path = "/test/file' AND '1'='1.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_sql_injection_union_select() {
+        let path = "/test/file' UNION SELECT NULL--.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_sql_injection_drop_table() {
+        let path = "/test/file'; DROP TABLE users--.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_sql_injection_comment_terminator() {
+        let path = "/test/admin'--.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_sql_injection_url_encoded() {
+        // %27 = ', %20 = space
+        let path = "/test/file%27%20OR%20%271%27=%271.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_sql_injection_or_1_equals_1() {
+        let path = "/test/file OR 1=1--.txt";
+        let result = check_sql_injection(path);
+        assert!(result.is_err());
     }
 }
