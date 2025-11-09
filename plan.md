@@ -1898,7 +1898,7 @@ Before releasing v0.3.0, verify:
 
 **Why**: Validate replica configuration format and detect misconfigurations at startup
 
-- [ ] Test: Can parse single bucket config (backward compatibility)
+- [x] Test: Can parse single bucket config (backward compatibility) (src/config/mod.rs:802-842 - test_can_parse_single_bucket_config_backward_compatibility)
 - [ ] Test: Can parse replica set with multiple replicas
 - [ ] Test: Replicas sorted by priority (1, 2, 3...)
 - [ ] Test: Replica priority must be unique within bucket

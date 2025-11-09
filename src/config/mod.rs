@@ -795,4 +795,49 @@ buckets:
         );
         assert_eq!(cb_config.half_open_max_requests, 2);
     }
+
+    // Phase 23: High Availability Bucket Replication Tests
+    // ======================================================
+
+    #[test]
+    fn test_can_parse_single_bucket_config_backward_compatibility() {
+        // Test: The existing single-bucket config format should continue to work
+        // This ensures backward compatibility - existing deployments don't break
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      endpoint: "https://s3.us-west-2.amazonaws.com"
+      timeout: 30
+"#;
+
+        // Parse config - should succeed without errors
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Verify bucket configuration loaded correctly
+        assert_eq!(config.buckets.len(), 1);
+        assert_eq!(config.buckets[0].name, "products");
+        assert_eq!(config.buckets[0].path_prefix, "/products");
+
+        // Verify S3 config fields
+        let s3_config = &config.buckets[0].s3;
+        assert_eq!(s3_config.bucket, "my-products-bucket");
+        assert_eq!(s3_config.region, "us-west-2");
+        assert_eq!(s3_config.access_key, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(s3_config.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+        assert_eq!(s3_config.endpoint, Some("https://s3.us-west-2.amazonaws.com".to_string()));
+        assert_eq!(s3_config.timeout, 30);
+
+        // Validation should pass
+        config.validate().unwrap();
+    }
 }
