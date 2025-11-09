@@ -412,7 +412,10 @@ impl ProxyHttp for YatagarasuProxy {
         let _permit = match self.request_semaphore.try_acquire() {
             Ok(permit) => permit,
             Err(_) => {
-                tracing::warn!("Rejecting request due to max concurrent requests reached");
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    "Rejecting request due to max concurrent requests reached"
+                );
 
                 // Increment metrics counter for concurrency limit rejections
                 self.metrics.increment_concurrency_limit_rejection();
@@ -444,7 +447,10 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Check resource exhaustion SECOND - reject requests if resources exhausted
         if !self.resource_monitor.should_accept_request() {
-            tracing::warn!("Rejecting request due to resource exhaustion");
+            tracing::warn!(
+                request_id = %ctx.request_id(),
+                "Rejecting request due to resource exhaustion"
+            );
 
             let mut header = ResponseHeader::build(503, None)?;
             header.insert_header("Content-Type", "application/json")?;
@@ -482,6 +488,7 @@ impl ProxyHttp for YatagarasuProxy {
             security::validate_uri_length(&uri_str, self.security_limits.max_uri_length)
         {
             tracing::warn!(
+                request_id = %ctx.request_id(),
                 uri_length = uri_str.len(),
                 limit = self.security_limits.max_uri_length,
                 error = %security_error,
@@ -522,6 +529,7 @@ impl ProxyHttp for YatagarasuProxy {
             security::validate_header_size(total_header_size, self.security_limits.max_header_size)
         {
             tracing::warn!(
+                request_id = %ctx.request_id(),
                 header_size = total_header_size,
                 limit = self.security_limits.max_header_size,
                 error = %security_error,
@@ -562,6 +570,7 @@ impl ProxyHttp for YatagarasuProxy {
             security::validate_body_size(content_length, self.security_limits.max_body_size)
         {
             tracing::warn!(
+                request_id = %ctx.request_id(),
                 content_length = ?content_length,
                 limit = self.security_limits.max_body_size,
                 error = %security_error,
@@ -597,6 +606,7 @@ impl ProxyHttp for YatagarasuProxy {
         // We need to detect the attack BEFORE normalization
         if let Err(security_error) = security::check_path_traversal(&uri_str) {
             tracing::warn!(
+                request_id = %ctx.request_id(),
                 uri = %uri_str,
                 error = %security_error,
                 "Path traversal attempt detected in raw URI"
@@ -628,6 +638,7 @@ impl ProxyHttp for YatagarasuProxy {
         // 5. Check for SQL injection attempts (check RAW URI before processing)
         if let Err(security_error) = security::check_sql_injection(&uri_str) {
             tracing::warn!(
+                request_id = %ctx.request_id(),
                 uri = %uri_str,
                 error = %security_error,
                 "SQL injection attempt detected in raw URI"
@@ -779,12 +790,16 @@ impl ProxyHttp for YatagarasuProxy {
                         // Authenticate request
                         match authenticate_request(&headers, &query_params, jwt_config) {
                             Ok(_claims) => {
-                                tracing::debug!("Admin reload request authenticated successfully");
+                                tracing::debug!(
+                                    request_id = %ctx.request_id(),
+                                    "Admin reload request authenticated successfully"
+                                );
                             }
                             Err(auth_error) => {
                                 tracing::warn!(
-                                    "Admin reload authentication failed: {}",
-                                    auth_error
+                                    request_id = %ctx.request_id(),
+                                    error = %auth_error,
+                                    "Admin reload authentication failed"
                                 );
 
                                 // Build 401 Unauthorized response
@@ -823,6 +838,7 @@ impl ProxyHttp for YatagarasuProxy {
                 match reload_manager.reload_config_with_generation(current_generation) {
                     Ok(new_config) => {
                         tracing::info!(
+                            request_id = %ctx.request_id(),
                             old_generation = current_generation,
                             new_generation = new_config.generation,
                             "Configuration reloaded successfully"
@@ -863,6 +879,7 @@ impl ProxyHttp for YatagarasuProxy {
                     }
                     Err(error_msg) => {
                         tracing::error!(
+                            request_id = %ctx.request_id(),
                             error = %error_msg,
                             "Configuration reload failed"
                         );
@@ -965,6 +982,7 @@ impl ProxyHttp for YatagarasuProxy {
                 rate_limit_manager.check_all(&bucket_config.name, client_ip)
             {
                 tracing::warn!(
+                    request_id = %ctx.request_id(),
                     bucket = %bucket_config.name,
                     client_ip = ?client_ip,
                     error = %rate_limit_error,
@@ -1007,6 +1025,7 @@ impl ProxyHttp for YatagarasuProxy {
             // Check if circuit breaker allows request
             if !circuit_breaker.should_allow_request() {
                 tracing::warn!(
+                    request_id = %ctx.request_id(),
                     bucket = %bucket_config.name,
                     state = ?circuit_breaker.state(),
                     "Circuit breaker rejecting request (circuit open)"
@@ -1288,6 +1307,7 @@ impl ProxyHttp for YatagarasuProxy {
                 if (200..300).contains(&status_code) {
                     circuit_breaker.record_success();
                     tracing::debug!(
+                        request_id = %ctx.request_id(),
                         bucket = %bucket_config.name,
                         status_code = status_code,
                         "Circuit breaker recorded success"
@@ -1295,6 +1315,7 @@ impl ProxyHttp for YatagarasuProxy {
                 } else if status_code >= 500 {
                     circuit_breaker.record_failure();
                     tracing::warn!(
+                        request_id = %ctx.request_id(),
                         bucket = %bucket_config.name,
                         status_code = status_code,
                         failure_count = circuit_breaker.failure_count(),
@@ -1313,5 +1334,27 @@ impl ProxyHttp for YatagarasuProxy {
             duration_ms = duration_ms,
             "Request completed"
         );
+    }
+
+    /// Filter upstream responses to add custom headers (request correlation)
+    fn upstream_response_filter(
+        &self,
+        _session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        // Add X-Request-ID header for request correlation
+        upstream_response
+            .insert_header("X-Request-ID", ctx.request_id())
+            .map_err(|e| {
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    error = ?e,
+                    "Failed to add X-Request-ID header"
+                );
+                e
+            })?;
+
+        Ok(())
     }
 }

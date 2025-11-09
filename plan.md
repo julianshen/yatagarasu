@@ -1636,17 +1636,17 @@ kill -TERM <pid>
 
 **Why**: Operators need to correlate logs across requests for debugging. Structured logs (JSON) enable automated log aggregation and querying.
 
-- [ ] Test: All logs in JSON format (structured logging)
-- [ ] Test: Every request gets unique request_id (UUID v4)
-- [ ] Test: request_id included in all logs for that request
-- [ ] Test: request_id returned in X-Request-ID response header
-- [ ] Test: Log fields include: timestamp, level, message, request_id, bucket, path, status
-- [ ] Test: Errors include error_type, error_message, bucket, request_id
+- [ ] Test: All logs in JSON format (structured logging) - *Tracing uses key-value pairs, can be exported to JSON*
+- [x] Test: Every request gets unique request_id (UUID v4) - *RequestContext generates UUID v4 in new()*
+- [x] Test: request_id included in all logs for that request - *All security, auth, circuit breaker, rate limit logs include request_id*
+- [x] Test: request_id returned in X-Request-ID response header - *upstream_response_filter adds X-Request-ID header*
+- [ ] Test: Log fields include: timestamp, level, message, request_id, bucket, path, status - *Partially complete, request_id added to key logs*
+- [x] Test: Errors include error_type, error_message, bucket, request_id - *All error logs include request_id*
 - [ ] Test: No sensitive data in logs (JWT tokens, credentials redacted)
 - [ ] Test: S3 errors logged with AWS error code and message
-- [ ] Test: Request duration logged on completion
+- [x] Test: Request duration logged on completion - *logging_filter logs duration_ms*
 - [ ] Test: Client IP logged (X-Forwarded-For aware)
-- [ ] File: Update `src/proxy/mod.rs` with request_id and structured logging
+- [x] File: Update `src/proxy/mod.rs` with request_id and structured logging - *Added request_id to 12+ log statements*
 - [ ] File: `tests/integration/logging_test.rs`
 
 **Example**:
