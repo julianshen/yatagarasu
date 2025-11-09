@@ -36,17 +36,17 @@ fn main() {
 
     // Log startup banner
     let version = env!("CARGO_PKG_VERSION");
-    tracing::info!(
-        version = version,
-        "Starting Yatagarasu S3 Proxy"
-    );
+    tracing::info!(version = version, "Starting Yatagarasu S3 Proxy");
 
     // Load and validate configuration from file
     let config_path_display = args.config.display().to_string();
 
     // Check if config file exists
     if !args.config.exists() {
-        eprintln!("Error: Configuration file not found: {}", config_path_display);
+        eprintln!(
+            "Error: Configuration file not found: {}",
+            config_path_display
+        );
         eprintln!("Please ensure the config file exists or specify a different path with --config");
         std::process::exit(1);
     }
@@ -57,7 +57,10 @@ fn main() {
     );
 
     let config = Config::from_file(&args.config).unwrap_or_else(|e| {
-        eprintln!("Error: Failed to load configuration from {}", config_path_display);
+        eprintln!(
+            "Error: Failed to load configuration from {}",
+            config_path_display
+        );
         eprintln!("Reason: {}", e);
         eprintln!("\nPlease check:");
         eprintln!("  - YAML syntax is correct");
@@ -89,7 +92,10 @@ fn main() {
         println!("Configuration is valid:");
         println!("  Version: {}", version);
         println!("  Config file: {}", config_path_display);
-        println!("  Listen address: {}:{}", config.server.address, config.server.port);
+        println!(
+            "  Listen address: {}:{}",
+            config.server.address, config.server.port
+        );
         println!("  Buckets configured: {}", config.buckets.len());
         println!("  JWT enabled: {}", config.jwt.is_some());
         std::process::exit(0);

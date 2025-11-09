@@ -1643,7 +1643,7 @@ kill -TERM <pid>
 - [ ] Test: Log fields include: timestamp, level, message, request_id, bucket, path, status - *Partially complete, request_id added to key logs*
 - [x] Test: Errors include error_type, error_message, bucket, request_id - *All error logs include request_id*
 - [x] Test: No sensitive data in logs (JWT tokens, credentials redacted) - *Verified: JWT tokens only show length, no credentials logged. docs/SECURITY_LOGGING.md created*
-- [ ] Test: S3 errors logged with AWS error code and message
+- [x] Test: S3 errors logged with AWS error code and message - *logging_filter extracts x-amz-error-code and x-amz-error-message headers from upstream responses*
 - [x] Test: Request duration logged on completion - *logging_filter logs duration_ms*
 - [x] Test: Client IP logged (X-Forwarded-For aware) - *get_client_ip() checks X-Forwarded-For header, added to all security/request logs*
 - [x] File: Update `src/proxy/mod.rs` with request_id and structured logging - *Added request_id + client_ip to 15+ log statements*

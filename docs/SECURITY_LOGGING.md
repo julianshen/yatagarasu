@@ -68,7 +68,7 @@ tracing::debug!(
 **SECURE** - We log request metadata, not headers/body:
 
 ```rust
-// src/proxy/mod.rs:1367-1375
+// src/proxy/mod.rs:1433-1441
 tracing::info!(
     request_id = %ctx.request_id(),    // ✅ Safe
     client_ip = %client_ip,             // ✅ Safe
@@ -79,6 +79,57 @@ tracing::info!(
     "Request completed"
 );
 ```
+
+### S3 Error Logging
+
+**SECURE** - We log S3 error codes and messages from response headers (safe diagnostic info):
+
+```rust
+// src/proxy/mod.rs:1379-1430
+// Extract S3 error information from upstream response headers (if error status)
+let (s3_error_code, s3_error_message) = if status_code >= 400 {
+    if let Some(resp) = session.response_written() {
+        let error_code = resp
+            .headers
+            .get("x-amz-error-code")           // ✅ Safe - AWS error code
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let error_message = resp
+            .headers
+            .get("x-amz-error-message")        // ✅ Safe - AWS error message
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        (error_code, error_message)
+    } else {
+        (None, None)
+    }
+} else {
+    (None, None)
+};
+
+// Log S3 errors with error code and message
+if let (Some(code), Some(message)) = (&s3_error_code, &s3_error_message) {
+    tracing::warn!(
+        request_id = %ctx.request_id(),
+        client_ip = %client_ip,
+        method = %ctx.method(),
+        path = %ctx.path(),
+        status_code = status_code,
+        s3_error_code = %code,             // ✅ Safe - e.g., "NoSuchKey", "AccessDenied"
+        s3_error_message = %message,       // ✅ Safe - AWS error description
+        bucket = bucket_name,              // ✅ Safe
+        duration_ms = duration_ms,
+        "S3 error response with error details"
+    );
+}
+```
+
+**AWS S3 Error Headers**:
+- `x-amz-error-code`: Error type (e.g., "NoSuchKey", "AccessDenied", "InvalidBucketName")
+- `x-amz-error-message`: Human-readable error description
+- These headers contain diagnostic information only, never credentials or sensitive data
 
 ### Configuration Loading
 

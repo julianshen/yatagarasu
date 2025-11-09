@@ -798,7 +798,9 @@ impl Metrics {
         ));
 
         // Backend health per bucket (1=healthy, 0=unhealthy)
-        output.push_str("\n# HELP backend_health Backend health status per bucket (1=healthy, 0=unhealthy)\n");
+        output.push_str(
+            "\n# HELP backend_health Backend health status per bucket (1=healthy, 0=unhealthy)\n",
+        );
         output.push_str("# TYPE backend_health gauge\n");
         if let Ok(health) = self.backend_health.lock() {
             for (bucket, is_healthy) in health.iter() {

@@ -1178,6 +1178,9 @@ fn test_router_lookup_is_fast_for_reasonable_config_sizes() {
                 endpoint: None,
                 timeout: 20,
                 connection_pool_size: 50,
+                circuit_breaker: None,
+                rate_limit: None,
+                retry: None,
             },
             auth: None,
         });
@@ -1223,6 +1226,9 @@ fn test_can_handle_100_plus_bucket_configurations_efficiently() {
                 endpoint: None,
                 timeout: 20,
                 connection_pool_size: 50,
+                circuit_breaker: None,
+                rate_limit: None,
+                retry: None,
             },
             auth: None,
         });

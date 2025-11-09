@@ -10,6 +10,8 @@ fn test_can_create_empty_config_struct() {
             port: 8080,
             request_timeout: 30,
             max_concurrent_requests: 1000,
+            rate_limit: None,
+            security_limits: SecurityLimitsConfig::default(),
         },
         buckets: vec![],
         jwt: None,

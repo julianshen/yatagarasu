@@ -756,7 +756,8 @@ impl ProxyHttp for YatagarasuProxy {
                 };
 
                 // Record backend health in metrics (for Prometheus export)
-                self.metrics.set_backend_health(&bucket_config.name, is_healthy);
+                self.metrics
+                    .set_backend_health(&bucket_config.name, is_healthy);
 
                 backends_health.insert(
                     bucket_config.name.clone(),
@@ -1375,6 +1376,59 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Extract client IP for logging
         let client_ip = self.get_client_ip(session);
+
+        // Extract S3 error information from upstream response headers (if error status)
+        let (s3_error_code, s3_error_message) = if status_code >= 400 {
+            if let Some(resp) = session.response_written() {
+                let error_code = resp
+                    .headers
+                    .get("x-amz-error-code")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let error_message = resp
+                    .headers
+                    .get("x-amz-error-message")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                (error_code, error_message)
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // Log S3 errors with error code and message (if available)
+        if status_code >= 400 {
+            if let (Some(code), Some(message)) = (&s3_error_code, &s3_error_message) {
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    client_ip = %client_ip,
+                    method = %ctx.method(),
+                    path = %ctx.path(),
+                    status_code = status_code,
+                    s3_error_code = %code,
+                    s3_error_message = %message,
+                    bucket = ctx.bucket_config().map(|b| b.name.as_str()).unwrap_or("unknown"),
+                    duration_ms = duration_ms,
+                    "S3 error response with error details"
+                );
+            } else {
+                // Error response but no S3 error headers (might be proxy error, not S3)
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    client_ip = %client_ip,
+                    method = %ctx.method(),
+                    path = %ctx.path(),
+                    status_code = status_code,
+                    bucket = ctx.bucket_config().map(|b| b.name.as_str()).unwrap_or("unknown"),
+                    duration_ms = duration_ms,
+                    "Error response without S3 error headers"
+                );
+            }
+        }
 
         // Log request completion with request ID for tracing
         tracing::info!(
