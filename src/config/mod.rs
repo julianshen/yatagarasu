@@ -88,6 +88,14 @@ impl Config {
 
             // Validate replica set if present (Phase 23: HA Bucket Replication)
             if let Some(replicas) = &bucket.s3.replicas {
+                // Check that at least one replica is defined
+                if replicas.is_empty() {
+                    return Err(format!(
+                        "Bucket '{}': Replica set cannot be empty. At least one replica is required.",
+                        bucket.name
+                    ));
+                }
+
                 // Check for duplicate priorities within bucket
                 let mut seen_priorities = HashSet::new();
                 // Check for duplicate names within bucket
@@ -1206,6 +1214,41 @@ buckets:
         assert!(
             error_lower.contains("name") && error_lower.contains("duplicate"),
             "Error should mention duplicate name, got: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_at_least_one_replica_required() {
+        // Test: Empty replicas array should be rejected
+        // At least one replica is required for HA configuration
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas: []
+"#;
+
+        // Parse config should succeed
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Validation should fail due to empty replicas
+        let result = config.validate();
+        assert!(
+            result.is_err(),
+            "Validation should fail with empty replicas array"
+        );
+
+        let error = result.unwrap_err();
+        let error_lower = error.to_lowercase();
+        assert!(
+            error_lower.contains("at least one") || error_lower.contains("empty"),
+            "Error should mention at least one replica required, got: {}",
             error
         );
     }
