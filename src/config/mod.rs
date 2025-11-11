@@ -85,6 +85,20 @@ impl Config {
                     bucket.path_prefix, bucket.name
                 ));
             }
+
+            // Validate replica set if present (Phase 23: HA Bucket Replication)
+            if let Some(replicas) = &bucket.s3.replicas {
+                // Check for duplicate priorities within bucket
+                let mut seen_priorities = HashSet::new();
+                for replica in replicas {
+                    if !seen_priorities.insert(replica.priority) {
+                        return Err(format!(
+                            "Bucket '{}': Duplicate priority {} found in replica set. Each replica must have a unique priority.",
+                            bucket.name, replica.priority
+                        ));
+                    }
+                }
+            }
         }
 
         // Validate JWT configuration if present
@@ -1007,5 +1021,49 @@ buckets:
 
         assert_eq!(replicas[2].priority, 3, "Third replica should have priority 3");
         assert_eq!(replicas[2].name, "replica-minio", "Third replica should be 'replica-minio'");
+    }
+
+    #[test]
+    fn test_replica_priority_must_be_unique_within_bucket() {
+        // Test: Duplicate priorities within a bucket should be rejected
+        // This ensures deterministic failover order - no ambiguity
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+        - name: "replica-eu"
+          bucket: "products-eu-west-1"
+          region: "eu-west-1"
+          access_key: "AKIAIOSFODNN7EXAMPLE2"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+          priority: 1
+"#;
+
+        // Parse config should succeed
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Validation should fail due to duplicate priority
+        let result = config.validate();
+        assert!(result.is_err(), "Validation should fail with duplicate priorities");
+
+        let error = result.unwrap_err();
+        let error_lower = error.to_lowercase();
+        assert!(
+            error_lower.contains("priority") && error_lower.contains("duplicate"),
+            "Error should mention duplicate priority, got: {}",
+            error
+        );
     }
 }
