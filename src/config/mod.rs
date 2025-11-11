@@ -39,6 +39,14 @@ impl Config {
 
         let mut config: Config = serde_yaml::from_str(&substituted).map_err(|e| e.to_string())?;
         config.generation = 0; // Initialize generation to 0
+
+        // Sort replicas by priority (1 = highest priority)
+        for bucket in &mut config.buckets {
+            if let Some(replicas) = &mut bucket.s3.replicas {
+                replicas.sort_by_key(|r| r.priority);
+            }
+        }
+
         Ok(config)
     }
 
@@ -947,5 +955,57 @@ buckets:
 
         // Validation should pass
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn test_replicas_sorted_by_priority() {
+        // Test: Replicas should be automatically sorted by priority (1, 2, 3...)
+        // This ensures failover always tries replicas in the correct order
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "replica-minio"
+          bucket: "products-backup"
+          region: "us-east-1"
+          access_key: "minioadmin"
+          secret_key: "minioadmin"
+          priority: 3
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+        - name: "replica-eu"
+          bucket: "products-eu-west-1"
+          region: "eu-west-1"
+          access_key: "AKIAIOSFODNN7EXAMPLE2"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+          priority: 2
+"#;
+
+        // Parse config
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Get replicas
+        let replicas = config.buckets[0].s3.replicas.as_ref().unwrap();
+
+        // Verify replicas are sorted by priority (1, 2, 3)
+        assert_eq!(replicas.len(), 3);
+        assert_eq!(replicas[0].priority, 1, "First replica should have priority 1");
+        assert_eq!(replicas[0].name, "primary", "First replica should be 'primary'");
+
+        assert_eq!(replicas[1].priority, 2, "Second replica should have priority 2");
+        assert_eq!(replicas[1].name, "replica-eu", "Second replica should be 'replica-eu'");
+
+        assert_eq!(replicas[2].priority, 3, "Third replica should have priority 3");
+        assert_eq!(replicas[2].name, "replica-minio", "Third replica should be 'replica-minio'");
     }
 }
