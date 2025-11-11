@@ -1905,7 +1905,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: Replica priority must be >= 1 (src/config/mod.rs:1070-1105 - test_replica_priority_must_be_at_least_one; validation logic at lines 94-100)
 - [x] Test: Replica name must be unique within bucket (src/config/mod.rs:1116-1172 - test_replica_name_must_be_unique_within_bucket; validation logic at lines 113-119)
 - [x] Test: At least one replica required per bucket (src/config/mod.rs:1213-1246 - test_at_least_one_replica_required; validation logic at lines 92-97)
-- [ ] Test: Each replica has required fields (bucket, region, access_key, secret_key, priority)
+- [x] Test: Each replica has required fields (bucket, region, access_key, secret_key, priority) (src/config/mod.rs:1256-1347 - test_replica_required_fields_enforced; enforced by serde deserialization)
 - [ ] Test: Optional replica timeout overrides default
 - [ ] Test: Invalid replica config fails validation with clear error
 - [ ] Test: Single bucket config converted to single-replica format internally

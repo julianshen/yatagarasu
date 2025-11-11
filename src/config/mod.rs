@@ -1252,4 +1252,97 @@ buckets:
             error
         );
     }
+
+    #[test]
+    fn test_replica_required_fields_enforced() {
+        // Test: Required fields (bucket, region, access_key, secret_key, priority, name)
+        // must be present in each replica. This is enforced by serde during parsing.
+
+        // Test 1: Missing bucket field
+        let yaml_missing_bucket = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+"#;
+        let result = Config::from_yaml_with_env(yaml_missing_bucket);
+        assert!(
+            result.is_err(),
+            "Config with missing bucket field should fail to parse"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("bucket") || error.contains("missing field"),
+            "Error should mention missing bucket field, got: {}",
+            error
+        );
+
+        // Test 2: Missing priority field
+        let yaml_missing_priority = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+"#;
+        let result = Config::from_yaml_with_env(yaml_missing_priority);
+        assert!(
+            result.is_err(),
+            "Config with missing priority field should fail to parse"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("priority") || error.contains("missing field"),
+            "Error should mention missing priority field, got: {}",
+            error
+        );
+
+        // Test 3: Missing access_key field
+        let yaml_missing_access_key = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+"#;
+        let result = Config::from_yaml_with_env(yaml_missing_access_key);
+        assert!(
+            result.is_err(),
+            "Config with missing access_key field should fail to parse"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("access_key") || error.contains("missing field"),
+            "Error should mention missing access_key field, got: {}",
+            error
+        );
+    }
 }
