@@ -218,6 +218,35 @@ impl Config {
 
         Ok(())
     }
+
+    /// Normalize the configuration by converting legacy single-bucket format to replica format.
+    /// This provides a unified code path where all buckets use the replica-based structure internally.
+    pub fn normalize(&self) -> Config {
+        let mut normalized = self.clone();
+
+        for bucket in &mut normalized.buckets {
+            // If replicas is None, convert legacy fields to single-replica format
+            if bucket.s3.replicas.is_none() {
+                // Only convert if legacy fields are populated (non-empty)
+                if !bucket.s3.bucket.is_empty() {
+                    let replica = S3Replica {
+                        name: "default".to_string(),
+                        bucket: bucket.s3.bucket.clone(),
+                        region: bucket.s3.region.clone(),
+                        access_key: bucket.s3.access_key.clone(),
+                        secret_key: bucket.s3.secret_key.clone(),
+                        endpoint: bucket.s3.endpoint.clone(),
+                        priority: 1,
+                        timeout: bucket.s3.timeout,
+                    };
+
+                    bucket.s3.replicas = Some(vec![replica]);
+                }
+            }
+        }
+
+        normalized
+    }
 }
 
 // Default timeout values
@@ -1524,5 +1553,80 @@ buckets:
 
         // Validation should pass
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn test_single_bucket_config_converted_to_replica_format() {
+        // Test: Legacy single-bucket config should be converted to single-replica format internally
+        // This provides a unified code path: everything is handled as replicas internally
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      bucket: "my-products-bucket"
+      region: "us-west-2"
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      endpoint: "https://s3.us-west-2.amazonaws.com"
+      timeout: 30
+"#;
+
+        // Parse config
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Verify the config parsed successfully
+        assert_eq!(config.buckets.len(), 1);
+        let s3_config = &config.buckets[0].s3;
+
+        // Legacy format: replicas should be None initially
+        assert!(
+            s3_config.replicas.is_none(),
+            "Legacy config should have replicas=None before normalization"
+        );
+
+        // After normalization, the config should be treated as a single replica
+        // This is tested by calling a method that normalizes the config
+        let normalized_config = config.normalize();
+
+        // Now the replicas field should be populated with a single replica
+        let normalized_s3 = &normalized_config.buckets[0].s3;
+        assert!(
+            normalized_s3.replicas.is_some(),
+            "After normalization, legacy config should have replicas populated"
+        );
+
+        let replicas = normalized_s3.replicas.as_ref().unwrap();
+        assert_eq!(replicas.len(), 1, "Should have exactly 1 replica");
+
+        // Verify replica fields match legacy config
+        let replica = &replicas[0];
+        assert_eq!(
+            replica.name, "default",
+            "Converted replica should be named 'default'"
+        );
+        assert_eq!(replica.bucket, "my-products-bucket");
+        assert_eq!(replica.region, "us-west-2");
+        assert_eq!(replica.access_key, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(
+            replica.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        );
+        assert_eq!(
+            replica.endpoint,
+            Some("https://s3.us-west-2.amazonaws.com".to_string())
+        );
+        assert_eq!(replica.timeout, 30);
+        assert_eq!(
+            replica.priority, 1,
+            "Default replica should have priority 1"
+        );
+
+        // Validation should pass
+        normalized_config.validate().unwrap();
     }
 }
