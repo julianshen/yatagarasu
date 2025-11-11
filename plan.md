@@ -1907,7 +1907,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: At least one replica required per bucket (src/config/mod.rs:1213-1246 - test_at_least_one_replica_required; validation logic at lines 92-97)
 - [x] Test: Each replica has required fields (bucket, region, access_key, secret_key, priority) (src/config/mod.rs:1256-1347 - test_replica_required_fields_enforced; enforced by serde deserialization)
 - [x] Test: Optional replica timeout overrides default (src/config/mod.rs:1349-1404 - test_replica_timeout_defaults_and_overrides; default via #[serde(default = "default_s3_timeout")] at line 249)
-- [ ] Test: Invalid replica config fails validation with clear error
+- [x] Test: Invalid replica config fails validation with clear error (src/config/mod.rs:1349-1450 - test_invalid_replica_config_rejected; validation logic at lines 105-127 for timeout>0, non-empty name, non-empty bucket)
 - [ ] Test: Single bucket config converted to single-replica format internally
 - [x] File: Update `src/config/mod.rs` with S3Replica struct (lines 239-251) and S3Config.replicas field (line 279)
 

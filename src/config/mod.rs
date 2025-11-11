@@ -102,6 +102,30 @@ impl Config {
                 let mut seen_names = HashSet::new();
 
                 for replica in replicas {
+                    // Check replica name is not empty
+                    if replica.name.trim().is_empty() {
+                        return Err(format!(
+                            "Bucket '{}': Replica name cannot be empty. Each replica must have a non-empty name.",
+                            bucket.name
+                        ));
+                    }
+
+                    // Check replica bucket is not empty
+                    if replica.bucket.trim().is_empty() {
+                        return Err(format!(
+                            "Bucket '{}': Replica '{}' has empty bucket name. Each replica must have a non-empty bucket name.",
+                            bucket.name, replica.name
+                        ));
+                    }
+
+                    // Check timeout is greater than 0
+                    if replica.timeout == 0 {
+                        return Err(format!(
+                            "Bucket '{}': Replica '{}' has timeout 0. Timeout must be > 0 seconds.",
+                            bucket.name, replica.name
+                        ));
+                    }
+
                     // Check priority is at least 1
                     if replica.priority < 1 {
                         return Err(format!(
@@ -1342,6 +1366,105 @@ buckets:
         assert!(
             error.contains("access_key") || error.contains("missing field"),
             "Error should mention missing access_key field, got: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_invalid_replica_config_rejected() {
+        // Test 1: Zero timeout should be rejected (timeout must be > 0)
+        let yaml_zero_timeout = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+          timeout: 0
+"#;
+        let config =
+            Config::from_yaml_with_env(yaml_zero_timeout).expect("Valid YAML should parse");
+
+        let result = config.validate();
+        assert!(result.is_err(), "Replica with timeout=0 should be rejected");
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("timeout") && error.contains("0"),
+            "Error should mention timeout=0, got: {}",
+            error
+        );
+
+        // Test 2: Empty replica name should be rejected
+        let yaml_empty_name = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: ""
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+"#;
+        let config = Config::from_yaml_with_env(yaml_empty_name).expect("Valid YAML should parse");
+
+        let result = config.validate();
+        assert!(
+            result.is_err(),
+            "Replica with empty name should be rejected"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("name") && error.contains("empty"),
+            "Error should mention empty name, got: {}",
+            error
+        );
+
+        // Test 3: Empty bucket name should be rejected
+        let yaml_empty_bucket = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: ""
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+"#;
+        let config =
+            Config::from_yaml_with_env(yaml_empty_bucket).expect("Valid YAML should parse");
+
+        let result = config.validate();
+        assert!(
+            result.is_err(),
+            "Replica with empty bucket name should be rejected"
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("bucket") && error.contains("empty"),
+            "Error should mention empty bucket, got: {}",
             error
         );
     }
