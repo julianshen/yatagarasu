@@ -26,6 +26,7 @@ fn test_can_create_s3_client_with_valid_credentials() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result = create_s3_client(&config);
@@ -59,6 +60,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result1 = create_s3_client(&config1);
@@ -77,6 +79,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result2 = create_s3_client(&config2);
@@ -95,6 +98,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result3 = create_s3_client(&config3);
@@ -113,6 +117,7 @@ fn test_can_create_s3_client_with_region_configuration() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result4 = create_s3_client(&config4);
@@ -134,6 +139,7 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result = create_s3_client(&minio_config);
@@ -158,6 +164,7 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result2 = create_s3_client(&localstack_config);
@@ -185,6 +192,7 @@ fn test_can_create_s3_client_with_custom_endpoint() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result3 = create_s3_client(&https_config);
@@ -215,6 +223,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result1 = create_s3_client(&config_empty_access_key);
@@ -236,6 +245,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result2 = create_s3_client(&config_empty_secret_key);
@@ -257,6 +267,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result3 = create_s3_client(&config_empty_region);
@@ -278,6 +289,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result4 = create_s3_client(&config_empty_bucket);
@@ -299,6 +311,7 @@ fn test_client_creation_fails_with_empty_credentials() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     let result5 = create_s3_client(&config_all_empty);
@@ -319,6 +332,7 @@ fn test_can_create_multiple_independent_s3_clients() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     // Create config for users bucket
@@ -333,6 +347,7 @@ fn test_can_create_multiple_independent_s3_clients() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     // Create config for images bucket with custom endpoint (MinIO)
@@ -347,6 +362,7 @@ fn test_can_create_multiple_independent_s3_clients() {
         rate_limit: None,
         circuit_breaker: None,
         retry: None,
+        replicas: None,
     };
 
     // Create all three clients
@@ -8145,6 +8161,7 @@ fn test_can_create_s3_http_client_from_bucket_config() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None, // Public bucket
     };
@@ -8206,6 +8223,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8224,6 +8242,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: Some(yatagarasu::config::AuthConfig { enabled: true }),
     };
@@ -8242,6 +8261,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8353,6 +8373,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8381,6 +8402,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8408,6 +8430,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8464,6 +8487,7 @@ fn test_s3_client_generates_valid_aws_signature_v4() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8536,6 +8560,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None, // Public bucket
     };
@@ -8555,6 +8580,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: Some(yatagarasu::config::AuthConfig {
             enabled: true, // Requires JWT
@@ -8576,6 +8602,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };
@@ -8704,6 +8731,7 @@ fn test_get_request_to_products_image_fetches_from_s3() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None, // Public bucket
     }];
@@ -9538,6 +9566,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None, // Public bucket, no JWT required
     };
@@ -9557,6 +9586,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
     };
@@ -9576,6 +9606,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             rate_limit: None,
             circuit_breaker: None,
             retry: None,
+            replicas: None,
         },
         auth: None,
     };

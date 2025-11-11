@@ -90,6 +90,9 @@ impl Config {
             if let Some(replicas) = &bucket.s3.replicas {
                 // Check for duplicate priorities within bucket
                 let mut seen_priorities = HashSet::new();
+                // Check for duplicate names within bucket
+                let mut seen_names = HashSet::new();
+
                 for replica in replicas {
                     // Check priority is at least 1
                     if replica.priority < 1 {
@@ -104,6 +107,14 @@ impl Config {
                         return Err(format!(
                             "Bucket '{}': Duplicate priority {} found in replica set. Each replica must have a unique priority.",
                             bucket.name, replica.priority
+                        ));
+                    }
+
+                    // Check for duplicate names
+                    if !seen_names.insert(&replica.name) {
+                        return Err(format!(
+                            "Bucket '{}': Duplicate replica name '{}' found. Each replica must have a unique name.",
+                            bucket.name, replica.name
                         ));
                     }
                 }
@@ -888,12 +899,21 @@ buckets:
         assert_eq!(s3_config.bucket, "my-products-bucket");
         assert_eq!(s3_config.region, "us-west-2");
         assert_eq!(s3_config.access_key, "AKIAIOSFODNN7EXAMPLE");
-        assert_eq!(s3_config.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
-        assert_eq!(s3_config.endpoint, Some("https://s3.us-west-2.amazonaws.com".to_string()));
+        assert_eq!(
+            s3_config.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        );
+        assert_eq!(
+            s3_config.endpoint,
+            Some("https://s3.us-west-2.amazonaws.com".to_string())
+        );
         assert_eq!(s3_config.timeout, 30);
 
         // Verify replicas field is None for legacy config
-        assert!(s3_config.replicas.is_none(), "Legacy config should not have replicas");
+        assert!(
+            s3_config.replicas.is_none(),
+            "Legacy config should not have replicas"
+        );
 
         // Validation should pass
         config.validate().unwrap();
@@ -948,7 +968,10 @@ buckets:
 
         // Verify replica set structure exists
         let s3_config = &config.buckets[0].s3;
-        assert!(s3_config.replicas.is_some(), "Replicas field should be present");
+        assert!(
+            s3_config.replicas.is_some(),
+            "Replicas field should be present"
+        );
 
         let replicas = s3_config.replicas.as_ref().unwrap();
         assert_eq!(replicas.len(), 3, "Should have 3 replicas");
@@ -959,8 +982,14 @@ buckets:
         assert_eq!(primary.bucket, "products-us-west-2");
         assert_eq!(primary.region, "us-west-2");
         assert_eq!(primary.access_key, "AKIAIOSFODNN7EXAMPLE1");
-        assert_eq!(primary.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1");
-        assert_eq!(primary.endpoint, Some("https://s3.us-west-2.amazonaws.com".to_string()));
+        assert_eq!(
+            primary.secret_key,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+        );
+        assert_eq!(
+            primary.endpoint,
+            Some("https://s3.us-west-2.amazonaws.com".to_string())
+        );
         assert_eq!(primary.priority, 1);
         assert_eq!(primary.timeout, 30);
 
@@ -1022,14 +1051,32 @@ buckets:
 
         // Verify replicas are sorted by priority (1, 2, 3)
         assert_eq!(replicas.len(), 3);
-        assert_eq!(replicas[0].priority, 1, "First replica should have priority 1");
-        assert_eq!(replicas[0].name, "primary", "First replica should be 'primary'");
+        assert_eq!(
+            replicas[0].priority, 1,
+            "First replica should have priority 1"
+        );
+        assert_eq!(
+            replicas[0].name, "primary",
+            "First replica should be 'primary'"
+        );
 
-        assert_eq!(replicas[1].priority, 2, "Second replica should have priority 2");
-        assert_eq!(replicas[1].name, "replica-eu", "Second replica should be 'replica-eu'");
+        assert_eq!(
+            replicas[1].priority, 2,
+            "Second replica should have priority 2"
+        );
+        assert_eq!(
+            replicas[1].name, "replica-eu",
+            "Second replica should be 'replica-eu'"
+        );
 
-        assert_eq!(replicas[2].priority, 3, "Third replica should have priority 3");
-        assert_eq!(replicas[2].name, "replica-minio", "Third replica should be 'replica-minio'");
+        assert_eq!(
+            replicas[2].priority, 3,
+            "Third replica should have priority 3"
+        );
+        assert_eq!(
+            replicas[2].name, "replica-minio",
+            "Third replica should be 'replica-minio'"
+        );
     }
 
     #[test]
@@ -1065,7 +1112,10 @@ buckets:
 
         // Validation should fail due to duplicate priority
         let result = config.validate();
-        assert!(result.is_err(), "Validation should fail with duplicate priorities");
+        assert!(
+            result.is_err(),
+            "Validation should fail with duplicate priorities"
+        );
 
         let error = result.unwrap_err();
         let error_lower = error.to_lowercase();
@@ -1109,6 +1159,53 @@ buckets:
         assert!(
             error.contains("priority") && (error.contains(">= 1") || error.contains("at least 1")),
             "Error should mention priority must be >= 1, got: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_replica_name_must_be_unique_within_bucket() {
+        // Test: Duplicate replica names within a bucket should be rejected
+        // This ensures clear replica identification in logs and metrics
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+        - name: "primary"
+          bucket: "products-eu-west-1"
+          region: "eu-west-1"
+          access_key: "AKIAIOSFODNN7EXAMPLE2"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+          priority: 2
+"#;
+
+        // Parse config should succeed
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Validation should fail due to duplicate name
+        let result = config.validate();
+        assert!(
+            result.is_err(),
+            "Validation should fail with duplicate replica names"
+        );
+
+        let error = result.unwrap_err();
+        let error_lower = error.to_lowercase();
+        assert!(
+            error_lower.contains("name") && error_lower.contains("duplicate"),
+            "Error should mention duplicate name, got: {}",
             error
         );
     }
