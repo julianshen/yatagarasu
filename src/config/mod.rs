@@ -1345,4 +1345,61 @@ buckets:
             error
         );
     }
+
+    #[test]
+    fn test_replica_timeout_defaults_and_overrides() {
+        // Test: timeout field is optional with default, and can be overridden per-replica
+        // This allows flexibility: fast primary (lower timeout) vs. slow backup (higher timeout)
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 1
+          # timeout not specified - should default to 20 seconds
+        - name: "backup"
+          bucket: "products-backup"
+          region: "us-east-1"
+          access_key: "AKIAIOSFODNN7EXAMPLE2"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2"
+          priority: 2
+          timeout: 45  # custom timeout - should override default
+"#;
+
+        // Parse config - should succeed
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Get replicas
+        let replicas = config.buckets[0].s3.replicas.as_ref().unwrap();
+        assert_eq!(replicas.len(), 2);
+
+        // Verify first replica uses default timeout (20s)
+        let primary = &replicas[0];
+        assert_eq!(primary.name, "primary");
+        assert_eq!(
+            primary.timeout, 20,
+            "Replica without timeout field should default to 20 seconds"
+        );
+
+        // Verify second replica uses custom timeout (45s)
+        let backup = &replicas[1];
+        assert_eq!(backup.name, "backup");
+        assert_eq!(
+            backup.timeout, 45,
+            "Replica with timeout field should use specified value"
+        );
+
+        // Validation should pass
+        config.validate().unwrap();
+    }
 }
