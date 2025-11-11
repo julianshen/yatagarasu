@@ -91,6 +91,15 @@ impl Config {
                 // Check for duplicate priorities within bucket
                 let mut seen_priorities = HashSet::new();
                 for replica in replicas {
+                    // Check priority is at least 1
+                    if replica.priority < 1 {
+                        return Err(format!(
+                            "Bucket '{}': Replica '{}' has priority {}. Priority must be >= 1.",
+                            bucket.name, replica.name, replica.priority
+                        ));
+                    }
+
+                    // Check for duplicate priorities
                     if !seen_priorities.insert(replica.priority) {
                         return Err(format!(
                             "Bucket '{}': Duplicate priority {} found in replica set. Each replica must have a unique priority.",
@@ -1063,6 +1072,43 @@ buckets:
         assert!(
             error_lower.contains("priority") && error_lower.contains("duplicate"),
             "Error should mention duplicate priority, got: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_replica_priority_must_be_at_least_one() {
+        // Test: Priority 0 should be rejected - priorities start at 1
+        // This ensures clean, human-friendly priority numbering (1, 2, 3...)
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      replicas:
+        - name: "primary"
+          bucket: "products-us-west-2"
+          region: "us-west-2"
+          access_key: "AKIAIOSFODNN7EXAMPLE1"
+          secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1"
+          priority: 0
+"#;
+
+        // Parse config should succeed
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Validation should fail due to priority 0
+        let result = config.validate();
+        assert!(result.is_err(), "Validation should fail with priority 0");
+
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("priority") && (error.contains(">= 1") || error.contains("at least 1")),
+            "Error should mention priority must be >= 1, got: {}",
             error
         );
     }

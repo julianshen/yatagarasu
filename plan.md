@@ -1902,7 +1902,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: Can parse replica set with multiple replicas (src/config/mod.rs:844-923 - test_can_parse_replica_set_with_multiple_replicas; S3Replica struct at lines 239-251, S3Config.replicas field at line 279)
 - [x] Test: Replicas sorted by priority (1, 2, 3...) (src/config/mod.rs:952-1002 - test_replicas_sorted_by_priority; sorting logic at lines 43-48)
 - [x] Test: Replica priority must be unique within bucket (src/config/mod.rs:1012-1068 - test_replica_priority_must_be_unique_within_bucket; validation logic at lines 89-101)
-- [ ] Test: Replica priority must be >= 1
+- [x] Test: Replica priority must be >= 1 (src/config/mod.rs:1070-1105 - test_replica_priority_must_be_at_least_one; validation logic at lines 94-100)
 - [ ] Test: Replica name must be unique within bucket
 - [ ] Test: At least one replica required per bucket
 - [ ] Test: Each replica has required fields (bucket, region, access_key, secret_key, priority)
