@@ -1237,4 +1237,79 @@ mod tests {
         // Future enhancement: Add error classification to skip failover for 4xx errors.
         // When that's implemented, this test should be updated to verify only primary is called.
     }
+
+    #[test]
+    fn test_all_replicas_failed_returns_last_error() {
+        // Test: When all replicas fail, return the LAST error (from the last replica tried)
+        // This is important for proper error reporting to clients
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+            S3Replica {
+                name: "replica-ap".to_string(),
+                bucket: "products-ap-southeast-1".to_string(),
+                region: "ap-southeast-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: Some("https://s3.ap-southeast-1.amazonaws.com".to_string()),
+                priority: 3,
+                timeout: 20,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+        let calls = RefCell::new(Vec::new());
+
+        // All replicas fail with different errors
+        let result = replica_set.try_request(|replica| {
+            calls.borrow_mut().push(replica.name.clone());
+            match replica.name.as_str() {
+                "primary" => Err::<String, String>("HTTP 500: Internal Server Error".to_string()),
+                "replica-eu" => Err::<String, String>("HTTP 502: Bad Gateway".to_string()),
+                "replica-ap" => Err::<String, String>("HTTP 503: Service Unavailable".to_string()),
+                _ => panic!("Unexpected replica name"),
+            }
+        });
+
+        // Verify request failed with the LAST error (from replica-ap)
+        assert!(
+            result.is_err(),
+            "Request should fail when all replicas fail"
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "HTTP 503: Service Unavailable",
+            "Should return the last error (from last replica tried)"
+        );
+
+        // Verify all three replicas were called in priority order
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 3, "Should try all 3 replicas");
+        assert_eq!(calls[0], "primary", "Should call primary replica first");
+        assert_eq!(calls[1], "replica-eu", "Should call second replica");
+        assert_eq!(
+            calls[2], "replica-ap",
+            "Should call third replica, whose error is returned"
+        );
+    }
 }

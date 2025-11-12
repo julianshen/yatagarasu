@@ -1939,7 +1939,7 @@ buckets:
 - [x] Test: Each replica has independent timeout (src/replica_set/mod.rs:363-442 - test_each_replica_has_independent_timeout)
 - [x] Test: Replica set can be cloned (for reload) (src/replica_set/mod.rs:444-535 - test_replica_set_can_be_cloned)
 - [x] Test: Single-bucket config creates one-replica set (src/replica_set/mod.rs:537-602 - test_single_bucket_config_creates_one_replica_set)
-- [x] File: Create `src/replica_set/mod.rs` (lines 1-1240)
+- [x] File: Create `src/replica_set/mod.rs` (lines 1-1312)
 
 ### Test: Failover Logic
 
@@ -1954,7 +1954,7 @@ buckets:
 - [x] Test: HTTP 504 triggers failover to next replica (src/replica_set/mod.rs:1021-1085 - test_http_504_triggers_failover_to_next_replica)
 - [x] Test: HTTP 403 (Forbidden) does NOT trigger failover - return to client (src/replica_set/mod.rs:1087-1162 - test_http_403_does_not_trigger_failover)
 - [x] Test: HTTP 404 (Not Found) does NOT trigger failover - return to client (src/replica_set/mod.rs:1164-1239 - test_http_404_does_not_trigger_failover)
-- [ ] Test: All replicas failed returns 502 Bad Gateway
+- [x] Test: All replicas failed returns 502 Bad Gateway (src/replica_set/mod.rs:1241-1311 - test_all_replicas_failed_returns_last_error)
 - [ ] Test: Failover respects retry budget (max 2 failovers = 3 total tries)
 - [ ] Test: Failover skips unhealthy replicas (circuit breaker open)
 - [ ] Test: Failover logs replica name and reason
