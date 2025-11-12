@@ -88,6 +88,7 @@ pub struct Metrics {
     // Phase 23: Per-replica metrics
     // Key format: "bucket_name:replica_name"
     replica_request_counts: Mutex<HashMap<String, u64>>,
+    replica_error_counts: Mutex<HashMap<String, u64>>,
 }
 
 impl Metrics {
@@ -127,6 +128,7 @@ impl Metrics {
             security_sql_injection_blocked: AtomicU64::new(0),
             backend_health: Mutex::new(HashMap::new()),
             replica_request_counts: Mutex::new(HashMap::new()),
+            replica_error_counts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -530,6 +532,25 @@ impl Metrics {
     pub fn get_replica_request_count(&self, bucket: &str, replica: &str) -> u64 {
         let key = format!("{}:{}", bucket, replica);
         self.replica_request_counts
+            .lock()
+            .ok()
+            .and_then(|counts| counts.get(&key).copied())
+            .unwrap_or(0)
+    }
+
+    /// Increment error count for a specific replica within a bucket
+    pub fn increment_replica_error_count(&self, bucket: &str, replica: &str) {
+        let key = format!("{}:{}", bucket, replica);
+        if let Ok(mut counts) = self.replica_error_counts.lock() {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    /// Get error count for a specific replica (for testing)
+    #[cfg(test)]
+    pub fn get_replica_error_count(&self, bucket: &str, replica: &str) -> u64 {
+        let key = format!("{}:{}", bucket, replica);
+        self.replica_error_counts
             .lock()
             .ok()
             .and_then(|counts| counts.get(&key).copied())
@@ -1497,5 +1518,39 @@ mod tests {
 
         // Original primary count should be unchanged
         assert_eq!(metrics.get_replica_request_count("products", "primary"), 3);
+    }
+
+    #[test]
+    fn test_track_error_count_per_replica() {
+        // Test: Error count per replica
+        let metrics = Metrics::new();
+
+        // Track errors from different replicas within same bucket
+        metrics.increment_replica_error_count("products", "primary");
+        assert_eq!(metrics.get_replica_error_count("products", "primary"), 1);
+
+        metrics.increment_replica_error_count("products", "replica-eu");
+        assert_eq!(metrics.get_replica_error_count("products", "replica-eu"), 1);
+
+        // Multiple errors from same replica
+        metrics.increment_replica_error_count("products", "primary");
+        metrics.increment_replica_error_count("products", "primary");
+        assert_eq!(metrics.get_replica_error_count("products", "primary"), 3);
+
+        // Different bucket, same replica name
+        metrics.increment_replica_error_count("media", "primary");
+        assert_eq!(metrics.get_replica_error_count("media", "primary"), 1);
+
+        // Original primary error count should be unchanged
+        assert_eq!(metrics.get_replica_error_count("products", "primary"), 3);
+
+        // Verify error count is independent from request count
+        metrics.increment_replica_request_count("products", "primary");
+        assert_eq!(metrics.get_replica_request_count("products", "primary"), 1);
+        assert_eq!(
+            metrics.get_replica_error_count("products", "primary"),
+            3,
+            "Error count should be independent from request count"
+        );
     }
 }
