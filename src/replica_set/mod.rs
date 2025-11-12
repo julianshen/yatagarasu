@@ -72,6 +72,8 @@ impl ReplicaSet {
     /// Try to execute a request against replicas in priority order.
     /// Returns the first successful result, or the last error if all replicas fail.
     ///
+    /// Skips replicas with open circuit breakers (unhealthy replicas).
+    ///
     /// # Arguments
     /// * `request_fn` - A closure that takes a replica and attempts to execute a request
     ///
@@ -85,6 +87,16 @@ impl ReplicaSet {
         let mut last_error = None;
 
         for replica in &self.replicas {
+            // Skip replicas with open circuit breakers
+            if !replica.circuit_breaker.should_allow_request() {
+                tracing::debug!(
+                    replica_name = %replica.name,
+                    circuit_state = ?replica.circuit_breaker.state(),
+                    "Skipping replica due to open circuit breaker"
+                );
+                continue;
+            }
+
             match request_fn(replica) {
                 Ok(result) => return Ok(result),
                 Err(e) => {
@@ -104,6 +116,9 @@ impl ReplicaSet {
     ///
     /// This method limits the number of failover attempts to prevent cascading failures
     /// and resource exhaustion when many replicas are configured.
+    ///
+    /// Skips replicas with open circuit breakers (unhealthy replicas).
+    /// Note: Skipped replicas do NOT count against the retry budget.
     ///
     /// # Arguments
     /// * `request_fn` - A closure that takes a replica and attempts to execute a request
@@ -133,6 +148,16 @@ impl ReplicaSet {
         let attempts_to_make = max_attempts.min(self.replicas.len());
 
         for replica in self.replicas.iter().take(attempts_to_make) {
+            // Skip replicas with open circuit breakers
+            if !replica.circuit_breaker.should_allow_request() {
+                tracing::debug!(
+                    replica_name = %replica.name,
+                    circuit_state = ?replica.circuit_breaker.state(),
+                    "Skipping replica due to open circuit breaker"
+                );
+                continue;
+            }
+
             match request_fn(replica) {
                 Ok(result) => return Ok(result),
                 Err(e) => {
@@ -1465,6 +1490,102 @@ mod tests {
         assert!(
             result.unwrap_err().contains("replica-ap"),
             "Should return error from last attempted replica (replica-ap)"
+        );
+    }
+
+    #[test]
+    fn test_failover_skips_unhealthy_replicas() {
+        // Test: Circuit breaker integration - skip replicas with open circuit breakers
+        // When a replica's circuit breaker is open (unhealthy), skip it during failover
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+            S3Replica {
+                name: "replica-ap".to_string(),
+                bucket: "products-ap-southeast-1".to_string(),
+                region: "ap-southeast-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: Some("https://s3.ap-southeast-1.amazonaws.com".to_string()),
+                priority: 3,
+                timeout: 20,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Open the circuit breaker for the primary replica by recording failures
+        // Default failure_threshold is 5
+        for _ in 0..5 {
+            replica_set.replicas[0].circuit_breaker.record_failure();
+        }
+
+        // Verify primary circuit breaker is now open
+        assert_eq!(
+            replica_set.replicas[0].circuit_breaker.state(),
+            crate::circuit_breaker::CircuitState::Open,
+            "Primary replica circuit breaker should be open after 5 failures"
+        );
+
+        // Verify EU replica circuit breaker is still closed
+        assert_eq!(
+            replica_set.replicas[1].circuit_breaker.state(),
+            crate::circuit_breaker::CircuitState::Closed,
+            "EU replica circuit breaker should still be closed"
+        );
+
+        let calls = RefCell::new(Vec::new());
+
+        // Try a request - should skip primary (circuit open) and go to EU replica
+        let result = replica_set.try_request(|replica| {
+            calls.borrow_mut().push(replica.name.clone());
+            Ok::<String, String>(format!("success from {}", replica.name))
+        });
+
+        // Verify request succeeded from EU replica (skipped primary)
+        assert!(result.is_ok(), "Request should succeed from EU replica");
+        assert_eq!(
+            result.unwrap(),
+            "success from replica-eu",
+            "Should return result from replica-eu (primary skipped)"
+        );
+
+        // Verify only EU replica was called (primary skipped due to open circuit)
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            1,
+            "Should only call 1 replica (primary skipped due to open circuit)"
+        );
+        assert_eq!(
+            calls[0], "replica-eu",
+            "Should call replica-eu first (primary skipped)"
+        );
+
+        // Verify primary was NOT called
+        assert!(
+            !calls.contains(&"primary".to_string()),
+            "Should NOT call primary (circuit breaker open)"
         );
     }
 }
