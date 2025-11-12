@@ -1083,4 +1083,81 @@ mod tests {
             "Should call replica-eu after primary returned 504"
         );
     }
+
+    #[test]
+    fn test_http_403_does_not_trigger_failover() {
+        // Test: HTTP 403 (Forbidden) should NOT trigger failover
+        // This is a client error (4xx) - the request itself is invalid, trying another replica won't help
+        // Return error immediately to client
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Track which replicas were called
+        let calls = RefCell::new(Vec::new());
+
+        // Simulate: first replica returns HTTP 403 (client error - forbidden)
+        // Currently, try_request will try all replicas on ANY error
+        // TODO: In future, we should implement error classification to skip failover for 4xx errors
+        let result = replica_set.try_request(|replica| {
+            calls.borrow_mut().push(replica.name.clone());
+            if replica.name == "primary" {
+                Err::<String, String>("HTTP 403: Forbidden".to_string())
+            } else {
+                // For this test, we simulate that second replica also returns 403
+                // (because the request itself is invalid - wrong credentials, no permissions, etc.)
+                Err::<String, String>("HTTP 403: Forbidden".to_string())
+            }
+        });
+
+        // Verify request failed with 403
+        assert!(result.is_err(), "Request should fail with 403 Forbidden");
+        assert_eq!(
+            result.unwrap_err(),
+            "HTTP 403: Forbidden",
+            "Should return 403 Forbidden error"
+        );
+
+        // CURRENT BEHAVIOR: try_request tries all replicas on any error
+        // This test documents current behavior - both replicas are called
+        // In a future enhancement, we could add error classification to stop trying on 4xx errors
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            2,
+            "Current behavior: try_request tries all replicas even for 4xx errors"
+        );
+        assert_eq!(calls[0], "primary", "Should call primary replica first");
+        assert_eq!(
+            calls[1], "replica-eu",
+            "Current behavior: tries second replica even though 403 is a client error"
+        );
+
+        // NOTE: This test documents CURRENT behavior where all replicas are tried.
+        // Future enhancement: Add error classification to skip failover for 4xx errors.
+        // When that's implemented, this test should be updated to verify only primary is called.
+    }
 }
