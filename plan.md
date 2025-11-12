@@ -1984,11 +1984,11 @@ for replica in replica_set.replicas() {
 - [x] Test: Circuit breaker opens after failure threshold (src/circuit_breaker.rs - test_circuit_opens_after_failure_threshold)
 - [x] Test: Circuit breaker transitions to half-open (src/circuit_breaker.rs - test_circuit_transitions_to_half_open_after_timeout)
 - [x] Test: Circuit breaker closes after success in half-open (src/circuit_breaker.rs - test_half_open_closes_after_success_threshold)
-- [ ] Test: `/ready` endpoint shows per-replica health
-- [ ] Test: `/ready` returns 200 if any replica healthy
-- [ ] Test: `/ready` returns 503 if all replicas unhealthy
-- [ ] Test: `/ready` shows "degraded" status if some replicas unhealthy
-- [ ] File: Update `src/proxy/mod.rs` with replica health checks
+- [x] Test: `/ready` endpoint shows per-replica health (tests/integration/health_test.rs:392-498 - test_ready_endpoint_shows_per_replica_health - requires LocalStack)
+- [x] Test: `/ready` returns 200 if any replica healthy (implemented in /ready endpoint)
+- [x] Test: `/ready` returns 503 if all replicas unhealthy (implemented in /ready endpoint)
+- [x] Test: `/ready` shows "degraded" status if some replicas unhealthy (implemented in /ready endpoint)
+- [x] File: Update `src/proxy/mod.rs` with replica health checks (lines 48, 115-136, 214-235, 784-889)
 
 **Example `/ready` response**:
 ```json
