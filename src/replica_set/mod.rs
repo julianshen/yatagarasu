@@ -266,4 +266,97 @@ mod tests {
             "Third replica should be 'replica-minio'"
         );
     }
+
+    #[test]
+    fn test_each_replica_has_independent_credentials() {
+        // Test: Each replica should have its own access_key and secret_key
+        // This ensures credential isolation: wrong credentials can't be used for wrong bucket
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+            S3Replica {
+                name: "replica-minio".to_string(),
+                bucket: "products-backup".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "minioadmin".to_string(),
+                secret_key: "minioadmin-secret".to_string(),
+                endpoint: Some("https://minio.example.com".to_string()),
+                priority: 3,
+                timeout: 20,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Verify we have 3 replicas
+        assert_eq!(replica_set.len(), 3, "Should have 3 replicas");
+
+        // Verify first replica has correct credentials
+        let primary = &replica_set.replicas[0];
+        assert_eq!(primary.name, "primary");
+        assert_eq!(
+            primary.client.config.access_key, "AKIAIOSFODNN7EXAMPLE1",
+            "Primary replica should have its own access_key"
+        );
+        assert_eq!(
+            primary.client.config.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1",
+            "Primary replica should have its own secret_key"
+        );
+
+        // Verify second replica has different credentials
+        let replica_eu = &replica_set.replicas[1];
+        assert_eq!(replica_eu.name, "replica-eu");
+        assert_eq!(
+            replica_eu.client.config.access_key, "AKIAIOSFODNN7EXAMPLE2",
+            "EU replica should have its own access_key"
+        );
+        assert_eq!(
+            replica_eu.client.config.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2",
+            "EU replica should have its own secret_key"
+        );
+
+        // Verify third replica has different credentials
+        let replica_minio = &replica_set.replicas[2];
+        assert_eq!(replica_minio.name, "replica-minio");
+        assert_eq!(
+            replica_minio.client.config.access_key, "minioadmin",
+            "MinIO replica should have its own access_key"
+        );
+        assert_eq!(
+            replica_minio.client.config.secret_key, "minioadmin-secret",
+            "MinIO replica should have its own secret_key"
+        );
+
+        // Verify credentials are different between replicas (credential isolation)
+        assert_ne!(
+            primary.client.config.access_key, replica_eu.client.config.access_key,
+            "Primary and EU replicas should have different access_keys"
+        );
+        assert_ne!(
+            primary.client.config.secret_key, replica_eu.client.config.secret_key,
+            "Primary and EU replicas should have different secret_keys"
+        );
+        assert_ne!(
+            replica_eu.client.config.access_key, replica_minio.client.config.access_key,
+            "EU and MinIO replicas should have different access_keys"
+        );
+    }
 }
