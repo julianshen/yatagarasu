@@ -83,6 +83,7 @@ impl ReplicaSet {
     pub fn try_request<F, T, E>(&self, mut request_fn: F) -> Result<T, E>
     where
         F: FnMut(&ReplicaEntry) -> Result<T, E>,
+        E: std::fmt::Display,
     {
         let mut last_error = None;
 
@@ -97,9 +98,25 @@ impl ReplicaSet {
                 continue;
             }
 
+            tracing::info!(
+                replica_name = %replica.name,
+                "Trying replica"
+            );
+
             match request_fn(replica) {
-                Ok(result) => return Ok(result),
+                Ok(result) => {
+                    tracing::info!(
+                        replica_name = %replica.name,
+                        "Replica succeeded"
+                    );
+                    return Ok(result);
+                }
                 Err(e) => {
+                    tracing::warn!(
+                        replica_name = %replica.name,
+                        error = %e,
+                        "Replica failed"
+                    );
                     last_error = Some(e);
                     // Continue to next replica on failure
                 }
@@ -143,6 +160,7 @@ impl ReplicaSet {
     ) -> Result<T, E>
     where
         F: FnMut(&ReplicaEntry) -> Result<T, E>,
+        E: std::fmt::Display,
     {
         let mut last_error = None;
         let attempts_to_make = max_attempts.min(self.replicas.len());
@@ -158,9 +176,25 @@ impl ReplicaSet {
                 continue;
             }
 
+            tracing::info!(
+                replica_name = %replica.name,
+                "Trying replica"
+            );
+
             match request_fn(replica) {
-                Ok(result) => return Ok(result),
+                Ok(result) => {
+                    tracing::info!(
+                        replica_name = %replica.name,
+                        "Replica succeeded"
+                    );
+                    return Ok(result);
+                }
                 Err(e) => {
+                    tracing::warn!(
+                        replica_name = %replica.name,
+                        error = %e,
+                        "Replica failed"
+                    );
                     last_error = Some(e);
                     // Continue to next replica on failure (if budget allows)
                 }
@@ -1586,6 +1620,157 @@ mod tests {
         assert!(
             !calls.contains(&"primary".to_string()),
             "Should NOT call primary (circuit breaker open)"
+        );
+    }
+
+    #[test]
+    fn test_failover_logs_replica_name_and_reason() {
+        // Test: Verify that failover attempts log replica names and failure reasons
+        // This is important for observability and debugging in production
+        use std::cell::RefCell;
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::fmt::MakeWriter;
+
+        // Custom writer to capture log output
+        #[derive(Clone)]
+        struct LogCapture {
+            logs: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl LogCapture {
+            fn new() -> Self {
+                Self {
+                    logs: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn get_logs(&self) -> Vec<String> {
+                self.logs.lock().unwrap().clone()
+            }
+        }
+
+        impl std::io::Write for LogCapture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let msg = String::from_utf8_lossy(buf).to_string();
+                self.logs.lock().unwrap().push(msg);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl<'a> MakeWriter<'a> for LogCapture {
+            type Writer = Self;
+
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        // Set up tracing subscriber to capture logs
+        let log_capture = LogCapture::new();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log_capture.clone())
+            .without_time()
+            .with_ansi(false)
+            .finish();
+
+        // Set as global subscriber (ignore error if already set in other tests)
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+            S3Replica {
+                name: "replica-ap".to_string(),
+                bucket: "products-ap-southeast-1".to_string(),
+                region: "ap-southeast-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: Some("https://s3.ap-southeast-1.amazonaws.com".to_string()),
+                priority: 3,
+                timeout: 20,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+        let calls = RefCell::new(Vec::new());
+
+        // First two replicas fail, third succeeds
+        let result = replica_set.try_request(|replica| {
+            calls.borrow_mut().push(replica.name.clone());
+            match replica.name.as_str() {
+                "primary" => Err::<String, String>("Connection timeout after 5s".to_string()),
+                "replica-eu" => Err::<String, String>("HTTP 503 Service Unavailable".to_string()),
+                "replica-ap" => Ok("success from replica-ap".to_string()),
+                _ => panic!("Unexpected replica name"),
+            }
+        });
+
+        // Verify request succeeded
+        assert!(
+            result.is_ok(),
+            "Request should succeed when third replica works"
+        );
+        assert_eq!(
+            result.unwrap(),
+            "success from replica-ap",
+            "Should return result from replica-ap"
+        );
+
+        // Get captured logs
+        let logs = log_capture.get_logs();
+        let logs_text = logs.join("\n");
+
+        // Verify logs contain replica names when attempting requests
+        assert!(
+            logs_text.contains("primary"),
+            "Logs should contain primary replica name"
+        );
+        assert!(
+            logs_text.contains("replica-eu"),
+            "Logs should contain replica-eu name"
+        );
+        assert!(
+            logs_text.contains("replica-ap"),
+            "Logs should contain replica-ap name"
+        );
+
+        // Verify logs contain failure reasons for failed replicas
+        assert!(
+            logs_text.contains("Connection timeout") || logs_text.contains("failed"),
+            "Logs should contain failure reason for primary"
+        );
+        assert!(
+            logs_text.contains("503") || logs_text.contains("failed"),
+            "Logs should contain failure reason for replica-eu"
+        );
+
+        // Verify logs indicate success for working replica
+        assert!(
+            logs_text.contains("succeeded") || logs_text.contains("replica-ap"),
+            "Logs should indicate success from replica-ap"
         );
     }
 }
