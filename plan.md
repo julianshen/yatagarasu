@@ -1932,14 +1932,14 @@ buckets:
 
 **Why**: Create S3 clients and circuit breakers for each replica
 
-- [x] Test: Create S3 client for each replica (src/replica_set/mod.rs:96-154 - test_create_replica_set_from_multiple_replicas)
-- [ ] Test: Create circuit breaker for each replica
-- [ ] Test: Replicas stored in priority order
+- [x] Test: Create S3 client for each replica (src/replica_set/mod.rs:96-148 - test_create_replica_set_from_multiple_replicas)
+- [x] Test: Create circuit breaker for each replica (src/replica_set/mod.rs:150-203 - test_create_circuit_breaker_for_each_replica)
+- [x] Test: Replicas stored in priority order (src/replica_set/mod.rs:205-268 - test_replicas_stored_in_priority_order)
 - [ ] Test: Each replica has independent credentials
 - [ ] Test: Each replica has independent timeout
 - [ ] Test: Replica set can be cloned (for reload)
 - [ ] Test: Single-bucket config creates one-replica set
-- [x] File: Create `src/replica_set/mod.rs` (lines 1-154)
+- [x] File: Create `src/replica_set/mod.rs` (lines 1-269)
 
 ### Test: Failover Logic
 
