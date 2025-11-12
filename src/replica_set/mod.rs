@@ -440,4 +440,97 @@ mod tests {
             "Primary and backup replicas should have different timeouts"
         );
     }
+
+    #[test]
+    fn test_replica_set_can_be_cloned() {
+        // Test: ReplicaSet should be cloneable for hot reload support
+        // When config is reloaded, we create new ReplicaSet without disrupting in-flight requests
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let original = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Clone the ReplicaSet
+        let cloned = original.clone();
+
+        // Verify clone has same number of replicas
+        assert_eq!(
+            cloned.len(),
+            original.len(),
+            "Cloned ReplicaSet should have same number of replicas"
+        );
+        assert_eq!(cloned.len(), 2, "Should have 2 replicas");
+
+        // Verify first replica properties match
+        let original_primary = &original.replicas[0];
+        let cloned_primary = &cloned.replicas[0];
+        assert_eq!(
+            cloned_primary.name, original_primary.name,
+            "Cloned replica should have same name"
+        );
+        assert_eq!(
+            cloned_primary.priority, original_primary.priority,
+            "Cloned replica should have same priority"
+        );
+        assert_eq!(
+            cloned_primary.client.config.bucket, original_primary.client.config.bucket,
+            "Cloned replica should have same bucket"
+        );
+        assert_eq!(
+            cloned_primary.client.config.access_key, original_primary.client.config.access_key,
+            "Cloned replica should have same access_key"
+        );
+        assert_eq!(
+            cloned_primary.client.config.timeout, original_primary.client.config.timeout,
+            "Cloned replica should have same timeout"
+        );
+
+        // Verify second replica properties match
+        let original_eu = &original.replicas[1];
+        let cloned_eu = &cloned.replicas[1];
+        assert_eq!(
+            cloned_eu.name, original_eu.name,
+            "Cloned EU replica should have same name"
+        );
+        assert_eq!(
+            cloned_eu.priority, original_eu.priority,
+            "Cloned EU replica should have same priority"
+        );
+        assert_eq!(
+            cloned_eu.client.config.bucket, original_eu.client.config.bucket,
+            "Cloned EU replica should have same bucket"
+        );
+
+        // Verify circuit breakers are cloned (both start in Closed state)
+        assert_eq!(
+            cloned_primary.circuit_breaker.state(),
+            crate::circuit_breaker::CircuitState::Closed,
+            "Cloned circuit breaker should be in Closed state"
+        );
+        assert_eq!(
+            cloned_eu.circuit_breaker.state(),
+            crate::circuit_breaker::CircuitState::Closed,
+            "Cloned EU circuit breaker should be in Closed state"
+        );
+    }
 }
