@@ -89,6 +89,7 @@ pub struct Metrics {
     // Key format: "bucket_name:replica_name"
     replica_request_counts: Mutex<HashMap<String, u64>>,
     replica_error_counts: Mutex<HashMap<String, u64>>,
+    replica_latencies: Mutex<HashMap<String, Vec<u64>>>,
 }
 
 impl Metrics {
@@ -129,6 +130,7 @@ impl Metrics {
             backend_health: Mutex::new(HashMap::new()),
             replica_request_counts: Mutex::new(HashMap::new()),
             replica_error_counts: Mutex::new(HashMap::new()),
+            replica_latencies: Mutex::new(HashMap::new()),
         }
     }
 
@@ -555,6 +557,43 @@ impl Metrics {
             .ok()
             .and_then(|counts| counts.get(&key).copied())
             .unwrap_or(0)
+    }
+
+    /// Record latency for a specific replica within a bucket in milliseconds
+    pub fn record_replica_latency(&self, bucket: &str, replica: &str, duration_ms: f64) {
+        let key = format!("{}:{}", bucket, replica);
+        let duration_us = (duration_ms * 1000.0) as u64;
+        if let Ok(mut latencies) = self.replica_latencies.lock() {
+            latencies
+                .entry(key)
+                .or_insert_with(Vec::new)
+                .push(duration_us);
+        }
+    }
+
+    /// Calculate histogram for specific replica (for testing)
+    #[cfg(test)]
+    pub fn get_replica_latency_histogram(&self, bucket: &str, replica: &str) -> Histogram {
+        let key = format!("{}:{}", bucket, replica);
+        if let Ok(latencies) = self.replica_latencies.lock() {
+            if let Some(replica_samples) = latencies.get(&key) {
+                calculate_histogram(replica_samples)
+            } else {
+                Histogram {
+                    p50: 0.0,
+                    p90: 0.0,
+                    p95: 0.0,
+                    p99: 0.0,
+                }
+            }
+        } else {
+            Histogram {
+                p50: 0.0,
+                p90: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            }
+        }
     }
 
     /// Get successful reload count (for testing)
@@ -1551,6 +1590,57 @@ mod tests {
             metrics.get_replica_error_count("products", "primary"),
             3,
             "Error count should be independent from request count"
+        );
+    }
+
+    #[test]
+    fn test_track_latency_per_replica() {
+        // Test: Latency per replica
+        let metrics = Metrics::new();
+
+        // Record latencies for different replicas within same bucket
+        metrics.record_replica_latency("products", "primary", 50.0); // 50ms
+        metrics.record_replica_latency("products", "primary", 60.0); // 60ms
+        metrics.record_replica_latency("products", "primary", 70.0); // 70ms
+
+        metrics.record_replica_latency("products", "replica-eu", 100.0); // 100ms
+        metrics.record_replica_latency("products", "replica-eu", 110.0); // 110ms
+
+        // Calculate histograms for each replica
+        let primary_histogram = metrics.get_replica_latency_histogram("products", "primary");
+        assert!(
+            primary_histogram.p50 > 0.0,
+            "Primary replica should have p50 latency"
+        );
+        assert!(
+            primary_histogram.p95 > 0.0,
+            "Primary replica should have p95 latency"
+        );
+
+        let replica_eu_histogram = metrics.get_replica_latency_histogram("products", "replica-eu");
+        assert!(
+            replica_eu_histogram.p50 > 0.0,
+            "EU replica should have p50 latency"
+        );
+
+        // Primary should have lower latency than EU replica
+        assert!(
+            primary_histogram.p50 < replica_eu_histogram.p50,
+            "Primary replica should have lower latency than EU replica"
+        );
+
+        // Different bucket, same replica name (isolated latencies)
+        metrics.record_replica_latency("media", "primary", 200.0); // 200ms
+        let media_primary_histogram = metrics.get_replica_latency_histogram("media", "primary");
+        assert!(
+            media_primary_histogram.p50 > 0.0,
+            "Media primary replica should have latency"
+        );
+
+        // Verify media primary latency is different from products primary
+        assert!(
+            media_primary_histogram.p50 > primary_histogram.p50,
+            "Media primary should have higher latency than products primary"
         );
     }
 }
