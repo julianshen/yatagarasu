@@ -90,6 +90,8 @@ pub struct Metrics {
     replica_request_counts: Mutex<HashMap<String, u64>>,
     replica_error_counts: Mutex<HashMap<String, u64>>,
     replica_latencies: Mutex<HashMap<String, Vec<u64>>>,
+    // Key format for failovers: "bucket_name:from_replica:to_replica"
+    replica_failovers: Mutex<HashMap<String, u64>>,
 }
 
 impl Metrics {
@@ -131,6 +133,7 @@ impl Metrics {
             replica_request_counts: Mutex::new(HashMap::new()),
             replica_error_counts: Mutex::new(HashMap::new()),
             replica_latencies: Mutex::new(HashMap::new()),
+            replica_failovers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -594,6 +597,25 @@ impl Metrics {
                 p99: 0.0,
             }
         }
+    }
+
+    /// Increment failover counter for a specific failover path (from → to)
+    pub fn increment_replica_failover(&self, bucket: &str, from: &str, to: &str) {
+        let key = format!("{}:{}:{}", bucket, from, to);
+        if let Ok(mut failovers) = self.replica_failovers.lock() {
+            *failovers.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    /// Get failover count for a specific failover path (for testing)
+    #[cfg(test)]
+    pub fn get_replica_failover_count(&self, bucket: &str, from: &str, to: &str) -> u64 {
+        let key = format!("{}:{}:{}", bucket, from, to);
+        self.replica_failovers
+            .lock()
+            .ok()
+            .and_then(|failovers| failovers.get(&key).copied())
+            .unwrap_or(0)
     }
 
     /// Get successful reload count (for testing)
@@ -1641,6 +1663,59 @@ mod tests {
         assert!(
             media_primary_histogram.p50 > primary_histogram.p50,
             "Media primary should have higher latency than products primary"
+        );
+    }
+
+    #[test]
+    fn test_track_failover_event_counter() {
+        // Test: Failover event counter (from → to)
+        let metrics = Metrics::new();
+
+        // Track failover events from primary to replica-eu
+        metrics.increment_replica_failover("products", "primary", "replica-eu");
+        assert_eq!(
+            metrics.get_replica_failover_count("products", "primary", "replica-eu"),
+            1,
+            "Should track failover from primary to replica-eu"
+        );
+
+        // Multiple failovers on same path
+        metrics.increment_replica_failover("products", "primary", "replica-eu");
+        metrics.increment_replica_failover("products", "primary", "replica-eu");
+        assert_eq!(
+            metrics.get_replica_failover_count("products", "primary", "replica-eu"),
+            3,
+            "Should increment failover count on same path"
+        );
+
+        // Different failover path: replica-eu → replica-ap
+        metrics.increment_replica_failover("products", "replica-eu", "replica-ap");
+        assert_eq!(
+            metrics.get_replica_failover_count("products", "replica-eu", "replica-ap"),
+            1,
+            "Should track different failover path independently"
+        );
+
+        // Verify original path count unchanged
+        assert_eq!(
+            metrics.get_replica_failover_count("products", "primary", "replica-eu"),
+            3,
+            "Original failover path count should be unchanged"
+        );
+
+        // Different bucket, same replica names (isolated failovers)
+        metrics.increment_replica_failover("media", "primary", "replica-eu");
+        assert_eq!(
+            metrics.get_replica_failover_count("media", "primary", "replica-eu"),
+            1,
+            "Media bucket failovers should be isolated from products"
+        );
+
+        // Verify products bucket count unchanged
+        assert_eq!(
+            metrics.get_replica_failover_count("products", "primary", "replica-eu"),
+            3,
+            "Products bucket failover count should be unchanged"
         );
     }
 }
