@@ -965,6 +965,108 @@ impl Metrics {
             }
         }
 
+        // Phase 23: Per-replica metrics
+
+        // Replica request counts
+        output.push_str(
+            "\n# HELP http_requests_by_replica_total HTTP requests per replica within bucket\n",
+        );
+        output.push_str("# TYPE http_requests_by_replica_total counter\n");
+        if let Ok(counts) = self.replica_request_counts.lock() {
+            for (key, count) in counts.iter() {
+                // key format: "bucket:replica"
+                if let Some((bucket, replica)) = key.split_once(':') {
+                    output.push_str(&format!(
+                        "http_requests_by_replica_total{{bucket=\"{}\",replica=\"{}\"}} {}\n",
+                        bucket, replica, count
+                    ));
+                }
+            }
+        }
+
+        // Replica error counts
+        output.push_str(
+            "\n# HELP http_errors_by_replica_total HTTP errors per replica within bucket\n",
+        );
+        output.push_str("# TYPE http_errors_by_replica_total counter\n");
+        if let Ok(counts) = self.replica_error_counts.lock() {
+            for (key, count) in counts.iter() {
+                // key format: "bucket:replica"
+                if let Some((bucket, replica)) = key.split_once(':') {
+                    output.push_str(&format!(
+                        "http_errors_by_replica_total{{bucket=\"{}\",replica=\"{}\"}} {}\n",
+                        bucket, replica, count
+                    ));
+                }
+            }
+        }
+
+        // Replica latency histograms
+        output.push_str(
+            "\n# HELP replica_request_duration_seconds Request duration per replica in seconds\n",
+        );
+        output.push_str("# TYPE replica_request_duration_seconds summary\n");
+        if let Ok(latencies) = self.replica_latencies.lock() {
+            for (key, samples) in latencies.iter() {
+                // key format: "bucket:replica"
+                if let Some((bucket, replica)) = key.split_once(':') {
+                    let histogram = calculate_histogram(samples);
+                    output.push_str(&format!(
+                        "replica_request_duration_seconds{{bucket=\"{}\",replica=\"{}\",quantile=\"0.5\"}} {:.3}\n",
+                        bucket, replica, histogram.p50 / 1000.0 // Convert ms to seconds
+                    ));
+                    output.push_str(&format!(
+                        "replica_request_duration_seconds{{bucket=\"{}\",replica=\"{}\",quantile=\"0.9\"}} {:.3}\n",
+                        bucket, replica, histogram.p90 / 1000.0
+                    ));
+                    output.push_str(&format!(
+                        "replica_request_duration_seconds{{bucket=\"{}\",replica=\"{}\",quantile=\"0.95\"}} {:.3}\n",
+                        bucket, replica, histogram.p95 / 1000.0
+                    ));
+                    output.push_str(&format!(
+                        "replica_request_duration_seconds{{bucket=\"{}\",replica=\"{}\",quantile=\"0.99\"}} {:.3}\n",
+                        bucket, replica, histogram.p99 / 1000.0
+                    ));
+                }
+            }
+        }
+
+        // Replica failover counters
+        output.push_str("\n# HELP replica_failovers_total Replica failover events (from → to)\n");
+        output.push_str("# TYPE replica_failovers_total counter\n");
+        if let Ok(failovers) = self.replica_failovers.lock() {
+            for (key, count) in failovers.iter() {
+                // key format: "bucket:from:to"
+                let parts: Vec<&str> = key.split(':').collect();
+                if parts.len() == 3 {
+                    let bucket = parts[0];
+                    let from = parts[1];
+                    let to = parts[2];
+                    output.push_str(&format!(
+                        "replica_failovers_total{{bucket=\"{}\",from=\"{}\",to=\"{}\"}} {}\n",
+                        bucket, from, to, count
+                    ));
+                }
+            }
+        }
+
+        // Replica health gauges
+        output.push_str("\n# HELP replica_health Replica health status (1=healthy, 0=unhealthy)\n");
+        output.push_str("# TYPE replica_health gauge\n");
+        if let Ok(health) = self.replica_health.lock() {
+            for (key, is_healthy) in health.iter() {
+                // key format: "bucket:replica"
+                if let Some((bucket, replica)) = key.split_once(':') {
+                    output.push_str(&format!(
+                        "replica_health{{bucket=\"{}\",replica=\"{}\"}} {}\n",
+                        bucket,
+                        replica,
+                        if *is_healthy { 1 } else { 0 }
+                    ));
+                }
+            }
+        }
+
         output
     }
 }
@@ -1870,6 +1972,106 @@ mod tests {
             metrics.get_active_replica("products"),
             Some("replica-ap".to_string()),
             "Should track multiple failover updates"
+        );
+    }
+
+    #[test]
+    fn test_export_replica_metrics_to_prometheus_format() {
+        // Test: Phase 23 replica metrics exported to Prometheus format
+        let metrics = Metrics::new();
+
+        // Record some per-replica metrics
+        metrics.increment_replica_request_count("products", "primary");
+        metrics.increment_replica_request_count("products", "primary");
+        metrics.increment_replica_request_count("products", "replica-eu");
+
+        metrics.increment_replica_error_count("products", "replica-eu");
+
+        metrics.record_replica_latency("products", "primary", 50.0); // 50ms
+
+        metrics.increment_replica_failover("products", "primary", "replica-eu");
+        metrics.increment_replica_failover("products", "primary", "replica-eu");
+
+        metrics.set_replica_health("products", "primary", false); // unhealthy
+        metrics.set_replica_health("products", "replica-eu", true); // healthy
+
+        metrics.set_active_replica("products", "replica-eu");
+
+        // Export to Prometheus format
+        let output = metrics.export_prometheus();
+
+        // Verify replica request counts are exported
+        assert!(
+            output.contains(
+                "http_requests_by_replica_total{bucket=\"products\",replica=\"primary\"} 2"
+            ),
+            "Should export replica request count for products:primary"
+        );
+        assert!(
+            output.contains(
+                "http_requests_by_replica_total{bucket=\"products\",replica=\"replica-eu\"} 1"
+            ),
+            "Should export replica request count for products:replica-eu"
+        );
+
+        // Verify replica error counts are exported
+        assert!(
+            output.contains(
+                "http_errors_by_replica_total{bucket=\"products\",replica=\"replica-eu\"} 1"
+            ),
+            "Should export replica error count for products:replica-eu"
+        );
+
+        // Verify replica latency histograms are exported
+        assert!(
+            output.contains("replica_request_duration_seconds{bucket=\"products\",replica=\"primary\",quantile=\"0.5\"}"),
+            "Should export replica latency histogram for products:primary"
+        );
+
+        // Verify failover counters are exported
+        assert!(
+            output.contains(
+                "replica_failovers_total{bucket=\"products\",from=\"primary\",to=\"replica-eu\"} 2"
+            ),
+            "Should export failover count from primary to replica-eu"
+        );
+
+        // Verify replica health gauges are exported
+        assert!(
+            output.contains("replica_health{bucket=\"products\",replica=\"primary\"} 0"),
+            "Should export replica health for products:primary (unhealthy)"
+        );
+        assert!(
+            output.contains("replica_health{bucket=\"products\",replica=\"replica-eu\"} 1"),
+            "Should export replica health for products:replica-eu (healthy)"
+        );
+
+        // Verify HELP and TYPE annotations exist for new metrics
+        assert!(
+            output.contains("# HELP http_requests_by_replica_total"),
+            "Should have HELP annotation for replica requests"
+        );
+        assert!(
+            output.contains("# TYPE http_requests_by_replica_total counter"),
+            "Should have TYPE annotation for replica requests"
+        );
+
+        assert!(
+            output.contains("# HELP replica_failovers_total"),
+            "Should have HELP annotation for failovers"
+        );
+        assert!(
+            output.contains("# TYPE replica_failovers_total counter"),
+            "Should have TYPE annotation for failovers"
+        );
+
+        assert!(
+            output.contains("# HELP replica_health"),
+            "Should have HELP annotation for replica health"
+        );
+        assert!(
+            output.contains("# TYPE replica_health gauge"),
+            "Should have TYPE annotation for replica health"
         );
     }
 }
