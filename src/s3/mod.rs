@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct S3Client {
     pub config: S3Config,
 }

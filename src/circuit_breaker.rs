@@ -67,7 +67,7 @@ impl Default for CircuitBreakerConfig {
 }
 
 /// Circuit breaker for preventing cascading failures
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CircuitBreaker {
     /// Current circuit state
     state: Arc<AtomicU8>,
