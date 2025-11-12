@@ -2011,7 +2011,7 @@ for replica in replica_set.replicas() {
 
 **Why**: Observe request distribution and failover events
 
-- [ ] Test: Request count per replica
+- [x] Test: Request count per replica
 - [ ] Test: Error count per replica
 - [ ] Test: Latency per replica
 - [ ] Test: Failover event counter (from → to)

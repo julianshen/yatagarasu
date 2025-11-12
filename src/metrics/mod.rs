@@ -84,6 +84,10 @@ pub struct Metrics {
 
     // Backend health per bucket (1=healthy, 0=unhealthy)
     backend_health: Mutex<HashMap<String, bool>>,
+
+    // Phase 23: Per-replica metrics
+    // Key format: "bucket_name:replica_name"
+    replica_request_counts: Mutex<HashMap<String, u64>>,
 }
 
 impl Metrics {
@@ -122,6 +126,7 @@ impl Metrics {
             security_path_traversal_blocked: AtomicU64::new(0),
             security_sql_injection_blocked: AtomicU64::new(0),
             backend_health: Mutex::new(HashMap::new()),
+            replica_request_counts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -508,6 +513,27 @@ impl Metrics {
         } else {
             HashMap::new()
         }
+    }
+
+    // Phase 23: Per-replica metrics methods
+
+    /// Increment request count for a specific replica within a bucket
+    pub fn increment_replica_request_count(&self, bucket: &str, replica: &str) {
+        let key = format!("{}:{}", bucket, replica);
+        if let Ok(mut counts) = self.replica_request_counts.lock() {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    /// Get request count for a specific replica (for testing)
+    #[cfg(test)]
+    pub fn get_replica_request_count(&self, bucket: &str, replica: &str) -> u64 {
+        let key = format!("{}:{}", bucket, replica);
+        self.replica_request_counts
+            .lock()
+            .ok()
+            .and_then(|counts| counts.get(&key).copied())
+            .unwrap_or(0)
     }
 
     /// Get successful reload count (for testing)
@@ -1442,5 +1468,34 @@ mod tests {
         // Output should still be valid
         assert!(output.contains("# HELP"));
         assert!(output.contains("# TYPE"));
+    }
+
+    // Phase 23: Per-Replica Metrics Tests
+    #[test]
+    fn test_track_request_count_per_replica() {
+        // Test: Request count per replica
+        let metrics = Metrics::new();
+
+        // Track requests to different replicas within same bucket
+        metrics.increment_replica_request_count("products", "primary");
+        assert_eq!(metrics.get_replica_request_count("products", "primary"), 1);
+
+        metrics.increment_replica_request_count("products", "replica-eu");
+        assert_eq!(
+            metrics.get_replica_request_count("products", "replica-eu"),
+            1
+        );
+
+        // Multiple requests to same replica
+        metrics.increment_replica_request_count("products", "primary");
+        metrics.increment_replica_request_count("products", "primary");
+        assert_eq!(metrics.get_replica_request_count("products", "primary"), 3);
+
+        // Different bucket, same replica name
+        metrics.increment_replica_request_count("media", "primary");
+        assert_eq!(metrics.get_replica_request_count("media", "primary"), 1);
+
+        // Original primary count should be unchanged
+        assert_eq!(metrics.get_replica_request_count("products", "primary"), 3);
     }
 }
