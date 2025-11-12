@@ -1936,10 +1936,10 @@ buckets:
 - [x] Test: Create circuit breaker for each replica (src/replica_set/mod.rs:150-203 - test_create_circuit_breaker_for_each_replica)
 - [x] Test: Replicas stored in priority order (src/replica_set/mod.rs:205-268 - test_replicas_stored_in_priority_order)
 - [x] Test: Each replica has independent credentials (src/replica_set/mod.rs:270-363 - test_each_replica_has_independent_credentials)
-- [ ] Test: Each replica has independent timeout
+- [x] Test: Each replica has independent timeout (src/replica_set/mod.rs:363-442 - test_each_replica_has_independent_timeout)
 - [ ] Test: Replica set can be cloned (for reload)
 - [ ] Test: Single-bucket config creates one-replica set
-- [x] File: Create `src/replica_set/mod.rs` (lines 1-364)
+- [x] File: Create `src/replica_set/mod.rs` (lines 1-443)
 
 ### Test: Failover Logic
 

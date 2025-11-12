@@ -359,4 +359,85 @@ mod tests {
             "EU and MinIO replicas should have different access_keys"
         );
     }
+
+    #[test]
+    fn test_each_replica_has_independent_timeout() {
+        // Test: Each replica should have its own timeout configuration
+        // This allows flexibility: fast primary (30s) vs. slow backup (60s)
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30, // Fast primary: 30 seconds
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 45, // Slower cross-region: 45 seconds
+            },
+            S3Replica {
+                name: "replica-backup".to_string(),
+                bucket: "products-backup".to_string(),
+                region: "us-east-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: Some("https://minio.example.com".to_string()),
+                priority: 3,
+                timeout: 60, // Slow backup: 60 seconds
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Verify we have 3 replicas
+        assert_eq!(replica_set.len(), 3, "Should have 3 replicas");
+
+        // Verify first replica has 30s timeout
+        let primary = &replica_set.replicas[0];
+        assert_eq!(primary.name, "primary");
+        assert_eq!(
+            primary.client.config.timeout, 30,
+            "Primary replica should have 30s timeout"
+        );
+
+        // Verify second replica has 45s timeout
+        let replica_eu = &replica_set.replicas[1];
+        assert_eq!(replica_eu.name, "replica-eu");
+        assert_eq!(
+            replica_eu.client.config.timeout, 45,
+            "EU replica should have 45s timeout"
+        );
+
+        // Verify third replica has 60s timeout
+        let replica_backup = &replica_set.replicas[2];
+        assert_eq!(replica_backup.name, "replica-backup");
+        assert_eq!(
+            replica_backup.client.config.timeout, 60,
+            "Backup replica should have 60s timeout"
+        );
+
+        // Verify timeouts are different between replicas (timeout isolation)
+        assert_ne!(
+            primary.client.config.timeout, replica_eu.client.config.timeout,
+            "Primary and EU replicas should have different timeouts"
+        );
+        assert_ne!(
+            replica_eu.client.config.timeout, replica_backup.client.config.timeout,
+            "EU and backup replicas should have different timeouts"
+        );
+        assert_ne!(
+            primary.client.config.timeout, replica_backup.client.config.timeout,
+            "Primary and backup replicas should have different timeouts"
+        );
+    }
 }
