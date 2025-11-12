@@ -1939,7 +1939,7 @@ buckets:
 - [x] Test: Each replica has independent timeout (src/replica_set/mod.rs:363-442 - test_each_replica_has_independent_timeout)
 - [x] Test: Replica set can be cloned (for reload) (src/replica_set/mod.rs:444-535 - test_replica_set_can_be_cloned)
 - [x] Test: Single-bucket config creates one-replica set (src/replica_set/mod.rs:537-602 - test_single_bucket_config_creates_one_replica_set)
-- [x] File: Create `src/replica_set/mod.rs` (lines 1-1020)
+- [x] File: Create `src/replica_set/mod.rs` (lines 1-1086)
 
 ### Test: Failover Logic
 
@@ -1951,7 +1951,7 @@ buckets:
 - [x] Test: HTTP 500 triggers failover to next replica (src/replica_set/mod.rs:823-887 - test_http_500_triggers_failover_to_next_replica)
 - [x] Test: HTTP 502 triggers failover to next replica (src/replica_set/mod.rs:889-953 - test_http_502_triggers_failover_to_next_replica)
 - [x] Test: HTTP 503 triggers failover to next replica (src/replica_set/mod.rs:955-1019 - test_http_503_triggers_failover_to_next_replica)
-- [ ] Test: HTTP 504 triggers failover to next replica
+- [x] Test: HTTP 504 triggers failover to next replica (src/replica_set/mod.rs:1021-1085 - test_http_504_triggers_failover_to_next_replica)
 - [ ] Test: HTTP 403 (Forbidden) does NOT trigger failover - return to client
 - [ ] Test: HTTP 404 (Not Found) does NOT trigger failover - return to client
 - [ ] Test: All replicas failed returns 502 Bad Gateway
