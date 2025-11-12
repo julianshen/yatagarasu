@@ -92,6 +92,8 @@ pub struct Metrics {
     replica_latencies: Mutex<HashMap<String, Vec<u64>>>,
     // Key format for failovers: "bucket_name:from_replica:to_replica"
     replica_failovers: Mutex<HashMap<String, u64>>,
+    // Replica health gauge: true=healthy, false=unhealthy
+    replica_health: Mutex<HashMap<String, bool>>,
 }
 
 impl Metrics {
@@ -134,6 +136,7 @@ impl Metrics {
             replica_error_counts: Mutex::new(HashMap::new()),
             replica_latencies: Mutex::new(HashMap::new()),
             replica_failovers: Mutex::new(HashMap::new()),
+            replica_health: Mutex::new(HashMap::new()),
         }
     }
 
@@ -616,6 +619,28 @@ impl Metrics {
             .ok()
             .and_then(|failovers| failovers.get(&key).copied())
             .unwrap_or(0)
+    }
+
+    /// Set health status for a specific replica (gauge: 1=healthy, 0=unhealthy)
+    pub fn set_replica_health(&self, bucket: &str, replica: &str, is_healthy: bool) {
+        let key = format!("{}:{}", bucket, replica);
+        if let Ok(mut health) = self.replica_health.lock() {
+            health.insert(key, is_healthy);
+        }
+    }
+
+    /// Get health status for a specific replica (for testing)
+    /// Returns 1 for healthy, 0 for unhealthy
+    /// Default: 1 (healthy) if not set
+    #[cfg(test)]
+    pub fn get_replica_health(&self, bucket: &str, replica: &str) -> u8 {
+        let key = format!("{}:{}", bucket, replica);
+        self.replica_health
+            .lock()
+            .ok()
+            .and_then(|health| health.get(&key).copied())
+            .unwrap_or(true) // Default to healthy if not set
+            as u8 // Convert bool to u8: true=1, false=0
     }
 
     /// Get successful reload count (for testing)
@@ -1716,6 +1741,64 @@ mod tests {
             metrics.get_replica_failover_count("products", "primary", "replica-eu"),
             3,
             "Products bucket failover count should be unchanged"
+        );
+    }
+
+    #[test]
+    fn test_track_replica_health_gauge() {
+        // Test: Replica health gauge (1=healthy, 0=unhealthy)
+        let metrics = Metrics::new();
+
+        // Set replica health status
+        metrics.set_replica_health("products", "primary", true); // healthy
+        assert_eq!(
+            metrics.get_replica_health("products", "primary"),
+            1,
+            "Healthy replica should return 1"
+        );
+
+        metrics.set_replica_health("products", "replica-eu", false); // unhealthy
+        assert_eq!(
+            metrics.get_replica_health("products", "replica-eu"),
+            0,
+            "Unhealthy replica should return 0"
+        );
+
+        // Update health status
+        metrics.set_replica_health("products", "primary", false); // now unhealthy
+        assert_eq!(
+            metrics.get_replica_health("products", "primary"),
+            0,
+            "Updated health status should reflect as unhealthy"
+        );
+
+        metrics.set_replica_health("products", "replica-eu", true); // now healthy
+        assert_eq!(
+            metrics.get_replica_health("products", "replica-eu"),
+            1,
+            "Updated health status should reflect as healthy"
+        );
+
+        // Different bucket, same replica name (isolated health status)
+        metrics.set_replica_health("media", "primary", true); // healthy
+        assert_eq!(
+            metrics.get_replica_health("media", "primary"),
+            1,
+            "Media primary should be healthy"
+        );
+
+        // Verify products primary is still unhealthy (isolation)
+        assert_eq!(
+            metrics.get_replica_health("products", "primary"),
+            0,
+            "Products primary should still be unhealthy (bucket isolation)"
+        );
+
+        // Get health for replica that hasn't been set (default: healthy)
+        assert_eq!(
+            metrics.get_replica_health("products", "replica-ap"),
+            1,
+            "Unset replica should default to healthy (1)"
         );
     }
 }

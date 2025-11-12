@@ -2015,7 +2015,7 @@ for replica in replica_set.replicas() {
 - [x] Test: Error count per replica
 - [x] Test: Latency per replica
 - [x] Test: Failover event counter (from → to)
-- [ ] Test: Replica health gauge (1=healthy, 0=unhealthy)
+- [x] Test: Replica health gauge (1=healthy, 0=unhealthy)
 - [ ] Test: Active replica gauge (which replica currently serving)
 - [ ] Test: Metrics exported to Prometheus format
 - [ ] File: Update `src/metrics/mod.rs` with replica metrics
