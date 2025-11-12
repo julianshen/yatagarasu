@@ -98,6 +98,55 @@ impl ReplicaSet {
         // unwrap is safe here because we know replicas is not empty (validated in new())
         Err(last_error.unwrap())
     }
+
+    /// Try to execute a request against replicas in priority order with a retry budget.
+    /// Returns the first successful result, or the last error if all attempts fail.
+    ///
+    /// This method limits the number of failover attempts to prevent cascading failures
+    /// and resource exhaustion when many replicas are configured.
+    ///
+    /// # Arguments
+    /// * `request_fn` - A closure that takes a replica and attempts to execute a request
+    /// * `max_attempts` - Maximum number of replicas to try (1 initial + N failovers)
+    ///
+    /// # Returns
+    /// * `Ok(T)` - The successful result from the first working replica
+    /// * `Err(E)` - The error from the last attempted replica if all attempts failed
+    ///
+    /// # Example
+    /// ```
+    /// // With 5 replicas configured but max_attempts=3:
+    /// // - Try replica 1 (priority 1) - initial attempt
+    /// // - Try replica 2 (priority 2) - first failover
+    /// // - Try replica 3 (priority 3) - second failover
+    /// // - Stop: budget exhausted, replicas 4 and 5 not tried
+    /// ```
+    pub fn try_request_with_budget<F, T, E>(
+        &self,
+        mut request_fn: F,
+        max_attempts: usize,
+    ) -> Result<T, E>
+    where
+        F: FnMut(&ReplicaEntry) -> Result<T, E>,
+    {
+        let mut last_error = None;
+        let attempts_to_make = max_attempts.min(self.replicas.len());
+
+        for replica in self.replicas.iter().take(attempts_to_make) {
+            match request_fn(replica) {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e);
+                    // Continue to next replica on failure (if budget allows)
+                }
+            }
+        }
+
+        // All attempts failed - return the last error
+        // unwrap is safe here because we know replicas is not empty (validated in new())
+        // and attempts_to_make is at least 1
+        Err(last_error.unwrap())
+    }
 }
 
 /// Create an S3 client from a replica configuration
@@ -1310,6 +1359,112 @@ mod tests {
         assert_eq!(
             calls[2], "replica-ap",
             "Should call third replica, whose error is returned"
+        );
+    }
+
+    #[test]
+    fn test_failover_respects_retry_budget() {
+        // Test: Retry budget limits failover attempts to prevent cascading failures
+        // Budget of 3 total tries = 1 initial + 2 failovers
+        // With 5 replicas available, should only try first 3 (priorities 1, 2, 3)
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+            S3Replica {
+                name: "replica-ap".to_string(),
+                bucket: "products-ap-southeast-1".to_string(),
+                region: "ap-southeast-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                endpoint: Some("https://s3.ap-southeast-1.amazonaws.com".to_string()),
+                priority: 3,
+                timeout: 20,
+            },
+            S3Replica {
+                name: "replica-sa".to_string(),
+                bucket: "products-sa-east-1".to_string(),
+                region: "sa-east-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE4".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY4".to_string(),
+                endpoint: Some("https://s3.sa-east-1.amazonaws.com".to_string()),
+                priority: 4,
+                timeout: 20,
+            },
+            S3Replica {
+                name: "replica-af".to_string(),
+                bucket: "products-af-south-1".to_string(),
+                region: "af-south-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE5".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY5".to_string(),
+                endpoint: Some("https://s3.af-south-1.amazonaws.com".to_string()),
+                priority: 5,
+                timeout: 20,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+        let calls = RefCell::new(Vec::new());
+
+        // All replicas fail, but retry budget should limit tries to 3
+        let result = replica_set.try_request_with_budget(
+            |replica| {
+                calls.borrow_mut().push(replica.name.clone());
+                Err::<String, String>(format!("HTTP 500 from {}", replica.name))
+            },
+            3, // max_attempts: 1 initial try + 2 failovers = 3 total
+        );
+
+        // Verify request failed (all 3 attempts failed)
+        assert!(
+            result.is_err(),
+            "Request should fail when all attempts fail"
+        );
+
+        // Verify only first 3 replicas were tried (retry budget respected)
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            3,
+            "Should only try 3 replicas (respecting retry budget)"
+        );
+        assert_eq!(calls[0], "primary", "Should try primary first");
+        assert_eq!(calls[1], "replica-eu", "Should try EU replica second");
+        assert_eq!(calls[2], "replica-ap", "Should try AP replica third");
+
+        // Verify replicas 4 and 5 were NOT tried (budget exhausted)
+        assert!(
+            !calls.contains(&"replica-sa".to_string()),
+            "Should NOT try replica-sa (budget exhausted)"
+        );
+        assert!(
+            !calls.contains(&"replica-af".to_string()),
+            "Should NOT try replica-af (budget exhausted)"
+        );
+
+        // Verify last error is from the 3rd replica (replica-ap)
+        assert!(
+            result.unwrap_err().contains("replica-ap"),
+            "Should return error from last attempted replica (replica-ap)"
         );
     }
 }
