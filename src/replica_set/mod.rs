@@ -885,4 +885,70 @@ mod tests {
             "Should call replica-eu after primary returned 500"
         );
     }
+
+    #[test]
+    fn test_http_502_triggers_failover_to_next_replica() {
+        // Test: HTTP 502 (Bad Gateway) should trigger failover
+        // This indicates upstream server issues - try next replica
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Track which replicas were called
+        let calls = RefCell::new(Vec::new());
+
+        // Simulate: first replica returns HTTP 502, second succeeds
+        let result = replica_set.try_request(|replica| {
+            calls.borrow_mut().push(replica.name.clone());
+            if replica.name == "primary" {
+                Err::<String, String>("HTTP 502: Bad Gateway".to_string())
+            } else {
+                Ok(format!("success from {}", replica.name))
+            }
+        });
+
+        // Verify request succeeded from second replica
+        assert!(result.is_ok(), "Request should succeed from second replica");
+        assert_eq!(
+            result.unwrap(),
+            "success from replica-eu",
+            "Should return result from replica-eu after primary returned 502"
+        );
+
+        // Verify both replicas were called
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            2,
+            "Should call both replicas (primary returned 502, EU succeeded)"
+        );
+        assert_eq!(calls[0], "primary", "Should call primary replica first");
+        assert_eq!(
+            calls[1], "replica-eu",
+            "Should call replica-eu after primary returned 502"
+        );
+    }
 }
