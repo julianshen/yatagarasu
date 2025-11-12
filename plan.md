@@ -1938,8 +1938,8 @@ buckets:
 - [x] Test: Each replica has independent credentials (src/replica_set/mod.rs:270-363 - test_each_replica_has_independent_credentials)
 - [x] Test: Each replica has independent timeout (src/replica_set/mod.rs:363-442 - test_each_replica_has_independent_timeout)
 - [x] Test: Replica set can be cloned (for reload) (src/replica_set/mod.rs:444-535 - test_replica_set_can_be_cloned)
-- [ ] Test: Single-bucket config creates one-replica set
-- [x] File: Create `src/replica_set/mod.rs` (lines 1-536)
+- [x] Test: Single-bucket config creates one-replica set (src/replica_set/mod.rs:537-602 - test_single_bucket_config_creates_one_replica_set)
+- [x] File: Create `src/replica_set/mod.rs` (lines 1-603)
 
 ### Test: Failover Logic
 

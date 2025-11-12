@@ -533,4 +533,70 @@ mod tests {
             "Cloned EU circuit breaker should be in Closed state"
         );
     }
+
+    #[test]
+    fn test_single_bucket_config_creates_one_replica_set() {
+        // Test: Legacy single-bucket config should normalize to one-replica ReplicaSet
+        // This ensures backward compatibility and unified code path
+        let replica = S3Replica {
+            name: "default".to_string(),
+            bucket: "my-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            endpoint: Some("https://s3.us-east-1.amazonaws.com".to_string()),
+            priority: 1,
+            timeout: 30,
+        };
+
+        // Create ReplicaSet from single replica (simulating normalized config)
+        let replica_set = ReplicaSet::new(&[replica]).expect("Should create ReplicaSet");
+
+        // Verify we have exactly 1 replica
+        assert_eq!(replica_set.len(), 1, "Should have exactly 1 replica");
+        assert!(!replica_set.is_empty(), "ReplicaSet should not be empty");
+
+        // Verify the replica properties
+        let default_replica = &replica_set.replicas[0];
+        assert_eq!(
+            default_replica.name, "default",
+            "Normalized replica should be named 'default'"
+        );
+        assert_eq!(
+            default_replica.priority, 1,
+            "Single replica should have priority 1"
+        );
+        assert_eq!(
+            default_replica.client.config.bucket, "my-bucket",
+            "Replica should have correct bucket"
+        );
+        assert_eq!(
+            default_replica.client.config.region, "us-east-1",
+            "Replica should have correct region"
+        );
+        assert_eq!(
+            default_replica.client.config.access_key, "AKIAIOSFODNN7EXAMPLE",
+            "Replica should have correct access_key"
+        );
+        assert_eq!(
+            default_replica.client.config.secret_key, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "Replica should have correct secret_key"
+        );
+        assert_eq!(
+            default_replica.client.config.timeout, 30,
+            "Replica should have correct timeout"
+        );
+        assert_eq!(
+            default_replica.client.config.endpoint,
+            Some("https://s3.us-east-1.amazonaws.com".to_string()),
+            "Replica should have correct endpoint"
+        );
+
+        // Verify circuit breaker is initialized
+        assert_eq!(
+            default_replica.circuit_breaker.state(),
+            crate::circuit_breaker::CircuitState::Closed,
+            "Circuit breaker should start in Closed state"
+        );
+    }
 }
