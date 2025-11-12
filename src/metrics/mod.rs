@@ -94,6 +94,8 @@ pub struct Metrics {
     replica_failovers: Mutex<HashMap<String, u64>>,
     // Replica health gauge: true=healthy, false=unhealthy
     replica_health: Mutex<HashMap<String, bool>>,
+    // Active replica gauge: which replica is currently serving for each bucket
+    active_replica: Mutex<HashMap<String, String>>,
 }
 
 impl Metrics {
@@ -137,6 +139,7 @@ impl Metrics {
             replica_latencies: Mutex::new(HashMap::new()),
             replica_failovers: Mutex::new(HashMap::new()),
             replica_health: Mutex::new(HashMap::new()),
+            active_replica: Mutex::new(HashMap::new()),
         }
     }
 
@@ -641,6 +644,23 @@ impl Metrics {
             .and_then(|health| health.get(&key).copied())
             .unwrap_or(true) // Default to healthy if not set
             as u8 // Convert bool to u8: true=1, false=0
+    }
+
+    /// Set active replica for a bucket (which replica is currently serving)
+    pub fn set_active_replica(&self, bucket: &str, replica: &str) {
+        if let Ok(mut active) = self.active_replica.lock() {
+            active.insert(bucket.to_string(), replica.to_string());
+        }
+    }
+
+    /// Get active replica for a bucket (for testing)
+    /// Returns Some(replica_name) if set, None otherwise
+    #[cfg(test)]
+    pub fn get_active_replica(&self, bucket: &str) -> Option<String> {
+        self.active_replica
+            .lock()
+            .ok()
+            .and_then(|active| active.get(bucket).cloned())
     }
 
     /// Get successful reload count (for testing)
@@ -1799,6 +1819,57 @@ mod tests {
             metrics.get_replica_health("products", "replica-ap"),
             1,
             "Unset replica should default to healthy (1)"
+        );
+    }
+
+    #[test]
+    fn test_track_active_replica_gauge() {
+        let metrics = Metrics::new();
+
+        // Set active replica for products bucket
+        metrics.set_active_replica("products", "primary");
+        assert_eq!(
+            metrics.get_active_replica("products"),
+            Some("primary".to_string()),
+            "Should return active replica name"
+        );
+
+        // Update active replica (simulating failover)
+        metrics.set_active_replica("products", "replica-eu");
+        assert_eq!(
+            metrics.get_active_replica("products"),
+            Some("replica-eu".to_string()),
+            "Should return updated active replica after failover"
+        );
+
+        // Different bucket, same replica name (isolated active replica)
+        metrics.set_active_replica("media", "primary");
+        assert_eq!(
+            metrics.get_active_replica("media"),
+            Some("primary".to_string()),
+            "Media bucket should have its own active replica"
+        );
+
+        // Verify products bucket still has replica-eu active (isolation)
+        assert_eq!(
+            metrics.get_active_replica("products"),
+            Some("replica-eu".to_string()),
+            "Products active replica should be isolated from media"
+        );
+
+        // Get active replica for bucket that hasn't been set
+        assert_eq!(
+            metrics.get_active_replica("images"),
+            None,
+            "Unset bucket should return None"
+        );
+
+        // Update to another replica (second failover)
+        metrics.set_active_replica("products", "replica-ap");
+        assert_eq!(
+            metrics.get_active_replica("products"),
+            Some("replica-ap".to_string()),
+            "Should track multiple failover updates"
         );
     }
 }
