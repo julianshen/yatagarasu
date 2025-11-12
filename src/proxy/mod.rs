@@ -44,11 +44,15 @@ pub struct YatagarasuProxy {
     security_limits: SecurityLimits,
     /// Proxy start time (for uptime calculation in /health endpoint)
     start_time: Instant,
+    /// Replica sets per bucket (Phase 23: High Availability bucket replication with automatic failover)
+    replica_sets: Arc<HashMap<String, crate::replica_set::ReplicaSet>>,
 }
 
 impl YatagarasuProxy {
     /// Create a new YatagarasuProxy instance from configuration
     pub fn new(config: Config) -> Self {
+        // Normalize config to ensure all buckets have replicas populated (Phase 23: HA support)
+        let config = config.normalize();
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
         // Initialize resource monitor with auto-detected system limits
@@ -108,6 +112,32 @@ impl YatagarasuProxy {
             }
         }
 
+        // Initialize replica sets for each bucket (Phase 23: HA bucket replication)
+        let mut replica_sets = HashMap::new();
+        for bucket in &config.buckets {
+            // After normalization, all buckets have replicas populated (either from replicas array or converted from legacy fields)
+            if let Some(ref replicas) = bucket.s3.replicas {
+                match crate::replica_set::ReplicaSet::new(replicas) {
+                    Ok(replica_set) => {
+                        replica_sets.insert(bucket.name.clone(), replica_set);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            bucket = %bucket.name,
+                            error = %e,
+                            "Failed to create ReplicaSet for bucket, skipping"
+                        );
+                        // Skip this bucket - it won't have failover support
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    bucket = %bucket.name,
+                    "Bucket has no replicas configured after normalization, skipping"
+                );
+            }
+        }
+
         let security_limits = config.server.security_limits.to_security_limits();
 
         Self {
@@ -122,11 +152,14 @@ impl YatagarasuProxy {
             retry_policies: Arc::new(retry_policies),
             security_limits,
             start_time: Instant::now(),
+            replica_sets: Arc::new(replica_sets),
         }
     }
 
     /// Create a new YatagarasuProxy with reload support
     pub fn with_reload(config: Config, config_path: PathBuf) -> Self {
+        // Normalize config to ensure all buckets have replicas populated (Phase 23: HA support)
+        let config = config.normalize();
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
         let reload_manager = Arc::new(ReloadManager::new(config_path));
@@ -187,6 +220,32 @@ impl YatagarasuProxy {
             }
         }
 
+        // Initialize replica sets for each bucket (Phase 23: HA bucket replication)
+        let mut replica_sets = HashMap::new();
+        for bucket in &config.buckets {
+            // After normalization, all buckets have replicas populated (either from replicas array or converted from legacy fields)
+            if let Some(ref replicas) = bucket.s3.replicas {
+                match crate::replica_set::ReplicaSet::new(replicas) {
+                    Ok(replica_set) => {
+                        replica_sets.insert(bucket.name.clone(), replica_set);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            bucket = %bucket.name,
+                            error = %e,
+                            "Failed to create ReplicaSet for bucket, skipping"
+                        );
+                        // Skip this bucket - it won't have failover support
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    bucket = %bucket.name,
+                    "Bucket has no replicas configured after normalization, skipping"
+                );
+            }
+        }
+
         let security_limits = config.server.security_limits.to_security_limits();
 
         Self {
@@ -201,6 +260,7 @@ impl YatagarasuProxy {
             retry_policies: Arc::new(retry_policies),
             security_limits,
             start_time: Instant::now(),
+            replica_sets: Arc::new(replica_sets),
         }
     }
 
@@ -234,53 +294,6 @@ impl YatagarasuProxy {
             }
         }
         params
-    }
-
-    /// Check S3 backend health by attempting to connect to the endpoint
-    ///
-    /// Performs a simple TCP connectivity check with a timeout.
-    /// Returns true if the endpoint is reachable, false otherwise.
-    async fn check_s3_health(&self, endpoint: &str) -> bool {
-        // Parse endpoint URL to get host and port
-        let url = match endpoint.parse::<hyper::Uri>() {
-            Ok(uri) => uri,
-            Err(_) => return false,
-        };
-
-        let host = match url.host() {
-            Some(h) => h,
-            None => return false,
-        };
-
-        let port = url
-            .port_u16()
-            .unwrap_or(if url.scheme_str() == Some("https") {
-                443
-            } else {
-                80
-            });
-
-        // Try to establish TCP connection with 2 second timeout
-        let addr = format!("{}:{}", host, port);
-        let connect_future = tokio::net::TcpStream::connect(&addr);
-        let timeout_duration = Duration::from_secs(2);
-
-        match tokio::time::timeout(timeout_duration, connect_future).await {
-            Ok(Ok(_stream)) => {
-                // Connection successful
-                true
-            }
-            Ok(Err(_)) => {
-                // Connection failed
-                tracing::warn!(endpoint = %endpoint, "S3 health check failed: connection error");
-                false
-            }
-            Err(_) => {
-                // Timeout
-                tracing::warn!(endpoint = %endpoint, "S3 health check failed: timeout");
-                false
-            }
-        }
     }
 
     /// Extract client IP address from session (X-Forwarded-For aware)
@@ -739,35 +752,87 @@ impl ProxyHttp for YatagarasuProxy {
             return Ok(true); // Short-circuit (response already sent)
         }
 
-        // Special handling for /ready endpoint (bypass auth, check S3 backend health)
+        // Special handling for /ready endpoint (bypass auth, check S3 backend health with per-replica details)
         if path == "/ready" {
-            // Check health of all S3 backends
+            // Check health of all S3 backends with per-replica granularity (Phase 23)
             let mut backends_health = serde_json::Map::new();
             let mut all_healthy = true;
 
             for bucket_config in &self.config.buckets {
-                // Check if S3 endpoint is reachable with a simple connectivity check
-                let is_healthy = if let Some(endpoint) = &bucket_config.s3.endpoint {
-                    self.check_s3_health(endpoint).await
-                } else {
-                    // If no endpoint specified, assume AWS S3 is used (always healthy for this check)
-                    // We can't check AWS S3 connectivity without region-specific endpoints
-                    true
-                };
+                // Get the ReplicaSet for this bucket
+                if let Some(replica_set) = self.replica_sets.get(&bucket_config.name) {
+                    // Check health of each replica via circuit breaker state
+                    let mut replicas_health = serde_json::Map::new();
+                    let mut bucket_has_healthy_replica = false;
 
-                // Record backend health in metrics (for Prometheus export)
-                self.metrics
-                    .set_backend_health(&bucket_config.name, is_healthy);
+                    for replica in &replica_set.replicas {
+                        // Check circuit breaker state to determine health
+                        let is_healthy = replica.circuit_breaker.state()
+                            == crate::circuit_breaker::CircuitState::Closed;
 
-                backends_health.insert(
-                    bucket_config.name.clone(),
-                    serde_json::Value::String(if is_healthy {
-                        "healthy".to_string()
+                        if is_healthy {
+                            bucket_has_healthy_replica = true;
+                        }
+
+                        replicas_health.insert(
+                            replica.name.clone(),
+                            serde_json::Value::String(if is_healthy {
+                                "healthy".to_string()
+                            } else {
+                                "unhealthy".to_string()
+                            }),
+                        );
+                    }
+
+                    // Determine overall bucket status
+                    let bucket_status = if bucket_has_healthy_replica {
+                        if replicas_health.values().all(|v| v == "healthy") {
+                            "ready"
+                        } else {
+                            "degraded" // Some replicas unhealthy but at least one healthy
+                        }
                     } else {
                         all_healthy = false;
-                        "unhealthy".to_string()
-                    }),
-                );
+                        "unavailable" // All replicas unhealthy
+                    };
+
+                    // Record backend health in metrics (for Prometheus export)
+                    self.metrics
+                        .set_backend_health(&bucket_config.name, bucket_has_healthy_replica);
+
+                    // Build bucket health object with status and per-replica details
+                    let mut bucket_health = serde_json::Map::new();
+                    bucket_health.insert(
+                        "status".to_string(),
+                        serde_json::Value::String(bucket_status.to_string()),
+                    );
+                    bucket_health.insert(
+                        "replicas".to_string(),
+                        serde_json::Value::Object(replicas_health),
+                    );
+
+                    backends_health.insert(
+                        bucket_config.name.clone(),
+                        serde_json::Value::Object(bucket_health),
+                    );
+                } else {
+                    // Fallback: No ReplicaSet found (shouldn't happen with proper config)
+                    tracing::warn!(
+                        bucket = %bucket_config.name,
+                        "No ReplicaSet found for bucket, reporting as unavailable"
+                    );
+                    all_healthy = false;
+
+                    let mut bucket_health = serde_json::Map::new();
+                    bucket_health.insert(
+                        "status".to_string(),
+                        serde_json::Value::String("unavailable".to_string()),
+                    );
+                    backends_health.insert(
+                        bucket_config.name.clone(),
+                        serde_json::Value::Object(bucket_health),
+                    );
+                }
             }
 
             let status_code: u16 = if all_healthy { 200 } else { 503 };

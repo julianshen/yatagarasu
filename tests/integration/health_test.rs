@@ -388,3 +388,111 @@ jwt:
 
     harness.shutdown().await;
 }
+
+#[tokio::test]
+#[ignore] // Requires running proxy with LocalStack/MinIO
+async fn test_ready_endpoint_shows_per_replica_health() {
+    init_logging();
+
+    let s3_endpoint = std::env::var("TEST_S3_ENDPOINT").unwrap_or("http://localhost:9000".to_string());
+
+    // Create config with bucket that has 2 replicas
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    replicas:
+      - name: "primary"
+        priority: 1
+        endpoint: "{}"
+        region: "us-east-1"
+        bucket: "products-primary"
+        access_key: "test"
+        secret_key: "test"
+      - name: "backup"
+        priority: 2
+        endpoint: "{}"
+        region: "us-east-1"
+        bucket: "products-backup"
+        access_key: "test"
+        secret_key: "test"
+
+jwt:
+  enabled: false
+  secret: "dummy-secret"
+  algorithm: "HS256"
+  token_sources: []
+  claims: []
+"#,
+        s3_endpoint, s3_endpoint
+    );
+    let config_path = "/tmp/test-ready-replica-health-config.yaml";
+    fs::write(config_path, config_content).expect("Failed to write config file");
+
+    let harness = ProxyTestHarness::new(config_path, Duration::from_secs(10))
+        .await
+        .expect("Failed to start proxy");
+
+    // Test: /ready includes health status for each replica within the bucket
+    let response = harness
+        .get("/ready")
+        .await
+        .expect("Failed to GET /ready");
+
+    assert_eq!(
+        response.status(),
+        200,
+        "/ready should return 200 OK when any replica is healthy"
+    );
+
+    let body = hyper::body::to_bytes(response.into_body())
+        .await
+        .expect("Failed to read response body");
+    let json: Value = serde_json::from_slice(&body).expect("Failed to parse JSON");
+
+    // Response should include per-replica health
+    assert!(
+        json["backends"].is_object(),
+        "backends should be an object"
+    );
+    assert!(
+        json["backends"]["products"].is_object(),
+        "products bucket should be an object with replica details"
+    );
+    assert!(
+        json["backends"]["products"]["status"].is_string(),
+        "products should have overall status"
+    );
+    assert!(
+        json["backends"]["products"]["replicas"].is_object(),
+        "products should have replicas object"
+    );
+
+    // Both replicas should be in the response
+    assert!(
+        json["backends"]["products"]["replicas"]["primary"].is_string(),
+        "primary replica should be in response"
+    );
+    assert!(
+        json["backends"]["products"]["replicas"]["backup"].is_string(),
+        "backup replica should be in response"
+    );
+
+    // At least one replica should be healthy
+    let primary_health = json["backends"]["products"]["replicas"]["primary"]
+        .as_str()
+        .unwrap();
+    let backup_health = json["backends"]["products"]["replicas"]["backup"]
+        .as_str()
+        .unwrap();
+    assert!(
+        primary_health == "healthy" || backup_health == "healthy",
+        "At least one replica should be healthy"
+    );
+
+    harness.shutdown().await;
+}
