@@ -1939,13 +1939,13 @@ buckets:
 - [x] Test: Each replica has independent timeout (src/replica_set/mod.rs:363-442 - test_each_replica_has_independent_timeout)
 - [x] Test: Replica set can be cloned (for reload) (src/replica_set/mod.rs:444-535 - test_replica_set_can_be_cloned)
 - [x] Test: Single-bucket config creates one-replica set (src/replica_set/mod.rs:537-602 - test_single_bucket_config_creates_one_replica_set)
-- [x] File: Create `src/replica_set/mod.rs` (lines 1-603)
+- [x] File: Create `src/replica_set/mod.rs` (lines 1-690)
 
 ### Test: Failover Logic
 
 **Why**: Automatically try replicas in priority order when failures occur
 
-- [ ] Test: Request succeeds from first (highest priority) replica
+- [x] Test: Request succeeds from first (highest priority) replica (src/replica_set/mod.rs:603-689 - test_request_succeeds_from_first_replica)
 - [ ] Test: Connection error triggers failover to next replica
 - [ ] Test: Timeout triggers failover to next replica
 - [ ] Test: HTTP 500 triggers failover to next replica

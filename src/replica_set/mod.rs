@@ -68,6 +68,36 @@ impl ReplicaSet {
     pub fn is_empty(&self) -> bool {
         self.replicas.is_empty()
     }
+
+    /// Try to execute a request against replicas in priority order.
+    /// Returns the first successful result, or the last error if all replicas fail.
+    ///
+    /// # Arguments
+    /// * `request_fn` - A closure that takes a replica and attempts to execute a request
+    ///
+    /// # Returns
+    /// * `Ok(T)` - The successful result from the first working replica
+    /// * `Err(E)` - The error from the last replica if all failed
+    pub fn try_request<F, T, E>(&self, mut request_fn: F) -> Result<T, E>
+    where
+        F: FnMut(&ReplicaEntry) -> Result<T, E>,
+    {
+        let mut last_error = None;
+
+        for replica in &self.replicas {
+            match request_fn(replica) {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e);
+                    // Continue to next replica on failure
+                }
+            }
+        }
+
+        // All replicas failed - return the last error
+        // unwrap is safe here because we know replicas is not empty (validated in new())
+        Err(last_error.unwrap())
+    }
 }
 
 /// Create an S3 client from a replica configuration
@@ -598,5 +628,63 @@ mod tests {
             crate::circuit_breaker::CircuitState::Closed,
             "Circuit breaker should start in Closed state"
         );
+    }
+
+    #[test]
+    fn test_request_succeeds_from_first_replica() {
+        // Test: When all replicas are healthy, request should succeed from first (priority 1) replica
+        // This verifies basic failover logic: try replicas in priority order
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+        // Track which replicas were called (using RefCell for interior mutability in closure)
+        let calls = RefCell::new(Vec::new());
+
+        // Simulate a successful request from first replica
+        let result = replica_set.try_request(|replica| {
+            calls.borrow_mut().push(replica.name.clone());
+            Ok::<String, String>(format!("success from {}", replica.name))
+        });
+
+        // Verify request succeeded
+        assert!(result.is_ok(), "Request should succeed");
+        assert_eq!(
+            result.unwrap(),
+            "success from primary",
+            "Should return result from primary replica"
+        );
+
+        // Verify only first replica was called
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            1,
+            "Should only call first replica when it succeeds"
+        );
+        assert_eq!(calls[0], "primary", "Should call primary replica first");
     }
 }
