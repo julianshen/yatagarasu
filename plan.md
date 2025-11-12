@@ -1979,11 +1979,11 @@ for replica in replica_set.replicas() {
 
 **Why**: Track health status per replica for circuit breaker and observability
 
-- [ ] Test: Each replica has independent circuit breaker
-- [ ] Test: Unhealthy replica is skipped during failover
-- [ ] Test: Circuit breaker opens after failure threshold
-- [ ] Test: Circuit breaker transitions to half-open
-- [ ] Test: Circuit breaker closes after success in half-open
+- [x] Test: Each replica has independent circuit breaker (src/replica_set/mod.rs:289-361 - test_create_circuit_breaker_for_each_replica)
+- [x] Test: Unhealthy replica is skipped during failover (src/replica_set/mod.rs:1471-1590 - test_failover_skips_unhealthy_replicas - Test 30)
+- [x] Test: Circuit breaker opens after failure threshold (src/circuit_breaker.rs - test_circuit_opens_after_failure_threshold)
+- [x] Test: Circuit breaker transitions to half-open (src/circuit_breaker.rs - test_circuit_transitions_to_half_open_after_timeout)
+- [x] Test: Circuit breaker closes after success in half-open (src/circuit_breaker.rs - test_half_open_closes_after_success_threshold)
 - [ ] Test: `/ready` endpoint shows per-replica health
 - [ ] Test: `/ready` returns 200 if any replica healthy
 - [ ] Test: `/ready` returns 503 if all replicas unhealthy
