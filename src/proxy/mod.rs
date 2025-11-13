@@ -445,6 +445,9 @@ impl ProxyHttp for YatagarasuProxy {
                         "Selected healthy replica for request"
                     );
 
+                    // Phase 23: Track active replica in metrics
+                    self.metrics.set_active_replica(&bucket_name, &replica.name);
+
                     return Ok(peer);
                 }
             }
@@ -793,6 +796,14 @@ impl ProxyHttp for YatagarasuProxy {
         if self.resource_monitor.metrics_enabled() {
             self.metrics.increment_request_count();
             self.metrics.increment_method_count(&method);
+
+            // Phase 23: Track per-replica request count if replica was selected
+            if let Some(bucket_config) = ctx.bucket_config() {
+                if let Some(replica_name) = ctx.replica_name() {
+                    self.metrics
+                        .increment_replica_request_count(&bucket_config.name, replica_name);
+                }
+            }
         }
 
         // Special handling for /health endpoint (bypass auth, return health status)

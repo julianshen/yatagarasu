@@ -7,6 +7,7 @@
 // - /health bypasses authentication (always accessible)
 
 use super::test_harness::ProxyTestHarness;
+use http_body_util::BodyExt;
 use serde_json::Value;
 use std::fs;
 use std::sync::Once;
@@ -88,9 +89,12 @@ async fn test_health_endpoint_returns_200_ok() {
     );
 
     // Parse response body
-    let body = hyper::body::to_bytes(response.into_body())
+    let body = response
+        .into_body()
+        .collect()
         .await
-        .expect("Failed to read response body");
+        .expect("Failed to read response body")
+        .to_bytes();
     let json: Value = serde_json::from_slice(&body).expect("Failed to parse JSON");
 
     // Check required fields
@@ -229,9 +233,12 @@ async fn test_ready_endpoint_returns_200_when_backends_healthy() {
     );
 
     // Parse response body
-    let body = hyper::body::to_bytes(response.into_body())
+    let body = response
+        .into_body()
+        .collect()
         .await
-        .expect("Failed to read response body");
+        .expect("Failed to read response body")
+        .to_bytes();
     let json: Value = serde_json::from_slice(&body).expect("Failed to parse JSON");
 
     // Check required fields
@@ -292,9 +299,12 @@ async fn test_ready_endpoint_returns_503_when_backend_unreachable() {
     );
 
     // Parse response body
-    let body = hyper::body::to_bytes(response.into_body())
+    let body = response
+        .into_body()
+        .collect()
         .await
-        .expect("Failed to read response body");
+        .expect("Failed to read response body")
+        .to_bytes();
     let json: Value = serde_json::from_slice(&body).expect("Failed to parse JSON");
 
     // Check required fields

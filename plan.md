@@ -2059,14 +2059,14 @@ ERROR All replicas failed
 
 **Why**: Verify end-to-end failover behavior with real S3 backends
 
-- [ ] Test: Failover to replica when primary S3 unavailable
-- [ ] Test: Skip unhealthy replica during failover
-- [ ] Test: Return 502 when all replicas fail
-- [ ] Test: `/ready` endpoint shows per-replica health
-- [ ] Test: Metrics track replica usage and failover
-- [ ] Test: No failover on 404 (return to client immediately)
-- [ ] Test: Backward compatibility - single bucket config works
-- [ ] File: Create `tests/integration/replica_set_test.rs`
+- [x] Test: Failover to replica when primary S3 unavailable
+- [x] Test: Skip unhealthy replica during failover
+- [x] Test: Return 502 when all replicas fail
+- [ ] Test: `/ready` endpoint shows per-replica health (exists in health_test.rs, commented out due to API mismatch)
+- [x] Test: Metrics track replica usage and failover
+- [x] Test: No failover on 404 (return to client immediately)
+- [x] Test: Backward compatibility - single bucket config works
+- [x] File: Create `tests/integration/replica_set_test.rs` (6 tests created)
 
 ### Test: Documentation
 
