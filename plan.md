@@ -2038,7 +2038,7 @@ replica_health{bucket="products",replica="replica-eu"} 1
 - [x] Test: Log successful request with replica name
 - [x] Test: Log failover event with from/to replica names
 - [x] Test: Log all replicas failed with error details
-- [ ] Test: Log replica skip due to circuit breaker
+- [x] Test: Log replica skip due to circuit breaker
 - [ ] Test: All logs include request_id for correlation
 - [ ] File: Update `src/proxy/mod.rs` with replica logging
 

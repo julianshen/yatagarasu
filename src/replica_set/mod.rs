@@ -1925,4 +1925,99 @@ mod tests {
             "Log should contain 500InternalError"
         );
     }
+
+    #[test]
+    fn test_log_replica_skip_due_to_circuit_breaker() {
+        // Test: Phase 23 - Log replica skip due to circuit breaker
+        // Expected log format:
+        // DEBUG Skipping replica due to open circuit breaker
+        //       replica_name=primary, circuit_state=Open
+
+        use crate::logging::create_test_subscriber;
+        use std::sync::{Arc, Mutex};
+
+        // Create a buffer to capture log output
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = create_test_subscriber(buffer.clone());
+
+        tracing::subscriber::with_default(subscriber, || {
+            let replicas = vec![
+                S3Replica {
+                    name: "primary".to_string(),
+                    bucket: "products-us-west-2".to_string(),
+                    region: "us-west-2".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                    endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                    priority: 1,
+                    timeout: 30,
+                },
+                S3Replica {
+                    name: "replica-eu".to_string(),
+                    bucket: "products-eu-west-1".to_string(),
+                    region: "eu-west-1".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                    endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                    priority: 2,
+                    timeout: 25,
+                },
+            ];
+
+            let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+            // Open the circuit breaker for primary replica by recording failures
+            for _ in 0..5 {
+                replica_set.replicas[0].circuit_breaker.record_failure();
+            }
+
+            // Verify primary circuit breaker is open
+            assert_eq!(
+                replica_set.replicas[0].circuit_breaker.state(),
+                crate::circuit_breaker::CircuitState::Open,
+                "Primary circuit breaker should be open"
+            );
+
+            // Call try_request - should skip primary and use replica-eu
+            let result: Result<String, String> = replica_set.try_request(|replica| {
+                // Only replica-eu should be called (primary skipped)
+                if replica.name == "replica-eu" {
+                    Ok(format!("success from {}", replica.name))
+                } else {
+                    panic!("Should not call primary replica (circuit breaker open)")
+                }
+            });
+
+            // Verify request succeeded from replica-eu
+            assert!(result.is_ok(), "Request should succeed from replica-eu");
+            assert_eq!(
+                result.unwrap(),
+                "success from replica-eu",
+                "Should return result from replica-eu"
+            );
+        });
+
+        // Read log output
+        let output = buffer.lock().unwrap();
+        let log_line = String::from_utf8_lossy(&output);
+
+        // Verify log contains "Skipping replica due to open circuit breaker" message
+        assert!(
+            log_line.contains("Skipping replica due to open circuit breaker"),
+            "Log should contain 'Skipping replica due to open circuit breaker' message"
+        );
+
+        // Verify log contains primary replica name
+        assert!(
+            log_line.contains("\"replica_name\":\"primary\"")
+                || log_line.contains("replica_name=primary"),
+            "Log should contain replica_name=primary"
+        );
+
+        // Verify log contains circuit state (Open)
+        assert!(
+            log_line.contains("Open") || log_line.contains("circuit_state"),
+            "Log should contain circuit state (Open)"
+        );
+    }
 }
