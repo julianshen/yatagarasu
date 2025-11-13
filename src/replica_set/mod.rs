@@ -2020,4 +2020,82 @@ mod tests {
             "Log should contain circuit state (Open)"
         );
     }
+
+    #[test]
+    fn test_all_logs_include_request_id_for_correlation() {
+        // Test: Phase 23 - All logs include request_id for correlation
+        // This test verifies that when try_request is called within a tracing span
+        // that has a request_id field, all logs will include that request_id
+        // This enables correlation of all logs for a single request
+
+        use crate::logging::create_test_subscriber;
+        use std::sync::{Arc, Mutex};
+
+        // Create a buffer to capture log output
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = create_test_subscriber(buffer.clone());
+
+        tracing::subscriber::with_default(subscriber, || {
+            let replicas = vec![
+                S3Replica {
+                    name: "primary".to_string(),
+                    bucket: "products-us-west-2".to_string(),
+                    region: "us-west-2".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                    endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                    priority: 1,
+                    timeout: 30,
+                },
+                S3Replica {
+                    name: "replica-eu".to_string(),
+                    bucket: "products-eu-west-2".to_string(),
+                    region: "eu-west-1".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                    endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                    priority: 2,
+                    timeout: 25,
+                },
+            ];
+
+            let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+            // Create a span with request_id (simulating RequestContext)
+            let request_id = "550e8400-e29b-41d4-a716-446655440000";
+            let span = tracing::info_span!("request", request_id = %request_id);
+            let _guard = span.enter();
+
+            // Call try_request with failover scenario: primary fails, replica-eu succeeds
+            let _result: Result<String, String> = replica_set.try_request(|replica| {
+                if replica.name == "primary" {
+                    Err("ConnectionTimeout".to_string())
+                } else {
+                    Ok(format!("success from {}", replica.name))
+                }
+            });
+        });
+
+        // Read log output
+        let output = buffer.lock().unwrap();
+        let log_line = String::from_utf8_lossy(&output);
+
+        // Verify request_id appears in logs
+        // The tracing span should propagate request_id to all logs within it
+        assert!(
+            log_line.contains("550e8400-e29b-41d4-a716-446655440000"),
+            "Logs should contain request_id for correlation: {}",
+            log_line
+        );
+
+        // Verify multiple log entries are present (showing correlation across operations)
+        // This confirms we can correlate all operations for a single request
+        // The JSON output includes the request_id in the span field for each log entry
+        let log_count = log_line.matches("request_id").count();
+        assert!(
+            log_count >= 3,
+            "Should have multiple log entries (at least 3) with request_id for correlation, found: {}",
+            log_count
+        );
+    }
 }
