@@ -88,6 +88,7 @@ impl ReplicaSet {
         let mut last_error = None;
         let mut last_failed_replica: Option<&str> = None;
         let mut attempt = 0;
+        let mut all_errors: Vec<String> = Vec::new();
 
         for replica in &self.replicas {
             // Skip replicas with open circuit breakers
@@ -128,20 +129,28 @@ impl ReplicaSet {
                     return Ok(result);
                 }
                 Err(e) => {
+                    let error_msg = format!("{}", e);
                     tracing::warn!(
                         replica_name = %replica.name,
                         error = %e,
                         "Replica failed"
                     );
                     last_failed_replica = Some(&replica.name);
+                    all_errors.push(error_msg);
                     last_error = Some(e);
                     // Continue to next replica on failure
                 }
             }
         }
 
-        // All replicas failed - return the last error
+        // All replicas failed - log error details
         // unwrap is safe here because we know replicas is not empty (validated in new())
+        tracing::error!(
+            attempted = attempt,
+            errors = ?all_errors,
+            "All replicas failed"
+        );
+
         Err(last_error.unwrap())
     }
 
@@ -182,6 +191,7 @@ impl ReplicaSet {
         let mut last_error = None;
         let mut last_failed_replica: Option<&str> = None;
         let mut attempt = 0;
+        let mut all_errors: Vec<String> = Vec::new();
         let attempts_to_make = max_attempts.min(self.replicas.len());
 
         for replica in self.replicas.iter().take(attempts_to_make) {
@@ -223,21 +233,29 @@ impl ReplicaSet {
                     return Ok(result);
                 }
                 Err(e) => {
+                    let error_msg = format!("{}", e);
                     tracing::warn!(
                         replica_name = %replica.name,
                         error = %e,
                         "Replica failed"
                     );
                     last_failed_replica = Some(&replica.name);
+                    all_errors.push(error_msg);
                     last_error = Some(e);
                     // Continue to next replica on failure (if budget allows)
                 }
             }
         }
 
-        // All attempts failed - return the last error
+        // All attempts failed - log error details
         // unwrap is safe here because we know replicas is not empty (validated in new())
         // and attempts_to_make is at least 1
+        tracing::error!(
+            attempted = attempt,
+            errors = ?all_errors,
+            "All replicas failed"
+        );
+
         Err(last_error.unwrap())
     }
 }
@@ -1805,6 +1823,106 @@ mod tests {
         assert!(
             logs_text.contains("succeeded") || logs_text.contains("replica-ap"),
             "Logs should indicate success from replica-ap"
+        );
+    }
+
+    #[test]
+    fn test_log_all_replicas_failed_with_error_details() {
+        // Test: Phase 23 - Log all replicas failed with error details
+        // Expected log format:
+        // ERROR All replicas failed
+        //       request_id=550e8400-..., bucket=products, attempted=3,
+        //       errors=[ConnectionTimeout, ConnectionTimeout, 500InternalError]
+
+        use crate::logging::create_test_subscriber;
+        use std::sync::{Arc, Mutex};
+
+        // Create a buffer to capture log output
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = create_test_subscriber(buffer.clone());
+
+        tracing::subscriber::with_default(subscriber, || {
+            let replicas = vec![
+                S3Replica {
+                    name: "primary".to_string(),
+                    bucket: "products-us-west-2".to_string(),
+                    region: "us-west-2".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                    endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                    priority: 1,
+                    timeout: 30,
+                },
+                S3Replica {
+                    name: "replica-eu".to_string(),
+                    bucket: "products-eu-west-1".to_string(),
+                    region: "eu-west-1".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                    endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                    priority: 2,
+                    timeout: 25,
+                },
+                S3Replica {
+                    name: "replica-ap".to_string(),
+                    bucket: "products-ap-southeast-1".to_string(),
+                    region: "ap-southeast-1".to_string(),
+                    access_key: "AKIAIOSFODNN7EXAMPLE3".to_string(),
+                    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY3".to_string(),
+                    endpoint: Some("https://s3.ap-southeast-1.amazonaws.com".to_string()),
+                    priority: 3,
+                    timeout: 20,
+                },
+            ];
+
+            let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+
+            // Call try_request with a function that always fails with different errors
+            let mut attempt_count = 0;
+            let result: Result<String, String> = replica_set.try_request(|replica| {
+                attempt_count += 1;
+                match replica.name.as_str() {
+                    "primary" => Err("ConnectionTimeout".to_string()),
+                    "replica-eu" => Err("ConnectionTimeout".to_string()),
+                    "replica-ap" => Err("500InternalError".to_string()),
+                    _ => panic!("Unexpected replica name"),
+                }
+            });
+
+            // Verify request failed
+            assert!(
+                result.is_err(),
+                "Request should fail when all replicas fail"
+            );
+
+            // Verify we tried 3 replicas
+            assert_eq!(attempt_count, 3, "Should have attempted all 3 replicas");
+        });
+
+        // Read log output
+        let output = buffer.lock().unwrap();
+        let log_line = String::from_utf8_lossy(&output);
+
+        // Verify log contains "All replicas failed" message
+        assert!(
+            log_line.contains("All replicas failed"),
+            "Log should contain 'All replicas failed' message"
+        );
+
+        // Verify log contains attempted count
+        assert!(
+            log_line.contains("\"attempted\":3"),
+            "Log should contain attempted=3"
+        );
+
+        // Verify log contains all error messages
+        assert!(
+            log_line.contains("ConnectionTimeout"),
+            "Log should contain ConnectionTimeout errors"
+        );
+        assert!(
+            log_line.contains("500InternalError"),
+            "Log should contain 500InternalError"
         );
     }
 }
