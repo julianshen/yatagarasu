@@ -2040,7 +2040,7 @@ replica_health{bucket="products",replica="replica-eu"} 1
 - [x] Test: Log all replicas failed with error details
 - [x] Test: Log replica skip due to circuit breaker
 - [x] Test: All logs include request_id for correlation
-- [ ] File: Update `src/proxy/mod.rs` with replica logging
+- [x] File: Update `src/proxy/mod.rs` with replica logging
 
 **Example logs**:
 ```

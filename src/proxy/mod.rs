@@ -1533,11 +1533,20 @@ impl ProxyHttp for YatagarasuProxy {
             if let (Some(replica_name), Some(bucket_config)) =
                 (ctx.replica_name(), ctx.bucket_config())
             {
+                // Calculate request duration from start timestamp
+                let duration_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    .saturating_sub(ctx.timestamp()) as f64
+                    * 1000.0; // Convert seconds to milliseconds
+
                 tracing::info!(
                     request_id = %ctx.request_id(),
                     bucket = bucket_config.name.as_str(),
                     replica = replica_name,
                     status = status,
+                    duration_ms = duration_ms,
                     "Request served from replica '{}'", replica_name
                 );
             }
