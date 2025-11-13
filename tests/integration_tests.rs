@@ -9,12 +9,15 @@ mod integration {
     mod concurrency_test;
     mod e2e_localstack_test;
     mod error_scenarios_test;
+    // mod health_test; // TODO: Fix API mismatch with test_harness
     mod hot_reload_test;
     mod jwt_auth_test;
+    // mod logging_test; // TODO: Fix API mismatch with test_harness
     mod metrics_test;
     mod multibucket_test;
     mod range_requests_test;
     mod rate_limit_test;
+    mod replica_set_test;
     mod retry_test;
     mod security_test;
     mod server_basic_test;
