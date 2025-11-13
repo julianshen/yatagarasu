@@ -19,6 +19,8 @@ pub struct RequestContext {
     timestamp: u64,
     bucket_config: Option<BucketConfig>,
     claims: Option<Claims>,
+    /// Selected replica name for Phase 23 HA bucket replication
+    replica_name: Option<String>,
 }
 
 impl RequestContext {
@@ -37,6 +39,7 @@ impl RequestContext {
                 .as_secs(),
             bucket_config: None,
             claims: None,
+            replica_name: None,
         }
     }
 
@@ -55,6 +58,7 @@ impl RequestContext {
                 .as_secs(),
             bucket_config: None,
             claims: None,
+            replica_name: None,
         }
     }
 
@@ -77,6 +81,7 @@ impl RequestContext {
                 .as_secs(),
             bucket_config: None,
             claims: None,
+            replica_name: None,
         }
     }
 
@@ -148,6 +153,16 @@ impl RequestContext {
     /// Get the JWT claims for this request
     pub fn claims(&self) -> Option<&Claims> {
         self.claims.as_ref()
+    }
+
+    /// Set the replica name that is serving this request (Phase 23: HA bucket replication)
+    pub fn set_replica_name(&mut self, replica_name: String) {
+        self.replica_name = Some(replica_name);
+    }
+
+    /// Get the replica name that is serving this request (Phase 23: HA bucket replication)
+    pub fn replica_name(&self) -> Option<&str> {
+        self.replica_name.as_deref()
     }
 }
 
