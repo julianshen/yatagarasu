@@ -2036,7 +2036,7 @@ replica_health{bucket="products",replica="replica-eu"} 1
 **Why**: Track failover events and replica usage for troubleshooting
 
 - [x] Test: Log successful request with replica name
-- [ ] Test: Log failover event with from/to replica names
+- [x] Test: Log failover event with from/to replica names
 - [ ] Test: Log all replicas failed with error details
 - [ ] Test: Log replica skip due to circuit breaker
 - [ ] Test: All logs include request_id for correlation

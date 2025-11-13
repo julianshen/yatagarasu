@@ -86,6 +86,8 @@ impl ReplicaSet {
         E: std::fmt::Display,
     {
         let mut last_error = None;
+        let mut last_failed_replica: Option<&str> = None;
+        let mut attempt = 0;
 
         for replica in &self.replicas {
             // Skip replicas with open circuit breakers
@@ -96,6 +98,20 @@ impl ReplicaSet {
                     "Skipping replica due to open circuit breaker"
                 );
                 continue;
+            }
+
+            attempt += 1;
+
+            // Log failover if we're moving from a failed replica to a new one
+            if let Some(from_replica) = last_failed_replica {
+                tracing::warn!(
+                    from = from_replica,
+                    to = replica.name.as_str(),
+                    attempt = attempt,
+                    "Failover: {} → {}",
+                    from_replica,
+                    replica.name
+                );
             }
 
             tracing::info!(
@@ -117,6 +133,7 @@ impl ReplicaSet {
                         error = %e,
                         "Replica failed"
                     );
+                    last_failed_replica = Some(&replica.name);
                     last_error = Some(e);
                     // Continue to next replica on failure
                 }
@@ -163,6 +180,8 @@ impl ReplicaSet {
         E: std::fmt::Display,
     {
         let mut last_error = None;
+        let mut last_failed_replica: Option<&str> = None;
+        let mut attempt = 0;
         let attempts_to_make = max_attempts.min(self.replicas.len());
 
         for replica in self.replicas.iter().take(attempts_to_make) {
@@ -174,6 +193,20 @@ impl ReplicaSet {
                     "Skipping replica due to open circuit breaker"
                 );
                 continue;
+            }
+
+            attempt += 1;
+
+            // Log failover if we're moving from a failed replica to a new one
+            if let Some(from_replica) = last_failed_replica {
+                tracing::warn!(
+                    from = from_replica,
+                    to = replica.name.as_str(),
+                    attempt = attempt,
+                    "Failover: {} → {}",
+                    from_replica,
+                    replica.name
+                );
             }
 
             tracing::info!(
@@ -195,6 +228,7 @@ impl ReplicaSet {
                         error = %e,
                         "Replica failed"
                     );
+                    last_failed_replica = Some(&replica.name);
                     last_error = Some(e);
                     // Continue to next replica on failure (if budget allows)
                 }

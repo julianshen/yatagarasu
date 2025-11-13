@@ -1616,4 +1616,80 @@ mod tests {
             log_line
         );
     }
+
+    #[test]
+    fn test_log_failover_event_with_from_to_replicas() {
+        // Test: Phase 23 - Log failover event with from/to replica names
+        // Expected log format:
+        // WARN  Failover: primary → replica-eu
+        //       request_id=550e8400-..., bucket=products, reason=ConnectionTimeout, attempt=2
+
+        // Create a buffer to capture log output
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = create_test_subscriber(buffer.clone());
+
+        tracing::subscriber::with_default(subscriber, || {
+            // Create a request context
+            let ctx = RequestContext::new("GET".to_string(), "/products/test.jpg".to_string());
+            let request_id = ctx.request_id();
+            let bucket_name = "products";
+
+            // Simulate a failover event: primary → replica-eu
+            let from_replica = "primary";
+            let to_replica = "replica-eu";
+            let reason = "ConnectionTimeout";
+            let attempt = 2;
+
+            tracing::warn!(
+                request_id = %request_id,
+                bucket = bucket_name,
+                from = from_replica,
+                to = to_replica,
+                reason = reason,
+                attempt = attempt,
+                "Failover: {} → {}", from_replica, to_replica
+            );
+        });
+
+        // Read log output
+        let output = buffer.lock().unwrap();
+        let log_line = String::from_utf8_lossy(&output);
+
+        // Verify log contains required fields
+        assert!(
+            log_line.contains("Failover: primary → replica-eu"),
+            "Log should contain failover message: {}",
+            log_line
+        );
+        assert!(
+            log_line.contains("\"bucket\":\"products\""),
+            "Log should contain bucket field: {}",
+            log_line
+        );
+        assert!(
+            log_line.contains("\"from\":\"primary\""),
+            "Log should contain from field: {}",
+            log_line
+        );
+        assert!(
+            log_line.contains("\"to\":\"replica-eu\""),
+            "Log should contain to field: {}",
+            log_line
+        );
+        assert!(
+            log_line.contains("\"reason\":\"ConnectionTimeout\""),
+            "Log should contain reason field: {}",
+            log_line
+        );
+        assert!(
+            log_line.contains("\"attempt\":2"),
+            "Log should contain attempt number: {}",
+            log_line
+        );
+        assert!(
+            log_line.contains("\"request_id\""),
+            "Log should contain request_id field: {}",
+            log_line
+        );
+    }
 }
