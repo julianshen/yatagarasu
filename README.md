@@ -4,17 +4,17 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-695%20passing-green.svg)](plan.md)
+[![Tests](https://img.shields.io/badge/tests-171%20library%20tests-green.svg)](plan.md)
 [![Coverage](https://img.shields.io/badge/coverage-98.43%25-brightgreen.svg)](coverage/)
-[![Status](https://img.shields.io/badge/status-Production%20Ready%20v0.3.1-brightgreen.svg)](IMPLEMENTATION_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Production%20Ready%20v0.4.0-brightgreen.svg)](IMPLEMENTATION_STATUS.md)
 
 A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framework and Rust, providing intelligent routing, multi-bucket support, and flexible JWT authentication for secure content delivery.
 
 ## 🎉 DEVELOPMENT STATUS
 
-**Current State**: Core library modules complete and **Production-Ready with High Availability!** (v0.3.1)
+**Current State**: Core library modules complete and **Production-Ready with Docker & CI/CD!** (v0.4.0)
 
-**✅ What Works Now** (as of 2025-11-09):
+**✅ What Works Now** (as of 2025-11-14):
 - ✅ **HTTP Server**: Accepts connections and proxies requests to S3!
 - ✅ **Routing**: Requests to /bucket-prefix/* route to correct S3 bucket
 - ✅ **Authentication**: JWT token validation with 401/403 responses
@@ -34,7 +34,9 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - ✅ **Structured logging**: UUID request_id correlation, X-Request-ID header, client IP tracking
 - ✅ **Startup validation**: Config validation, --test mode, clear error messages
 - ✅ **High Availability**: Multi-replica bucket configuration with automatic failover, circuit breaker health checking
-- ✅ **695 passing tests** with 98.43% coverage
+- ✅ **Read-Only Enforcement**: HTTP method validation (GET/HEAD/OPTIONS only), 405 responses for unsafe methods
+- ✅ **Docker & CI/CD**: Production-ready 41.2MB distroless image, docker-compose for local dev, GitHub Actions CI
+- ✅ **171 library tests passing** with 98.43% coverage
 
 **⏳ What's Still Being Worked On**:
 - ⏳ Configuration hot reload (Pingora built-in, needs integration)
@@ -45,14 +47,15 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - 🎯 **Phase 26+** (v1.0.0): Caching layer and advanced features
 
 **✅ Recently Completed**:
+- ✅ **Phase 25**: Read-Only Enforcement - HTTP method validation (GET/HEAD/OPTIONS only), 405 responses for unsafe methods (PUT/POST/DELETE/PATCH), CORS support for browser clients (15/15 tests passing)
 - ✅ **Phase 24** (v0.4.0): Docker Images & CI/CD Automation - Production-ready multi-stage Dockerfile (41.2MB distroless image), docker-compose for local development, GitHub Actions CI with automated testing and coverage (36/36 tests passing)
-- ✅ **Phase 23** (v0.3.1): High Availability Bucket Replication - Multi-replica failover, priority-based selection, circuit breaker health checking, per-replica metrics and observability (60+ tests passing, comprehensive production deployment guide)
-- ✅ **Phase 22** (v0.3.0): Graceful Shutdown & Observability - Health endpoints (/health, /ready), graceful shutdown (Pingora built-in), structured logging (request_id, X-Request-ID), startup validation, metrics enhancements
-- ✅ **Phase 21** (v0.2.0): Production Hardening & Resilience - Security validation (SQL injection, path traversal), rate limiting, circuit breaker (ALL 8/8 security tests passing)
+- ✅ **Phase 23** (v0.3.1): High Availability Bucket Replication - Multi-replica failover, priority-based selection, circuit breaker health checking, per-replica metrics and observability (60+ tests passing)
+- ✅ **Phase 22** (v0.3.0): Graceful Shutdown & Observability - Health endpoints (/health, /ready), graceful shutdown (Pingora built-in), structured logging (request_id, X-Request-ID), startup validation
+- ✅ **Phase 21** (v0.2.0): Production Hardening & Resilience - Security validation (SQL injection, path traversal), rate limiting, circuit breaker (8/8 security tests passing)
 - ✅ **Phase 17**: Performance benchmarking infrastructure (Criterion + K6) - ALL TARGETS EXCEEDED!
 - ✅ **Phase 16**: Integration test infrastructure with ProxyTestHarness
 
-**Progress**: ~93% toward v1.0 (Phase 23 complete - production-ready with high availability!)
+**Progress**: ~95% toward v1.0 (Phases 21-25 complete - production-ready with full security hardening!)
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed technical analysis and progress assessment.
 
