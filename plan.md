@@ -2241,13 +2241,13 @@ This means:
 **Objective**: Add early method validation in request_filter to reject unsafe methods
 
 **Tests** (7 tests):
-- [ ] Test: GET requests to S3 paths are allowed (returns 200 OK)
-- [ ] Test: HEAD requests to S3 paths are allowed (returns 200 OK)
-- [ ] Test: PUT requests to S3 paths return 405 Method Not Allowed
-- [ ] Test: POST requests to S3 paths return 405 Method Not Allowed (except /admin/reload)
-- [ ] Test: DELETE requests to S3 paths return 405 Method Not Allowed
-- [ ] Test: PATCH requests to S3 paths return 405 Method Not Allowed
-- [ ] Test: 405 response includes Allow header with "GET, HEAD, OPTIONS"
+- [x] Test: GET requests to S3 paths are allowed (returns 200 OK)
+- [x] Test: HEAD requests to S3 paths are allowed (returns 200 OK)
+- [x] Test: PUT requests to S3 paths return 405 Method Not Allowed
+- [x] Test: POST requests to S3 paths return 405 Method Not Allowed (except /admin/reload)
+- [x] Test: DELETE requests to S3 paths return 405 Method Not Allowed
+- [x] Test: PATCH requests to S3 paths return 405 Method Not Allowed
+- [x] Test: 405 response includes Allow header with "GET, HEAD, OPTIONS"
 
 **Implementation**:
 ```rust

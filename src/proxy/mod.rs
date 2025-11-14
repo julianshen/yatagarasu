@@ -602,6 +602,54 @@ impl ProxyHttp for YatagarasuProxy {
 
         // SECURITY VALIDATIONS (check early before routing)
 
+        // 0. HTTP Method Validation (Read-Only Proxy - Phase 25)
+        // This proxy only supports GET and HEAD for S3 operations
+        // Special endpoints (/health, /ready, /metrics, /admin/reload) are handled separately
+        if !(path.starts_with("/health")
+            || path.starts_with("/ready")
+            || path.starts_with("/metrics")
+            || (path == "/admin/reload" && method == "POST"))
+        {
+            // Only GET, HEAD, and OPTIONS are allowed for S3 operations
+            match method.as_str() {
+                "GET" | "HEAD" | "OPTIONS" => {} // Allowed
+                _ => {
+                    tracing::warn!(
+                        request_id = %ctx.request_id(),
+                        client_ip = %client_ip,
+                        method = %method,
+                        path = %path,
+                        "Unsupported HTTP method for read-only proxy"
+                    );
+
+                    let mut header = ResponseHeader::build(405, None)?;
+                    header.insert_header("Content-Type", "application/json")?;
+                    header.insert_header("Allow", "GET, HEAD, OPTIONS")?;
+
+                    let error_body = serde_json::json!({
+                        "error": "Method Not Allowed",
+                        "message": format!(
+                            "Method {} is not allowed. This is a read-only S3 proxy. Allowed methods: GET, HEAD, OPTIONS",
+                            method
+                        ),
+                        "status": 405
+                    })
+                    .to_string();
+
+                    header.insert_header("Content-Length", error_body.len().to_string())?;
+                    session
+                        .write_response_header(Box::new(header), false)
+                        .await?;
+                    session
+                        .write_response_body(Some(error_body.into()), true)
+                        .await?;
+
+                    self.metrics.increment_status_count(405);
+                    return Ok(true); // Short-circuit
+                }
+            }
+        }
+
         // 1. Validate URI length
         let uri_str = req.uri.to_string();
         if let Err(security_error) =

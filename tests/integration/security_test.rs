@@ -448,3 +448,187 @@ async fn test_sql_injection_blocked() {
         status
     );
 }
+
+// ============================================================================
+// Phase 25: HTTP Method Validation (Read-Only Proxy Enforcement)
+// ============================================================================
+
+/// Helper to make raw HTTP requests with custom method
+async fn raw_http_request_with_method(
+    method: &str,
+    path: &str,
+) -> Result<(u16, String, HeaderMap), Box<dyn std::error::Error>> {
+    // Connect to proxy
+    let stream = TcpStream::connect("127.0.0.1:18080").await?;
+    let io = TokioIo::new(stream);
+
+    // HTTP/1 handshake
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+
+    // Spawn connection task
+    tokio::task::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("Connection failed: {:?}", err);
+        }
+    });
+
+    // Create request with specified method
+    let req = hyper::Request::builder()
+        .method(method)
+        .uri(path)
+        .header("Host", "127.0.0.1:18080")
+        .body(String::new())?;
+
+    // Send request
+    let res = sender.send_request(req).await?;
+
+    // Get status and headers
+    let status = res.status().as_u16();
+    let headers = res.headers().clone();
+
+    // Convert hyper::HeaderMap to reqwest::HeaderMap
+    let mut reqwest_headers = HeaderMap::new();
+    for (name, value) in headers.iter() {
+        reqwest_headers.insert(
+            HeaderName::from_str(name.as_str()).unwrap(),
+            HeaderValue::from_bytes(value.as_bytes()).unwrap(),
+        );
+    }
+
+    // Read body
+    use http_body_util::BodyExt;
+    let body_bytes = res.into_body().collect().await?.to_bytes();
+    let body = String::from_utf8_lossy(&body_bytes).to_string();
+
+    Ok((status, body, reqwest_headers))
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy with test configuration
+async fn test_get_requests_allowed() {
+    // GET requests to S3 paths should be allowed
+    let (status, _body, _headers) = raw_http_request_with_method("GET", "/test/sample.txt")
+        .await
+        .expect("Request failed");
+
+    // GET should not return 405 Method Not Allowed
+    // May return 200 (success), 404 (not found), 403 (auth required), etc.
+    assert_ne!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED.as_u16(),
+        "GET requests should be allowed (got {})",
+        status
+    );
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_head_requests_allowed() {
+    // HEAD requests to S3 paths should be allowed
+    let (status, _body, _headers) = raw_http_request_with_method("HEAD", "/test/sample.txt")
+        .await
+        .expect("Request failed");
+
+    // HEAD should not return 405 Method Not Allowed
+    assert_ne!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED.as_u16(),
+        "HEAD requests should be allowed (got {})",
+        status
+    );
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_put_requests_blocked() {
+    // PUT requests to S3 paths should return 405 Method Not Allowed
+    let (status, body, headers) = raw_http_request_with_method("PUT", "/test/upload.txt")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED.as_u16(),
+        "PUT requests should return 405 Method Not Allowed"
+    );
+
+    // Verify Allow header is present
+    assert!(
+        headers.contains_key("allow"),
+        "405 response should include Allow header"
+    );
+
+    let allow_header = headers.get("allow").unwrap().to_str().unwrap();
+    assert!(
+        allow_header.contains("GET") && allow_header.contains("HEAD"),
+        "Allow header should include GET and HEAD (got: {})",
+        allow_header
+    );
+
+    // Verify error response body
+    let json: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+    assert_eq!(json["error"], "Method Not Allowed");
+    assert_eq!(json["status"], 405);
+    assert!(json["message"]
+        .as_str()
+        .unwrap()
+        .contains("read-only S3 proxy"));
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_post_requests_blocked() {
+    // POST requests to S3 paths should return 405 Method Not Allowed
+    // (except /admin/reload which is handled separately)
+    let (status, body, _headers) = raw_http_request_with_method("POST", "/test/data")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED.as_u16(),
+        "POST requests to S3 paths should return 405 Method Not Allowed"
+    );
+
+    let json: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+    assert_eq!(json["error"], "Method Not Allowed");
+    assert_eq!(json["status"], 405);
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_delete_requests_blocked() {
+    // DELETE requests to S3 paths should return 405 Method Not Allowed
+    let (status, body, _headers) = raw_http_request_with_method("DELETE", "/test/file.txt")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED.as_u16(),
+        "DELETE requests should return 405 Method Not Allowed"
+    );
+
+    let json: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+    assert_eq!(json["error"], "Method Not Allowed");
+    assert_eq!(json["status"], 405);
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_patch_requests_blocked() {
+    // PATCH requests to S3 paths should return 405 Method Not Allowed
+    let (status, body, _headers) = raw_http_request_with_method("PATCH", "/test/file.txt")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED.as_u16(),
+        "PATCH requests should return 405 Method Not Allowed"
+    );
+
+    let json: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+    assert_eq!(json["error"], "Method Not Allowed");
+    assert_eq!(json["status"], 405);
+}
