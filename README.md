@@ -4,15 +4,15 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-635%20passing-green.svg)](plan.md)
+[![Tests](https://img.shields.io/badge/tests-695%20passing-green.svg)](plan.md)
 [![Coverage](https://img.shields.io/badge/coverage-98.43%25-brightgreen.svg)](coverage/)
-[![Status](https://img.shields.io/badge/status-Production%20Ready%20v0.3.0-brightgreen.svg)](IMPLEMENTATION_STATUS.md)
+[![Status](https://img.shields.io/badge/status-Production%20Ready%20v0.3.1-brightgreen.svg)](IMPLEMENTATION_STATUS.md)
 
 A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, providing intelligent routing, multi-bucket support, and flexible JWT authentication.
 
 ## 🎉 DEVELOPMENT STATUS
 
-**Current State**: Core library modules complete and **Production-Ready for Container Orchestration!** (v0.3.0)
+**Current State**: Core library modules complete and **Production-Ready with High Availability!** (v0.3.1)
 
 **✅ What Works Now** (as of 2025-11-09):
 - ✅ **HTTP Server**: Accepts connections and proxies requests to S3!
@@ -33,7 +33,8 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 - ✅ **Graceful shutdown**: Pingora built-in SIGTERM handling, in-flight request completion
 - ✅ **Structured logging**: UUID request_id correlation, X-Request-ID header, client IP tracking
 - ✅ **Startup validation**: Config validation, --test mode, clear error messages
-- ✅ **635 passing tests** with 98.43% coverage
+- ✅ **High Availability**: Multi-replica bucket configuration with automatic failover, circuit breaker health checking
+- ✅ **695 passing tests** with 98.43% coverage
 
 **⏳ What's Still Being Worked On**:
 - ⏳ Configuration hot reload (Pingora built-in, needs integration)
@@ -41,18 +42,18 @@ A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, 
 - ⏳ Docker images and CI/CD automation
 
 **🚀 What's Coming Next**:
-- 🚧 **Phase 23-24** (v0.4.0): Docker images and CI/CD automation
+- 🚧 **Phase 24** (v0.4.0): Docker images and CI/CD automation
 - 🚧 **Optional**: Chaos engineering tests (Toxiproxy integration)
 - 🎯 **Phase 25+** (v1.0.0): Caching layer and advanced features
 
 **✅ Recently Completed**:
-- ✅ **Phase 22** (v0.3.0): Graceful Shutdown & Observability - Health endpoints (/health, /ready), graceful shutdown (Pingora built-in), structured logging (request_id, X-Request-ID), startup validation, metrics enhancements (ALL CORE FEATURES COMPLETE!)
+- ✅ **Phase 23** (v0.3.1): High Availability Bucket Replication - Multi-replica failover, priority-based selection, circuit breaker health checking, per-replica metrics and observability (60+ tests passing, comprehensive production deployment guide)
+- ✅ **Phase 22** (v0.3.0): Graceful Shutdown & Observability - Health endpoints (/health, /ready), graceful shutdown (Pingora built-in), structured logging (request_id, X-Request-ID), startup validation, metrics enhancements
 - ✅ **Phase 21** (v0.2.0): Production Hardening & Resilience - Security validation (SQL injection, path traversal), rate limiting, circuit breaker (ALL 8/8 security tests passing)
 - ✅ **Phase 17**: Performance benchmarking infrastructure (Criterion + K6) - ALL TARGETS EXCEEDED!
 - ✅ **Phase 16**: Integration test infrastructure with ProxyTestHarness
-- ✅ **Phase 0**: HEAD request support - Fixed AWS Signature V4 bug
 
-**Progress**: ~90% toward v1.0 (Phase 22 complete - production-ready for container orchestration!)
+**Progress**: ~93% toward v1.0 (Phase 23 complete - production-ready with high availability!)
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed technical analysis and progress assessment.
 
