@@ -83,7 +83,7 @@ tempfile = "3.8"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
 tokio-test = "0.4"
 log = "0.4"
-env_logger = "0.11"
+# env_logger removed - use tracing-subscriber in tests instead
 
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }

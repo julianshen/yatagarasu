@@ -1,0 +1,77 @@
+# Yatagarasu Docker Build - Ignore unnecessary files
+# This optimizes build context size and speeds up Docker builds
+
+# Build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Testing
+coverage/
+.tarpaulin/
+*.profraw
+*.profdata
+
+# Documentation (not needed in image)
+*.md
+!README.md
+docs/
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+LICENSE.md
+
+# Configuration examples (except config.example.yaml which we copy explicitly)
+config.test.yaml
+config.local.yaml
+.env
+.env.*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+*.swp
+
+# Docker files (don't copy into themselves)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Scripts (not needed in image)
+scripts/
+
+# Benchmarks output
+benches/results/
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
