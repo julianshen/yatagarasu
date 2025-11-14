@@ -632,3 +632,107 @@ async fn test_patch_requests_blocked() {
     assert_eq!(json["error"], "Method Not Allowed");
     assert_eq!(json["status"], 405);
 }
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_options_returns_200_with_cors_headers() {
+    // OPTIONS requests should return 200 OK with CORS headers
+    let (status, _body, headers) = raw_http_request_with_method("OPTIONS", "/test/sample.txt")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK.as_u16(),
+        "OPTIONS requests should return 200 OK"
+    );
+
+    // Verify CORS headers are present
+    assert!(
+        headers.contains_key("access-control-allow-methods"),
+        "OPTIONS response should include Access-Control-Allow-Methods header"
+    );
+
+    assert!(
+        headers.contains_key("access-control-allow-headers"),
+        "OPTIONS response should include Access-Control-Allow-Headers header"
+    );
+
+    assert!(
+        headers.contains_key("access-control-max-age"),
+        "OPTIONS response should include Access-Control-Max-Age header"
+    );
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_options_includes_allow_header() {
+    // OPTIONS response should include Allow header with supported methods
+    let (status, _body, headers) = raw_http_request_with_method("OPTIONS", "/test/file.txt")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(status, reqwest::StatusCode::OK.as_u16());
+
+    // Verify Allow header is present and contains correct methods
+    assert!(
+        headers.contains_key("allow"),
+        "OPTIONS response should include Allow header"
+    );
+
+    let allow_header = headers.get("allow").unwrap().to_str().unwrap();
+    assert!(
+        allow_header.contains("GET"),
+        "Allow header should include GET (got: {})",
+        allow_header
+    );
+    assert!(
+        allow_header.contains("HEAD"),
+        "Allow header should include HEAD (got: {})",
+        allow_header
+    );
+    assert!(
+        allow_header.contains("OPTIONS"),
+        "Allow header should include OPTIONS (got: {})",
+        allow_header
+    );
+}
+
+#[tokio::test]
+#[ignore] // Requires running proxy
+async fn test_options_includes_access_control_allow_methods() {
+    // OPTIONS response should include Access-Control-Allow-Methods header
+    let (status, _body, headers) = raw_http_request_with_method("OPTIONS", "/public/data")
+        .await
+        .expect("Request failed");
+
+    assert_eq!(status, reqwest::StatusCode::OK.as_u16());
+
+    // Verify Access-Control-Allow-Methods header
+    assert!(
+        headers.contains_key("access-control-allow-methods"),
+        "OPTIONS response should include Access-Control-Allow-Methods header"
+    );
+
+    let cors_methods = headers
+        .get("access-control-allow-methods")
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    assert!(
+        cors_methods.contains("GET"),
+        "CORS Allow-Methods should include GET (got: {})",
+        cors_methods
+    );
+    assert!(
+        cors_methods.contains("HEAD"),
+        "CORS Allow-Methods should include HEAD (got: {})",
+        cors_methods
+    );
+    assert!(
+        cors_methods.contains("OPTIONS"),
+        "CORS Allow-Methods should include OPTIONS (got: {})",
+        cors_methods
+    );
+}

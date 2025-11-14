@@ -2299,9 +2299,9 @@ if !path.starts_with("/health")
 **Objective**: Handle OPTIONS requests for CORS pre-flight checks
 
 **Tests** (3 tests):
-- [ ] Test: OPTIONS /* returns 200 OK with correct CORS headers
-- [ ] Test: OPTIONS response includes Allow: GET, HEAD, OPTIONS
-- [ ] Test: OPTIONS response includes Access-Control-Allow-Methods header
+- [x] Test: OPTIONS /* returns 200 OK with correct CORS headers
+- [x] Test: OPTIONS response includes Allow: GET, HEAD, OPTIONS
+- [x] Test: OPTIONS response includes Access-Control-Allow-Methods header
 
 **Implementation**:
 ```rust

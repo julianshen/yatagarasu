@@ -650,6 +650,34 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
+        // Handle OPTIONS requests (CORS pre-flight)
+        // OPTIONS is allowed through method validation above, now handle it specially
+        if method == "OPTIONS" {
+            tracing::debug!(
+                request_id = %ctx.request_id(),
+                path = %path,
+                "Handling OPTIONS request for CORS pre-flight"
+            );
+
+            let mut header = ResponseHeader::build(200, None)?;
+            header.insert_header("Allow", "GET, HEAD, OPTIONS")?;
+            header.insert_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")?;
+            header.insert_header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, Range",
+            )?;
+            header.insert_header("Access-Control-Max-Age", "86400")?; // 24 hours
+            header.insert_header("Content-Length", "0")?;
+
+            session
+                .write_response_header(Box::new(header), false)
+                .await?;
+            session.write_response_body(None, true).await?;
+
+            self.metrics.increment_status_count(200);
+            return Ok(true); // Short-circuit
+        }
+
         // 1. Validate URI length
         let uri_str = req.uri.to_string();
         if let Err(security_error) =
