@@ -1,0 +1,23 @@
+# Minimal test configuration for Docker testing
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "${AWS_ACCESS_KEY_TEST}"
+      secret_key: "${AWS_SECRET_KEY_TEST}"
+    auth:
+      enabled: false
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
