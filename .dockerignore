@@ -41,6 +41,7 @@ LICENSE.md
 
 # Configuration examples (except config.example.yaml which we copy explicitly)
 config.test.yaml
+config.test-docker.yaml
 config.local.yaml
 .env
 .env.*
