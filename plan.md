@@ -2200,115 +2200,165 @@ cargo test --test integration_tests
 - [ ] Test: Release workflow creates GitHub Release with changelog
 - [ ] Test: Release workflow attaches binary artifacts (Linux x86_64, Linux aarch64)
 - [ ] Test: Release workflow generates SBOM (Software Bill of Materials)
-- [ ] Test: Published images are publicly pullable: `docker pull ghcr.io/.../yatagarasu:latest`
-- [ ] Test: Published images work in production (test with docker run)
-- [ ] Test: Release notes auto-generated from commit messages since last tag
-- [ ] Test: Release includes links to docs (README, HA guide, Docker guide)
-
-**Implementation Notes**:
-- Use docker/build-push-action for multi-arch builds
-- Use docker/login-action for ghcr.io authentication
-- Use softprops/action-gh-release for GitHub Release creation
-- Include security scanning (Trivy) in release workflow
+- [ ] Test: Published images are publicly pullable: `docker pull ghcr.io/yourusername/yatagarasu:v0.4.0
+docker run -p 8080:8080 -v ./config.yaml:/etc/yatagarasu/config.yaml ghcr.io/yourusername/yatagarasu:v0.4.0
+```
 
 ---
 
-### E. Documentation & Deployment Guides
+## Phase 25: Read-Only Enforcement (Security Hardening)
 
-**Objective**: Comprehensive Docker deployment documentation
+**Goal**: Ensure the proxy strictly enforces read-only operations (GET/HEAD only) and rejects upload attempts (PUT/POST/DELETE)
 
-**Files**:
-- [ ] File: Create `docs/DOCKER.md` with Docker deployment guide
-  - Building images locally
-  - Running containers (docker run, docker-compose)
-  - Environment variable configuration
-  - Volume mounts for config and logs
-  - Health check configuration
-  - Resource limits (CPU, memory)
-  - Security best practices (non-root user, read-only filesystem)
-  - Troubleshooting common Docker issues
-- [ ] File: Create `docs/KUBERNETES.md` with Kubernetes deployment guide
-  - Deployment manifest with resource limits
-  - Service manifest (ClusterIP, LoadBalancer)
-  - ConfigMap for config.yaml
-  - Secret for AWS credentials
-  - Horizontal Pod Autoscaler (HPA) configuration
-  - Liveness and readiness probes
-  - Rolling update strategy
-  - Prometheus ServiceMonitor (if using Prometheus Operator)
-  - Ingress configuration examples
-- [ ] File: Create `.dockerignore` to exclude unnecessary files from build context
-  - target/, coverage/, .git/, *.md (except essential), test fixtures
-- [ ] File: Update `README.md` with Docker quick start section
-  - `docker pull` command
-  - `docker run` example
-  - `docker-compose up` example
-  - Link to docs/DOCKER.md for details
-- [ ] File: Update `ROADMAP.md` to mark v0.4.0 as complete
-- [ ] File: Create `scripts/release.sh` helper script for maintainers
-  - Validates version number format
-  - Updates version in Cargo.toml
-  - Creates git tag
-  - Pushes tag to trigger release workflow
+**Why Phase 25**: Currently, the proxy has a security vulnerability where PUT/POST/DELETE requests to S3 paths are treated as GET requests instead of being rejected. This phase adds proper HTTP method validation to enforce the read-only design decision.
+
+**Status**: NOT STARTED
 
 ---
 
-### F. CI/CD Quality Gates
+### Current Security Issue
 
-**Objective**: Ensure all quality standards are met before merging or releasing
+**Problem**: Lines 1398-1400 in src/proxy/mod.rs:
+```rust
+let s3_request = match ctx.method() {
+    "HEAD" => build_head_object_request(&bucket, &s3_key, &region),
+    _ => build_get_object_request(&bucket, &s3_key, &region),  // ⚠️ ANY method defaults to GET!
+};
+```
 
-**Quality Gates**:
-- [ ] Gate: All unit tests must pass (cargo test --lib)
-- [ ] Gate: All integration tests must pass (cargo test --test '*')
-- [ ] Gate: No clippy warnings (cargo clippy -- -D warnings)
-- [ ] Gate: Code is formatted (cargo fmt --check)
-- [ ] Gate: No security vulnerabilities (cargo audit)
-- [ ] Gate: Test coverage ≥90% (cargo tarpaulin)
-- [ ] Gate: Docker image builds successfully
-- [ ] Gate: Docker image size ≤100MB
-- [ ] Gate: Container healthchecks pass
-- [ ] Gate: Integration tests with MinIO pass
-- [ ] Gate: All documentation is up to date
+This means:
+- PUT /bucket/file.txt → Treated as GET (returns file instead of rejecting)
+- POST /bucket/data → Treated as GET  
+- DELETE /bucket/object → Treated as GET
+- **Security Risk**: Clients might think they're uploading but proxy silently treats as download
 
-**Branch Protection Rules** (to configure on GitHub):
-- Require status checks to pass before merging
-- Require branches to be up to date before merging
-- Require review from code owner (optional)
-- Restrict pushes to main branch (use PRs)
+**Correct Behavior**: Reject unsafe methods with 405 Method Not Allowed
 
 ---
 
-**Estimated Effort**: 4-6 days (following TDD methodology)
+### A. HTTP Method Validation
 
-**Test Count**: 50+ tests (12 Dockerfile + 11 docker-compose + 13 CI + 12 release + documentation checks)
+**Objective**: Add early method validation in request_filter to reject unsafe methods
 
-**Expected Outcome**: 
-- Production-ready Docker images (&lt;100MB) published to ghcr.io
-- Automated CI/CD pipeline ensuring code quality
-- Easy local development with docker-compose
-- Comprehensive deployment guides for Docker and Kubernetes
-- Automated releases on git tags with changelog and binaries
+**Tests** (7 tests):
+- [ ] Test: GET requests to S3 paths are allowed (returns 200 OK)
+- [ ] Test: HEAD requests to S3 paths are allowed (returns 200 OK)
+- [ ] Test: PUT requests to S3 paths return 405 Method Not Allowed
+- [ ] Test: POST requests to S3 paths return 405 Method Not Allowed (except /admin/reload)
+- [ ] Test: DELETE requests to S3 paths return 405 Method Not Allowed
+- [ ] Test: PATCH requests to S3 paths return 405 Method Not Allowed
+- [ ] Test: 405 response includes Allow header with "GET, HEAD, OPTIONS"
+
+**Implementation**:
+```rust
+// In request_filter, after extracting method (line 598)
+// But BEFORE special endpoint handling (health, ready, metrics, admin/reload)
+
+// Validate HTTP method for S3 paths (read-only proxy)
+if !path.starts_with("/health") 
+    && !path.starts_with("/ready") 
+    && !path.starts_with("/metrics")
+    && !(path == "/admin/reload" && method == "POST")
+{
+    // Only GET, HEAD, and OPTIONS are allowed for S3 operations
+    match method.as_str() {
+        "GET" | "HEAD" | "OPTIONS" => {}, // Allowed
+        _ => {
+            tracing::warn!(
+                request_id = %ctx.request_id(),
+                method = %method,
+                path = %path,
+                "Unsupported HTTP method for read-only proxy"
+            );
+
+            let mut header = ResponseHeader::build(405, None)?;
+            header.insert_header("Content-Type", "application/json")?;
+            header.insert_header("Allow", "GET, HEAD, OPTIONS")?;
+
+            let error_body = serde_json::json!({
+                "error": "Method Not Allowed",
+                "message": format!("Method {} is not allowed. This is a read-only S3 proxy. Allowed methods: GET, HEAD, OPTIONS", method),
+                "status": 405
+            }).to_string();
+
+            header.insert_header("Content-Length", error_body.len().to_string())?;
+            session.write_response_header(Box::new(header), false).await?;
+            session.write_response_body(Some(error_body.into()), true).await?;
+
+            self.metrics.increment_status_count(405);
+            return Ok(true); // Short-circuit
+        }
+    }
+}
+```
+
+---
+
+### B. OPTIONS Method Support (CORS Pre-flight)
+
+**Objective**: Handle OPTIONS requests for CORS pre-flight checks
+
+**Tests** (3 tests):
+- [ ] Test: OPTIONS /* returns 200 OK with correct CORS headers
+- [ ] Test: OPTIONS response includes Allow: GET, HEAD, OPTIONS
+- [ ] Test: OPTIONS response includes Access-Control-Allow-Methods header
+
+**Implementation**:
+```rust
+// Handle OPTIONS requests (CORS pre-flight)
+if method == "OPTIONS" {
+    let mut header = ResponseHeader::build(200, None)?;
+    header.insert_header("Allow", "GET, HEAD, OPTIONS")?;
+    header.insert_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")?;
+    header.insert_header("Access-Control-Allow-Headers", "Authorization, Content-Type, Range")?;
+    header.insert_header("Access-Control-Max-Age", "86400")?; // 24 hours
+    header.insert_header("Content-Length", "0")?;
+    
+    session.write_response_header(Box::new(header), false).await?;
+    session.write_response_body(None, true).await?;
+    
+    self.metrics.increment_status_count(200);
+    return Ok(true);
+}
+```
+
+---
+
+### C. Documentation & Testing
+
+**Tests** (5 tests):
+- [ ] Test: Attempting PUT upload returns 405 with clear error message
+- [ ] Test: Curl examples in docs work correctly (GET/HEAD only)
+- [ ] Test: Integration test: PUT to MinIO via proxy returns 405
+- [ ] Test: Security audit passes (no upload vulnerabilities)
+- [ ] Test: README clearly states "Read-Only Proxy"
+
+**Documentation Updates**:
+- [ ] Update README.md to emphasize read-only nature
+- [ ] Add "Unsupported Operations" section to docs
+- [ ] Update API examples to show only GET/HEAD
+- [ ] Add troubleshooting for "why can't I upload?" FAQ
+
+---
+
+**Total Tests**: 15 tests
+**Estimated Effort**: 0.5-1 day
+**Dependencies**: None (can be done immediately)
+**Priority**: HIGH (security issue)
 
 **Verification**:
 ```bash
-# Build and test locally
-docker build -t yatagarasu:test .
-docker-compose up -d
-curl http://localhost:8080/health
-curl http://localhost:9090/metrics
+# Should succeed
+curl -I http://localhost:8080/public/hello.txt  # HEAD
+curl http://localhost:8080/public/hello.txt     # GET
 
-# Verify CI passes
-git push origin feature-branch
-# Check GitHub Actions UI for green checkmarks
+# Should return 405 Method Not Allowed
+curl -X PUT http://localhost:8080/public/file.txt -d "data"
+curl -X POST http://localhost:8080/public/upload -d "data"
+curl -X DELETE http://localhost:8080/public/file.txt
 
-# Test release (maintainers only)
-git tag v0.4.0
-git push origin v0.4.0
-# Check GitHub Releases page and ghcr.io for published image
-
-# Pull and run published image
-docker pull ghcr.io/yourusername/yatagarasu:v0.4.0
-docker run -p 8080:8080 -v ./config.yaml:/etc/yatagarasu/config.yaml ghcr.io/yourusername/yatagarasu:v0.4.0
+# Should succeed (admin endpoint exception)
+curl -X POST http://localhost:8080/admin/reload -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
