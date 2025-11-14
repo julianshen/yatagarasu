@@ -165,6 +165,104 @@ metrics:
   port: 9090
 ```
 
+### High Availability Configuration (v0.3.0+)
+
+Yatagarasu supports **automatic failover** with replica sets for production-grade high availability. Configure multiple S3 replicas (primary + backup) per bucket with priority-based automatic failover.
+
+**Features**:
+- 🔄 **Automatic Failover**: Circuit breaker-based health checking with automatic replica selection
+- 📊 **Per-Replica Metrics**: Track request counts, latencies, errors, and failover events per replica
+- 🏥 **Health Monitoring**: `/ready` endpoint shows per-replica health status
+- ⏱️ **Configurable Timeouts**: Set connection and request timeouts per replica
+- 🔙 **Backward Compatible**: Legacy single-bucket configs continue to work
+
+**Configuration Example**:
+
+```yaml
+server:
+  address: "0.0.0.0:8080"
+  threads: 4
+
+buckets:
+  - name: "products"
+    path_prefix: "/products"
+    s3:
+      # Legacy fields (required for backward compatibility)
+      bucket: "products-us-west"
+      region: "us-west-2"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+
+      # New replica set configuration (Phase 23)
+      replicas:
+        - name: "primary-us-west"
+          bucket: "products-us-west"
+          region: "us-west-2"
+          access_key: "${AWS_ACCESS_KEY_US_WEST}"
+          secret_key: "${AWS_SECRET_KEY_US_WEST}"
+          priority: 1        # Lower = higher priority
+          timeout: 5         # Connection/request timeout in seconds
+
+        - name: "backup-us-east"
+          bucket: "products-us-east"
+          region: "us-east-1"
+          access_key: "${AWS_ACCESS_KEY_US_EAST}"
+          secret_key: "${AWS_SECRET_KEY_US_EAST}"
+          priority: 2        # Backup replica (used when primary fails)
+          timeout: 5
+
+        - name: "backup-eu-central"
+          bucket: "products-eu"
+          region: "eu-central-1"
+          access_key: "${AWS_ACCESS_KEY_EU}"
+          secret_key: "${AWS_SECRET_KEY_EU}"
+          endpoint: "https://s3.eu-central-1.amazonaws.com"  # Optional custom endpoint
+          priority: 3        # Third fallback
+          timeout: 10
+
+      # Optional: Circuit breaker per bucket (applies to replica health checks)
+      circuit_breaker:
+        failure_threshold: 5       # Open circuit after 5 failures
+        success_threshold: 2       # Close circuit after 2 successes
+        timeout_seconds: 30        # Half-open state timeout
+
+metrics:
+  enabled: true
+  port: 9090
+```
+
+**How It Works**:
+1. Each request selects the highest-priority **healthy** replica (circuit breaker not open)
+2. If primary fails (circuit breaker open), automatically uses next healthy replica
+3. Circuit breakers automatically recover after timeout (half-open → closed on success)
+4. Per-replica metrics track which replica serves each request
+
+**Observability**:
+
+```bash
+# Check overall health
+curl http://localhost:8080/health
+
+# Check per-replica health
+curl http://localhost:8080/ready
+# Response: {"status":"ready","backends":{"products":{"status":"ready","replicas":{"primary-us-west":"healthy","backup-us-east":"healthy"}}}}
+
+# View per-replica metrics
+curl http://localhost:9090/metrics | grep replica
+# http_requests_by_replica_total{bucket="products",replica="primary-us-west"} 1523
+# http_requests_by_replica_total{bucket="products",replica="backup-us-east"} 47
+# replica_health{bucket="products",replica="primary-us-west"} 1
+# replica_failovers_total{bucket="products",from="primary-us-west",to="backup-us-east"} 3
+```
+
+**Use Cases**:
+- **Multi-Region Replication**: Automatic failover between AWS regions
+- **Cross-Cloud Replication**: Primary on AWS, backup on MinIO/Wasabi
+- **Disaster Recovery**: Automatic failover during S3 outages
+- **Load Balancing**: Distribute traffic across replicas (future enhancement)
+
+See [docs/HA_BUCKET_REPLICATION.md](docs/HA_BUCKET_REPLICATION.md) for comprehensive guide.
+
 ### Example Requests
 
 The HTTP server is now fully functional! You can:

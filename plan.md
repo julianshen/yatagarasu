@@ -2072,9 +2072,9 @@ ERROR All replicas failed
 
 **Why**: Guide users on configuring HA bucket replication
 
-- [ ] File: Update `README.md` with replica set example
-- [ ] File: Create `docs/HA_BUCKET_REPLICATION.md` user guide
-- [ ] File: Update `config.example.yaml` with replica examples
+- [x] File: Update `README.md` with replica set example (HA section added with config, observability, use cases)
+- [x] File: Create `docs/HA_BUCKET_REPLICATION.md` user guide (600+ lines: architecture, ops guide, troubleshooting, FAQ)
+- [x] File: Update `config.example.yaml` with replica examples (Example 5: HA with 3 replicas + circuit breaker)
 
 **Estimated Effort**: 3-5 days (following TDD methodology)
 

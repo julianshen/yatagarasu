@@ -99,6 +99,58 @@ buckets:
     auth:
       enabled: false
 
+  # Example 5: High Availability with Replica Sets (v0.3.0+)
+  # Configure multiple S3 replicas for automatic failover
+  - name: "products-ha"
+    path_prefix: "/products"
+    s3:
+      # Legacy fields (required for backward compatibility)
+      bucket: "products-primary"
+      region: "us-west-2"
+      access_key: "${AWS_ACCESS_KEY_PRIMARY}"
+      secret_key: "${AWS_SECRET_KEY_PRIMARY}"
+
+      # Replica set configuration (Phase 23)
+      # Replicas are selected by priority (lower = higher priority)
+      # Circuit breaker automatically detects unhealthy replicas
+      replicas:
+        # Primary replica (highest priority)
+        - name: "primary-us-west"
+          bucket: "products-primary"
+          region: "us-west-2"
+          access_key: "${AWS_ACCESS_KEY_PRIMARY}"
+          secret_key: "${AWS_SECRET_KEY_PRIMARY}"
+          priority: 1        # Lower = higher priority
+          timeout: 5         # Connection/request timeout in seconds
+
+        # Backup replica in different region
+        - name: "backup-us-east"
+          bucket: "products-backup"
+          region: "us-east-1"
+          access_key: "${AWS_ACCESS_KEY_BACKUP}"
+          secret_key: "${AWS_SECRET_KEY_BACKUP}"
+          priority: 2        # Used when primary fails
+          timeout: 8         # Higher timeout for cross-region
+
+        # Optional: Third fallback replica (e.g., different cloud provider)
+        - name: "backup-minio"
+          bucket: "products"
+          region: "us-east-1"
+          access_key: "${MINIO_ACCESS_KEY}"
+          secret_key: "${MINIO_SECRET_KEY}"
+          endpoint: "https://minio.example.com:9000"  # Custom S3-compatible endpoint
+          priority: 3
+          timeout: 10
+
+      # Circuit breaker configuration (optional, applies to replica health)
+      circuit_breaker:
+        failure_threshold: 5       # Open circuit after N failures
+        success_threshold: 2       # Close circuit after N successes in half-open
+        timeout_seconds: 30        # Half-open state timeout
+
+    auth:
+      enabled: false
+
 # Logging configuration
 logging:
   level: "info"     # trace, debug, info, warn, error
