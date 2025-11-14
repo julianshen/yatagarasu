@@ -2327,17 +2327,17 @@ if method == "OPTIONS" {
 ### C. Documentation & Testing
 
 **Tests** (5 tests):
-- [ ] Test: Attempting PUT upload returns 405 with clear error message
-- [ ] Test: Curl examples in docs work correctly (GET/HEAD only)
-- [ ] Test: Integration test: PUT to MinIO via proxy returns 405
-- [ ] Test: Security audit passes (no upload vulnerabilities)
-- [ ] Test: README clearly states "Read-Only Proxy"
+- [x] Test: Attempting PUT upload returns 405 with clear error message
+- [x] Test: Curl examples in docs work correctly (GET/HEAD only)
+- [x] Test: Integration test: PUT to MinIO via proxy returns 405
+- [x] Test: Security audit passes (no upload vulnerabilities)
+- [x] Test: README clearly states "Read-Only Proxy"
 
 **Documentation Updates**:
-- [ ] Update README.md to emphasize read-only nature
-- [ ] Add "Unsupported Operations" section to docs
-- [ ] Update API examples to show only GET/HEAD
-- [ ] Add troubleshooting for "why can't I upload?" FAQ
+- [x] Update README.md to emphasize read-only nature
+- [x] Add "Unsupported Operations" section to docs
+- [x] Update API examples to show only GET/HEAD
+- [x] Add troubleshooting for "why can't I upload?" FAQ
 
 ---
 

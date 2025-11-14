@@ -8,7 +8,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-98.43%25-brightgreen.svg)](coverage/)
 [![Status](https://img.shields.io/badge/status-Production%20Ready%20v0.3.1-brightgreen.svg)](IMPLEMENTATION_STATUS.md)
 
-A high-performance S3 proxy built with Cloudflare's Pingora framework and Rust, providing intelligent routing, multi-bucket support, and flexible JWT authentication.
+A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framework and Rust, providing intelligent routing, multi-bucket support, and flexible JWT authentication for secure content delivery.
 
 ## 🎉 DEVELOPMENT STATUS
 
@@ -62,6 +62,7 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed technical 
 Yatagarasu is a reimplementation of [s3-envoy-proxy](https://github.com/julianshen/s3-envoy-proxy) using modern Rust async architecture. It provides:
 
 - 🚀 **High Performance**: 70% lower CPU usage compared to traditional proxies (via Pingora)
+- 📖 **Read-Only Operations**: Secure content delivery with GET, HEAD, and OPTIONS support (no uploads/modifications)
 - 🗂️ **Multi-Bucket Routing**: Map different S3 buckets to different URL paths with isolated credentials
 - 🔐 **Flexible JWT Auth**: Optional authentication with multiple token sources (header, query, custom)
 - 🎯 **Custom Claims**: Verify JWT claims with configurable logic (role, tenant, etc.)
@@ -70,6 +71,27 @@ Yatagarasu is a reimplementation of [s3-envoy-proxy](https://github.com/juliansh
 - 🧪 **Well-Tested**: >90% test coverage following TDD principles
 
 **Name Origin**: Yatagarasu (八咫烏) is the three-legged crow in Japanese mythology that serves as a divine messenger and guide. Like its namesake, this proxy guides and securely routes requests to the appropriate S3 buckets.
+
+### Supported Operations
+
+✅ **Allowed HTTP Methods**:
+- `GET` - Retrieve objects from S3
+- `HEAD` - Get object metadata without body
+- `OPTIONS` - CORS pre-flight requests
+
+❌ **Unsupported Operations** (returns 405 Method Not Allowed):
+- `PUT` - Upload files
+- `POST` - Create/upload data
+- `DELETE` - Remove objects
+- `PATCH` - Modify objects
+
+**Why Read-Only?** Yatagarasu is designed for secure content delivery, not data management. This design:
+- Reduces attack surface (no upload vulnerabilities)
+- Simplifies proxy logic and improves performance
+- Enforces principle of least privilege
+- Separates content delivery from content management
+
+For file uploads, use direct S3 access or a dedicated upload service with proper validation and virus scanning.
 
 ## Quick Start
 
