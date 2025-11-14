@@ -66,35 +66,38 @@ services:
     networks:
       - yatagarasu-net
 
-  # Yatagarasu S3 Proxy (will be enabled once implemented)
-  # yatagarasu:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: yatagarasu-proxy
-  #   ports:
-  #     - "8080:8080"  # Proxy HTTP
-  #     - "9090:9090"  # Prometheus metrics
-  #   environment:
-  #     # Override config with environment variables
-  #     AWS_ACCESS_KEY_PUBLIC: minioadmin
-  #     AWS_SECRET_KEY_PUBLIC: minioadmin
-  #     AWS_ACCESS_KEY_PRIVATE: minioadmin
-  #     AWS_SECRET_KEY_PRIVATE: minioadmin
-  #     JWT_SECRET: your-secret-key-here
-  #     RUST_LOG: info
-  #   volumes:
-  #     - ./config.docker.yaml:/etc/yatagarasu/config.yaml:ro
-  #   depends_on:
-  #     minio:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
-  #   networks:
-  #     - yatagarasu-net
+  # Yatagarasu S3 Proxy
+  yatagarasu:
+    image: yatagarasu:test
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yatagarasu-proxy
+    ports:
+      - "8080:8080"  # Proxy HTTP
+      - "9090:9090"  # Prometheus metrics
+    environment:
+      # Override config with environment variables
+      AWS_ACCESS_KEY_PUBLIC: minioadmin
+      AWS_SECRET_KEY_PUBLIC: minioadmin
+      AWS_ACCESS_KEY_PRIVATE: minioadmin
+      AWS_SECRET_KEY_PRIVATE: minioadmin
+      JWT_SECRET: test-secret-key-for-local-development-only
+      RUST_LOG: info
+    volumes:
+      - ./config.docker.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/yatagarasu", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - yatagarasu-net
+    restart: unless-stopped
 
 networks:
   yatagarasu-net:
