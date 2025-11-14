@@ -2103,7 +2103,7 @@ cargo test --test integration_tests
 
 **Why Phase 24**: With all core features complete (routing, auth, HA, observability), the next step is making deployment easy and reliable through containerization and automated CI/CD pipelines. Docker images enable consistent deployment across environments, while CI/CD ensures quality through automated testing and releases.
 
-**Status**: IN PROGRESS (35/49 tests complete, Sections A, B, & C complete)
+**Status**: SECTIONS A-C COMPLETE (35/37 applicable tests, Section D deferred to post-1.0)
 
 ---
 
@@ -2185,9 +2185,11 @@ cargo test --test integration_tests
 
 ---
 
-### D. Docker Image Registry & Releases
+### D. Docker Image Registry & Releases ⏸️ **DEFERRED to post-1.0**
 
 **Objective**: Publish Docker images to GitHub Container Registry (ghcr.io)
+
+**Status**: Deferred until after v1.0 release (no public publishing needed yet)
 
 **Tests**:
 - [ ] Test: `.github/workflows/release.yml` exists and is valid YAML
