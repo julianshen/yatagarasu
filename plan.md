@@ -2097,6 +2097,220 @@ cargo test --test integration_tests
 
 ---
 
+## Phase 24: Docker Images & CI/CD Automation (v0.4.0)
+
+**Goal**: Containerize the proxy and automate build, test, and release processes for production deployment
+
+**Why Phase 24**: With all core features complete (routing, auth, HA, observability), the next step is making deployment easy and reliable through containerization and automated CI/CD pipelines. Docker images enable consistent deployment across environments, while CI/CD ensures quality through automated testing and releases.
+
+**Status**: NOT STARTED
+
+---
+
+### A. Multi-Stage Dockerfile Creation (Production-Ready Image)
+
+**Objective**: Create optimized Docker image with minimal attack surface and size
+
+**Tests**:
+- [ ] Test: Dockerfile builds successfully with `docker build -t yatagarasu:test .`
+- [ ] Test: Built image size is under 100MB (multi-stage build optimization)
+- [ ] Test: Image uses distroless/cc runtime (minimal attack surface, no shell)
+- [ ] Test: Binary is statically linked or has minimal dynamic dependencies
+- [ ] Test: Image runs as non-root user (security best practice)
+- [ ] Test: Image includes health check command (`HEALTHCHECK` directive)
+- [ ] Test: Image respects signals (SIGTERM for graceful shutdown)
+- [ ] Test: Image exposes correct ports (8080 for HTTP, 9090 for metrics)
+- [ ] Test: Image accepts config via volume mount at /etc/yatagarasu/config.yaml
+- [ ] Test: Image accepts environment variables for config overrides
+- [ ] Test: Image logs to stdout in JSON format (container-friendly)
+- [ ] Test: Image works with mounted config: `docker run -v ./config.yaml:/etc/yatagarasu/config.yaml yatagarasu:test`
+
+**Implementation Notes**:
+- Stage 1 (builder): rust:1.70-slim, cargo build --release, strip binary
+- Stage 2 (runtime): gcr.io/distroless/cc-debian12, copy binary only
+- Use multi-arch builds (amd64, arm64) for broader deployment
+- Follow Docker best practices: layer caching, COPY before RUN, .dockerignore
+
+---
+
+### B. Docker Compose for Local Development & Testing
+
+**Objective**: Provide easy local testing environment with MinIO
+
+**Tests**:
+- [ ] Test: `docker-compose up` starts both yatagarasu and MinIO services
+- [ ] Test: MinIO console accessible at http://localhost:9001
+- [ ] Test: Yatagarasu proxy accessible at http://localhost:8080
+- [ ] Test: Yatagarasu metrics endpoint accessible at http://localhost:9090/metrics
+- [ ] Test: Yatagarasu health endpoints return 200 OK (/health, /ready)
+- [ ] Test: Can upload test file to MinIO and retrieve via proxy
+- [ ] Test: docker-compose includes volume mounts for config and test data
+- [ ] Test: docker-compose uses .env file for credentials (not hardcoded)
+- [ ] Test: docker-compose includes healthchecks for both services
+- [ ] Test: `docker-compose down` cleans up all resources (no orphaned containers/volumes)
+- [ ] Test: docker-compose supports hot reload (config changes via volume)
+
+**Deliverables**:
+- `docker-compose.yml` - Full development environment
+- `docker-compose.test.yml` - Minimal test setup (for CI)
+- `.env.example` - Example environment variables
+- `scripts/docker-setup.sh` - Script to initialize test data in MinIO
+
+---
+
+### C. GitHub Actions CI Pipeline
+
+**Objective**: Automate testing, linting, and quality checks on every push/PR
+
+**Tests**:
+- [ ] Test: `.github/workflows/ci.yml` exists and is valid YAML
+- [ ] Test: CI runs `cargo test --all` and all tests pass
+- [ ] Test: CI runs `cargo clippy -- -D warnings` and no warnings reported
+- [ ] Test: CI runs `cargo fmt --check` and code is properly formatted
+- [ ] Test: CI runs `cargo audit` for security vulnerabilities
+- [ ] Test: CI caches Cargo dependencies (faster subsequent runs)
+- [ ] Test: CI runs on push to main and all pull requests
+- [ ] Test: CI uses matrix strategy for multiple Rust versions (stable, beta)
+- [ ] Test: CI uploads test results as artifacts
+- [ ] Test: CI fails fast if critical tests fail (don't run remaining jobs)
+- [ ] Test: CI includes integration tests with docker-compose and MinIO
+- [ ] Test: CI generates and uploads coverage report (cargo tarpaulin)
+- [ ] Test: CI enforces >90% coverage threshold (fails if below)
+
+**Implementation Notes**:
+- Use actions/cache for Cargo registry and build artifacts
+- Use rust-toolchain file for version pinning
+- Run unit tests, integration tests, and E2E tests in separate jobs
+- Integration tests use docker-compose.test.yml with MinIO
+
+---
+
+### D. Docker Image Registry & Releases
+
+**Objective**: Publish Docker images to GitHub Container Registry (ghcr.io)
+
+**Tests**:
+- [ ] Test: `.github/workflows/release.yml` exists and is valid YAML
+- [ ] Test: Release workflow triggers on git tags matching `v*.*.*` pattern
+- [ ] Test: Release workflow builds Docker images for amd64 and arm64
+- [ ] Test: Release workflow tags images with version (e.g., `v0.4.0`) and `latest`
+- [ ] Test: Release workflow pushes images to ghcr.io/yourusername/yatagarasu
+- [ ] Test: Release workflow creates GitHub Release with changelog
+- [ ] Test: Release workflow attaches binary artifacts (Linux x86_64, Linux aarch64)
+- [ ] Test: Release workflow generates SBOM (Software Bill of Materials)
+- [ ] Test: Published images are publicly pullable: `docker pull ghcr.io/.../yatagarasu:latest`
+- [ ] Test: Published images work in production (test with docker run)
+- [ ] Test: Release notes auto-generated from commit messages since last tag
+- [ ] Test: Release includes links to docs (README, HA guide, Docker guide)
+
+**Implementation Notes**:
+- Use docker/build-push-action for multi-arch builds
+- Use docker/login-action for ghcr.io authentication
+- Use softprops/action-gh-release for GitHub Release creation
+- Include security scanning (Trivy) in release workflow
+
+---
+
+### E. Documentation & Deployment Guides
+
+**Objective**: Comprehensive Docker deployment documentation
+
+**Files**:
+- [ ] File: Create `docs/DOCKER.md` with Docker deployment guide
+  - Building images locally
+  - Running containers (docker run, docker-compose)
+  - Environment variable configuration
+  - Volume mounts for config and logs
+  - Health check configuration
+  - Resource limits (CPU, memory)
+  - Security best practices (non-root user, read-only filesystem)
+  - Troubleshooting common Docker issues
+- [ ] File: Create `docs/KUBERNETES.md` with Kubernetes deployment guide
+  - Deployment manifest with resource limits
+  - Service manifest (ClusterIP, LoadBalancer)
+  - ConfigMap for config.yaml
+  - Secret for AWS credentials
+  - Horizontal Pod Autoscaler (HPA) configuration
+  - Liveness and readiness probes
+  - Rolling update strategy
+  - Prometheus ServiceMonitor (if using Prometheus Operator)
+  - Ingress configuration examples
+- [ ] File: Create `.dockerignore` to exclude unnecessary files from build context
+  - target/, coverage/, .git/, *.md (except essential), test fixtures
+- [ ] File: Update `README.md` with Docker quick start section
+  - `docker pull` command
+  - `docker run` example
+  - `docker-compose up` example
+  - Link to docs/DOCKER.md for details
+- [ ] File: Update `ROADMAP.md` to mark v0.4.0 as complete
+- [ ] File: Create `scripts/release.sh` helper script for maintainers
+  - Validates version number format
+  - Updates version in Cargo.toml
+  - Creates git tag
+  - Pushes tag to trigger release workflow
+
+---
+
+### F. CI/CD Quality Gates
+
+**Objective**: Ensure all quality standards are met before merging or releasing
+
+**Quality Gates**:
+- [ ] Gate: All unit tests must pass (cargo test --lib)
+- [ ] Gate: All integration tests must pass (cargo test --test '*')
+- [ ] Gate: No clippy warnings (cargo clippy -- -D warnings)
+- [ ] Gate: Code is formatted (cargo fmt --check)
+- [ ] Gate: No security vulnerabilities (cargo audit)
+- [ ] Gate: Test coverage ≥90% (cargo tarpaulin)
+- [ ] Gate: Docker image builds successfully
+- [ ] Gate: Docker image size ≤100MB
+- [ ] Gate: Container healthchecks pass
+- [ ] Gate: Integration tests with MinIO pass
+- [ ] Gate: All documentation is up to date
+
+**Branch Protection Rules** (to configure on GitHub):
+- Require status checks to pass before merging
+- Require branches to be up to date before merging
+- Require review from code owner (optional)
+- Restrict pushes to main branch (use PRs)
+
+---
+
+**Estimated Effort**: 4-6 days (following TDD methodology)
+
+**Test Count**: 50+ tests (12 Dockerfile + 11 docker-compose + 13 CI + 12 release + documentation checks)
+
+**Expected Outcome**: 
+- Production-ready Docker images (&lt;100MB) published to ghcr.io
+- Automated CI/CD pipeline ensuring code quality
+- Easy local development with docker-compose
+- Comprehensive deployment guides for Docker and Kubernetes
+- Automated releases on git tags with changelog and binaries
+
+**Verification**:
+```bash
+# Build and test locally
+docker build -t yatagarasu:test .
+docker-compose up -d
+curl http://localhost:8080/health
+curl http://localhost:9090/metrics
+
+# Verify CI passes
+git push origin feature-branch
+# Check GitHub Actions UI for green checkmarks
+
+# Test release (maintainers only)
+git tag v0.4.0
+git push origin v0.4.0
+# Check GitHub Releases page and ghcr.io for published image
+
+# Pull and run published image
+docker pull ghcr.io/yourusername/yatagarasu:v0.4.0
+docker run -p 8080:8080 -v ./config.yaml:/etc/yatagarasu/config.yaml ghcr.io/yourusername/yatagarasu:v0.4.0
+```
+
+---
+
 ## Notes and Decisions
 
 ### Design Decisions
