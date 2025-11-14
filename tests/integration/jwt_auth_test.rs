@@ -18,12 +18,7 @@ use super::test_harness::ProxyTestHarness;
 static INIT: Once = Once::new();
 
 fn init_logging() {
-    INIT.call_once(|| {
-        let _ = env_logger::builder()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Debug)
-            .try_init();
-    });
+    INIT.call_once(|| {});
 }
 
 // JWT Claims structure for testing

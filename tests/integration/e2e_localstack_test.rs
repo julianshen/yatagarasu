@@ -10,12 +10,7 @@ use testcontainers_modules::localstack::LocalStack;
 static INIT: Once = Once::new();
 
 fn init_logging() {
-    INIT.call_once(|| {
-        let _ = env_logger::builder()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Debug)
-            .try_init();
-    });
+    INIT.call_once(|| {});
 }
 
 #[test]
@@ -2875,7 +2870,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_concurrent_requests_to_different_buckets() {
-    env_logger::init();
     log::info!("=== Test 18: Concurrent Requests to Different Buckets ===");
 
     let docker = Cli::default();
@@ -3235,7 +3229,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_502_invalid_s3_credentials() {
-    env_logger::init();
     log::info!("=== Test 19: Invalid S3 Credentials Return 502 ===");
 
     let docker = Cli::default();
@@ -3447,7 +3440,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_404_bucket_does_not_exist() {
-    env_logger::init();
     log::info!("=== Test 20: S3 Bucket Doesn't Exist Returns 404 ===");
 
     let docker = Cli::default();
@@ -3605,7 +3597,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_404_unknown_path() {
-    env_logger::init();
     log::info!("=== Test 21: Unknown/Unmapped Path Returns 404 ===");
 
     let docker = Cli::default();
@@ -3857,7 +3848,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_502_or_503_endpoint_unreachable() {
-    env_logger::init();
     log::info!("=== Test 22: S3 Endpoint Unreachable Returns 502/503 ===");
 
     log::info!("⚠️ NOT starting LocalStack (intentionally)");
@@ -4006,12 +3996,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_http_validation_boundary() {
-    env_logger::builder()
-        .is_test(true)
-        .filter_level(log::LevelFilter::Info)
-        .try_init()
-        .ok();
-
     log::info!("=== Test 23: HTTP Validation Boundary (Pingora vs Application) ===");
 
     let docker = Cli::default();
@@ -4296,12 +4280,6 @@ jwt:
 #[test]
 #[ignore]
 fn test_proxy_large_file_streaming() {
-    env_logger::builder()
-        .is_test(true)
-        .filter_level(log::LevelFilter::Info)
-        .try_init()
-        .ok();
-
     log::info!("=== Test 24: Large File Streaming (100MB) ===");
 
     let docker = Cli::default();
@@ -4560,12 +4538,6 @@ buckets:
 #[test]
 #[ignore]
 fn test_proxy_concurrent_gets_same_file() {
-    env_logger::builder()
-        .is_test(true)
-        .filter_level(log::LevelFilter::Info)
-        .try_init()
-        .ok();
-
     log::info!("=== Test 25: Concurrent GETs to Same File ===");
 
     let docker = Cli::default();
