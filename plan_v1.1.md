@@ -115,11 +115,11 @@
 - [x] Test: Can parse max_item_size_mb (default 10MB)
 - [x] Test: Can parse max_cache_size_mb (default 1024MB = 1GB)
 - [x] Test: Can parse default_ttl_seconds (default 3600 = 1 hour)
-- [ ] Test: Can parse max_item_size in bytes (10MB = 10485760 bytes)
-- [ ] Test: Can parse max_cache_size in bytes (1GB = 1073741824 bytes)
-- [ ] Test: Rejects negative max_item_size
-- [ ] Test: Rejects negative max_cache_size
-- [ ] Test: Rejects negative default_ttl
+- [x] Test: Can parse max_item_size in bytes (10MB = 10485760 bytes)
+- [x] Test: Can parse max_cache_size in bytes (1GB = 1073741824 bytes)
+- [x] Test: Rejects negative max_item_size (N/A - u64 type prevents negative values)
+- [x] Test: Rejects negative max_cache_size (N/A - u64 type prevents negative values)
+- [x] Test: Rejects negative default_ttl (N/A - u64 type prevents negative values)
 - [ ] Test: Rejects max_item_size > max_cache_size
 
 ### Disk Cache Configuration

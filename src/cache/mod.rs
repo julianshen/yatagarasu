@@ -42,6 +42,18 @@ fn default_ttl_seconds() -> u64 {
     3600 // 1 hour
 }
 
+impl MemoryCacheConfig {
+    /// Convert max_item_size_mb to bytes
+    pub fn max_item_size_bytes(&self) -> u64 {
+        self.max_item_size_mb * 1024 * 1024
+    }
+
+    /// Convert max_cache_size_mb to bytes
+    pub fn max_cache_size_bytes(&self) -> u64 {
+        self.max_cache_size_mb * 1024 * 1024
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +196,41 @@ memory:
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.memory.default_ttl_seconds, 7200);
+    }
+
+    #[test]
+    fn test_can_parse_max_item_size_in_bytes() {
+        // Test: Can parse max_item_size in bytes (10MB = 10485760 bytes)
+        let config = MemoryCacheConfig::default();
+        assert_eq!(config.max_item_size_bytes(), 10 * 1024 * 1024);
+        assert_eq!(config.max_item_size_bytes(), 10485760);
+
+        // Test custom value
+        let yaml = r#"
+enabled: true
+memory:
+  max_item_size_mb: 20
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.memory.max_item_size_bytes(), 20 * 1024 * 1024);
+        assert_eq!(config.memory.max_item_size_bytes(), 20971520);
+    }
+
+    #[test]
+    fn test_can_parse_max_cache_size_in_bytes() {
+        // Test: Can parse max_cache_size in bytes (1GB = 1073741824 bytes)
+        let config = MemoryCacheConfig::default();
+        assert_eq!(config.max_cache_size_bytes(), 1024 * 1024 * 1024);
+        assert_eq!(config.max_cache_size_bytes(), 1073741824);
+
+        // Test custom value
+        let yaml = r#"
+enabled: true
+memory:
+  max_cache_size_mb: 2048
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.memory.max_cache_size_bytes(), 2048 * 1024 * 1024);
+        assert_eq!(config.memory.max_cache_size_bytes(), 2147483648);
     }
 }
