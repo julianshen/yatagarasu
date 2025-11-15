@@ -386,168 +386,149 @@ pub trait Cache: Send + Sync {
 
 ---
 
-# PHASE 27: In-Memory LRU Cache Implementation (Week 1-2)
+# PHASE 27: In-Memory Cache Implementation with Moka (Week 1-2)
 
-**Goal**: Implement production-ready in-memory LRU cache
-**Deliverable**: Memory cache stores/retrieves entries, enforces size limits, evicts LRU
-**Verification**: `cargo test` passes, integration tests with cache hit/miss
+**Goal**: Wrap moka cache library to implement production-ready in-memory cache  
+**Deliverable**: Memory cache stores/retrieves entries, enforces size limits, uses TinyLFU eviction  
+**Verification**: `cargo test` passes, integration tests demonstrate >80% hit rate  
+**Approach**: Use battle-tested `moka` library instead of building from scratch
 
-## 27.1: LRU Data Structure Setup
+**Why Moka?**
+- Production-proven (used by crates.io with 85% hit rate)
+- Built-in async support for Tokio
+- TinyLFU admission policy (better hit rates than pure LRU)
+- Thread-safe concurrent hash table (no manual locking needed)
+- Size-aware eviction with custom weigher functions
+- Built-in TTL/TTI support
 
-### Dependencies
-- [ ] Test: Add `lru` crate to Cargo.toml
-- [ ] Test: Can import LruCache from lru crate
-- [ ] Test: Add `parking_lot` crate for better RwLock
-- [ ] Test: Can import RwLock from parking_lot
+---
 
-### MemoryCache Structure
+## 27.1: Dependencies & Moka Setup
+
+### Add Moka Dependency
+- [ ] Test: Add `moka = { version = "0.12", features = ["future"] }` to Cargo.toml
+- [ ] Test: Can import `moka::future::Cache`
+- [ ] Test: Can import `moka::notification::RemovalCause`
+- [ ] Test: Moka compiles without errors
+
+### Understand Moka's API
+- [ ] Test: Can create basic moka::future::Cache
+- [ ] Test: Can call get() and insert() on moka cache
+- [ ] Test: Can configure max_capacity on builder
+- [ ] Test: Can configure time_to_live on builder
+- [ ] Test: Moka cache is Send + Sync
+
+---
+
+## 27.2: MemoryCache Wrapper Structure
+
+### MemoryCache Structure Definition
 - [ ] Test: Can create MemoryCache struct
-- [ ] Test: MemoryCache contains LruCache for entries
-- [ ] Test: MemoryCache contains config (max sizes, TTL)
-- [ ] Test: MemoryCache contains stats (hits, misses, evictions)
-- [ ] Test: MemoryCache wrapped in Arc<RwLock<>> for thread safety
+- [ ] Test: MemoryCache contains moka::future::Cache<CacheKey, CacheEntry>
+- [ ] Test: MemoryCache contains Arc<AtomicU64> for stats tracking
+- [ ] Test: MemoryCache contains config parameters (max sizes, TTL)
+
+### Statistics Tracking Structure
+- [ ] Test: Can create CacheStatsTracker struct
+- [ ] Test: Tracker contains AtomicU64 for hits, misses, evictions
+- [ ] Test: Tracker provides atomic increment methods
+- [ ] Test: Tracker provides snapshot method returning CacheStats
 
 ### MemoryCache Constructor
 - [ ] Test: Can create MemoryCache::new(config)
-- [ ] Test: Constructor initializes empty LRU cache
-- [ ] Test: Constructor initializes stats with zeros
-- [ ] Test: Constructor stores config parameters
-- [ ] Test: Constructor sets LRU capacity based on estimated item count
+- [ ] Test: Constructor creates moka::Cache::builder()
+- [ ] Test: Constructor sets max_capacity from config
+- [ ] Test: Constructor sets time_to_live from config
+- [ ] Test: Constructor configures weigher function
+- [ ] Test: Constructor initializes stats tracker
 
 ---
 
-## 27.2: Basic Get/Set Operations
+## 27.3: Moka Weigher Function
 
-### Get Operation (Cache Miss)
+### Custom Weigher for CacheEntry
+- [ ] Test: Can define weigher closure
+- [ ] Test: Weigher returns entry.size_bytes() as u32
+- [ ] Test: Weigher accounts for data + metadata size
+- [ ] Test: Weigher handles overflow (max = u32::MAX)
+
+### Weigher Integration
+- [ ] Test: Moka builder accepts weigher closure
+- [ ] Test: Moka respects max_capacity as total weight
+- [ ] Test: Moka evicts based on weighted size
+- [ ] Test: Can retrieve weighted_size() from moka cache
+
+---
+
+## 27.4: Basic Cache Operations (Moka Wrapper)
+
+### Get Operation
+- [ ] Test: get() calls moka.get(key).await
 - [ ] Test: get() on empty cache returns None
-- [ ] Test: get() increments miss counter
-- [ ] Test: get() on non-existent key returns None
-- [ ] Test: get() with expired entry returns None
-- [ ] Test: get() removes expired entry from cache
+- [ ] Test: get() on existing key returns Some(entry)
+- [ ] Test: get() increments hit counter on cache hit
+- [ ] Test: get() increments miss counter on cache miss
+- [ ] Test: get() returns cloned CacheEntry
 
-### Set Operation (Cache Empty)
-- [ ] Test: set() stores entry in cache
-- [ ] Test: set() increments item count
-- [ ] Test: set() updates current_size_bytes
+### Insert Operation  
+- [ ] Test: set() calls moka.insert(key, entry).await
+- [ ] Test: set() rejects entry larger than max_item_size
+- [ ] Test: set() returns CacheError::StorageFull for oversized entry
+- [ ] Test: set() stores entry successfully when within limits
+- [ ] Test: set() overwrites existing entry for same key
 - [ ] Test: Can retrieve entry immediately after set()
 
-### Get Operation (Cache Hit)
-- [ ] Test: get() on existing key returns Some(entry)
-- [ ] Test: get() increments hit counter
-- [ ] Test: get() updates last_accessed_at timestamp
-- [ ] Test: get() returns cloned data (not moved)
-- [ ] Test: get() validates entry not expired
-
-### Set Operation (Overwrite Existing)
-- [ ] Test: set() overwrites existing entry for same key
-- [ ] Test: set() updates size correctly when overwriting
-- [ ] Test: set() updates timestamp when overwriting
-- [ ] Test: Old data is freed when overwritten
-
----
-
-## 27.3: Size Enforcement
-
-### Max Item Size Enforcement
-- [ ] Test: set() rejects entry larger than max_item_size
-- [ ] Test: Returns error when entry too large
-- [ ] Test: Error message indicates max size limit
-- [ ] Test: Does not store oversized entry
-- [ ] Test: Does not update stats for rejected entry
-
-### Current Size Tracking
-- [ ] Test: current_size_bytes starts at 0
-- [ ] Test: set() increases current_size_bytes
-- [ ] Test: delete() decreases current_size_bytes
-- [ ] Test: eviction decreases current_size_bytes
-- [ ] Test: Size calculation includes entry metadata overhead
-
-### Max Cache Size Enforcement (Eviction Trigger)
-- [ ] Test: set() triggers eviction when cache full
-- [ ] Test: Eviction removes oldest (least recently used) entry
-- [ ] Test: Eviction frees space for new entry
-- [ ] Test: Eviction increments eviction counter
-- [ ] Test: Multiple evictions if single entry doesn't free enough space
-
----
-
-## 27.4: LRU Eviction Logic
-
-### LRU Ordering
-- [ ] Test: Newly set entry is most recently used
-- [ ] Test: get() updates entry to most recently used
-- [ ] Test: Oldest entry is least recently used
-- [ ] Test: Eviction removes least recently used entry
-
-### Eviction Process
-- [ ] Test: evict_lru() removes oldest entry
-- [ ] Test: evict_lru() returns size of evicted entry
-- [ ] Test: evict_lru() updates stats (eviction count, size)
-- [ ] Test: evict_lru() on empty cache does nothing
-
-### Multi-Entry Eviction
-- [ ] Test: Can evict multiple entries to free space
-- [ ] Test: Evicts entries in LRU order (oldest first)
-- [ ] Test: Stops evicting once enough space freed
-- [ ] Test: Tracks all evictions in stats
-
-### Eviction Edge Cases
-- [ ] Test: Eviction with only one entry in cache
-- [ ] Test: Eviction with all entries same size
-- [ ] Test: Eviction with entries of varying sizes
-- [ ] Test: Eviction doesn't remove the entry being added
-
----
-
-## 27.5: TTL & Expiration
-
-### TTL Assignment on Set
-- [ ] Test: set() assigns TTL from config default
-- [ ] Test: set() assigns custom TTL if provided
-- [ ] Test: set() calculates expires_at from TTL
-- [ ] Test: TTL of 0 means no expiration (cache forever)
-
-### Expiration Check on Get
-- [ ] Test: get() checks entry expiration
+### TTL Handling
+- [ ] Test: Moka automatically expires entries after TTL
 - [ ] Test: get() returns None for expired entry
-- [ ] Test: get() removes expired entry from cache
-- [ ] Test: get() updates stats (counts as miss)
-- [ ] Test: Non-expired entry returned normally
-
-### Background Expiration (Optional Cleanup)
-- [ ] Test: Can manually trigger expired entry cleanup
-- [ ] Test: cleanup_expired() scans all entries
-- [ ] Test: cleanup_expired() removes all expired entries
-- [ ] Test: cleanup_expired() updates size tracking
-- [ ] Test: cleanup_expired() updates eviction stats
+- [ ] Test: Expired entries don't count as hits
+- [ ] Test: Can set TTL of 0 for no expiration (use very long duration)
 
 ---
 
-## 27.6: Thread Safety & Concurrency
+## 27.5: Eviction Listener & Statistics
 
-### Concurrent Get Operations
-- [ ] Test: Multiple threads can get() simultaneously
-- [ ] Test: Concurrent get() operations don't corrupt data
-- [ ] Test: Concurrent get() stats are accurate
-- [ ] Test: RwLock allows concurrent reads
+### Eviction Listener Setup
+- [ ] Test: Can define eviction_listener closure
+- [ ] Test: Listener increments eviction counter
+- [ ] Test: Listener receives RemovalCause enum
+- [ ] Test: Listener tracks Size-based evictions separately from Expired
 
-### Concurrent Set Operations
-- [ ] Test: Multiple threads can set() different keys
-- [ ] Test: Concurrent set() operations don't corrupt cache
-- [ ] Test: Concurrent set() size tracking is accurate
-- [ ] Test: Write lock prevents concurrent modifications
+### Eviction Listener Integration
+- [ ] Test: Moka builder accepts eviction_listener
+- [ ] Test: Listener called when entry evicted
+- [ ] Test: Listener called when entry expires
+- [ ] Test: Listener not called on manual delete
 
-### Mixed Concurrent Operations
-- [ ] Test: Can get() while another thread set()
-- [ ] Test: Can set() while another thread get()
-- [ ] Test: Stats remain consistent under concurrent load
-- [ ] Test: No deadlocks with concurrent operations
+### Statistics Accuracy
+- [ ] Test: Hit counter increments correctly
+- [ ] Test: Miss counter increments correctly
+- [ ] Test: Eviction counter increments correctly
+- [ ] Test: Counters are thread-safe (use atomics)
 
-### Stress Test
-- [ ] Test: 100 threads performing random get/set operations
-- [ ] Test: Cache remains consistent after stress test
-- [ ] Test: Stats are accurate after stress test
-- [ ] Test: No memory leaks after stress test
+---
+
+## 27.6: Advanced Cache Operations
+
+### Delete Operation
+- [ ] Test: delete() calls moka.invalidate(key).await
+- [ ] Test: delete() removes existing entry
+- [ ] Test: delete() on non-existent key succeeds (no-op)
+- [ ] Test: delete() does not increment eviction counter
+- [ ] Test: delete() does not trigger eviction listener
+
+### Clear Operation
+- [ ] Test: clear() calls moka.invalidate_all().await
+- [ ] Test: clear() removes all entries
+- [ ] Test: clear() resets entry_count() to 0
+- [ ] Test: clear() resets weighted_size() to 0
+- [ ] Test: clear() preserves stats (hits/misses don't reset)
+
+### Maintenance Tasks
+- [ ] Test: run_pending_tasks() processes moka's background work
+- [ ] Test: Can call run_pending_tasks() to force sync
+- [ ] Test: Background tasks handle eviction
+- [ ] Test: Background tasks handle expiration
 
 ---
 
@@ -556,97 +537,143 @@ pub trait Cache: Send + Sync {
 ### Implement Cache Trait for MemoryCache
 - [ ] Test: MemoryCache implements Cache trait
 - [ ] Test: MemoryCache implements Send + Sync
-- [ ] Test: Can use MemoryCache through Cache trait object
+- [ ] Test: Can use MemoryCache through Arc<dyn Cache>
 
-### get() Implementation
-- [ ] Test: Cache::get() calls internal get logic
-- [ ] Test: Returns CacheEntry wrapped in Result
+### Cache::get() Implementation
+- [ ] Test: get() wraps moka.get().await
 - [ ] Test: Returns Ok(None) on miss
 - [ ] Test: Returns Ok(Some(entry)) on hit
-- [ ] Test: Returns Err on internal error
+- [ ] Test: Updates statistics correctly
+- [ ] Test: No errors in normal operation
 
-### set() Implementation
-- [ ] Test: Cache::set() calls internal set logic
+### Cache::set() Implementation
+- [ ] Test: set() validates entry size first
+- [ ] Test: Returns Err(StorageFull) if entry too large
+- [ ] Test: Calls moka.insert() if size valid
 - [ ] Test: Returns Ok(()) on success
-- [ ] Test: Returns Err(CacheError::StorageFull) when entry too large
-- [ ] Test: Performs eviction if needed
+- [ ] Test: Moka handles eviction automatically
 
-### delete() Implementation
-- [ ] Test: Cache::delete() removes entry
-- [ ] Test: Returns Ok(true) if entry existed
+### Cache::delete() Implementation
+- [ ] Test: delete() wraps moka.invalidate()
+- [ ] Test: Returns Ok(true) if entry existed (check with contains_key first)
 - [ ] Test: Returns Ok(false) if entry didn't exist
-- [ ] Test: Updates size tracking on delete
-- [ ] Test: Updates item count on delete
+- [ ] Test: No statistics updates needed
 
-### clear() Implementation
-- [ ] Test: Cache::clear() removes all entries
-- [ ] Test: Resets size to 0
-- [ ] Test: Resets item count to 0
-- [ ] Test: Preserves stats (hits/misses don't reset)
+### Cache::clear() Implementation
+- [ ] Test: clear() wraps moka.invalidate_all()
+- [ ] Test: Returns Ok(()) always
+- [ ] Test: Preserves hit/miss stats
 
-### stats() Implementation
-- [ ] Test: Cache::stats() returns current statistics
-- [ ] Test: Stats include hits, misses, evictions
-- [ ] Test: Stats include current size and item count
-- [ ] Test: Stats are consistent and accurate
+### Cache::stats() Implementation
+- [ ] Test: stats() returns snapshot of counters
+- [ ] Test: Includes hits, misses, evictions
+- [ ] Test: Includes entry_count() from moka
+- [ ] Test: Includes weighted_size() from moka
+- [ ] Test: Includes max_size_bytes from config
 
 ---
 
 ## 27.8: Integration with Config
 
-### Create MemoryCache from Config
-- [ ] Test: Can create MemoryCache from CacheConfig
-- [ ] Test: Constructor extracts max_item_size from config
-- [ ] Test: Constructor extracts max_cache_size from config
-- [ ] Test: Constructor extracts default_ttl from config
-- [ ] Test: Config validation occurs before cache creation
+### MemoryCache from CacheConfig
+- [ ] Test: Can create MemoryCache::from_config(config)
+- [ ] Test: Extracts max_item_size_mb from config
+- [ ] Test: Extracts max_cache_size_mb from config
+- [ ] Test: Extracts default_ttl_seconds from config
+- [ ] Test: Converts MB to bytes for moka
+- [ ] Test: Validates config before cache creation
 
 ### Cache Factory Function
-- [ ] Test: Can create cache factory function
-- [ ] Test: Factory returns Arc<dyn Cache> trait object
-- [ ] Test: Factory creates MemoryCache when configured
-- [ ] Test: Factory creates NullCache when caching disabled
+- [ ] Test: Can create cache_factory(config) function
+- [ ] Test: Factory returns Arc<dyn Cache>
+- [ ] Test: Factory creates MemoryCache when enabled=true
+- [ ] Test: Factory creates NullCache when enabled=false
+- [ ] Test: Factory uses moka when cache_layers includes "memory"
 
 ### NullCache (No-Op Implementation)
 - [ ] Test: Can create NullCache struct
 - [ ] Test: NullCache implements Cache trait
-- [ ] Test: NullCache::get() always returns None
-- [ ] Test: NullCache::set() always succeeds (does nothing)
+- [ ] Test: NullCache::get() always returns Ok(None)
+- [ ] Test: NullCache::set() always returns Ok(())
+- [ ] Test: NullCache::delete() always returns Ok(false)
+- [ ] Test: NullCache::clear() always returns Ok(())
 - [ ] Test: NullCache::stats() returns zeros
-- [ ] Test: Used when caching disabled in config
 
 ---
 
-## 27.9: Testing & Validation
+## 27.9: Thread Safety & Concurrency
+
+### Moka's Concurrent Guarantees
+- [ ] Test: Moka cache is thread-safe by design
+- [ ] Test: Can share MemoryCache across threads
+- [ ] Test: Concurrent get() operations work correctly
+- [ ] Test: Concurrent insert() operations work correctly
+
+### Mixed Concurrent Operations
+- [ ] Test: Can get() and insert() from different threads
+- [ ] Test: Stats remain accurate under concurrent load
+- [ ] Test: No deadlocks with concurrent operations
+- [ ] Test: No race conditions in statistics tracking
+
+### Stress Test (Reduced Scope)
+- [ ] Test: 10 threads performing random get/set operations
+- [ ] Test: Cache remains consistent after stress test
+- [ ] Test: Stats are approximately accurate (within 5%)
+- [ ] Test: No panics or errors during stress test
+
+---
+
+## 27.10: Testing & Validation
 
 ### Unit Tests Summary
 - [ ] Test: All MemoryCache unit tests pass
-- [ ] Test: Test coverage >90% for cache module
+- [ ] Test: Test coverage >80% for memory cache wrapper
 - [ ] Test: No clippy warnings in cache module
 - [ ] Test: Code formatted with rustfmt
 
 ### Integration Test Setup
-- [ ] Test: Create integration test file for cache
+- [ ] Test: Create tests/cache_integration.rs
 - [ ] Test: Can create MemoryCache in integration test
-- [ ] Test: Integration test has test fixtures (sample cache entries)
+- [ ] Test: Test fixtures create realistic CacheEntry objects
 
 ### Integration Tests - Basic Operations
 - [ ] Test: Can store and retrieve 100 different entries
 - [ ] Test: Cache hit rate improves with repeated access
-- [ ] Test: LRU eviction works with realistic workload
+- [ ] Test: Eviction works when cache fills up
 - [ ] Test: TTL expiration works end-to-end
+- [ ] Test: Statistics tracking is accurate
+
+### Integration Tests - Size Management
+- [ ] Test: Rejects entries larger than max_item_size
+- [ ] Test: Evicts entries when total size exceeds max_cache_size
+- [ ] Test: Weighted size calculation is accurate
+- [ ] Test: Can fill cache to ~90% capacity
 
 ### Integration Tests - Performance
-- [ ] Test: get() latency <1ms for cached entries
-- [ ] Test: set() latency <1ms for normal entries
-- [ ] Test: Cache handles 10,000 entries efficiently
+- [ ] Test: get() latency <1ms P95 for cached entries
+- [ ] Test: insert() latency <1ms P95 for normal entries
+- [ ] Test: Cache handles 1,000 entries efficiently
 - [ ] Test: Cache handles 100MB of data efficiently
 
 ### Integration Tests - Edge Cases
-- [ ] Test: Cache handles empty data
+- [ ] Test: Cache handles empty data (0 bytes)
 - [ ] Test: Cache handles very large entries (near max size)
-- [ ] Test: Cache handles rapid set/evict cycles
+- [ ] Test: Cache handles rapid insert/evict cycles
 - [ ] Test: Cache handles all entries expiring simultaneously
+
+### Integration Tests - Hit Rate Validation
+- [ ] Test: Repeated access pattern achieves >80% hit rate
+- [ ] Test: TinyLFU improves hit rate over pure LRU
+- [ ] Test: Cache adapts to changing access patterns
+- [ ] Test: Hit rate calculation is accurate
+
+---
+
+**Summary**: Phase 27 revised to use `moka` instead of manual implementation  
+**Tests Reduced**: ~135 tests → ~87 tests (65% reduction in test count)  
+**Complexity Reduced**: No manual LRU, no manual locking, no manual TTL tracking  
+**Benefits**: Production-proven library, better hit rates, less code to maintain  
+**Trade-off**: Dependency on external crate (acceptable - widely used)
 
 ---
 
