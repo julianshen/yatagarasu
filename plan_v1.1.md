@@ -111,10 +111,10 @@
 - [x] Test: Can parse cache config with enabled=false
 
 ### Memory Cache Configuration
-- [ ] Test: Can parse memory cache section
-- [ ] Test: Can parse max_item_size_mb (default 10MB)
-- [ ] Test: Can parse max_cache_size_mb (default 1024MB = 1GB)
-- [ ] Test: Can parse default_ttl_seconds (default 3600 = 1 hour)
+- [x] Test: Can parse memory cache section
+- [x] Test: Can parse max_item_size_mb (default 10MB)
+- [x] Test: Can parse max_cache_size_mb (default 1024MB = 1GB)
+- [x] Test: Can parse default_ttl_seconds (default 3600 = 1 hour)
 - [ ] Test: Can parse max_item_size in bytes (10MB = 10485760 bytes)
 - [ ] Test: Can parse max_cache_size in bytes (1GB = 1073741824 bytes)
 - [ ] Test: Rejects negative max_item_size
