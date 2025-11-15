@@ -158,17 +158,7 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **Why**: Support enterprise authentication systems that use RSA/ECDSA
 
-#### 3. S3 LIST XML Response
-**Priority**: LOW  
-**Effort**: MEDIUM (3-4 days)
-
-- [ ] XML serialization for LIST requests
-- [ ] S3-compatible XML format
-- [ ] Pagination support
-
-**Why**: Full S3 API compatibility for clients expecting XML
-
-#### 4. Enhanced Observability
+#### 3. Enhanced Observability
 **Priority**: MEDIUM  
 **Effort**: MEDIUM (1 week)
 
@@ -179,7 +169,7 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **Why**: Better debugging and performance monitoring
 
-#### 5. Additional Security Features
+#### 4. Additional Security Features
 **Priority**: LOW  
 **Effort**: MEDIUM (1 week)
 
@@ -207,7 +197,6 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 - ✅ RS256/ES256 JWT support
 
 **Nice to Have**:
-- S3 LIST XML format
 - OpenTelemetry tracing
 - mTLS support
 
