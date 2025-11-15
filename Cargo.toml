@@ -73,6 +73,9 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
 [dev-dependencies]
 # Testing
 rstest = "0.18"

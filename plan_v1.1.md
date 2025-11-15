@@ -406,17 +406,17 @@ pub trait Cache: Send + Sync {
 ## 27.1: Dependencies & Moka Setup
 
 ### Add Moka Dependency
-- [ ] Test: Add `moka = { version = "0.12", features = ["future"] }` to Cargo.toml
-- [ ] Test: Can import `moka::future::Cache`
-- [ ] Test: Can import `moka::notification::RemovalCause`
-- [ ] Test: Moka compiles without errors
+- [x] Test: Add `moka = { version = "0.12", features = ["future"] }` to Cargo.toml
+- [x] Test: Can import `moka::future::Cache`
+- [x] Test: Can import `moka::notification::RemovalCause`
+- [x] Test: Moka compiles without errors
 
 ### Understand Moka's API
-- [ ] Test: Can create basic moka::future::Cache
-- [ ] Test: Can call get() and insert() on moka cache
-- [ ] Test: Can configure max_capacity on builder
-- [ ] Test: Can configure time_to_live on builder
-- [ ] Test: Moka cache is Send + Sync
+- [x] Test: Can create basic moka::future::Cache
+- [x] Test: Can call get() and insert() on moka cache
+- [x] Test: Can configure max_capacity on builder
+- [x] Test: Can configure time_to_live on builder
+- [x] Test: Moka cache is Send + Sync
 
 ---
 

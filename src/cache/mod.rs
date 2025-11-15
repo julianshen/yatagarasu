@@ -3373,4 +3373,113 @@ cache:
             Some(7200)
         );
     }
+
+    // ============================================================
+    // Phase 27.1: Dependencies & Moka Setup Tests
+    // ============================================================
+
+    #[test]
+    fn test_add_moka_dependency() {
+        // Test: Add `moka = { version = "0.12", features = ["future"] }` to Cargo.toml
+        // This test passes if the module compiles with moka dependency
+        assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_can_import_moka_future_cache() {
+        // Test: Can import `moka::future::Cache`
+        use moka::future::Cache;
+
+        // If this compiles, the import works
+        let _: Option<Cache<String, String>> = None;
+        assert!(true);
+    }
+
+    #[test]
+    fn test_can_import_removal_cause() {
+        // Test: Can import `moka::notification::RemovalCause`
+        use moka::notification::RemovalCause;
+
+        // Verify the enum exists and has expected variants
+        let _cause = RemovalCause::Size;
+        let _cause = RemovalCause::Expired;
+        assert!(true);
+    }
+
+    #[test]
+    fn test_moka_compiles_without_errors() {
+        // Test: Moka compiles without errors
+        // This test passes if the module compiles
+        use moka::future::Cache;
+        let _: Option<Cache<CacheKey, CacheEntry>> = None;
+        assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_can_create_basic_moka_cache() {
+        // Test: Can create basic moka::future::Cache
+        use moka::future::Cache;
+
+        let cache: Cache<String, String> = Cache::new(10);
+        assert_eq!(cache.entry_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_can_call_get_and_insert() {
+        // Test: Can call get() and insert() on moka cache
+        use moka::future::Cache;
+
+        let cache: Cache<String, String> = Cache::new(10);
+
+        // Insert a value
+        cache.insert("key1".to_string(), "value1".to_string()).await;
+
+        // Get the value
+        let value = cache.get(&"key1".to_string()).await;
+        assert_eq!(value, Some("value1".to_string()));
+
+        // Get non-existent key
+        let value = cache.get(&"key2".to_string()).await;
+        assert_eq!(value, None);
+    }
+
+    #[tokio::test]
+    async fn test_can_configure_max_capacity() {
+        // Test: Can configure max_capacity on builder
+        use moka::future::Cache;
+
+        let cache: Cache<String, String> = Cache::builder().max_capacity(100).build();
+
+        assert_eq!(cache.entry_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_can_configure_time_to_live() {
+        // Test: Can configure time_to_live on builder
+        use moka::future::Cache;
+        use std::time::Duration;
+
+        let cache: Cache<String, String> = Cache::builder()
+            .max_capacity(100)
+            .time_to_live(Duration::from_secs(60))
+            .build();
+
+        cache.insert("key1".to_string(), "value1".to_string()).await;
+
+        // Verify insertion worked by retrieving the value
+        let value = cache.get(&"key1".to_string()).await;
+        assert_eq!(value, Some("value1".to_string()));
+    }
+
+    #[test]
+    fn test_moka_cache_is_send_sync() {
+        // Test: Moka cache is Send + Sync
+        use moka::future::Cache;
+
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+
+        assert_send::<Cache<String, String>>();
+        assert_sync::<Cache<String, String>>();
+    }
 }
