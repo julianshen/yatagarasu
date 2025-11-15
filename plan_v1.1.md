@@ -142,14 +142,14 @@
 - [x] Test: Rejects redis cache with negative DB number (N/A - u32 type prevents negative values)
 
 ### Cache Hierarchy Configuration
-- [ ] Test: Can parse cache_layers array (default: ["memory"])
-- [ ] Test: Can parse cache_layers with multiple layers (["memory", "disk"])
-- [ ] Test: Can parse cache_layers with all layers (["memory", "disk", "redis"])
-- [ ] Test: Rejects cache_layers with unknown layer name
-- [ ] Test: Rejects cache_layers with duplicate layers
-- [ ] Test: Rejects cache_layers with empty array when caching enabled
-- [ ] Test: Validates disk layer requires disk_cache_enabled=true
-- [ ] Test: Validates redis layer requires redis_enabled=true
+- [x] Test: Can parse cache_layers array (default: ["memory"])
+- [x] Test: Can parse cache_layers with multiple layers (["memory", "disk"])
+- [x] Test: Can parse cache_layers with all layers (["memory", "disk", "redis"])
+- [x] Test: Rejects cache_layers with unknown layer name
+- [x] Test: Rejects cache_layers with duplicate layers
+- [x] Test: Rejects cache_layers with empty array when caching enabled
+- [x] Test: Validates disk layer requires disk_cache_enabled=true
+- [x] Test: Validates redis layer requires redis_enabled=true
 
 ### Per-Bucket Cache Configuration
 - [ ] Test: Can parse per-bucket cache override in bucket config

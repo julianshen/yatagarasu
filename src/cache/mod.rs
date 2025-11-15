@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -12,6 +12,73 @@ pub struct CacheConfig {
     pub disk: DiskCacheConfig,
     #[serde(default)]
     pub redis: RedisCacheConfig,
+    #[serde(default = "default_cache_layers")]
+    pub cache_layers: Vec<String>,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: default_cache_layers(),
+        }
+    }
+}
+
+fn default_cache_layers() -> Vec<String> {
+    vec!["memory".to_string()]
+}
+
+impl CacheConfig {
+    /// Validate cache configuration
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate individual layer configs
+        self.memory.validate()?;
+        self.disk.validate()?;
+        self.redis.validate()?;
+
+        // Validate cache_layers
+        if self.enabled && self.cache_layers.is_empty() {
+            return Err("cache_layers cannot be empty when caching is enabled".to_string());
+        }
+
+        // Check for unknown layer names
+        for layer in &self.cache_layers {
+            if !matches!(layer.as_str(), "memory" | "disk" | "redis") {
+                return Err(format!("Unknown cache layer: '{}'", layer));
+            }
+        }
+
+        // Check for duplicate layers
+        let mut seen = std::collections::HashSet::new();
+        for layer in &self.cache_layers {
+            if !seen.insert(layer) {
+                return Err(format!("Duplicate cache layer: '{}'", layer));
+            }
+        }
+
+        // Validate layer dependencies
+        for layer in &self.cache_layers {
+            match layer.as_str() {
+                "disk" if !self.disk.enabled => {
+                    return Err(
+                        "disk layer requires disk.enabled=true in configuration".to_string()
+                    );
+                }
+                "redis" if !self.redis.enabled => {
+                    return Err(
+                        "redis layer requires redis.enabled=true in configuration".to_string()
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +261,7 @@ enabled: false
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
         };
         assert_eq!(config.enabled, true);
 
@@ -202,6 +270,7 @@ enabled: false
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
         };
         assert_eq!(config.enabled, false);
     }
@@ -639,6 +708,164 @@ redis:
             redis_key_prefix: "yatagarasu:".to_string(),
             redis_ttl_seconds: 3600,
         };
+        assert!(config.validate().is_ok());
+    }
+
+    // Cache Hierarchy Configuration tests
+    #[test]
+    fn test_can_parse_cache_layers_array_default_memory() {
+        // Test: Can parse cache_layers array (default: ["memory"])
+        let config = CacheConfig::default();
+        assert_eq!(config.cache_layers, vec!["memory".to_string()]);
+
+        // Test with empty YAML
+        let yaml = r#"
+enabled: true
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.cache_layers, vec!["memory".to_string()]);
+    }
+
+    #[test]
+    fn test_can_parse_cache_layers_with_multiple_layers() {
+        // Test: Can parse cache_layers with multiple layers (["memory", "disk"])
+        let yaml = r#"
+enabled: true
+disk:
+  enabled: true
+cache_layers: ["memory", "disk"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.cache_layers,
+            vec!["memory".to_string(), "disk".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_can_parse_cache_layers_with_all_layers() {
+        // Test: Can parse cache_layers with all layers (["memory", "disk", "redis"])
+        let yaml = r#"
+enabled: true
+disk:
+  enabled: true
+redis:
+  enabled: true
+  redis_url: redis://localhost:6379
+cache_layers: ["memory", "disk", "redis"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.cache_layers,
+            vec![
+                "memory".to_string(),
+                "disk".to_string(),
+                "redis".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_rejects_cache_layers_with_unknown_layer_name() {
+        // Test: Rejects cache_layers with unknown layer name
+        let yaml = r#"
+enabled: true
+cache_layers: ["memory", "unknown"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown cache layer"));
+    }
+
+    #[test]
+    fn test_rejects_cache_layers_with_duplicate_layers() {
+        // Test: Rejects cache_layers with duplicate layers
+        let yaml = r#"
+enabled: true
+cache_layers: ["memory", "memory"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Duplicate cache layer"));
+    }
+
+    #[test]
+    fn test_rejects_cache_layers_with_empty_array_when_enabled() {
+        // Test: Rejects cache_layers with empty array when caching enabled
+        let yaml = r#"
+enabled: true
+cache_layers: []
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("cache_layers cannot be empty when caching is enabled"));
+
+        // Empty layers OK when caching disabled
+        let yaml = r#"
+enabled: false
+cache_layers: []
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validates_disk_layer_requires_disk_enabled() {
+        // Test: Validates disk layer requires disk.enabled=true
+        let yaml = r#"
+enabled: true
+disk:
+  enabled: false
+cache_layers: ["memory", "disk"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("disk layer requires disk.enabled=true"));
+
+        // Valid config with disk enabled
+        let yaml = r#"
+enabled: true
+disk:
+  enabled: true
+cache_layers: ["memory", "disk"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validates_redis_layer_requires_redis_enabled() {
+        // Test: Validates redis layer requires redis.enabled=true
+        let yaml = r#"
+enabled: true
+redis:
+  enabled: false
+cache_layers: ["memory", "redis"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("redis layer requires redis.enabled=true"));
+
+        // Valid config with redis enabled
+        let yaml = r#"
+enabled: true
+redis:
+  enabled: true
+  redis_url: redis://localhost:6379
+cache_layers: ["memory", "redis"]
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.validate().is_ok());
     }
 }
