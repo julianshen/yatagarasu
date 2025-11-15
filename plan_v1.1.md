@@ -120,15 +120,15 @@
 - [x] Test: Rejects negative max_item_size (N/A - u64 type prevents negative values)
 - [x] Test: Rejects negative max_cache_size (N/A - u64 type prevents negative values)
 - [x] Test: Rejects negative default_ttl (N/A - u64 type prevents negative values)
-- [ ] Test: Rejects max_item_size > max_cache_size
+- [x] Test: Rejects max_item_size > max_cache_size
 
 ### Disk Cache Configuration
-- [ ] Test: Can parse disk cache section (optional)
-- [ ] Test: Can parse cache_dir path (default: /var/cache/yatagarasu)
-- [ ] Test: Can parse max_disk_cache_size_mb (default 10GB)
-- [ ] Test: Can parse disk_cache_enabled (default false)
-- [ ] Test: Rejects disk cache with empty cache_dir
-- [ ] Test: Rejects disk cache with negative max size
+- [x] Test: Can parse disk cache section (optional)
+- [x] Test: Can parse cache_dir path (default: /var/cache/yatagarasu)
+- [x] Test: Can parse max_disk_cache_size_mb (default 10GB)
+- [x] Test: Can parse disk_cache_enabled (default false)
+- [x] Test: Rejects disk cache with empty cache_dir
+- [x] Test: Rejects disk cache with negative max size (N/A - u64 type prevents negative values)
 
 ### Redis Cache Configuration
 - [ ] Test: Can parse redis cache section (optional)
