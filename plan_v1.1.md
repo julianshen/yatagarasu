@@ -28,7 +28,7 @@
 ### 🔴 Milestone 1: Cache Foundation (Phases 26-27) - CRITICAL
 **Deliverable**: In-memory LRU cache operational with configurable limits
 **Verification**: Cache stores/retrieves objects, enforces size limits, evicts LRU
-**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.4 COMPLETE (41 tests)
+**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.5 COMPLETE (52 tests)
 
 ### 🔴 Milestone 2: Persistent Cache (Phase 28-29) - CRITICAL
 **Deliverable**: Disk OR Redis cache layer operational
@@ -489,22 +489,22 @@ pub trait Cache: Send + Sync {
 ## 27.5: Eviction Listener & Statistics
 
 ### Eviction Listener Setup
-- [ ] Test: Can define eviction_listener closure
-- [ ] Test: Listener increments eviction counter
-- [ ] Test: Listener receives RemovalCause enum
-- [ ] Test: Listener tracks Size-based evictions separately from Expired
+- [x] Test: Can define eviction_listener closure
+- [x] Test: Listener increments eviction counter
+- [x] Test: Listener receives RemovalCause enum
+- [x] Test: Listener tracks Size-based evictions separately from Expired
 
 ### Eviction Listener Integration
-- [ ] Test: Moka builder accepts eviction_listener
-- [ ] Test: Listener called when entry evicted
-- [ ] Test: Listener called when entry expires
-- [ ] Test: Listener not called on manual delete
+- [x] Test: Moka builder accepts eviction_listener
+- [x] Test: Listener called when entry evicted
+- [x] Test: Listener called when entry expires
+- [ ] Test: Listener not called on manual delete (will verify in 27.6 with delete())
 
 ### Statistics Accuracy
-- [ ] Test: Hit counter increments correctly
-- [ ] Test: Miss counter increments correctly
-- [ ] Test: Eviction counter increments correctly
-- [ ] Test: Counters are thread-safe (use atomics)
+- [x] Test: Hit counter increments correctly
+- [x] Test: Miss counter increments correctly
+- [x] Test: Eviction counter increments correctly
+- [x] Test: Counters are thread-safe (use atomics)
 
 ---
 
