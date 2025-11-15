@@ -104,11 +104,11 @@
 
 ### Basic Cache Config Structure
 - [x] Test: Can create empty CacheConfig struct
-- [ ] Test: Can deserialize minimal cache config from YAML
-- [ ] Test: CacheConfig has enabled field (bool)
-- [ ] Test: CacheConfig defaults to disabled when not specified
-- [ ] Test: Can parse cache config with enabled=true
-- [ ] Test: Can parse cache config with enabled=false
+- [x] Test: Can deserialize minimal cache config from YAML
+- [x] Test: CacheConfig has enabled field (bool)
+- [x] Test: CacheConfig defaults to disabled when not specified
+- [x] Test: Can parse cache config with enabled=true
+- [x] Test: Can parse cache config with enabled=false
 
 ### Memory Cache Configuration
 - [ ] Test: Can parse memory cache section
