@@ -365,13 +365,13 @@ yatagarasu/
 - [x] **Circuit Breaker**: Automatic failure detection and recovery
 - [x] **Prometheus Metrics**: Request counts, latencies, error rates, rate limit metrics
 
-### 📋 Planned: Production Features (v0.3.0+)
+### ✅ Production Features (v1.0.0 - Complete)
 
-- [ ] **Health Endpoints**: `/health` liveness and `/ready` readiness checks with S3 backend validation (Phase 22)
-- [ ] **Graceful Shutdown**: SIGTERM with connection draining and in-flight request completion (Phase 22)
-- [ ] **Request Correlation**: UUID request_id in logs and X-Request-ID response header (Phase 22)
-- [ ] **Chaos Testing**: S3 failure scenarios, network partitions, resource exhaustion (Phase 22)
-- [ ] **Performance Tuning**: Connection pooling optimization, keep-alive tuning
+- [x] **Health Endpoints**: `/health` liveness and `/ready` readiness checks with S3 backend validation ✅
+- [x] **Graceful Shutdown**: SIGTERM/SIGINT/SIGQUIT with in-flight request completion (Pingora built-in) ✅
+- [x] **Request Correlation**: UUID request_id in logs and X-Request-ID response header ✅
+- [x] **Startup Validation**: Configuration validation, --test mode, clear error messages ✅
+- [x] **Performance Tuning**: Connection pooling, timeouts, circuit breaker ✅
 
 ### 🎯 Future: Advanced Features (v1.0+)
 
