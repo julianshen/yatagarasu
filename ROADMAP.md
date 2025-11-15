@@ -55,6 +55,17 @@
 - ✅ Configuration via YAML with environment variable substitution
 - ✅ Graceful configuration reload without downtime
 
+**High Availability & Resilience**:
+- ✅ HA bucket replication with automatic failover (see [docs/HA_BUCKET_REPLICATION.md](docs/HA_BUCKET_REPLICATION.md))
+  - Priority-based replica selection
+  - Health monitoring per replica
+  - Circuit breaker integration
+  - Per-replica metrics
+- ✅ Connection pooling (Pingora built-in)
+  - Automatic connection reuse
+  - Connection pool cleanup on shutdown
+  - Per-bucket connection management
+
 **Documentation**:
 - ✅ Complete technical specification (spec.md)
 - ✅ TDD implementation plan with 200+ tests (plan.md)
@@ -227,29 +238,30 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 ---
 
-## v1.2.0 - Multi-Region & HA 🌍 **FUTURE**
+## v1.2.0 - Enhanced Resilience 🌍 **FUTURE**
 
-**Target**: Q2 2026  
-**Focus**: High availability and multi-region support
+**Target**: Q2 2026
+**Focus**: Advanced multi-region capabilities and enhanced connection management
+
+**Note**: Basic HA bucket replication and connection pooling are ALREADY in v1.0.0
 
 ### Planned Features
 
 #### 1. Multi-Region S3 Support
-- [ ] Automatic failover between regions
-- [ ] Health-based region selection
-- [ ] Latency-based routing
-- [ ] Configuration for primary/secondary regions
+- [ ] Automatic failover between AWS regions (not just buckets)
+- [ ] Geographic latency-based routing (route to nearest region)
+- [ ] Configuration for primary/secondary/tertiary regions
+- [ ] Cross-region health monitoring
 
-#### 2. HA Bucket Replication
-- [ ] Automatic failover between replica buckets
-- [ ] Health monitoring per replica
-- [ ] Load balancing across healthy replicas
-- [ ] Documentation: Currently available as manual configuration (see docs/HA_BUCKET_REPLICATION.md)
+**Why**: Global deployments need region-level failover, not just bucket-level
 
-#### 3. Connection Pooling Enhancements
-- [ ] Dynamic pool sizing
-- [ ] Connection health checks
-- [ ] Per-bucket connection limits
+#### 2. Enhanced Connection Pooling
+- [ ] Dynamic pool sizing based on load
+- [ ] Advanced connection health checks (application-level ping)
+- [ ] Configurable per-bucket connection limits
+- [ ] Connection pool metrics and tuning
+
+**Why**: Fine-grained control over connection resources
 
 **Timeline**: TBD based on user demand
 
