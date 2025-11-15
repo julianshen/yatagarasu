@@ -801,6 +801,35 @@ impl MemoryCache {
             max_item_size_bytes: config.max_item_size_bytes(),
         }
     }
+
+    /// Get an entry from the cache
+    /// Returns None if key not found or entry expired
+    pub async fn get(&self, key: &CacheKey) -> Option<CacheEntry> {
+        match self.cache.get(key).await {
+            Some(entry) => {
+                self.stats.increment_hits();
+                Some(entry)
+            }
+            None => {
+                self.stats.increment_misses();
+                None
+            }
+        }
+    }
+
+    /// Insert an entry into the cache
+    /// Returns error if entry exceeds max_item_size
+    pub async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        // Validate entry size
+        let entry_size = entry.size_bytes() as u64;
+        if entry_size > self.max_item_size_bytes {
+            return Err(CacheError::StorageFull);
+        }
+
+        // Insert into moka cache
+        self.cache.insert(key, entry).await;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -3977,5 +4006,493 @@ cache:
         let weighted_size = cache.weighted_size();
         assert!(weighted_size >= expected_size as u64);
         assert!(weighted_size <= (expected_size as u64) + 100); // Small tolerance
+    }
+
+    // ============================================================
+    // Phase 27.4: Basic Cache Operations Tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_get_calls_moka_get() {
+        // Test: get() calls moka.get(key).await
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        // Get from empty cache
+        let result = cache.get(&key).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_on_empty_cache_returns_none() {
+        // Test: get() on empty cache returns None
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "nonexistent".to_string(),
+            etag: None,
+        };
+
+        let result = cache.get(&key).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_on_existing_key_returns_some_entry() {
+        // Test: get() on existing key returns Some(entry)
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 100]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        // Insert directly into moka cache
+        cache.cache.insert(key.clone(), entry.clone()).await;
+
+        // Get should return the entry
+        let result = cache.get(&key).await;
+        assert!(result.is_some());
+        let retrieved = result.unwrap();
+        assert_eq!(retrieved.etag, "etag1");
+        assert_eq!(retrieved.content_type, "text/plain");
+    }
+
+    #[tokio::test]
+    async fn test_get_increments_hit_counter_on_cache_hit() {
+        // Test: get() increments hit counter on cache hit
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 50]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        // Insert entry
+        cache.cache.insert(key.clone(), entry).await;
+
+        // Get should increment hits
+        use std::sync::atomic::Ordering;
+        assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 0);
+        
+        cache.get(&key).await;
+        assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 1);
+        
+        cache.get(&key).await;
+        assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_increments_miss_counter_on_cache_miss() {
+        // Test: get() increments miss counter on cache miss
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "nonexistent".to_string(),
+            etag: None,
+        };
+
+        use std::sync::atomic::Ordering;
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 0);
+        
+        cache.get(&key).await;
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 1);
+        
+        cache.get(&key).await;
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_returns_cloned_cache_entry() {
+        // Test: get() returns cloned CacheEntry
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let original_data = Bytes::from(vec![1, 2, 3, 4, 5]);
+        let entry = CacheEntry::new(
+            original_data.clone(),
+            "application/octet-stream".to_string(),
+            "etag-abc".to_string(),
+            None,
+        );
+
+        cache.cache.insert(key.clone(), entry).await;
+
+        // Get returns a clone
+        let retrieved = cache.get(&key).await.unwrap();
+        assert_eq!(retrieved.data, original_data);
+        assert_eq!(retrieved.etag, "etag-abc");
+        assert_eq!(retrieved.content_type, "application/octet-stream");
+    }
+
+    #[tokio::test]
+    async fn test_set_calls_moka_insert() {
+        // Test: set() calls moka.insert(key, entry).await
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 100]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = cache.set(key.clone(), entry).await;
+        assert!(result.is_ok());
+
+        // Verify it was inserted by checking if we can retrieve it
+        let retrieved = cache.cache.get(&key).await;
+        assert!(retrieved.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_set_rejects_entry_larger_than_max_item_size() {
+        // Test: set() rejects entry larger than max_item_size
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1, // 1MB max
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "huge".to_string(),
+            etag: None,
+        };
+
+        // Create an entry larger than 1MB
+        let large_data = vec![0u8; 2 * 1024 * 1024]; // 2MB
+        let entry = CacheEntry::new(
+            Bytes::from(large_data),
+            "application/octet-stream".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = cache.set(key, entry).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_returns_storage_full_for_oversized_entry() {
+        // Test: set() returns CacheError::StorageFull for oversized entry
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "oversized".to_string(),
+            etag: None,
+        };
+
+        let large_data = vec![0u8; 5 * 1024 * 1024]; // 5MB
+        let entry = CacheEntry::new(
+            Bytes::from(large_data),
+            "application/octet-stream".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = cache.set(key, entry).await;
+        assert!(matches!(result, Err(CacheError::StorageFull)));
+    }
+
+    #[tokio::test]
+    async fn test_set_stores_entry_successfully_when_within_limits() {
+        // Test: set() stores entry successfully when within limits
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "normal".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 1024]), // 1KB - well within limits
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = cache.set(key.clone(), entry).await;
+        assert!(result.is_ok());
+
+        // Verify entry is stored
+        let retrieved = cache.cache.get(&key).await;
+        assert!(retrieved.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_set_overwrites_existing_entry_for_same_key() {
+        // Test: set() overwrites existing entry for same key
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        // Insert first entry
+        let entry1 = CacheEntry::new(
+            Bytes::from("original"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+        cache.set(key.clone(), entry1).await.unwrap();
+
+        // Overwrite with second entry
+        let entry2 = CacheEntry::new(
+            Bytes::from("updated"),
+            "text/html".to_string(),
+            "etag2".to_string(),
+            None,
+        );
+        cache.set(key.clone(), entry2).await.unwrap();
+
+        // Should retrieve the updated entry
+        let retrieved = cache.get(&key).await.unwrap();
+        assert_eq!(retrieved.etag, "etag2");
+        assert_eq!(retrieved.content_type, "text/html");
+        assert_eq!(retrieved.data, Bytes::from("updated"));
+    }
+
+    #[tokio::test]
+    async fn test_can_retrieve_entry_immediately_after_set() {
+        // Test: Can retrieve entry immediately after set()
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "immediate".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("test data"),
+            "text/plain".to_string(),
+            "etag123".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Should be able to retrieve immediately
+        let retrieved = cache.get(&key).await;
+        assert!(retrieved.is_some());
+        let entry = retrieved.unwrap();
+        assert_eq!(entry.data, Bytes::from("test data"));
+        assert_eq!(entry.etag, "etag123");
+    }
+
+    #[tokio::test]
+    async fn test_moka_automatically_expires_entries_after_ttl() {
+        // Test: Moka automatically expires entries after TTL
+        use std::time::Duration;
+        use tokio::time::sleep;
+
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 1, // 1 second TTL
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "expiring".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("temporary"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Should exist immediately
+        assert!(cache.get(&key).await.is_some());
+
+        // Wait for TTL to expire (1.5 seconds to be safe)
+        sleep(Duration::from_millis(1500)).await;
+        cache.cache.run_pending_tasks().await;
+
+        // Should be expired now
+        let result = cache.get(&key).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_returns_none_for_expired_entry() {
+        // Test: get() returns None for expired entry
+        use std::time::Duration;
+        use tokio::time::sleep;
+
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 1, // 1 second
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "short-lived".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Wait for expiration
+        sleep(Duration::from_millis(1500)).await;
+        cache.cache.run_pending_tasks().await;
+
+        let result = cache.get(&key).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_expired_entries_dont_count_as_hits() {
+        // Test: Expired entries don't count as hits
+        use std::time::Duration;
+        use tokio::time::sleep;
+        use std::sync::atomic::Ordering;
+
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 1,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "expiring".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Wait for expiration
+        sleep(Duration::from_millis(1500)).await;
+        cache.cache.run_pending_tasks().await;
+
+        let initial_hits = cache.stats.hits.load(Ordering::Relaxed);
+        let initial_misses = cache.stats.misses.load(Ordering::Relaxed);
+
+        // Get expired entry
+        cache.get(&key).await;
+
+        // Should count as miss, not hit
+        assert_eq!(cache.stats.hits.load(Ordering::Relaxed), initial_hits);
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), initial_misses + 1);
     }
 }

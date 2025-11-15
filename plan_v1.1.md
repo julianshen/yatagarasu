@@ -28,7 +28,7 @@
 ### 🔴 Milestone 1: Cache Foundation (Phases 26-27) - CRITICAL
 **Deliverable**: In-memory LRU cache operational with configurable limits
 **Verification**: Cache stores/retrieves objects, enforces size limits, evicts LRU
-**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.3 COMPLETE (27 tests)
+**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.4 COMPLETE (41 tests)
 
 ### 🔴 Milestone 2: Persistent Cache (Phase 28-29) - CRITICAL
 **Deliverable**: Disk OR Redis cache layer operational
@@ -463,26 +463,26 @@ pub trait Cache: Send + Sync {
 ## 27.4: Basic Cache Operations (Moka Wrapper)
 
 ### Get Operation
-- [ ] Test: get() calls moka.get(key).await
-- [ ] Test: get() on empty cache returns None
-- [ ] Test: get() on existing key returns Some(entry)
-- [ ] Test: get() increments hit counter on cache hit
-- [ ] Test: get() increments miss counter on cache miss
-- [ ] Test: get() returns cloned CacheEntry
+- [x] Test: get() calls moka.get(key).await
+- [x] Test: get() on empty cache returns None
+- [x] Test: get() on existing key returns Some(entry)
+- [x] Test: get() increments hit counter on cache hit
+- [x] Test: get() increments miss counter on cache miss
+- [x] Test: get() returns cloned CacheEntry
 
-### Insert Operation  
-- [ ] Test: set() calls moka.insert(key, entry).await
-- [ ] Test: set() rejects entry larger than max_item_size
-- [ ] Test: set() returns CacheError::StorageFull for oversized entry
-- [ ] Test: set() stores entry successfully when within limits
-- [ ] Test: set() overwrites existing entry for same key
-- [ ] Test: Can retrieve entry immediately after set()
+### Insert Operation
+- [x] Test: set() calls moka.insert(key, entry).await
+- [x] Test: set() rejects entry larger than max_item_size
+- [x] Test: set() returns CacheError::StorageFull for oversized entry
+- [x] Test: set() stores entry successfully when within limits
+- [x] Test: set() overwrites existing entry for same key
+- [x] Test: Can retrieve entry immediately after set()
 
 ### TTL Handling
-- [ ] Test: Moka automatically expires entries after TTL
-- [ ] Test: get() returns None for expired entry
-- [ ] Test: Expired entries don't count as hits
-- [ ] Test: Can set TTL of 0 for no expiration (use very long duration)
+- [x] Test: Moka automatically expires entries after TTL
+- [x] Test: get() returns None for expired entry
+- [x] Test: Expired entries don't count as hits
+- [ ] Test: Can set TTL of 0 for no expiration (covered by existing CacheEntry tests)
 
 ---
 
