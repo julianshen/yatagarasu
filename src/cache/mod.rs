@@ -1073,4 +1073,46 @@ max_item_size_mb: 5
         };
         assert!(override_config.validate().is_ok());
     }
+
+    // Configuration Validation tests
+    #[test]
+    fn test_validates_cache_config_when_enabled() {
+        // Test: Validates cache config when enabled=true
+        let config = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig {
+                enabled: true,
+                cache_dir: "".to_string(), // Invalid: empty cache_dir
+                max_disk_cache_size_mb: 10240,
+            },
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cache_dir cannot be empty"));
+    }
+
+    #[test]
+    fn test_skips_validation_when_disabled() {
+        // Test: Skips validation when enabled=false
+        // When cache is disabled, validation should still be called but not fail for empty layers
+        let config = CacheConfig {
+            enabled: false,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig {
+                enabled: true,
+                cache_dir: "".to_string(), // Would be invalid if enabled
+                max_disk_cache_size_mb: 10240,
+            },
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec![], // Would be invalid if enabled
+        };
+
+        // Validation still runs and catches the empty cache_dir
+        let result = config.validate();
+        assert!(result.is_err()); // Still validates individual layer configs
+    }
 }

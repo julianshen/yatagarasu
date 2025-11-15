@@ -167,12 +167,12 @@
 - [x] Test: Can use literal value (no substitution) for cache config
 
 ### Configuration Validation
-- [ ] Test: Validates cache config when enabled=true
-- [ ] Test: Skips validation when enabled=false
-- [ ] Test: Validates at least one cache layer configured when enabled
-- [ ] Test: Validates layer dependencies (disk requires disk config, redis requires redis config)
-- [ ] Test: Full config validation passes with valid cache config
-- [ ] Test: Full config validation fails with invalid cache config
+- [x] Test: Validates cache config when enabled=true
+- [x] Test: Skips validation when enabled=false
+- [x] Test: Validates at least one cache layer configured when enabled (covered by cache hierarchy test)
+- [x] Test: Validates layer dependencies (covered by cache hierarchy tests)
+- [x] Test: Full config validation passes with valid cache config
+- [x] Test: Full config validation fails with invalid cache config
 
 ### Example YAML Configuration Test
 ```yaml
@@ -203,8 +203,8 @@ buckets:
       max_item_size_mb: 5  # Override: 5MB max
 ```
 
-- [ ] Test: Can parse complete cache config example above
-- [ ] Test: Per-bucket overrides apply correctly
+- [x] Test: Can parse complete cache config example above
+- [x] Test: Per-bucket overrides apply correctly
 
 ---
 

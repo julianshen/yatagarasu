@@ -220,6 +220,11 @@ impl Config {
             }
         }
 
+        // Validate cache configuration if present
+        if let Some(cache) = &self.cache {
+            cache.validate()?;
+        }
+
         Ok(())
     }
 
@@ -1808,5 +1813,168 @@ cache:
             config.cache.as_ref().unwrap().redis.redis_password,
             Some("literal-password".to_string())
         );
+    }
+
+    #[test]
+    fn test_full_config_validation_passes_with_valid_cache() {
+        // Test: Full config validation passes with valid cache config
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 1024
+    default_ttl_seconds: 3600
+  cache_layers: ["memory"]
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_full_config_validation_fails_with_invalid_cache() {
+        // Test: Full config validation fails with invalid cache config
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  cache_layers: []
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("cache_layers cannot be empty when caching is enabled"));
+    }
+
+    #[test]
+    fn test_can_parse_complete_cache_config_example() {
+        // Test: Can parse complete cache config example
+        std::env::set_var("REDIS_URL_EXAMPLE", "redis://cache.example.com:6379");
+        std::env::set_var("REDIS_PASSWORD_EXAMPLE", "secret123");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+    cache:
+      ttl_seconds: 7200
+      max_item_size_mb: 5
+cache:
+  enabled: true
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 1024
+    default_ttl_seconds: 3600
+  disk:
+    enabled: false
+    cache_dir: /var/cache/yatagarasu
+    max_disk_cache_size_mb: 10240
+  redis:
+    enabled: false
+    redis_url: ${REDIS_URL_EXAMPLE}
+    redis_password: ${REDIS_PASSWORD_EXAMPLE}
+    redis_db: 0
+    redis_key_prefix: "yatagarasu:"
+    redis_ttl_seconds: 3600
+  cache_layers: ["memory"]
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // Verify cache config
+        let cache = config.cache.as_ref().unwrap();
+        assert_eq!(cache.enabled, true);
+        assert_eq!(cache.memory.max_item_size_mb, 10);
+        assert_eq!(cache.memory.max_cache_size_mb, 1024);
+        assert_eq!(cache.disk.enabled, false);
+        assert_eq!(cache.redis.enabled, false);
+        assert_eq!(cache.cache_layers, vec!["memory"]);
+
+        // Verify bucket cache override
+        let bucket = &config.buckets[0];
+        let bucket_cache_override = bucket.cache.as_ref().unwrap();
+        assert_eq!(bucket_cache_override.ttl_seconds, Some(7200));
+        assert_eq!(bucket_cache_override.max_item_size_mb, Some(5));
+
+        std::env::remove_var("REDIS_URL_EXAMPLE");
+        std::env::remove_var("REDIS_PASSWORD_EXAMPLE");
+    }
+
+    #[test]
+    fn test_per_bucket_cache_overrides_apply_correctly() {
+        // Test: Per-bucket overrides apply correctly
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+    cache:
+      ttl_seconds: 7200
+      max_item_size_mb: 5
+cache:
+  enabled: true
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 1024
+    default_ttl_seconds: 3600
+  cache_layers: ["memory"]
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let global_cache = config.cache.as_ref().unwrap();
+        let bucket_override = config.buckets[0].cache.as_ref().unwrap();
+
+        // Test merge
+        let merged = bucket_override.merge_with_global(global_cache);
+
+        // TTL should be overridden to 7200
+        assert_eq!(merged.memory.default_ttl_seconds, 7200);
+
+        // max_item_size should be overridden to 5
+        assert_eq!(merged.memory.max_item_size_mb, 5);
+
+        // Global settings should be inherited
+        assert_eq!(merged.enabled, true);
+        assert_eq!(merged.memory.max_cache_size_mb, 1024);
     }
 }
