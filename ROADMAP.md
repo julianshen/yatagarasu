@@ -169,16 +169,28 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **Why**: Better debugging and performance monitoring
 
-#### 4. Additional Security Features
-**Priority**: LOW  
-**Effort**: MEDIUM (1 week)
+#### 4. Audit Logging & Compliance
+**Priority**: HIGH (Elevated - Critical for security/compliance)
+**Effort**: MEDIUM (3-5 days)
 
-- [ ] mTLS support (mutual TLS)
+- [ ] Comprehensive audit log for all requests (who, what, when, from where)
+- [ ] Structured JSON audit logs with correlation IDs
+- [ ] Audit log includes: client IP, user (from JWT), bucket, object key, action, response status, timestamp
+- [ ] Configurable audit log retention and rotation
+- [ ] Audit log export to S3, syslog, or external system
+- [ ] Sensitive data redaction (e.g., JWT tokens in logs)
+
+**Why**: Essential for security audits, compliance (SOC2, GDPR, HIPAA), incident investigation, and access tracking
+
+#### 5. Advanced Security Features
+**Priority**: MEDIUM
+**Effort**: LOW-MEDIUM (3-5 days)
+
 - [ ] IP allowlist/blocklist per bucket
-- [ ] Advanced rate limiting (token bucket, sliding window)
-- [ ] Audit logging
+- [ ] Advanced rate limiting (token bucket, sliding window algorithms)
+- [ ] Enhanced DDoS protection
 
-**Why**: Enterprise security requirements
+**Why**: Additional security hardening for production environments
 
 ### v1.1.0 Release Criteria
 
@@ -195,10 +207,11 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **HIGH - Must Have**:
 - ✅ RS256/ES256 JWT support
+- ✅ Audit logging (comprehensive request/access tracking)
 
 **Nice to Have**:
 - OpenTelemetry tracing
-- mTLS support
+- Advanced security features (IP allowlists, enhanced rate limiting)
 
 **Timeline**: 6-8 weeks development + 2 weeks testing
 
