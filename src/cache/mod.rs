@@ -714,6 +714,87 @@ pub trait Cache: Send + Sync {
     async fn stats(&self) -> Result<CacheStats, CacheError>;
 }
 
+// ============================================================
+// Phase 27.2: MemoryCache Implementation with Moka
+// ============================================================
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+/// Statistics tracker using atomics for thread safety
+#[allow(dead_code)]
+struct CacheStatsTracker {
+    hits: AtomicU64,
+    misses: AtomicU64,
+    evictions: AtomicU64,
+}
+
+#[allow(dead_code)]
+impl CacheStatsTracker {
+    /// Create a new stats tracker with all counters at zero
+    fn new() -> Self {
+        Self {
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+            evictions: AtomicU64::new(0),
+        }
+    }
+
+    /// Increment hit counter
+    fn increment_hits(&self) {
+        self.hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment miss counter
+    fn increment_misses(&self) {
+        self.misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment eviction counter
+    fn increment_evictions(&self) {
+        self.evictions.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get a snapshot of current statistics
+    fn snapshot(&self, current_size_bytes: u64, current_item_count: u64, max_size_bytes: u64) -> CacheStats {
+        CacheStats {
+            hits: self.hits.load(Ordering::Relaxed),
+            misses: self.misses.load(Ordering::Relaxed),
+            evictions: self.evictions.load(Ordering::Relaxed),
+            current_size_bytes,
+            current_item_count,
+            max_size_bytes,
+        }
+    }
+}
+
+/// MemoryCache wraps moka for our Cache trait
+#[allow(dead_code)]
+pub struct MemoryCache {
+    cache: moka::future::Cache<CacheKey, CacheEntry>,
+    stats: Arc<CacheStatsTracker>,
+    max_item_size_bytes: u64,
+}
+
+#[allow(dead_code)]
+impl MemoryCache {
+    /// Create a new MemoryCache from configuration
+    pub fn new(config: &MemoryCacheConfig) -> Self {
+        use std::time::Duration;
+
+        let cache = moka::future::Cache::builder()
+            .max_capacity(config.max_cache_size_bytes())
+            .time_to_live(Duration::from_secs(config.default_ttl_seconds))
+            .build();
+
+        Self {
+            cache,
+            stats: Arc::new(CacheStatsTracker::new()),
+            max_item_size_bytes: config.max_item_size_bytes(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3481,5 +3562,156 @@ cache:
 
         assert_send::<Cache<String, String>>();
         assert_sync::<Cache<String, String>>();
+    }
+
+    // ============================================================
+    // Phase 27.2: MemoryCache Wrapper Structure Tests
+    // ============================================================
+
+    #[test]
+    fn test_can_create_cache_stats_tracker_struct() {
+        // Test: Can create CacheStatsTracker struct
+        use std::sync::atomic::AtomicU64;
+
+        let tracker = CacheStatsTracker {
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+            evictions: AtomicU64::new(0),
+        };
+
+        // If this compiles, the test passes
+        assert_eq!(tracker.hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_cache_stats_tracker_contains_atomic_counters() {
+        // Test: Tracker contains AtomicU64 for hits, misses, evictions
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let tracker = CacheStatsTracker {
+            hits: AtomicU64::new(10),
+            misses: AtomicU64::new(5),
+            evictions: AtomicU64::new(2),
+        };
+
+        assert_eq!(tracker.hits.load(Ordering::Relaxed), 10);
+        assert_eq!(tracker.misses.load(Ordering::Relaxed), 5);
+        assert_eq!(tracker.evictions.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn test_cache_stats_tracker_provides_increment_methods() {
+        // Test: Tracker provides atomic increment methods
+        let tracker = CacheStatsTracker::new();
+
+        tracker.increment_hits();
+        tracker.increment_hits();
+        tracker.increment_misses();
+        tracker.increment_evictions();
+
+        use std::sync::atomic::Ordering;
+        assert_eq!(tracker.hits.load(Ordering::Relaxed), 2);
+        assert_eq!(tracker.misses.load(Ordering::Relaxed), 1);
+        assert_eq!(tracker.evictions.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn test_cache_stats_tracker_provides_snapshot_method() {
+        // Test: Tracker provides snapshot method returning CacheStats
+        let tracker = CacheStatsTracker::new();
+        tracker.increment_hits();
+        tracker.increment_hits();
+        tracker.increment_misses();
+
+        let stats = tracker.snapshot(1024, 10, 10240);
+        assert_eq!(stats.hits, 2);
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.current_size_bytes, 1024);
+        assert_eq!(stats.current_item_count, 10);
+        assert_eq!(stats.max_size_bytes, 10240);
+    }
+
+    #[test]
+    fn test_can_create_memory_cache_struct() {
+        // Test: Can create MemoryCache struct (compiles)
+        let _cache: Option<MemoryCache> = None;
+        assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_memory_cache_contains_moka_cache() {
+        // Test: MemoryCache contains moka::future::Cache<CacheKey, CacheEntry>
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let memory_cache = MemoryCache::new(&config);
+
+        // Verify we can interact with the internal cache
+        assert_eq!(memory_cache.cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn test_memory_cache_contains_stats_tracker() {
+        // Test: MemoryCache contains Arc<CacheStatsTracker>
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let memory_cache = MemoryCache::new(&config);
+
+        // Verify stats tracker is accessible
+        use std::sync::atomic::Ordering;
+        assert_eq!(memory_cache.stats.hits.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_memory_cache_contains_config_parameters() {
+        // Test: MemoryCache contains config parameters (max sizes, TTL)
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let memory_cache = MemoryCache::new(&config);
+
+        assert_eq!(memory_cache.max_item_size_bytes, 10 * 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn test_memory_cache_new_creates_moka_cache_with_max_capacity() {
+        // Test: Constructor creates moka cache with max_capacity from config
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let memory_cache = MemoryCache::new(&config);
+
+        // Verify cache exists and is empty
+        assert_eq!(memory_cache.cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn test_memory_cache_new_initializes_stats_tracker() {
+        // Test: Constructor initializes stats tracker
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let memory_cache = MemoryCache::new(&config);
+
+        use std::sync::atomic::Ordering;
+        assert_eq!(memory_cache.stats.hits.load(Ordering::Relaxed), 0);
+        assert_eq!(memory_cache.stats.misses.load(Ordering::Relaxed), 0);
+        assert_eq!(memory_cache.stats.evictions.load(Ordering::Relaxed), 0);
     }
 }

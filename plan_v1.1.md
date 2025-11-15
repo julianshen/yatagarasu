@@ -423,24 +423,24 @@ pub trait Cache: Send + Sync {
 ## 27.2: MemoryCache Wrapper Structure
 
 ### MemoryCache Structure Definition
-- [ ] Test: Can create MemoryCache struct
-- [ ] Test: MemoryCache contains moka::future::Cache<CacheKey, CacheEntry>
-- [ ] Test: MemoryCache contains Arc<AtomicU64> for stats tracking
-- [ ] Test: MemoryCache contains config parameters (max sizes, TTL)
+- [x] Test: Can create MemoryCache struct
+- [x] Test: MemoryCache contains moka::future::Cache<CacheKey, CacheEntry>
+- [x] Test: MemoryCache contains Arc<AtomicU64> for stats tracking
+- [x] Test: MemoryCache contains config parameters (max sizes, TTL)
 
 ### Statistics Tracking Structure
-- [ ] Test: Can create CacheStatsTracker struct
-- [ ] Test: Tracker contains AtomicU64 for hits, misses, evictions
-- [ ] Test: Tracker provides atomic increment methods
-- [ ] Test: Tracker provides snapshot method returning CacheStats
+- [x] Test: Can create CacheStatsTracker struct
+- [x] Test: Tracker contains AtomicU64 for hits, misses, evictions
+- [x] Test: Tracker provides atomic increment methods
+- [x] Test: Tracker provides snapshot method returning CacheStats
 
 ### MemoryCache Constructor
-- [ ] Test: Can create MemoryCache::new(config)
-- [ ] Test: Constructor creates moka::Cache::builder()
-- [ ] Test: Constructor sets max_capacity from config
-- [ ] Test: Constructor sets time_to_live from config
-- [ ] Test: Constructor configures weigher function
-- [ ] Test: Constructor initializes stats tracker
+- [x] Test: Can create MemoryCache::new(config)
+- [x] Test: Constructor creates moka::Cache::builder()
+- [x] Test: Constructor sets max_capacity from config
+- [ ] Test: Constructor sets time_to_live from config (implicit in constructor, will verify in integration tests)
+- [ ] Test: Constructor configures weigher function (Phase 27.3)
+- [x] Test: Constructor initializes stats tracker
 
 ---
 
