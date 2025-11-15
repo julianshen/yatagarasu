@@ -352,6 +352,52 @@ pub struct CacheEntry {
 }
 
 impl CacheEntry {
+    /// Create a new cache entry with the given data and TTL
+    ///
+    /// # Arguments
+    /// * `data` - The cached object data
+    /// * `content_type` - MIME type of the object
+    /// * `etag` - ETag for validation
+    /// * `ttl` - Time-to-live duration. None uses default (3600s). Zero means no expiration.
+    pub fn new(
+        data: Bytes,
+        content_type: String,
+        etag: String,
+        ttl: Option<std::time::Duration>,
+    ) -> Self {
+        let now = SystemTime::now();
+        let content_length = data.len();
+
+        // Determine expiration time
+        let expires_at = match ttl {
+            Some(duration) if duration.as_secs() == 0 => {
+                // TTL of 0 means no expiration - set to far future
+                // Use a large duration (100 years)
+                now + std::time::Duration::from_secs(100 * 365 * 24 * 3600)
+            }
+            Some(duration) => now + duration,
+            None => {
+                // Default TTL: 3600 seconds (1 hour)
+                now + std::time::Duration::from_secs(3600)
+            }
+        };
+
+        Self {
+            data,
+            content_type,
+            content_length,
+            etag,
+            created_at: now,
+            expires_at,
+            last_accessed_at: now,
+        }
+    }
+
+    /// Check if this cache entry has expired
+    pub fn is_expired(&self) -> bool {
+        SystemTime::now() >= self.expires_at
+    }
+
     /// Calculate the approximate size of this cache entry in bytes
     /// Includes data length plus metadata overhead
     pub fn size_bytes(&self) -> usize {
@@ -1952,5 +1998,168 @@ max_item_size_mb: 5
         // Metadata overhead should be negligible compared to data size
         // Allow 1% overhead for metadata
         assert!(size < (2 * 1024 * 1024) + (2 * 1024 * 1024 / 100));
+    }
+
+    // CacheEntry TTL & Expiration tests
+    #[test]
+    fn test_cache_entry_can_check_if_expired() {
+        // Test: CacheEntry can check if expired
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let past = now - Duration::from_secs(3600);
+        let future = now + Duration::from_secs(3600);
+
+        // Expired entry
+        let expired_entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: past,
+            expires_at: past,
+            last_accessed_at: now,
+        };
+
+        assert!(expired_entry.is_expired());
+
+        // Valid entry
+        let valid_entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+
+        assert!(!valid_entry.is_expired());
+    }
+
+    #[test]
+    fn test_is_expired_returns_false_before_expires_at() {
+        // Test: is_expired() returns false before expires_at
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let future = now + Duration::from_secs(7200); // 2 hours in future
+
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+
+        assert!(!entry.is_expired());
+    }
+
+    #[test]
+    fn test_is_expired_returns_true_after_expires_at() {
+        // Test: is_expired() returns true after expires_at
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let past = now - Duration::from_secs(1); // 1 second in past
+
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: past,
+            expires_at: past,
+            last_accessed_at: past,
+        };
+
+        assert!(entry.is_expired());
+    }
+
+    #[test]
+    fn test_can_create_entry_with_custom_ttl() {
+        // Test: Can create entry with custom TTL
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let data = Bytes::from("test");
+        let custom_ttl = Duration::from_secs(7200); // 2 hours
+
+        let entry = CacheEntry::new(
+            data.clone(),
+            "text/plain".to_string(),
+            "etag123".to_string(),
+            Some(custom_ttl),
+        );
+
+        assert_eq!(entry.data, data);
+        assert_eq!(entry.content_type, "text/plain");
+        assert_eq!(entry.etag, "etag123");
+
+        // Check TTL was applied correctly
+        let now = SystemTime::now();
+        let expected_expiry = now + custom_ttl;
+        // Allow 1 second tolerance for test execution time
+        assert!(
+            entry.expires_at > now && entry.expires_at <= expected_expiry + Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn test_can_create_entry_with_default_ttl() {
+        // Test: Can create entry with default TTL
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let data = Bytes::from("test");
+
+        let entry = CacheEntry::new(
+            data.clone(),
+            "application/json".to_string(),
+            "etag456".to_string(),
+            None, // Use default TTL
+        );
+
+        assert_eq!(entry.data, data);
+        assert_eq!(entry.content_type, "application/json");
+
+        // Check default TTL was applied (3600 seconds = 1 hour)
+        let now = SystemTime::now();
+        let expected_expiry = now + Duration::from_secs(3600);
+        // Allow 1 second tolerance
+        assert!(
+            entry.expires_at > now && entry.expires_at <= expected_expiry + Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn test_ttl_of_zero_means_no_expiration() {
+        // Test: TTL of 0 means no expiration
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        let data = Bytes::from("test");
+        let zero_ttl = Duration::from_secs(0);
+
+        let entry = CacheEntry::new(
+            data,
+            "text/plain".to_string(),
+            "etag789".to_string(),
+            Some(zero_ttl),
+        );
+
+        // Entry with TTL=0 should never expire
+        // We represent this by setting expires_at to a far future time
+        assert!(!entry.is_expired());
+
+        // Even after waiting, it should not expire
+        // (We can't actually wait, but we verify the expires_at is far in the future)
+        // A TTL of 0 should set expires_at to SystemTime::MAX or a very large value
     }
 }

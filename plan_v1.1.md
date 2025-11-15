@@ -261,12 +261,12 @@ buckets:
 - [x] Test: Size is accurate for large entries (>1MB)
 
 ### CacheEntry TTL & Expiration
-- [ ] Test: CacheEntry can check if expired
-- [ ] Test: is_expired() returns false before expires_at
-- [ ] Test: is_expired() returns true after expires_at
-- [ ] Test: Can create entry with custom TTL
-- [ ] Test: Can create entry with default TTL
-- [ ] Test: TTL of 0 means no expiration
+- [x] Test: CacheEntry can check if expired
+- [x] Test: is_expired() returns false before expires_at
+- [x] Test: is_expired() returns true after expires_at
+- [x] Test: Can create entry with custom TTL
+- [x] Test: Can create entry with default TTL
+- [x] Test: TTL of 0 means no expiration
 
 ### CacheEntry Access Tracking (for LRU)
 - [ ] Test: CacheEntry can update last_accessed_at
