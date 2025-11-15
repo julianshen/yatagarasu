@@ -9,49 +9,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Create GitHub release
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version: ${{ steps.get_version.outputs.version }}
-    steps:
-      - name: Get version from tag
-        id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-          body: |
-            ## Yatagarasu ${{ steps.get_version.outputs.version }}
-
-            ### Installation
-
-            **Docker:**
-            ```bash
-            docker pull ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.version }}
-            ```
-
-            **Binary downloads:**
-            See assets below for Linux and macOS binaries.
-
-            ### Changelog
-            <!-- Add changelog here -->
-
-  # Build and upload binaries
-  build-binaries:
-    name: Build ${{ matrix.target }}
-    needs: create-release
+  # Create GitHub release and build binaries
+  release:
+    name: Release ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -69,14 +32,35 @@ jobs:
             asset_name: yatagarasu-macos-arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: ${{ runner.os }}-cargo-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-${{ matrix.target }}-
+
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --verbose
 
       - name: Strip binary (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -90,21 +74,66 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
+          sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256 || shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          if [ -f CHANGELOG.md ]; then
+            CHANGELOG=$(awk '/^## \[${{ steps.get_version.outputs.version }}\]/,/^## \[/ {print}' CHANGELOG.md | head -n -1)
+            echo "changelog<<EOF" >> $GITHUB_OUTPUT
+            echo "$CHANGELOG" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "changelog=See repository for full changelog" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.get_version.outputs.version }}
+          body: |
+            ## Yatagarasu v${{ steps.get_version.outputs.version }}
+
+            High-performance S3 proxy built with Cloudflare Pingora and Rust.
+
+            ### Installation
+
+            **Docker:**
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.version }}
+            ```
+
+            **From source:**
+            ```bash
+            cargo install --git https://github.com/${{ github.repository }} --tag v${{ steps.get_version.outputs.version }}
+            ```
+
+            **Binary downloads:**
+            Download pre-built binaries below. Verify with SHA256 checksums.
+
+            ### Changelog
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
+
+            **Full Documentation**: https://github.com/${{ github.repository }}/blob/master/README.md
+            **Complete Changelog**: https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md
+          files: |
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz.sha256
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz
-          asset_name: ${{ matrix.asset_name }}.tar.gz
-          asset_content_type: application/gzip
 
   # Build and push Docker images
   docker:
     name: Build Docker Images
-    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
