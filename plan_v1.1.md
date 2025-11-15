@@ -229,15 +229,15 @@ buckets:
 - [x] Test: CacheKey handles Unicode object keys correctly
 
 ### CacheKey Parsing
-- [ ] Test: Can parse CacheKey from string
-- [ ] Test: Parsing fails gracefully with invalid format
-- [ ] Test: Roundtrip: to_string().parse() == original
+- [x] Test: Can parse CacheKey from string
+- [x] Test: Parsing fails gracefully with invalid format
+- [x] Test: Roundtrip: to_string().parse() == original
 
 ### CacheKey Hashing
-- [ ] Test: Same CacheKey produces same hash
-- [ ] Test: Different CacheKeys produce different hashes
-- [ ] Test: CacheKey with different etags are different keys
-- [ ] Test: CacheKey hash is stable across runs
+- [x] Test: Same CacheKey produces same hash
+- [x] Test: Different CacheKeys produce different hashes
+- [x] Test: CacheKey with different etags are different keys
+- [x] Test: CacheKey hash is stable across runs
 
 ---
 

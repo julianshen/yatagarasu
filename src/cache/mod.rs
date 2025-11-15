@@ -266,6 +266,69 @@ fn url_encode_cache_key(s: &str) -> String {
         .collect()
 }
 
+/// URL-decode a cache key component
+fn url_decode_cache_key(s: &str) -> Result<String, String> {
+    let mut decoded = String::new();
+    let mut chars = s.chars();
+
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            // Read next two characters as hex digits
+            let hex: String = chars.by_ref().take(2).collect();
+            if hex.len() != 2 {
+                return Err("Invalid URL encoding: incomplete escape sequence".to_string());
+            }
+
+            match u8::from_str_radix(&hex, 16) {
+                Ok(byte) => decoded.push(byte as char),
+                Err(_) => {
+                    return Err(format!(
+                        "Invalid URL encoding: invalid hex sequence %{}",
+                        hex
+                    ))
+                }
+            }
+        } else {
+            decoded.push(c);
+        }
+    }
+
+    Ok(decoded)
+}
+
+impl std::str::FromStr for CacheKey {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Expected format: "bucket:encoded_object_key"
+        let parts: Vec<&str> = s.splitn(2, ':').collect();
+
+        if parts.len() != 2 {
+            return Err("Invalid cache key format: missing ':' separator".to_string());
+        }
+
+        let bucket = parts[0];
+        let encoded_object_key = parts[1];
+
+        if bucket.is_empty() {
+            return Err("Invalid cache key format: bucket cannot be empty".to_string());
+        }
+
+        if encoded_object_key.is_empty() {
+            return Err("Invalid cache key format: object_key cannot be empty".to_string());
+        }
+
+        // Decode the object key
+        let object_key = url_decode_cache_key(encoded_object_key)?;
+
+        Ok(CacheKey {
+            bucket: bucket.to_string(),
+            object_key,
+            etag: None,
+        })
+    }
+}
+
 /// Per-bucket cache override configuration
 /// This can be included in BucketConfig to override global cache settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1364,5 +1427,186 @@ max_item_size_mb: 5
         assert!(string_repr.starts_with("bucket:"));
         // Should contain URL-encoded Unicode or the actual Unicode characters
         assert!(string_repr.len() > "bucket:".len());
+    }
+
+    // CacheKey Parsing tests
+    #[test]
+    fn test_can_parse_cache_key_from_string() {
+        // Test: Can parse CacheKey from string
+        use std::str::FromStr;
+
+        let cache_key_str = "my-bucket:path/to/file.txt";
+        let key = CacheKey::from_str(cache_key_str).unwrap();
+
+        assert_eq!(key.bucket, "my-bucket");
+        assert_eq!(key.object_key, "path/to/file.txt");
+        assert_eq!(key.etag, None);
+    }
+
+    #[test]
+    fn test_parsing_fails_gracefully_with_invalid_format() {
+        // Test: Parsing fails gracefully with invalid format
+        use std::str::FromStr;
+
+        // No colon separator
+        let result = CacheKey::from_str("invalid-format");
+        assert!(result.is_err());
+
+        // Empty bucket
+        let result = CacheKey::from_str(":object");
+        assert!(result.is_err());
+
+        // Empty object key
+        let result = CacheKey::from_str("bucket:");
+        assert!(result.is_err());
+
+        // Only colon
+        let result = CacheKey::from_str(":");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cache_key_roundtrip_to_string_parse() {
+        // Test: Roundtrip: to_string().parse() == original
+        use std::str::FromStr;
+
+        let original = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "path/to/file.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = original.to_string();
+        let parsed = CacheKey::from_str(&string_repr).unwrap();
+
+        assert_eq!(parsed.bucket, original.bucket);
+        assert_eq!(parsed.object_key, original.object_key);
+        assert_eq!(parsed.etag, original.etag);
+
+        // Test with special characters
+        let original_special = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "file with spaces.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = original_special.to_string();
+        let parsed_special = CacheKey::from_str(&string_repr).unwrap();
+
+        assert_eq!(parsed_special.object_key, "file with spaces.txt");
+    }
+
+    // CacheKey Hashing tests
+    #[test]
+    fn test_same_cache_key_produces_same_hash() {
+        // Test: Same CacheKey produces same hash
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let key2 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let mut hasher1 = DefaultHasher::new();
+        key1.hash(&mut hasher1);
+        let hash1 = hasher1.finish();
+
+        let mut hasher2 = DefaultHasher::new();
+        key2.hash(&mut hasher2);
+        let hash2 = hasher2.finish();
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_different_cache_keys_produce_different_hashes() {
+        // Test: Different CacheKeys produce different hashes
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let key1 = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let key2 = CacheKey {
+            bucket: "bucket2".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let mut hasher1 = DefaultHasher::new();
+        key1.hash(&mut hasher1);
+        let hash1 = hasher1.finish();
+
+        let mut hasher2 = DefaultHasher::new();
+        key2.hash(&mut hasher2);
+        let hash2 = hasher2.finish();
+
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_cache_key_with_different_etags_are_different() {
+        // Test: CacheKey with different etags are different keys
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: Some("etag1".to_string()),
+        };
+
+        let key2 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: Some("etag2".to_string()),
+        };
+
+        let key3 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        assert_ne!(key1, key2);
+        assert_ne!(key1, key3);
+        assert_ne!(key2, key3);
+    }
+
+    #[test]
+    fn test_cache_key_hash_is_stable() {
+        // Test: CacheKey hash is stable across runs (within same execution)
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: Some("etag".to_string()),
+        };
+
+        // Hash multiple times in same execution
+        let mut hasher1 = DefaultHasher::new();
+        key.hash(&mut hasher1);
+        let hash1 = hasher1.finish();
+
+        let mut hasher2 = DefaultHasher::new();
+        key.hash(&mut hasher2);
+        let hash2 = hasher2.finish();
+
+        let mut hasher3 = DefaultHasher::new();
+        key.hash(&mut hasher3);
+        let hash3 = hasher3.finish();
+
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash2, hash3);
     }
 }
