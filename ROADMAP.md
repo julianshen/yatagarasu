@@ -19,8 +19,7 @@
 - ✅ Per-bucket credential isolation for enhanced security
 - ✅ JWT-based authentication (optional per-bucket)
 - ✅ HTTP Range request support for video streaming and parallel downloads
-- ✅ Zero-copy streaming architecture for large files (constant memory usage)
-- ✅ Smart caching for small files (<10MB configurable)
+- ✅ Zero-copy streaming architecture for large files (constant ~64KB memory per connection)
 - ✅ Configuration hot reload via SIGHUP signal and /admin/reload API endpoint
 
 **Authentication & Security**:
@@ -112,21 +111,44 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 ### Known Limitations (Acceptable for v1.0)
 
 1. **JWT Algorithms**: HS256 only (RS256/ES256 → v1.1)
-2. **Caching**: In-memory only (disk/Redis → v1.1)
+2. **Caching**: ❌ NOT implemented in v1.0 (All files stream directly from S3 → Full caching in v1.1)
 3. **Read-Only**: Write operations intentionally blocked (design decision)
-4. **Single-Node**: No distributed caching (v1.0 is stateless, horizontal scaling works)
+4. **Pure Streaming**: No local buffering/caching (stateless design, horizontal scaling works)
 
 ---
 
 ## v1.1.0 - Enhanced Features 📋 **PLANNED**
 
-**Target**: Q1 2026  
-**Focus**: Enhanced authentication, advanced caching, and additional JWT algorithms
+**Target**: Q1 2026
+**Focus**: Cost optimization through caching + enhanced authentication
 
 ### Planned Features
 
-#### 1. Advanced JWT Algorithms
-**Priority**: HIGH  
+#### 1. Advanced Caching Layers 🔴 CRITICAL
+**Priority**: 🔴 **CRITICAL** (Primary v1.1 goal)
+**Effort**: HIGH (1-2 weeks)
+
+- [ ] In-memory LRU cache (heap-based)
+- [ ] Disk cache layer (persistent across restarts)
+- [ ] Redis cache layer (distributed caching)
+- [ ] Configurable cache hierarchy (memory → disk → Redis)
+- [ ] Cache statistics dashboard
+- [ ] Cache purge/invalidation API
+
+**Why**:
+- **Cost Optimization**: Dramatically reduce S3 GET request costs (can save 80-95% on AWS bills)
+- **Performance**: Sub-10ms response times for cached content vs 100ms+ from S3
+- **Scalability**: Reduce S3 backend load, enable higher request rates
+- **Reliability**: Continue serving cached content during S3 outages
+
+**Business Impact**: For high-traffic sites, caching can reduce monthly S3 costs from thousands of dollars to hundreds.
+
+**Example Cost Savings**:
+- Without cache: 10M requests/month × $0.0004/request = **$4,000/month**
+- With 90% cache hit rate: 1M S3 requests × $0.0004 = **$400/month** (90% savings)
+
+#### 2. Advanced JWT Algorithms
+**Priority**: HIGH
 **Effort**: MEDIUM (2-3 days)
 
 - [ ] RS256 (RSA Signature with SHA-256)
@@ -135,17 +157,6 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 - [ ] JWKS (JSON Web Key Set) endpoint support
 
 **Why**: Support enterprise authentication systems that use RSA/ECDSA
-
-#### 2. Advanced Caching Layers
-**Priority**: MEDIUM  
-**Effort**: HIGH (1-2 weeks)
-
-- [ ] Disk cache layer (persistent across restarts)
-- [ ] Redis cache layer (distributed caching)
-- [ ] Configurable cache hierarchy (memory → disk → Redis)
-- [ ] Cache statistics dashboard
-
-**Why**: Larger capacity, persistence, and multi-node cache sharing
 
 #### 3. S3 LIST XML Response
 **Priority**: LOW  
@@ -181,12 +192,19 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 ### v1.1.0 Release Criteria
 
-**Must Have**:
-- ✅ RS256/ES256 JWT support
-- ✅ At least one advanced cache layer (disk or Redis)
+**🔴 CRITICAL - Must Have**:
+- ✅ **In-memory LRU cache implementation** (Primary v1.1 goal)
+  - Minimum: Heap-based cache for files <10MB
+  - Target: 80%+ cache hit rate for static assets
+  - Cost savings validation: Reduce S3 requests by 70%+
+- ✅ **At least one persistent cache layer** (disk OR Redis)
+- ✅ **Cache purge/invalidation API**
 - ✅ All v1.0.0 features remain stable
 - ✅ Backward compatible with v1.0.0 configurations
 - ✅ Performance does not regress
+
+**HIGH - Must Have**:
+- ✅ RS256/ES256 JWT support
 
 **Nice to Have**:
 - S3 LIST XML format
@@ -194,6 +212,8 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 - mTLS support
 
 **Timeline**: 6-8 weeks development + 2 weeks testing
+
+**Success Metric**: Demonstrate 80%+ reduction in S3 costs for typical workload
 
 ---
 
