@@ -326,36 +326,36 @@ pub trait Cache: Send + Sync {
 ## 26.5: Cache Statistics
 
 ### CacheStats Structure
-- [ ] Test: Can create CacheStats struct
-- [ ] Test: CacheStats contains hits (u64)
-- [ ] Test: CacheStats contains misses (u64)
-- [ ] Test: CacheStats contains evictions (u64)
-- [ ] Test: CacheStats contains current_size_bytes (u64)
-- [ ] Test: CacheStats contains current_item_count (u64)
-- [ ] Test: CacheStats contains max_size_bytes (u64)
-- [ ] Test: CacheStats implements Clone trait
-- [ ] Test: CacheStats implements Debug trait
+- [x] Test: Can create CacheStats struct
+- [x] Test: CacheStats contains hits (u64)
+- [x] Test: CacheStats contains misses (u64)
+- [x] Test: CacheStats contains evictions (u64)
+- [x] Test: CacheStats contains current_size_bytes (u64)
+- [x] Test: CacheStats contains current_item_count (u64)
+- [x] Test: CacheStats contains max_size_bytes (u64)
+- [x] Test: CacheStats implements Clone trait
+- [x] Test: CacheStats implements Debug trait
 
 ### CacheStats Calculations
-- [ ] Test: CacheStats can calculate hit rate
-- [ ] Test: Hit rate = hits / (hits + misses)
-- [ ] Test: Hit rate is 0.0 when no requests
-- [ ] Test: Hit rate is 1.0 when all hits
-- [ ] Test: Hit rate is 0.0 when all misses
-- [ ] Test: Hit rate is 0.5 when 50% hits
+- [x] Test: CacheStats can calculate hit rate
+- [x] Test: Hit rate = hits / (hits + misses)
+- [x] Test: Hit rate is 0.0 when no requests
+- [x] Test: Hit rate is 1.0 when all hits
+- [x] Test: Hit rate is 0.0 when all misses
+- [x] Test: Hit rate is 0.5 when 50% hits
 
 ### CacheStats Serialization (for API)
-- [ ] Test: CacheStats implements Serialize trait
-- [ ] Test: CacheStats serializes to JSON
-- [ ] Test: JSON includes all fields
-- [ ] Test: JSON includes computed hit_rate field
+- [x] Test: CacheStats implements Serialize trait
+- [x] Test: CacheStats serializes to JSON
+- [x] Test: JSON includes all fields
+- [x] Test: JSON includes computed hit_rate field
 
 ### CacheStats Per-Bucket Tracking
-- [ ] Test: Can create BucketCacheStats struct
-- [ ] Test: BucketCacheStats maps bucket name to CacheStats
-- [ ] Test: Can aggregate stats across all buckets
-- [ ] Test: Can retrieve stats for specific bucket
-- [ ] Test: Returns empty stats for unknown bucket
+- [x] Test: Can create BucketCacheStats struct
+- [x] Test: BucketCacheStats maps bucket name to CacheStats
+- [x] Test: Can aggregate stats across all buckets
+- [x] Test: Can retrieve stats for specific bucket
+- [x] Test: Returns empty stats for unknown bucket
 
 ---
 
