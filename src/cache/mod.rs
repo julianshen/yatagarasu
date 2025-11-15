@@ -231,6 +231,18 @@ impl RedisCacheConfig {
     }
 }
 
+/// Cache key for identifying cached objects
+/// Combines bucket name and object key to uniquely identify a cache entry
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct CacheKey {
+    /// Bucket name
+    pub bucket: String,
+    /// S3 object key (path)
+    pub object_key: String,
+    /// Optional ETag for validation
+    pub etag: Option<String>,
+}
+
 /// Per-bucket cache override configuration
 /// This can be included in BucketConfig to override global cache settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1114,5 +1126,131 @@ max_item_size_mb: 5
         // Validation still runs and catches the empty cache_dir
         let result = config.validate();
         assert!(result.is_err()); // Still validates individual layer configs
+    }
+
+    // Phase 26.2: Cache Key Design tests
+    #[test]
+    fn test_can_create_cache_key_struct() {
+        // Test: Can create CacheKey struct
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "path/to/object.jpg".to_string(),
+            etag: None,
+        };
+        assert_eq!(key.bucket, "test-bucket");
+        assert_eq!(key.object_key, "path/to/object.jpg");
+        assert_eq!(key.etag, None);
+    }
+
+    #[test]
+    fn test_cache_key_contains_bucket_name() {
+        // Test: CacheKey contains bucket name
+        let key = CacheKey {
+            bucket: "my-bucket".to_string(),
+            object_key: "file.txt".to_string(),
+            etag: None,
+        };
+        assert_eq!(key.bucket, "my-bucket");
+    }
+
+    #[test]
+    fn test_cache_key_contains_object_key() {
+        // Test: CacheKey contains object key (S3 path)
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "path/to/my/object.pdf".to_string(),
+            etag: None,
+        };
+        assert_eq!(key.object_key, "path/to/my/object.pdf");
+    }
+
+    #[test]
+    fn test_cache_key_contains_etag_optional() {
+        // Test: CacheKey contains etag (optional for validation)
+        let key_without_etag = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "file.txt".to_string(),
+            etag: None,
+        };
+        assert_eq!(key_without_etag.etag, None);
+
+        let key_with_etag = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "file.txt".to_string(),
+            etag: Some("abc123".to_string()),
+        };
+        assert_eq!(key_with_etag.etag, Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn test_cache_key_implements_hash_trait() {
+        // Test: CacheKey implements Hash trait
+        use std::collections::HashMap;
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let mut map: HashMap<CacheKey, String> = HashMap::new();
+        map.insert(key.clone(), "value".to_string());
+
+        assert_eq!(map.get(&key), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn test_cache_key_implements_eq_trait() {
+        // Test: CacheKey implements Eq trait
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let key2 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let key3 = CacheKey {
+            bucket: "different".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        assert_eq!(key1, key2);
+        assert_ne!(key1, key3);
+    }
+
+    #[test]
+    fn test_cache_key_implements_clone_trait() {
+        // Test: CacheKey implements Clone trait
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: Some("etag123".to_string()),
+        };
+
+        let key2 = key1.clone();
+        assert_eq!(key1, key2);
+        assert_eq!(key2.bucket, "bucket");
+        assert_eq!(key2.object_key, "key");
+        assert_eq!(key2.etag, Some("etag123".to_string()));
+    }
+
+    #[test]
+    fn test_cache_key_implements_debug_trait() {
+        // Test: CacheKey implements Debug trait
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file.txt".to_string(),
+            etag: None,
+        };
+
+        let debug_str = format!("{:?}", key);
+        assert!(debug_str.contains("test"));
+        assert!(debug_str.contains("file.txt"));
     }
 }

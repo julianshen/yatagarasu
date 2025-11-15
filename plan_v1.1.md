@@ -211,14 +211,14 @@ buckets:
 ## 26.2: Cache Key Design
 
 ### CacheKey Structure
-- [ ] Test: Can create CacheKey struct
-- [ ] Test: CacheKey contains bucket name
-- [ ] Test: CacheKey contains object key (S3 path)
-- [ ] Test: CacheKey contains etag (optional for validation)
-- [ ] Test: CacheKey implements Hash trait
-- [ ] Test: CacheKey implements Eq trait
-- [ ] Test: CacheKey implements Clone trait
-- [ ] Test: CacheKey implements Debug trait
+- [x] Test: Can create CacheKey struct
+- [x] Test: CacheKey contains bucket name
+- [x] Test: CacheKey contains object key (S3 path)
+- [x] Test: CacheKey contains etag (optional for validation)
+- [x] Test: CacheKey implements Hash trait
+- [x] Test: CacheKey implements Eq trait
+- [x] Test: CacheKey implements Clone trait
+- [x] Test: CacheKey implements Debug trait
 
 ### CacheKey String Representation
 - [ ] Test: CacheKey can serialize to string (for Redis keys)
