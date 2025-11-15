@@ -351,6 +351,26 @@ pub struct CacheEntry {
     pub last_accessed_at: SystemTime,
 }
 
+impl CacheEntry {
+    /// Calculate the approximate size of this cache entry in bytes
+    /// Includes data length plus metadata overhead
+    pub fn size_bytes(&self) -> usize {
+        // Data size
+        let data_size = self.data.len();
+
+        // String metadata size
+        let content_type_size = self.content_type.len();
+        let etag_size = self.etag.len();
+
+        // Fixed-size metadata
+        let content_length_size = std::mem::size_of::<usize>();
+        let timestamps_size = 3 * std::mem::size_of::<SystemTime>();
+
+        // Total size
+        data_size + content_type_size + etag_size + content_length_size + timestamps_size
+    }
+}
+
 /// Per-bucket cache override configuration
 /// This can be included in BucketConfig to override global cache settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1802,5 +1822,135 @@ max_item_size_mb: 5
         };
 
         assert_eq!(entry.last_accessed_at, accessed);
+    }
+
+    // CacheEntry Size Calculation tests
+    #[test]
+    fn test_cache_entry_can_calculate_size_in_bytes() {
+        // Test: CacheEntry can calculate its size in bytes
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from("test data");
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data,
+            content_type: "text/plain".to_string(),
+            content_length: 9,
+            etag: "etag123".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        let size = entry.size_bytes();
+        assert!(size > 0);
+    }
+
+    #[test]
+    fn test_size_includes_data_length() {
+        // Test: Size includes data length
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from("hello world");
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data.len(),
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        let size = entry.size_bytes();
+        // Size should at least include the data length
+        assert!(size >= data.len());
+    }
+
+    #[test]
+    fn test_size_includes_metadata_overhead() {
+        // Test: Size includes metadata overhead (approximate)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from("test");
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "application/json".to_string(),
+            content_length: data.len(),
+            etag: "abc123".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        let size = entry.size_bytes();
+        // Size should be greater than just data (includes strings and metadata)
+        // Estimate: data.len() + content_type.len() + etag.len() + sizeof(usize) + 3*sizeof(SystemTime)
+        let metadata_size = "application/json".len()
+            + "abc123".len()
+            + std::mem::size_of::<usize>()
+            + 3 * std::mem::size_of::<SystemTime>();
+        assert!(size >= data.len() + metadata_size);
+    }
+
+    #[test]
+    fn test_size_accurate_for_small_entries() {
+        // Test: Size is accurate for small entries (<1KB)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from(vec![0u8; 512]); // 512 bytes
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "image/png".to_string(),
+            content_length: data.len(),
+            etag: "small".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        let size = entry.size_bytes();
+        // Should be at least the data size
+        assert!(size >= 512);
+        // Should not be wildly inaccurate (< 2x the data size for small entries)
+        assert!(size < 2048);
+    }
+
+    #[test]
+    fn test_size_accurate_for_large_entries() {
+        // Test: Size is accurate for large entries (>1MB)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from(vec![0u8; 2 * 1024 * 1024]); // 2MB
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "video/mp4".to_string(),
+            content_length: data.len(),
+            etag: "large".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        let size = entry.size_bytes();
+        // Should be at least the data size
+        assert!(size >= 2 * 1024 * 1024);
+        // Metadata overhead should be negligible compared to data size
+        // Allow 1% overhead for metadata
+        assert!(size < (2 * 1024 * 1024) + (2 * 1024 * 1024 / 100));
     }
 }

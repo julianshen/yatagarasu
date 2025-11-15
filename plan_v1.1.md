@@ -254,11 +254,11 @@ buckets:
 - [x] Test: CacheEntry contains last_accessed_at (timestamp, for LRU)
 
 ### CacheEntry Size Calculation
-- [ ] Test: CacheEntry can calculate its size in bytes
-- [ ] Test: Size includes data length
-- [ ] Test: Size includes metadata overhead (approximate)
-- [ ] Test: Size is accurate for small entries (<1KB)
-- [ ] Test: Size is accurate for large entries (>1MB)
+- [x] Test: CacheEntry can calculate its size in bytes
+- [x] Test: Size includes data length
+- [x] Test: Size includes metadata overhead (approximate)
+- [x] Test: Size is accurate for small entries (<1KB)
+- [x] Test: Size is accurate for large entries (>1MB)
 
 ### CacheEntry TTL & Expiration
 - [ ] Test: CacheEntry can check if expired
