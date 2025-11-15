@@ -9,14 +9,16 @@
 
 Yatagarasu is a high-performance S3 proxy built with Cloudflare's Pingora framework and Rust. It provides intelligent routing, multi-bucket support, and flexible JWT authentication for S3 object storage access.
 
-*Yatagarasu (八咫烏) is the three-legged crow in Japanese mythology that serves as a divine guide and messenger. Like its namesake, this proxy guides and securely routes requests to the appropriate S3 buckets.*
+_Yatagarasu (八咫烏) is the three-legged crow in Japanese mythology that serves as a divine guide and messenger. Like its namesake, this proxy guides and securely routes requests to the appropriate S3 buckets._
 
 ## Purpose and Goals
 
 ### Primary Purpose
+
 Reimplement the S3 Envoy proxy MVP with enhanced performance, security, and flexibility using Pingora and Rust, providing a production-ready S3 proxy solution with advanced authentication and multi-bucket routing capabilities.
 
 ### Key Goals
+
 - **Performance**: Leverage Pingora's architecture for 70% lower CPU usage compared to traditional proxies
 - **Multi-tenancy**: Support multiple S3 buckets with isolated credentials on different paths
 - **Security**: Implement flexible, optional JWT authentication with custom claims verification
@@ -25,6 +27,7 @@ Reimplement the S3 Envoy proxy MVP with enhanced performance, security, and flex
 - **Maintainability**: Follow TDD principles for high code quality and test coverage
 
 ### Success Criteria
+
 - Successfully proxy requests to multiple S3 buckets with path-based routing
 - JWT authentication working with all three token sources (query, auth header, custom header)
 - Performance meets or exceeds Envoy-based MVP with lower resource usage
@@ -35,22 +38,25 @@ Reimplement the S3 Envoy proxy MVP with enhanced performance, security, and flex
 ## Target Users
 
 ### Primary Users
+
 DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 access to their applications and services.
 
 ### User Personas
 
 1. **Platform Engineer**
+
    - Role: Infrastructure and platform services
-   - Goals: 
+   - Goals:
      - Provide secure S3 access to multiple teams/applications
      - Manage credentials centrally without exposing AWS keys to applications
      - Monitor and control S3 access patterns
-   - Pain Points: 
+   - Pain Points:
      - Managing separate S3 credentials for each application
      - Implementing consistent authentication across services
      - Performance overhead of existing proxy solutions
 
 2. **Security Engineer**
+
    - Role: Security and compliance
    - Goals:
      - Enforce authentication on S3 access
@@ -77,15 +83,18 @@ DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 
 ### Core Features
 
 #### Feature 1: Multi-Bucket Path Routing
+
 **Priority:** High  
 **Description:** Route incoming HTTP requests to different S3 buckets based on URL path prefixes. Each bucket has its own AWS credentials (access key and secret key) for isolated access control.
 
 **User Stories:**
+
 - As a platform engineer, I want to map `/bucket-a/*` to S3 bucket A and `/bucket-b/*` to S3 bucket B, so that I can serve content from multiple buckets through a single proxy endpoint
 - As a developer, I want to access objects via simple HTTP paths like `/products/image.png` without knowing the underlying S3 bucket name or credentials
 - As an administrator, I want to configure bucket mappings without code changes, so that I can add or modify buckets dynamically
 
 **Acceptance Criteria:**
+
 - [ ] Given a request to `/bucket-a/file.txt`, when the proxy receives it, then it routes to the configured S3 bucket A with bucket A's credentials
 - [ ] Given a request to `/bucket-b/data.json`, when the proxy receives it, then it routes to the configured S3 bucket B with bucket B's credentials
 - [ ] Given multiple path prefixes configured, when requests arrive, then each routes to its correct bucket independently
@@ -98,16 +107,19 @@ DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 
 ---
 
 #### Feature 2: Flexible JWT Authentication
+
 **Priority:** High  
 **Description:** Implement optional, configurable JWT authentication that can extract tokens from multiple sources and verify custom claims with configurable logic.
 
 **User Stories:**
+
 - As a security engineer, I want to require JWT authentication for specific paths/buckets, so that only authorized users can access sensitive S3 objects
 - As a developer, I want JWT tokens accepted from query parameters (`?token=xxx`), Authorization header (`Bearer xxx`), or custom headers (`X-Auth-Token: xxx`), so that I can support different client types
 - As an administrator, I want to configure custom JWT claims verification (e.g., `role=admin`, `tenant=acme`), so that I can implement fine-grained access control
 - As a platform engineer, I want JWT authentication to be optional per bucket/path, so that public and private content can coexist
 
 **Acceptance Criteria:**
+
 - [ ] Given JWT in query parameter `?token=xxx`, when configured, then token is extracted and validated
 - [ ] Given JWT in Authorization header `Bearer xxx`, when configured, then token is extracted and validated
 - [ ] Given JWT in custom header `X-Auth-Token: xxx`, when configured, then token is extracted and validated
@@ -123,16 +135,19 @@ DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 
 ---
 
 #### Feature 3: S3 Request Proxying and Signing
+
 **Priority:** High  
 **Description:** Transform HTTP requests into properly signed AWS S3 API requests using AWS Signature Version 4, handle S3 responses, and stream content back to clients. **Uses zero-copy streaming architecture - never buffers entire files to disk.**
 
 **User Stories:**
+
 - As a client application, I want to make standard HTTP GET requests to the proxy, so that the proxy handles S3 authentication and signing for me
 - As the proxy, I want to generate valid AWS Signature v4 signatures, so that S3 accepts my requests
 - As a developer, I want support for common S3 operations (GET object, HEAD object, LIST objects), so that I can perform standard S3 workflows through the proxy
 - As a client, I want efficient streaming of large S3 objects, so that memory usage stays reasonable
 
 **Acceptance Criteria:**
+
 - [ ] Given a GET request for an object, when proxied to S3, then request is signed with AWS Signature v4
 - [ ] Given a valid S3 object path, when requested, then object content is returned with correct content-type
 - [ ] Given a HEAD request for an object, when proxied to S3, then object metadata is returned without body
@@ -142,6 +157,7 @@ DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 
 - [ ] Given S3 response headers (ETag, Last-Modified, etc.), when returned, then they are preserved in proxy response
 
 **Range Request Support:**
+
 - [ ] Given a Range header in request, when proxied to S3, then Range header forwarded with AWS signature
 - [ ] Given a valid byte range, when S3 returns 206, then proxy returns 206 Partial Content to client
 - [ ] Given a range request, when served, then only requested bytes streamed (not full file, saves bandwidth)
@@ -152,6 +168,7 @@ DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 
 - [ ] Given any response, when sent, then Accept-Ranges: bytes header included to indicate support
 
 **Streaming Architecture:**
+
 - **Zero-copy streaming**: S3 response chunks flow directly to client without local buffering
 - **Constant memory**: ~64KB buffer per connection regardless of file size
 - **Low latency**: First byte to client (TTFB) within ~100-500ms
@@ -159,6 +176,7 @@ DevOps Engineers and Platform Teams who need to provide secure, multi-tenant S3 
 - **No local storage**: Files are never written to proxy's disk before serving
 
 **Caching Behavior:**
+
 - **Small files** (<10MB configurable): Buffered for caching when cache enabled
 - **Large files** (>10MB): Always streamed, never cached
 - **Range requests**: Always streamed from S3
@@ -171,15 +189,18 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for detailed sequence
 ---
 
 #### Feature 4: Configuration Management
+
 **Priority:** High  
 **Description:** Support flexible configuration via YAML/TOML files for bucket mappings, JWT settings, and proxy behavior. Enable hot-reload for configuration updates without downtime.
 
 **User Stories:**
+
 - As an administrator, I want to define all buckets, paths, and authentication rules in a configuration file, so that I can manage proxy behavior declaratively
 - As an operator, I want to update configuration and reload without restarting the proxy, so that I can avoid service disruption
 - As a developer, I want clear configuration validation errors on startup, so that I can quickly fix misconfigurations
 
 **Acceptance Criteria:**
+
 - [ ] Given a YAML configuration file, when proxy starts, then configuration is loaded and validated
 - [ ] Given invalid configuration (missing required fields, invalid formats), when starting, then proxy exits with clear error messages
 - [ ] Given a configuration file change, when signaled to reload, then new configuration is applied without dropping connections
@@ -193,21 +214,25 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for detailed sequence
 ### Secondary Features
 
 #### Feature 5: Advanced Caching
+
 **Priority:** Medium  
 **Description:** Implement optional caching layer (heap, mmap, or disk) for frequently accessed **small files** to reduce S3 requests and improve performance. Large files are always streamed for memory efficiency.
 
 **Caching Strategy:**
+
 - **Small files** (<10MB configurable): Eligible for caching
 - **Large files** (>10MB): Always streamed, never cached (memory efficiency)
 - **Range requests**: Always streamed from S3 (no partial caching)
 - **Cache write**: Asynchronous, doesn't block client response
 
 **User Stories:**
+
 - As a platform engineer, I want to cache hot objects in memory, so that repeated requests are served faster
 - As an administrator, I want to configure cache TTL and size limits per bucket, so that I can balance performance and freshness
 - As an operator, I want cache statistics and metrics, so that I can tune cache settings
 
 **Acceptance Criteria:**
+
 - [ ] Given cache enabled and file <10MB, when requested twice, then second request served from cache
 - [ ] Given cache enabled and file >10MB, when requested, then file is streamed (not cached)
 - [ ] Given cache TTL expired, when requested, then file is re-fetched from S3
@@ -216,6 +241,7 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for detailed sequence
 - [ ] Given range request, when requested, then always fetched from S3 (not cached)
 
 **Cache Layers (v1.0 uses heap cache, others deferred to v1.1):**
+
 - **Heap cache**: In-memory HashMap, fast but limited by RAM
 - **Mmap cache** (v1.1): Memory-mapped files, larger capacity
 - **Disk cache** (v1.1): Persistent cache, largest capacity
@@ -223,23 +249,28 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for detailed sequence
 See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for cache flow diagrams.
 
 #### Feature 6: Request Logging and Metrics
+
 **Priority:** Medium  
 **Description:** Comprehensive logging of requests, S3 operations, and authentication events with Prometheus metrics export.
 
 **User Stories:**
+
 - As an operator, I want detailed logs of all proxy operations, so that I can troubleshoot issues
 - As a monitoring engineer, I want Prometheus metrics (request counts, latencies, error rates), so that I can monitor proxy health
 
 #### Feature 7: Rate Limiting
+
 **Priority:** Low  
 **Description:** Implement per-client or per-path rate limiting to protect S3 buckets from abuse.
 
 **User Stories:**
+
 - As a security engineer, I want to rate-limit requests per JWT subject, so that no single user can overwhelm the system
 
 ## Non-Functional Requirements
 
 ### Performance
+
 - **Response time:** <100ms P95 for cached objects, <500ms P95 for S3 requests
 - **Throughput:** 10,000+ requests/second on commodity hardware
 - **Resource efficiency:** 70% lower CPU usage compared to Envoy-based solution
@@ -247,6 +278,7 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for cache flow diagra
 - **Scalability:** Horizontal scaling via multiple proxy instances (stateless design)
 
 ### Security
+
 - **Authentication:** JWT validation with configurable algorithms (HS256, RS256, ES256)
 - **Authorization:** Custom claims-based access control per bucket/path
 - **Credential isolation:** Complete separation of AWS credentials per bucket
@@ -255,26 +287,29 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for cache flow diagra
 - **Compliance:** No credential logging, secure memory handling for tokens and keys
 
 ### Reliability
+
 - **Availability:** 99.9% uptime target (depends on S3 availability)
-- **Error handling:** 
+- **Error handling:**
   - Graceful handling of S3 errors with proper HTTP status codes
   - Retry logic with exponential backoff for transient failures
   - Circuit breaker pattern for failing S3 buckets
-- **Data integrity:** 
+- **Data integrity:**
   - Pass through S3 ETags for integrity verification
   - No data corruption during proxying
 - **Fault tolerance:** Continue serving other buckets even if one bucket is unavailable
 
 ### Usability
+
 - **Configuration:** Clear, self-documenting YAML/TOML configuration format
 - **Error messages:** Human-readable error messages for all failure scenarios
-- **Documentation:** 
+- **Documentation:**
   - Comprehensive README with examples
   - Configuration reference documentation
   - API documentation for all endpoints
 - **Deployment:** Single binary deployment with minimal dependencies
 
 ### Maintainability
+
 - **Code quality:** Follow Kent Beck's TDD principles rigorously
 - **Test coverage:** >90% unit test coverage, comprehensive integration tests
 - **Code documentation:** Document complex logic and design decisions
@@ -289,6 +324,7 @@ See [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) for cache flow diagra
 **Architecture Pattern:** Asynchronous proxy with Pingora framework
 
 **High-Level Architecture:**
+
 ```
 Client Request
     ↓
@@ -310,6 +346,7 @@ Client Response
 ```
 
 **Key Components:**
+
 1. **HTTP Server Layer (Pingora):** Handles HTTP/HTTPS connections, request parsing
 2. **Router:** Maps request paths to bucket configurations
 3. **JWT Middleware:** Extracts and validates JWT tokens from configured sources
@@ -320,6 +357,7 @@ Client Response
 8. **Logger:** Structured logging with tracing integration
 
 **Data Flow:**
+
 1. Client sends HTTP request to proxy
 2. Router matches path prefix to bucket configuration
 3. If JWT required, middleware extracts token from configured source(s)
@@ -332,7 +370,7 @@ Client Response
 
 - **Language:** Rust 1.70+ (stable)
 - **Proxy Framework:** Cloudflare Pingora (latest stable)
-- **S3 Integration:** 
+- **S3 Integration:**
   - `aws-sdk-s3` (official AWS SDK for Rust) - primary choice
   - OR `rusoto_s3` (alternative if SDK limitations)
 - **JWT:** `jsonwebtoken` crate for validation
@@ -341,7 +379,7 @@ Client Response
 - **Configuration:** `config` crate for layered configuration
 - **Logging:** `tracing` + `tracing-subscriber` for structured logging
 - **Metrics:** `prometheus` crate for metrics export
-- **Testing Framework:** 
+- **Testing Framework:**
   - `cargo test` (unit tests)
   - `rstest` for parameterized tests
   - Integration tests with test S3 backend (MinIO or LocalStack)
@@ -349,6 +387,7 @@ Client Response
 - **HTTP Client:** Hyper (via Pingora/AWS SDK)
 
 ### Dependencies (Cargo.toml)
+
 ```toml
 [dependencies]
 pingora = "0.1"  # Cloudflare's proxy framework
@@ -376,6 +415,7 @@ testcontainers = "0.15"  # Container-based integration tests
 ### APIs and Integrations
 
 **Internal APIs:**
+
 - Configuration API: Load, validate, reload configuration
 - Router API: Match paths to bucket configurations
 - JWT API: Extract, validate, verify JWT tokens
@@ -383,13 +423,15 @@ testcontainers = "0.15"  # Container-based integration tests
 - Metrics API: Export Prometheus metrics on `/metrics` endpoint
 
 **External APIs:**
+
 - **AWS S3 API:** Standard S3 REST API with Signature Version 4
   - GET Object
   - HEAD Object
   - LIST Objects (optional)
 - **JWT Validation:** Standard JWT validation (no external service)
 
-**Data Formats:** 
+**Data Formats:**
+
 - Configuration: YAML or TOML
 - Responses: Original S3 content-types (binary, JSON, XML, etc.)
 - Metrics: Prometheus text format
@@ -407,15 +449,15 @@ server:
     enabled: true
     cert_path: "/path/to/cert.pem"
     key_path: "/path/to/key.pem"
-  
+
 buckets:
   - name: "products"
     path_prefix: "/products"
     s3:
       bucket: "my-products-bucket"
       region: "us-east-1"
-      endpoint: "https://s3.amazonaws.com"  # optional, for S3-compatible services
-      access_key: "${AWS_ACCESS_KEY_PRODUCTS}"  # env var substitution
+      endpoint: "https://s3.amazonaws.com" # optional, for S3-compatible services
+      access_key: "${AWS_ACCESS_KEY_PRODUCTS}" # env var substitution
       secret_key: "${AWS_SECRET_KEY_PRODUCTS}"
     auth:
       enabled: true
@@ -441,7 +483,7 @@ buckets:
       enabled: true
       ttl: 3600
       max_size: "1GB"
-  
+
   - name: "public-assets"
     path_prefix: "/assets"
     s3:
@@ -450,7 +492,7 @@ buckets:
       access_key: "${AWS_ACCESS_KEY_ASSETS}"
       secret_key: "${AWS_SECRET_KEY_ASSETS}"
     auth:
-      enabled: false  # Public access
+      enabled: false # Public access
     cache:
       enabled: true
       ttl: 86400
@@ -459,7 +501,7 @@ buckets:
 logging:
   level: "info"
   format: "json"
-  
+
 metrics:
   enabled: true
   port: 9090
@@ -468,6 +510,7 @@ metrics:
 #### Runtime Data Structures
 
 **BucketConfig:**
+
 ```rust
 struct BucketConfig {
     name: String,
@@ -479,6 +522,7 @@ struct BucketConfig {
 ```
 
 **S3Config:**
+
 ```rust
 struct S3Config {
     bucket: String,
@@ -490,6 +534,7 @@ struct S3Config {
 ```
 
 **AuthConfig:**
+
 ```rust
 struct AuthConfig {
     enabled: bool,
@@ -526,7 +571,9 @@ enum ClaimOperator {
 ## User Interface Specifications
 
 ### Main Workflows
+
 1. **Workflow 1:** [Name]
+
    - Step 1: [Description]
    - Step 2: [Description]
    - Step 3: [Description]
@@ -536,6 +583,7 @@ enum ClaimOperator {
    - Step 2: [Description]
 
 ### Key UI Components
+
 - [Component 1]: [Description]
 - [Component 2]: [Description]
 
@@ -544,13 +592,16 @@ enum ClaimOperator {
 ### Error Categories
 
 #### User Input Errors
+
 **How to handle:** Return 400 Bad Request with clear error message
+
 - Invalid path format
 - Malformed JWT token
 - Missing required headers
 - Invalid query parameters
 
 **Example Response:**
+
 ```json
 {
   "error": "Invalid request",
@@ -560,11 +611,14 @@ enum ClaimOperator {
 ```
 
 #### Authentication/Authorization Errors
+
 **How to handle:** Return appropriate 401/403 status codes
+
 - 401 Unauthorized: Missing or invalid JWT
 - 403 Forbidden: Valid JWT but failed claims verification
 
 **Example Response:**
+
 ```json
 {
   "error": "Unauthorized",
@@ -574,12 +628,15 @@ enum ClaimOperator {
 ```
 
 #### S3 Errors
+
 **How to handle:** Map S3 errors to appropriate HTTP status codes
+
 - 404: S3 object not found
 - 403: S3 access denied (credentials issue)
 - 500: S3 service error
 
 **Example Response:**
+
 ```json
 {
   "error": "Not found",
@@ -589,12 +646,15 @@ enum ClaimOperator {
 ```
 
 #### System Errors
+
 **How to handle:** Return 500 Internal Server Error, log full details
+
 - Configuration errors
 - Network failures to S3
 - Internal proxy errors
 
 **Example Response:**
+
 ```json
 {
   "error": "Internal server error",
@@ -606,6 +666,7 @@ enum ClaimOperator {
 ### Error Messages
 
 All error messages must be:
+
 - **Clear and actionable:** Tell user what went wrong and how to fix it
 - **User-friendly:** No Rust panic messages or technical jargon for external clients
 - **Secure:** Don't expose internal paths, credentials, or sensitive config
@@ -615,6 +676,7 @@ All error messages must be:
 ### Error Logging
 
 Internal logs should include:
+
 ```rust
 error!(
     error = %e,
@@ -635,7 +697,7 @@ Following TDD principles outlined in CLAUDE.md:
        /\
       /  \     E2E Tests (5%)
      /____\    - Full proxy workflow with real S3 (MinIO/LocalStack)
-    /      \   
+    /      \
    /  Inte  \  Integration Tests (15%)
   /  gration \  - Component interactions
  /____________\ - Router + Auth + S3 client
@@ -647,10 +709,12 @@ Following TDD principles outlined in CLAUDE.md:
 ### Test Levels
 
 #### 1. Unit Tests
+
 **Coverage target:** >90% of code  
 **Run frequency:** After every code change (in TDD cycle)
 
 **Test areas:**
+
 - Configuration parsing and validation
 - Path matching and routing logic
 - JWT token extraction from different sources
@@ -660,13 +724,14 @@ Following TDD principles outlined in CLAUDE.md:
 - Utility functions and helpers
 
 **Example tests:**
+
 ```rust
 #[test]
 fn test_extract_token_from_bearer_header() {
     let headers = /* ... */;
-    let token = extract_token(&headers, &TokenSource::Header { 
-        name: "Authorization".into(), 
-        prefix: Some("Bearer ".into()) 
+    let token = extract_token(&headers, &TokenSource::Header {
+        name: "Authorization".into(),
+        prefix: Some("Bearer ".into())
     });
     assert!(token.is_some());
 }
@@ -684,10 +749,12 @@ fn test_jwt_claims_verification_equals() {
 ```
 
 #### 2. Integration Tests
+
 **Coverage target:** All critical interaction paths  
 **Run frequency:** Before every commit
 
 **Test areas:**
+
 - Router + Auth middleware integration
 - Auth middleware + S3 client integration
 - Configuration loading + Router initialization
@@ -695,20 +762,21 @@ fn test_jwt_claims_verification_equals() {
 - Error propagation through layers
 
 **Example tests:**
+
 ```rust
 #[tokio::test]
 async fn test_authenticated_s3_request_flow() {
     // Setup: Create test config, mock S3
     let config = test_config();
     let proxy = setup_proxy(config);
-    
+
     // Execute: Send request with JWT
     let response = proxy.request()
         .header("Authorization", "Bearer valid-token")
         .path("/products/test.txt")
         .send()
         .await;
-    
+
     // Verify: Check S3 was called with correct signature
     assert_eq!(response.status(), 200);
     assert_s3_called_with_signature();
@@ -716,10 +784,12 @@ async fn test_authenticated_s3_request_flow() {
 ```
 
 #### 3. End-to-End Tests
+
 **Coverage target:** All main user workflows  
 **Run frequency:** Before every release (can be slow)
 
 **Test areas:**
+
 - Full request flow: Client → Proxy → S3 (MinIO/LocalStack) → Client
 - Multi-bucket routing with real S3-compatible storage
 - JWT authentication with real token generation
@@ -727,28 +797,30 @@ async fn test_authenticated_s3_request_flow() {
 - Error scenarios with real S3 errors
 
 **Test setup:** Use Docker Compose with:
+
 - MinIO or LocalStack for S3-compatible storage
 - Test JWT issuer service
 - Yatagarasu proxy instance
 
 **Example tests:**
+
 ```rust
 #[tokio::test]
 #[ignore] // Long-running test
 async fn test_e2e_multi_bucket_access() {
     // Setup: Start MinIO, create buckets, configure proxy
     let test_env = E2ETestEnvironment::new().await;
-    
+
     // Bucket A: PUT object
     test_env.minio.put_object("bucket-a", "file.txt", "content").await;
-    
+
     // Bucket B: PUT object
     test_env.minio.put_object("bucket-b", "data.json", "{}").await;
-    
+
     // Test: Access via proxy
     let resp_a = test_env.proxy.get("/bucket-a/file.txt").await;
     let resp_b = test_env.proxy.get("/bucket-b/data.json").await;
-    
+
     assert_eq!(resp_a.text(), "content");
     assert_eq!(resp_b.text(), "{}");
 }
@@ -764,6 +836,7 @@ async fn test_e2e_multi_bucket_access() {
 ### Test Fixtures
 
 Create reusable test fixtures:
+
 ```rust
 // tests/fixtures/mod.rs
 pub fn test_bucket_config() -> BucketConfig { /* ... */ }
@@ -775,6 +848,7 @@ pub fn expired_jwt_token() -> String { /* ... */ }
 ### Performance Tests
 
 Use `criterion` for benchmarking:
+
 ```rust
 #[bench]
 fn bench_jwt_validation(b: &mut Bencher) {
@@ -790,6 +864,7 @@ fn bench_s3_signature_generation(b: &mut Bencher) {
 ```
 
 Target benchmarks:
+
 - JWT validation: <1ms per token
 - S3 signature generation: <100μs
 - Path routing: <10μs per request
@@ -797,6 +872,7 @@ Target benchmarks:
 ## Constraints and Assumptions
 
 ### Constraints
+
 - **Pingora framework:** Must use Pingora's async architecture and APIs
 - **Rust language:** Must be Rust (no mixed-language codebase)
 - **S3 API compatibility:** Limited to S3-compatible APIs (AWS S3, MinIO, etc.)
@@ -805,6 +881,7 @@ Target benchmarks:
 - **Single tenant per bucket:** Each bucket config represents one S3 bucket only
 
 ### Assumptions
+
 - S3 backend is available and responsive
 - JWT issuer is external (proxy only validates, doesn't issue tokens)
 - Clients can handle standard HTTP error codes and JSON error responses
@@ -818,6 +895,7 @@ Target benchmarks:
 The following are explicitly out of scope for version 1.0:
 
 ### Not Supported
+
 - **S3 write operations** (PUT, POST, DELETE) - Read-only proxy
 - **S3 multipart uploads** - Complex to proxy correctly
 - **S3 website hosting features** - Index documents, error documents
@@ -831,6 +909,7 @@ The following are explicitly out of scope for version 1.0:
 - **GraphQL API** - REST/HTTP only
 
 ### Deferred to Future Versions
+
 - S3 write operations (PUT, DELETE)
 - Advanced caching strategies (LRU, LFU)
 - Cache invalidation APIs
@@ -845,22 +924,21 @@ The following are explicitly out of scope for version 1.0:
 Features and improvements to consider for future versions:
 
 ### Version 1.1
-- **Write support:** Enable PUT/DELETE operations with proper access control
+
 - **Advanced caching:** Implement mmap and disk cache layers
 - **Cache invalidation:** API endpoints to purge cache entries
 - **Cache pre-warming:** Recursive path prefetching to populate cache on startup or schedule
 - **Metrics dashboard:** Built-in web UI for metrics visualization
 
 ### Version 1.2
-- **S3 SELECT support:** Allow SQL-like queries on S3 objects
+
 - **Request transformation:** Modify requests/responses based on rules
 - **Multi-region failover:** Automatic failover to backup S3 regions
 - **Compression:** Transparent gzip/brotli compression of responses
 
 ### Version 2.0
-- **GraphQL API:** GraphQL layer over S3 objects
-- **Smart caching:** ML-based cache eviction and predictive prefetching/pre-warming
-- **Object transformation:** On-the-fly image resizing, video transcoding
+
+- **Smart caching:** cache eviction and predictive prefetching/pre-warming
 - **Edge deployment:** Deploy proxy to edge locations for lower latency
 
 ## Glossary
@@ -884,11 +962,13 @@ Features and improvements to consider for future versions:
 ## References
 
 ### Project
+
 - **Original MVP:** https://github.com/julianshen/s3-envoy-proxy
 - **CLAUDE.md:** Development methodology guide (Kent Beck's TDD)
 - **plan.md:** TDD implementation plan with test checklist
 
 ### Technology Documentation
+
 - **Pingora:** https://github.com/cloudflare/pingora
 - **AWS SDK for Rust:** https://aws.amazon.com/sdk-for-rust/
 - **JWT in Rust:** https://docs.rs/jsonwebtoken/
@@ -897,11 +977,13 @@ Features and improvements to consider for future versions:
 - **S3 API Reference:** https://docs.aws.amazon.com/AmazonS3/latest/API/
 
 ### Testing Tools
+
 - **MinIO:** https://min.io/ (S3-compatible storage for testing)
 - **LocalStack:** https://localstack.cloud/ (AWS service emulation)
 - **Testcontainers:** https://docs.rs/testcontainers/ (Container-based tests)
 
 ### Methodology
+
 - **Kent Beck's TDD:** https://www.amazon.com/Test-Driven-Development-Kent-Beck/dp/0321146530
 - **Tidy First?:** https://www.amazon.com/Tidy-First-Personal-Exercise-Empirical/dp/1098151240
 
@@ -909,10 +991,10 @@ Features and improvements to consider for future versions:
 
 ## Document History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0.0   | 2025-10-21 | Team | Initial specification for Pingora-based S3 proxy |
-| 0.1.0   | 2025-10-20 | Team | MVP specification (Envoy-based) |
+| Version | Date       | Author | Changes                                          |
+| ------- | ---------- | ------ | ------------------------------------------------ |
+| 1.0.0   | 2025-10-21 | Team   | Initial specification for Pingora-based S3 proxy |
+| 0.1.0   | 2025-10-20 | Team   | MVP specification (Envoy-based)                  |
 
 ---
 
