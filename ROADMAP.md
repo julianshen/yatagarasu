@@ -234,7 +234,98 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **Timeline**: 6-8 weeks development + 2 weeks testing
 
-**Success Metric**: Demonstrate 80%+ reduction in S3 costs for typical workload
+**Success Metrics**:
+- Primary: Demonstrate 80%+ reduction in S3 costs for typical workload
+
+### v1.1.0 Non-Functional Requirements (Must Pass Before Release)
+
+**Performance & Load Testing**:
+- ✅ **1000+ concurrent users** accessing small files (30+ min sustained)
+  - Test with cache COLD (all cache misses → S3)
+  - Test with cache HOT (90%+ cache hit rate)
+  - P95 latency: <50ms (cached), <200ms (uncached)
+  - Error rate: <0.1%
+  - Memory growth: <10% over 30 minutes
+
+- ✅ **100 concurrent users** downloading large files (>5GB each, 30+ min)
+  - Zero-copy streaming must hold: ~64KB memory per connection
+  - Total memory: <500MB (100 × 5MB buffer allowance)
+  - No memory leaks: Memory stable after 30 minutes
+  - P95 TTFB: <500ms
+  - Throughput: Sustain full network bandwidth
+  - No crashes or connection drops
+
+- ✅ **10000+ concurrent users** downloading 1KB files (5 min stress test)
+  - Maximum concurrency stress test (10x baseline)
+  - P95 latency: <100ms
+  - Throughput: >1000 req/s sustained
+  - Error rate: <0.1%
+  - No connection pool exhaustion
+  - No file descriptor leaks
+  - Memory stable (no unbounded growth)
+
+**Resilience & Chaos Testing**:
+- ✅ **Chaos engineering scenarios** (all must recover gracefully)
+  - S3 backend failure (503 errors) → Circuit breaker opens, metrics track
+  - Network partition (S3 unreachable) → 504 Gateway Timeout, no crashes
+  - Slow S3 responses (2s+ latency) → Timeouts work, requests don't pile up
+  - Replica failover → Primary fails, backup serves within 5 seconds
+  - High error rate (50% 500s from S3) → Circuit breaker protects proxy
+  - Resource exhaustion → Graceful degradation (503, not crash)
+
+- ✅ **HA replication failover testing**
+  - Primary replica failure → Automatic failover to backup <5s
+  - Backup failure → Falls back to tertiary (if configured)
+  - Primary recovery → Returns to primary (circuit breaker closes)
+  - Metrics validation → Failover events tracked correctly
+  - Zero data corruption → ETags, content verification
+  - Load test during failover → <1% error rate spike
+
+**Stability & Reliability**:
+- ✅ **24-hour soak test** (recommended, not required for v1.1.0)
+  - Mixed workload (small + large files, cached + uncached)
+  - Moderate load (50-100 concurrent users)
+  - Zero crashes, zero memory leaks
+  - Metrics remain healthy (no degradation)
+
+**Security & Compliance**:
+- ✅ **Audit log completeness** (if audit logging implemented)
+  - 100% of requests logged (no gaps)
+  - Correlation IDs match across all log entries
+  - Sensitive data properly redacted
+  - Log rotation works under high load (1000+ req/s)
+
+- ✅ **Rate limiting effectiveness**
+  - Blocks malicious traffic (10,000 req/s from single IP)
+  - Legitimate traffic unaffected
+  - Metrics track blocked requests
+
+**Cache Validation** (CRITICAL for v1.1):
+- ✅ **Cache consistency testing**
+  - Content matches S3 source (byte-for-byte)
+  - ETag validation works correctly
+  - Stale content not served after TTL expiry
+  - Purge/invalidation works under load
+  - No cache corruption after crashes/restarts
+
+- ✅ **Cache performance validation**
+  - Hit rate >80% for static workload
+  - Cache misses don't slow down hits
+  - Eviction works correctly (LRU)
+  - Concurrent access to same cached file (no corruption)
+
+**Operational Testing**:
+- ✅ **Hot reload under load**
+  - Configuration reload while serving 100+ req/s
+  - Zero dropped requests during reload
+  - New config applies immediately
+  - Old connections complete gracefully
+
+- ✅ **Graceful shutdown under load**
+  - SIGTERM while serving 1000+ active connections
+  - All in-flight requests complete (up to timeout)
+  - No broken pipes or connection resets
+  - Cache state preserved (if applicable)
 
 ---
 
