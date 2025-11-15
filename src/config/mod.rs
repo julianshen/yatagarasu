@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::cache::BucketCacheOverride;
+use crate::cache::{BucketCacheOverride, CacheConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -13,6 +13,8 @@ pub struct Config {
     pub buckets: Vec<BucketConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jwt: Option<JwtConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<CacheConfig>,
     #[serde(skip)]
     pub generation: u64, // Config version, increments on reload
 }
@@ -1632,5 +1634,179 @@ buckets:
 
         // Validation should pass
         normalized_config.validate().unwrap();
+    }
+
+    // Cache Configuration Environment Variable Substitution Tests
+    #[test]
+    fn test_can_substitute_env_var_in_cache_dir() {
+        // Test: Can substitute environment variable in cache_dir
+        std::env::set_var("CACHE_DIR_PATH", "/tmp/test-cache");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  disk:
+    enabled: true
+    cache_dir: ${CACHE_DIR_PATH}
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert_eq!(
+            config.cache.as_ref().unwrap().disk.cache_dir,
+            "/tmp/test-cache"
+        );
+
+        std::env::remove_var("CACHE_DIR_PATH");
+    }
+
+    #[test]
+    fn test_can_substitute_env_var_in_redis_url() {
+        // Test: Can substitute environment variable in redis_url
+        std::env::set_var("REDIS_URL", "redis://cache.example.com:6379");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  redis:
+    enabled: true
+    redis_url: ${REDIS_URL}
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert_eq!(
+            config.cache.as_ref().unwrap().redis.redis_url,
+            Some("redis://cache.example.com:6379".to_string())
+        );
+
+        std::env::remove_var("REDIS_URL");
+    }
+
+    #[test]
+    fn test_can_substitute_env_var_in_redis_password() {
+        // Test: Can substitute environment variable in redis_password
+        std::env::set_var("REDIS_PASSWORD", "super-secret-password");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  redis:
+    enabled: true
+    redis_url: redis://localhost:6379
+    redis_password: ${REDIS_PASSWORD}
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert_eq!(
+            config.cache.as_ref().unwrap().redis.redis_password,
+            Some("super-secret-password".to_string())
+        );
+
+        std::env::remove_var("REDIS_PASSWORD");
+    }
+
+    #[test]
+    fn test_cache_env_var_substitution_fails_when_missing() {
+        // Test: Substitution fails gracefully when env var missing
+        // Make sure NONEXISTENT_CACHE_VAR is not set
+        std::env::remove_var("NONEXISTENT_CACHE_VAR");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  disk:
+    enabled: true
+    cache_dir: ${NONEXISTENT_CACHE_VAR}
+"#;
+
+        let result = Config::from_yaml_with_env(yaml);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Environment variable 'NONEXISTENT_CACHE_VAR' is referenced but not set"));
+    }
+
+    #[test]
+    fn test_cache_config_literal_values_no_substitution() {
+        // Test: Can use literal value (no substitution) for cache config
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+cache:
+  enabled: true
+  disk:
+    enabled: true
+    cache_dir: /var/cache/yatagarasu
+  redis:
+    enabled: true
+    redis_url: redis://localhost:6379
+    redis_password: literal-password
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert_eq!(
+            config.cache.as_ref().unwrap().disk.cache_dir,
+            "/var/cache/yatagarasu"
+        );
+        assert_eq!(
+            config.cache.as_ref().unwrap().redis.redis_url,
+            Some("redis://localhost:6379".to_string())
+        );
+        assert_eq!(
+            config.cache.as_ref().unwrap().redis.redis_password,
+            Some("literal-password".to_string())
+        );
     }
 }

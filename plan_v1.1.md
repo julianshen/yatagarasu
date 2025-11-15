@@ -160,11 +160,11 @@
 - [x] Test: Rejects per-bucket cache with invalid values
 
 ### Environment Variable Substitution
-- [ ] Test: Can substitute environment variable in cache_dir
-- [ ] Test: Can substitute environment variable in redis_url
-- [ ] Test: Can substitute environment variable in redis_password
-- [ ] Test: Substitution fails gracefully when env var missing
-- [ ] Test: Can use literal value (no substitution) for cache config
+- [x] Test: Can substitute environment variable in cache_dir
+- [x] Test: Can substitute environment variable in redis_url
+- [x] Test: Can substitute environment variable in redis_password
+- [x] Test: Substitution fails gracefully when env var missing
+- [x] Test: Can use literal value (no substitution) for cache config
 
 ### Configuration Validation
 - [ ] Test: Validates cache config when enabled=true
