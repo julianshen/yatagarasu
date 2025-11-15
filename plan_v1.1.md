@@ -131,15 +131,15 @@
 - [x] Test: Rejects disk cache with negative max size (N/A - u64 type prevents negative values)
 
 ### Redis Cache Configuration
-- [ ] Test: Can parse redis cache section (optional)
-- [ ] Test: Can parse redis_url (e.g., redis://localhost:6379)
-- [ ] Test: Can parse redis_password (optional)
-- [ ] Test: Can parse redis_db (default 0)
-- [ ] Test: Can parse redis_key_prefix (default "yatagarasu:")
-- [ ] Test: Can parse redis_ttl_seconds (default 3600)
-- [ ] Test: Can parse redis_enabled (default false)
-- [ ] Test: Rejects redis cache with invalid URL format
-- [ ] Test: Rejects redis cache with negative DB number
+- [x] Test: Can parse redis cache section (optional)
+- [x] Test: Can parse redis_url (e.g., redis://localhost:6379)
+- [x] Test: Can parse redis_password (optional)
+- [x] Test: Can parse redis_db (default 0)
+- [x] Test: Can parse redis_key_prefix (default "yatagarasu:")
+- [x] Test: Can parse redis_ttl_seconds (default 3600)
+- [x] Test: Can parse redis_enabled (default false)
+- [x] Test: Rejects redis cache with invalid URL format
+- [x] Test: Rejects redis cache with negative DB number (N/A - u32 type prevents negative values)
 
 ### Cache Hierarchy Configuration
 - [ ] Test: Can parse cache_layers array (default: ["memory"])

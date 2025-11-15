@@ -10,6 +10,8 @@ pub struct CacheConfig {
     pub memory: MemoryCacheConfig,
     #[serde(default)]
     pub disk: DiskCacheConfig,
+    #[serde(default)]
+    pub redis: RedisCacheConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +107,63 @@ impl DiskCacheConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisCacheConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub redis_url: Option<String>,
+    #[serde(default)]
+    pub redis_password: Option<String>,
+    #[serde(default = "default_redis_db")]
+    pub redis_db: u32,
+    #[serde(default = "default_redis_key_prefix")]
+    pub redis_key_prefix: String,
+    #[serde(default = "default_redis_ttl_seconds")]
+    pub redis_ttl_seconds: u64,
+}
+
+impl Default for RedisCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            redis_url: None,
+            redis_password: None,
+            redis_db: default_redis_db(),
+            redis_key_prefix: default_redis_key_prefix(),
+            redis_ttl_seconds: default_redis_ttl_seconds(),
+        }
+    }
+}
+
+fn default_redis_db() -> u32 {
+    0
+}
+
+fn default_redis_key_prefix() -> String {
+    "yatagarasu:".to_string()
+}
+
+fn default_redis_ttl_seconds() -> u64 {
+    3600 // 1 hour
+}
+
+impl RedisCacheConfig {
+    /// Validate redis cache configuration
+    pub fn validate(&self) -> Result<(), String> {
+        if self.enabled && self.redis_url.is_none() {
+            return Err("redis_url is required when redis cache is enabled".to_string());
+        }
+        // Basic URL format validation
+        if let Some(url) = &self.redis_url {
+            if self.enabled && !url.starts_with("redis://") && !url.starts_with("rediss://") {
+                return Err("redis_url must start with redis:// or rediss:// (for TLS)".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +193,7 @@ enabled: false
             enabled: true,
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
         };
         assert_eq!(config.enabled, true);
 
@@ -141,6 +201,7 @@ enabled: false
             enabled: false,
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
         };
         assert_eq!(config.enabled, false);
     }
@@ -400,6 +461,183 @@ disk:
             enabled: false,
             cache_dir: String::new(),
             max_disk_cache_size_mb: 10240,
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    // Redis Cache Configuration tests
+    #[test]
+    fn test_can_parse_redis_cache_section() {
+        // Test: Can parse redis cache section (optional)
+        let yaml = r#"
+enabled: true
+redis:
+  enabled: true
+  redis_url: redis://localhost:6379
+  redis_password: secret
+  redis_db: 1
+  redis_key_prefix: "myapp:"
+  redis_ttl_seconds: 7200
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.redis.enabled, true);
+        assert_eq!(
+            config.redis.redis_url,
+            Some("redis://localhost:6379".to_string())
+        );
+        assert_eq!(config.redis.redis_password, Some("secret".to_string()));
+        assert_eq!(config.redis.redis_db, 1);
+        assert_eq!(config.redis.redis_key_prefix, "myapp:");
+        assert_eq!(config.redis.redis_ttl_seconds, 7200);
+    }
+
+    #[test]
+    fn test_can_parse_redis_url() {
+        // Test: Can parse redis_url (e.g., redis://localhost:6379)
+        let config = RedisCacheConfig::default();
+        assert_eq!(config.redis_url, None);
+
+        // Test explicit value
+        let yaml = r#"
+enabled: true
+redis:
+  redis_url: redis://localhost:6379
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.redis.redis_url,
+            Some("redis://localhost:6379".to_string())
+        );
+    }
+
+    #[test]
+    fn test_can_parse_redis_password_optional() {
+        // Test: Can parse redis_password (optional)
+        let config = RedisCacheConfig::default();
+        assert_eq!(config.redis_password, None);
+
+        // Test explicit value
+        let yaml = r#"
+enabled: true
+redis:
+  redis_password: mypassword
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.redis.redis_password, Some("mypassword".to_string()));
+    }
+
+    #[test]
+    fn test_can_parse_redis_db_default_0() {
+        // Test: Can parse redis_db (default 0)
+        let config = RedisCacheConfig::default();
+        assert_eq!(config.redis_db, 0);
+
+        // Test explicit value
+        let yaml = r#"
+enabled: true
+redis:
+  redis_db: 5
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.redis.redis_db, 5);
+    }
+
+    #[test]
+    fn test_can_parse_redis_key_prefix_default() {
+        // Test: Can parse redis_key_prefix (default "yatagarasu:")
+        let config = RedisCacheConfig::default();
+        assert_eq!(config.redis_key_prefix, "yatagarasu:");
+
+        // Test explicit value
+        let yaml = r#"
+enabled: true
+redis:
+  redis_key_prefix: "custom:"
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.redis.redis_key_prefix, "custom:");
+    }
+
+    #[test]
+    fn test_can_parse_redis_ttl_seconds_default() {
+        // Test: Can parse redis_ttl_seconds (default 3600)
+        let config = RedisCacheConfig::default();
+        assert_eq!(config.redis_ttl_seconds, 3600);
+
+        // Test explicit value
+        let yaml = r#"
+enabled: true
+redis:
+  redis_ttl_seconds: 1800
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.redis.redis_ttl_seconds, 1800);
+    }
+
+    #[test]
+    fn test_redis_enabled_defaults_to_false() {
+        // Test: Can parse redis_enabled (default false)
+        let config = RedisCacheConfig::default();
+        assert_eq!(config.enabled, false);
+
+        // Test explicit enabled
+        let yaml = r#"
+enabled: true
+redis:
+  enabled: true
+  redis_url: redis://localhost:6379
+"#;
+        let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.redis.enabled, true);
+    }
+
+    #[test]
+    fn test_rejects_redis_cache_with_invalid_url_format() {
+        // Test: Rejects redis cache with invalid URL format
+        let config = RedisCacheConfig {
+            enabled: true,
+            redis_url: Some("http://localhost:6379".to_string()), // Wrong protocol
+            redis_password: None,
+            redis_db: 0,
+            redis_key_prefix: "yatagarasu:".to_string(),
+            redis_ttl_seconds: 3600,
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("must start with redis:// or rediss://"));
+
+        // Valid redis:// URL should pass
+        let config = RedisCacheConfig {
+            enabled: true,
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_password: None,
+            redis_db: 0,
+            redis_key_prefix: "yatagarasu:".to_string(),
+            redis_ttl_seconds: 3600,
+        };
+        assert!(config.validate().is_ok());
+
+        // Valid rediss:// URL (TLS) should pass
+        let config = RedisCacheConfig {
+            enabled: true,
+            redis_url: Some("rediss://localhost:6379".to_string()),
+            redis_password: None,
+            redis_db: 0,
+            redis_key_prefix: "yatagarasu:".to_string(),
+            redis_ttl_seconds: 3600,
+        };
+        assert!(config.validate().is_ok());
+
+        // Disabled cache doesn't need URL
+        let config = RedisCacheConfig {
+            enabled: false,
+            redis_url: None,
+            redis_password: None,
+            redis_db: 0,
+            redis_key_prefix: "yatagarasu:".to_string(),
+            redis_ttl_seconds: 3600,
         };
         assert!(config.validate().is_ok());
     }
