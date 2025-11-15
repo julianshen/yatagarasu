@@ -129,9 +129,15 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 **Effort**: HIGH (1-2 weeks)
 
 - [ ] In-memory LRU cache (heap-based)
+  - Configurable max item size (e.g., cache files <10MB, user can adjust)
+  - Configurable max cache size (e.g., 1GB total, user can adjust)
+  - Configurable TTL per bucket or globally
 - [ ] Disk cache layer (persistent across restarts)
+  - Configurable cache directory and size limits
 - [ ] Redis cache layer (distributed caching)
+  - Configurable Redis connection and eviction policies
 - [ ] Configurable cache hierarchy (memory → disk → Redis)
+  - User defines which layers to enable and in what order
 - [ ] Cache statistics dashboard
 - [ ] Cache purge/invalidation API
 
@@ -196,10 +202,12 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **🔴 CRITICAL - Must Have**:
 - ✅ **In-memory LRU cache implementation** (Primary v1.1 goal)
-  - Minimum: Heap-based cache for files <10MB
+  - Fully configurable: max item size, max cache size, TTL (per-bucket or global)
+  - Example config: cache files <10MB (default, user adjustable)
   - Target: 80%+ cache hit rate for static assets
   - Cost savings validation: Reduce S3 requests by 70%+
 - ✅ **At least one persistent cache layer** (disk OR Redis)
+  - Configurable storage limits, eviction policies, directories
 - ✅ **Cache purge/invalidation API**
 - ✅ All v1.0.0 features remain stable
 - ✅ Backward compatible with v1.0.0 configurations
