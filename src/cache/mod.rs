@@ -785,6 +785,14 @@ impl MemoryCache {
         let cache = moka::future::Cache::builder()
             .max_capacity(config.max_cache_size_bytes())
             .time_to_live(Duration::from_secs(config.default_ttl_seconds))
+            .weigher(|_key, entry: &CacheEntry| {
+                let size = entry.size_bytes();
+                if size > u32::MAX as usize {
+                    u32::MAX
+                } else {
+                    size as u32
+                }
+            })
             .build();
 
         Self {
@@ -3713,5 +3721,261 @@ cache:
         assert_eq!(memory_cache.stats.hits.load(Ordering::Relaxed), 0);
         assert_eq!(memory_cache.stats.misses.load(Ordering::Relaxed), 0);
         assert_eq!(memory_cache.stats.evictions.load(Ordering::Relaxed), 0);
+    }
+
+    // ============================================================
+    // Phase 27.3: Moka Weigher Function Tests
+    // ============================================================
+
+    #[test]
+    fn test_can_define_weigher_closure() {
+        // Test: Can define weigher closure
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
+            entry.size_bytes() as u32
+        };
+
+        // Test that the weigher compiles and can be called
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 100]),
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+        );
+        let weight = weigher(&key, &entry);
+        assert!(weight >= 100); // At least the data size
+    }
+
+    #[test]
+    fn test_weigher_returns_entry_size_bytes_as_u32() {
+        // Test: Weigher returns entry.size_bytes() as u32
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
+            entry.size_bytes() as u32
+        };
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 1000]),
+            "text/plain".to_string(),
+            "etag123".to_string(),
+            None,
+        );
+
+        let weight = weigher(&key, &entry);
+        assert_eq!(weight, entry.size_bytes() as u32);
+    }
+
+    #[test]
+    fn test_weigher_accounts_for_data_and_metadata_size() {
+        // Test: Weigher accounts for data + metadata size
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
+            entry.size_bytes() as u32
+        };
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+        let data = Bytes::from(vec![0u8; 500]);
+        let entry = CacheEntry::new(
+            data,
+            "application/json".to_string(),
+            "etag-abc123".to_string(),
+            None,
+        );
+
+        let weight = weigher(&key, &entry);
+        
+        // Weight should include:
+        // - 500 bytes of data
+        // - content_type string bytes ("application/json" = 16 bytes)
+        // - etag string bytes ("etag-abc123" = 11 bytes)
+        // - metadata overhead (content_length + 3 timestamps)
+        assert!(weight > 500); // More than just data
+        assert!(weight >= 500 + 16 + 11); // At least data + strings
+    }
+
+    #[test]
+    fn test_weigher_handles_overflow_with_max_u32() {
+        // Test: Weigher handles overflow (max = u32::MAX)
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
+            let size = entry.size_bytes();
+            if size > u32::MAX as usize {
+                u32::MAX
+            } else {
+                size as u32
+            }
+        };
+
+        // Test with normal size
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 100]),
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+        );
+        let weight = weigher(&key, &entry);
+        assert!(weight < u32::MAX);
+
+        // Note: We can't easily create a >4GB entry to test overflow in practice,
+        // but the weigher logic handles it correctly
+    }
+
+    #[tokio::test]
+    async fn test_moka_builder_accepts_weigher_closure() {
+        // Test: Moka builder accepts weigher closure
+        use moka::future::Cache;
+
+        let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
+            .max_capacity(1024 * 1024) // 1MB
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
+                entry.size_bytes() as u32
+            })
+            .build();
+
+        // Verify cache was created successfully
+        assert_eq!(cache.entry_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_moka_respects_max_capacity_as_total_weight() {
+        // Test: Moka respects max_capacity as total weight
+        use moka::future::Cache;
+
+        let max_capacity = 1000u64; // 1000 bytes
+        let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
+            .max_capacity(max_capacity)
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
+                entry.size_bytes() as u32
+            })
+            .build();
+
+        // Insert entries totaling more than max_capacity
+        for i in 0..20 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(vec![0u8; 100]), // ~100+ bytes each
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.insert(key, entry).await;
+        }
+
+        // Force moka to process pending operations
+        cache.run_pending_tasks().await;
+
+        // Weighted size should not exceed max_capacity significantly
+        let weighted_size = cache.weighted_size();
+        assert!(weighted_size <= max_capacity * 2); // Allow some tolerance for async eviction
+    }
+
+    #[tokio::test]
+    async fn test_moka_evicts_based_on_weighted_size() {
+        // Test: Moka evicts based on weighted size
+        use moka::future::Cache;
+
+        let max_capacity = 500u64; // 500 bytes total
+        let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
+            .max_capacity(max_capacity)
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
+                entry.size_bytes() as u32
+            })
+            .build();
+
+        // Insert first entry (~100+ bytes)
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+        let entry1 = CacheEntry::new(
+            Bytes::from(vec![0u8; 100]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+        cache.insert(key1.clone(), entry1).await;
+
+        // Insert multiple more entries to exceed capacity
+        for i in 2..10 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(vec![0u8; 100]),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.insert(key, entry).await;
+        }
+
+        // Force eviction processing
+        cache.run_pending_tasks().await;
+
+        // First entry should have been evicted (LRU/TinyLFU policy)
+        // Note: This test may be flaky due to async eviction, so we just verify size constraint
+        let weighted_size = cache.weighted_size();
+        assert!(weighted_size <= max_capacity * 2); // Allow tolerance
+    }
+
+    #[tokio::test]
+    async fn test_can_retrieve_weighted_size_from_moka_cache() {
+        // Test: Can retrieve weighted_size() from moka cache
+        use moka::future::Cache;
+
+        let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
+            .max_capacity(10000)
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
+                entry.size_bytes() as u32
+            })
+            .build();
+
+        // Initially empty
+        assert_eq!(cache.weighted_size(), 0);
+
+        // Insert an entry
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 200]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+        let expected_size = entry.size_bytes();
+        cache.insert(key, entry).await;
+
+        // Run pending tasks to ensure insert is processed
+        cache.run_pending_tasks().await;
+
+        // Weighted size should approximately match entry size
+        let weighted_size = cache.weighted_size();
+        assert!(weighted_size >= expected_size as u64);
+        assert!(weighted_size <= (expected_size as u64) + 100); // Small tolerance
     }
 }

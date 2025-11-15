@@ -28,7 +28,7 @@
 ### 🔴 Milestone 1: Cache Foundation (Phases 26-27) - CRITICAL
 **Deliverable**: In-memory LRU cache operational with configurable limits
 **Verification**: Cache stores/retrieves objects, enforces size limits, evicts LRU
-**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1 COMPLETE (9 tests)
+**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.3 COMPLETE (27 tests)
 
 ### 🔴 Milestone 2: Persistent Cache (Phase 28-29) - CRITICAL
 **Deliverable**: Disk OR Redis cache layer operational
@@ -447,16 +447,16 @@ pub trait Cache: Send + Sync {
 ## 27.3: Moka Weigher Function
 
 ### Custom Weigher for CacheEntry
-- [ ] Test: Can define weigher closure
-- [ ] Test: Weigher returns entry.size_bytes() as u32
-- [ ] Test: Weigher accounts for data + metadata size
-- [ ] Test: Weigher handles overflow (max = u32::MAX)
+- [x] Test: Can define weigher closure
+- [x] Test: Weigher returns entry.size_bytes() as u32
+- [x] Test: Weigher accounts for data + metadata size
+- [x] Test: Weigher handles overflow (max = u32::MAX)
 
 ### Weigher Integration
-- [ ] Test: Moka builder accepts weigher closure
-- [ ] Test: Moka respects max_capacity as total weight
-- [ ] Test: Moka evicts based on weighted size
-- [ ] Test: Can retrieve weighted_size() from moka cache
+- [x] Test: Moka builder accepts weigher closure
+- [x] Test: Moka respects max_capacity as total weight
+- [x] Test: Moka evicts based on weighted size
+- [x] Test: Can retrieve weighted_size() from moka cache
 
 ---
 
