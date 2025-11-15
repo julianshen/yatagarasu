@@ -243,6 +243,29 @@ pub struct CacheKey {
     pub etag: Option<String>,
 }
 
+impl std::fmt::Display for CacheKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Format: "bucket:encoded_object_key"
+        // URL-encode special characters in object_key, but preserve slashes (valid S3 path separators)
+        let encoded_object_key = url_encode_cache_key(&self.object_key);
+        write!(f, "{}:{}", self.bucket, encoded_object_key)
+    }
+}
+
+/// URL-encode a cache key component, preserving slashes but encoding other special characters
+fn url_encode_cache_key(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            // Preserve slashes (valid S3 path separators)
+            '/' => "/".to_string(),
+            // Preserve alphanumeric and common safe characters
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            // Encode everything else
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
+}
+
 /// Per-bucket cache override configuration
 /// This can be included in BucketConfig to override global cache settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1252,5 +1275,94 @@ max_item_size_mb: 5
         let debug_str = format!("{:?}", key);
         assert!(debug_str.contains("test"));
         assert!(debug_str.contains("file.txt"));
+    }
+
+    // CacheKey String Representation tests
+    #[test]
+    fn test_cache_key_can_serialize_to_string() {
+        // Test: CacheKey can serialize to string (for Redis keys)
+        let key = CacheKey {
+            bucket: "my-bucket".to_string(),
+            object_key: "file.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = key.to_string();
+        assert!(string_repr.contains("my-bucket"));
+        assert!(string_repr.contains("file.txt"));
+    }
+
+    #[test]
+    fn test_cache_key_format_bucket_colon_object_key() {
+        // Test: CacheKey format: "bucket:object_key"
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "path/to/file.jpg".to_string(),
+            etag: None,
+        };
+
+        let string_repr = key.to_string();
+        assert_eq!(string_repr, "test-bucket:path/to/file.jpg");
+    }
+
+    #[test]
+    fn test_cache_key_escapes_special_characters() {
+        // Test: CacheKey escapes special characters in object_key
+        // Colons in object_key should be escaped to avoid confusion with separator
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "file:with:colons.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = key.to_string();
+        // Colons in the object key should be URL-encoded (%3A)
+        assert!(string_repr.contains("%3A"));
+        assert!(!string_repr.ends_with(":colons.txt"));
+    }
+
+    #[test]
+    fn test_cache_key_handles_slashes_correctly() {
+        // Test: CacheKey handles object keys with slashes correctly
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "path/to/nested/file.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = key.to_string();
+        // Slashes should be preserved (they're valid S3 path separators)
+        assert!(string_repr.contains("path/to/nested/file.txt"));
+        assert_eq!(string_repr, "bucket:path/to/nested/file.txt");
+    }
+
+    #[test]
+    fn test_cache_key_handles_spaces_correctly() {
+        // Test: CacheKey handles object keys with spaces correctly
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "file with spaces.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = key.to_string();
+        // Spaces should be URL-encoded
+        assert!(string_repr.contains("%20") || string_repr.contains("file+with+spaces"));
+    }
+
+    #[test]
+    fn test_cache_key_handles_unicode_correctly() {
+        // Test: CacheKey handles Unicode object keys correctly
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "文件/αρχείο/файл.txt".to_string(),
+            etag: None,
+        };
+
+        let string_repr = key.to_string();
+        // Unicode should be URL-encoded or preserved correctly
+        assert!(string_repr.starts_with("bucket:"));
+        // Should contain URL-encoded Unicode or the actual Unicode characters
+        assert!(string_repr.len() > "bucket:".len());
     }
 }

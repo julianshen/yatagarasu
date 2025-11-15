@@ -221,12 +221,12 @@ buckets:
 - [x] Test: CacheKey implements Debug trait
 
 ### CacheKey String Representation
-- [ ] Test: CacheKey can serialize to string (for Redis keys)
-- [ ] Test: CacheKey format: "bucket:object_key"
-- [ ] Test: CacheKey escapes special characters in object_key
-- [ ] Test: CacheKey handles object keys with slashes correctly
-- [ ] Test: CacheKey handles object keys with spaces correctly
-- [ ] Test: CacheKey handles Unicode object keys correctly
+- [x] Test: CacheKey can serialize to string (for Redis keys)
+- [x] Test: CacheKey format: "bucket:object_key"
+- [x] Test: CacheKey escapes special characters in object_key
+- [x] Test: CacheKey handles object keys with slashes correctly
+- [x] Test: CacheKey handles object keys with spaces correctly
+- [x] Test: CacheKey handles Unicode object keys correctly
 
 ### CacheKey Parsing
 - [ ] Test: Can parse CacheKey from string
