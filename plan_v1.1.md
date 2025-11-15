@@ -269,15 +269,15 @@ buckets:
 - [x] Test: TTL of 0 means no expiration
 
 ### CacheEntry Access Tracking (for LRU)
-- [ ] Test: CacheEntry can update last_accessed_at
-- [ ] Test: touch() updates last_accessed_at to current time
-- [ ] Test: last_accessed_at used for LRU sorting
+- [x] Test: CacheEntry can update last_accessed_at
+- [x] Test: touch() updates last_accessed_at to current time
+- [x] Test: last_accessed_at used for LRU sorting
 
 ### CacheEntry Validation
-- [ ] Test: Can validate entry against S3 ETag
-- [ ] Test: Validation succeeds when ETags match
-- [ ] Test: Validation fails when ETags differ
-- [ ] Test: Validation fails when entry expired
+- [x] Test: Can validate entry against S3 ETag
+- [x] Test: Validation succeeds when ETags match
+- [x] Test: Validation fails when ETags differ
+- [x] Test: Validation fails when entry expired
 
 ---
 

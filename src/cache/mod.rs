@@ -398,6 +398,24 @@ impl CacheEntry {
         SystemTime::now() >= self.expires_at
     }
 
+    /// Update the last accessed timestamp to current time
+    /// Used for LRU (Least Recently Used) cache eviction
+    pub fn touch(&mut self) {
+        self.last_accessed_at = SystemTime::now();
+    }
+
+    /// Validate the cache entry's ETag against a provided ETag
+    /// Returns true if the ETags match
+    pub fn validate_etag(&self, etag: &str) -> bool {
+        self.etag == etag
+    }
+
+    /// Check if the cache entry is valid (not expired and ETag matches)
+    /// Returns true only if both conditions are met
+    pub fn is_valid(&self, etag: &str) -> bool {
+        !self.is_expired() && self.validate_etag(etag)
+    }
+
     /// Calculate the approximate size of this cache entry in bytes
     /// Includes data length plus metadata overhead
     pub fn size_bytes(&self) -> usize {
@@ -2161,5 +2179,179 @@ max_item_size_mb: 5
         // Even after waiting, it should not expire
         // (We can't actually wait, but we verify the expires_at is far in the future)
         // A TTL of 0 should set expires_at to SystemTime::MAX or a very large value
+    }
+
+    // CacheEntry Access Tracking (for LRU) tests
+    #[test]
+    fn test_cache_entry_can_update_last_accessed_at() {
+        // Test: CacheEntry can update last_accessed_at
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let data = Bytes::from("test");
+        let mut entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
+
+        let original_access_time = entry.last_accessed_at;
+
+        // Wait a tiny bit and touch the entry
+        std::thread::sleep(Duration::from_millis(10));
+        entry.touch();
+
+        // last_accessed_at should be updated
+        assert!(entry.last_accessed_at > original_access_time);
+    }
+
+    #[test]
+    fn test_touch_updates_last_accessed_at_to_current_time() {
+        // Test: touch() updates last_accessed_at to current time
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let data = Bytes::from("test");
+        let mut entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
+
+        // Wait a bit
+        std::thread::sleep(Duration::from_millis(10));
+
+        let before_touch = SystemTime::now();
+        entry.touch();
+        let after_touch = SystemTime::now();
+
+        // last_accessed_at should be between before and after
+        assert!(entry.last_accessed_at >= before_touch);
+        assert!(entry.last_accessed_at <= after_touch);
+    }
+
+    #[test]
+    fn test_last_accessed_at_used_for_lru_sorting() {
+        // Test: last_accessed_at used for LRU sorting
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create three entries
+        let mut entry1 = CacheEntry::new(
+            Bytes::from("data1"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        let entry2 = CacheEntry::new(
+            Bytes::from("data2"),
+            "text/plain".to_string(),
+            "etag2".to_string(),
+            None,
+        );
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        let entry3 = CacheEntry::new(
+            Bytes::from("data3"),
+            "text/plain".to_string(),
+            "etag3".to_string(),
+            None,
+        );
+
+        // entry3 should have the most recent access time
+        assert!(entry3.last_accessed_at > entry2.last_accessed_at);
+        assert!(entry2.last_accessed_at > entry1.last_accessed_at);
+
+        // Touch entry1 to make it most recently accessed
+        std::thread::sleep(Duration::from_millis(10));
+        entry1.touch();
+
+        // Now entry1 should be most recent
+        assert!(entry1.last_accessed_at > entry3.last_accessed_at);
+        assert!(entry1.last_accessed_at > entry2.last_accessed_at);
+
+        // Can sort by last_accessed_at for LRU ordering
+        let mut entries = vec![&entry1, &entry2, &entry3];
+        entries.sort_by_key(|e| e.last_accessed_at);
+
+        // After sorting, least recently accessed should be first
+        assert_eq!(entries[0].etag, "etag2");
+        assert_eq!(entries[1].etag, "etag3");
+        assert_eq!(entries[2].etag, "etag1");
+    }
+
+    // CacheEntry Validation tests
+    #[test]
+    fn test_can_validate_entry_against_s3_etag() {
+        // Test: Can validate entry against S3 ETag
+        use bytes::Bytes;
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "matching-etag".to_string(),
+            None,
+        );
+
+        // Validate against matching ETag
+        assert!(entry.validate_etag("matching-etag"));
+
+        // Validate against non-matching ETag
+        assert!(!entry.validate_etag("different-etag"));
+    }
+
+    #[test]
+    fn test_validation_succeeds_when_etags_match() {
+        // Test: Validation succeeds when ETags match
+        use bytes::Bytes;
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "application/json".to_string(),
+            "abc123def456".to_string(),
+            None,
+        );
+
+        assert!(entry.validate_etag("abc123def456"));
+    }
+
+    #[test]
+    fn test_validation_fails_when_etags_differ() {
+        // Test: Validation fails when ETags differ
+        use bytes::Bytes;
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "original-etag".to_string(),
+            None,
+        );
+
+        assert!(!entry.validate_etag("updated-etag"));
+        assert!(!entry.validate_etag(""));
+        assert!(!entry.validate_etag("completely-different"));
+    }
+
+    #[test]
+    fn test_validation_fails_when_entry_expired() {
+        // Test: Validation fails when entry expired
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        // Create an expired entry
+        let now = SystemTime::now();
+        let past = now - Duration::from_secs(3600);
+
+        let entry = CacheEntry {
+            data: Bytes::from("data"),
+            content_type: "text/plain".to_string(),
+            content_length: 4,
+            etag: "valid-etag".to_string(),
+            created_at: past,
+            expires_at: past, // Already expired
+            last_accessed_at: now,
+        };
+
+        // Even with matching ETag, validation should fail if expired
+        assert!(!entry.is_valid("valid-etag"));
+
+        // Non-matching ETag should also fail
+        assert!(!entry.is_valid("different-etag"));
     }
 }
