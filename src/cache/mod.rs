@@ -1,6 +1,8 @@
 // Cache module
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
@@ -327,6 +329,26 @@ impl std::str::FromStr for CacheKey {
             etag: None,
         })
     }
+}
+
+/// Cache entry representing a cached S3 object
+/// Contains the object data and metadata for cache management
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    /// The cached object data
+    pub data: Bytes,
+    /// Content type of the cached object
+    pub content_type: String,
+    /// Content length of the cached object
+    pub content_length: usize,
+    /// ETag of the cached object (for validation)
+    pub etag: String,
+    /// When this entry was created
+    pub created_at: SystemTime,
+    /// When this entry expires (for TTL-based eviction)
+    pub expires_at: SystemTime,
+    /// Last time this entry was accessed (for LRU eviction)
+    pub last_accessed_at: SystemTime,
 }
 
 /// Per-bucket cache override configuration
@@ -1608,5 +1630,177 @@ max_item_size_mb: 5
 
         assert_eq!(hash1, hash2);
         assert_eq!(hash2, hash3);
+    }
+
+    // Phase 26.3: Cache Entry Design tests
+
+    // CacheEntry Structure tests
+    #[test]
+    fn test_can_create_cache_entry_struct() {
+        // Test: Can create CacheEntry struct
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from("test data");
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data.len(),
+            etag: "abc123".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        assert_eq!(entry.data, data);
+    }
+
+    #[test]
+    fn test_cache_entry_contains_data_bytes() {
+        // Test: CacheEntry contains data (Bytes)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let data = Bytes::from("hello world");
+        let now = SystemTime::now();
+
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data.len(),
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        assert_eq!(entry.data, Bytes::from("hello world"));
+        assert_eq!(entry.data.len(), 11);
+    }
+
+    #[test]
+    fn test_cache_entry_contains_content_type() {
+        // Test: CacheEntry contains content_type (String)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let now = SystemTime::now();
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "application/json".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        assert_eq!(entry.content_type, "application/json");
+    }
+
+    #[test]
+    fn test_cache_entry_contains_content_length() {
+        // Test: CacheEntry contains content_length (usize)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let now = SystemTime::now();
+        let entry = CacheEntry {
+            data: Bytes::from("test"),
+            content_type: "text/plain".to_string(),
+            content_length: 1024,
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        assert_eq!(entry.content_length, 1024);
+    }
+
+    #[test]
+    fn test_cache_entry_contains_etag() {
+        // Test: CacheEntry contains etag (String)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let now = SystemTime::now();
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "my-etag-123".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: now,
+        };
+
+        assert_eq!(entry.etag, "my-etag-123");
+    }
+
+    #[test]
+    fn test_cache_entry_contains_created_at() {
+        // Test: CacheEntry contains created_at (timestamp)
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        let created = SystemTime::now();
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: created,
+            expires_at: created,
+            last_accessed_at: created,
+        };
+
+        assert_eq!(entry.created_at, created);
+    }
+
+    #[test]
+    fn test_cache_entry_contains_expires_at() {
+        // Test: CacheEntry contains expires_at (timestamp)
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let expires = now + Duration::from_secs(3600);
+
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: expires,
+            last_accessed_at: now,
+        };
+
+        assert_eq!(entry.expires_at, expires);
+    }
+
+    #[test]
+    fn test_cache_entry_contains_last_accessed_at() {
+        // Test: CacheEntry contains last_accessed_at (timestamp, for LRU)
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let accessed = now + Duration::from_secs(10);
+
+        let entry = CacheEntry {
+            data: Bytes::new(),
+            content_type: "text/plain".to_string(),
+            content_length: 0,
+            etag: "etag".to_string(),
+            created_at: now,
+            expires_at: now,
+            last_accessed_at: accessed,
+        };
+
+        assert_eq!(entry.last_accessed_at, accessed);
     }
 }

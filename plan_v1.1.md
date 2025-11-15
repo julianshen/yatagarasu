@@ -244,14 +244,14 @@ buckets:
 ## 26.3: Cache Entry Design
 
 ### CacheEntry Structure
-- [ ] Test: Can create CacheEntry struct
-- [ ] Test: CacheEntry contains data (Bytes)
-- [ ] Test: CacheEntry contains content_type (String)
-- [ ] Test: CacheEntry contains content_length (usize)
-- [ ] Test: CacheEntry contains etag (String)
-- [ ] Test: CacheEntry contains created_at (timestamp)
-- [ ] Test: CacheEntry contains expires_at (timestamp)
-- [ ] Test: CacheEntry contains last_accessed_at (timestamp, for LRU)
+- [x] Test: Can create CacheEntry struct
+- [x] Test: CacheEntry contains data (Bytes)
+- [x] Test: CacheEntry contains content_type (String)
+- [x] Test: CacheEntry contains content_length (usize)
+- [x] Test: CacheEntry contains etag (String)
+- [x] Test: CacheEntry contains created_at (timestamp)
+- [x] Test: CacheEntry contains expires_at (timestamp)
+- [x] Test: CacheEntry contains last_accessed_at (timestamp, for LRU)
 
 ### CacheEntry Size Calculation
 - [ ] Test: CacheEntry can calculate its size in bytes
