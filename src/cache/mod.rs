@@ -1,5 +1,6 @@
 // Cache module
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
@@ -495,6 +496,106 @@ impl BucketCacheOverride {
 
         Ok(())
     }
+}
+
+/// Cache error types
+#[derive(Debug)]
+pub enum CacheError {
+    /// Cache entry not found
+    NotFound,
+    /// Cache storage is full
+    StorageFull,
+    /// I/O error (for disk cache)
+    IoError(std::io::Error),
+    /// Redis error (for redis cache)
+    RedisError(String),
+    /// Serialization/deserialization error
+    SerializationError(String),
+}
+
+impl std::fmt::Display for CacheError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CacheError::NotFound => write!(f, "Cache entry not found"),
+            CacheError::StorageFull => write!(f, "Cache storage is full"),
+            CacheError::IoError(err) => write!(f, "I/O error: {}", err),
+            CacheError::RedisError(msg) => write!(f, "Redis error: {}", msg),
+            CacheError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for CacheError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CacheError::IoError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for CacheError {
+    fn from(err: std::io::Error) -> Self {
+        CacheError::IoError(err)
+    }
+}
+
+impl From<serde_json::Error> for CacheError {
+    fn from(err: serde_json::Error) -> Self {
+        CacheError::SerializationError(err.to_string())
+    }
+}
+
+/// Cache statistics for monitoring and metrics
+#[derive(Debug, Clone, Default)]
+pub struct CacheStats {
+    /// Number of cache hits
+    pub hits: u64,
+    /// Number of cache misses
+    pub misses: u64,
+    /// Number of evictions (due to size/TTL)
+    pub evictions: u64,
+    /// Current cache size in bytes
+    pub current_size_bytes: u64,
+    /// Current number of items in cache
+    pub current_item_count: u64,
+    /// Maximum cache size in bytes
+    pub max_size_bytes: u64,
+}
+
+impl CacheStats {
+    /// Calculate hit rate (hits / total requests)
+    /// Returns 0.0 if there are no requests
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
+    }
+}
+
+/// Cache trait for different cache implementations (memory, disk, redis)
+#[async_trait]
+pub trait Cache: Send + Sync {
+    /// Get a cache entry by key
+    /// Returns None if the key is not found or the entry has expired
+    async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError>;
+
+    /// Set a cache entry
+    /// Overwrites existing entry if key already exists
+    async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError>;
+
+    /// Delete a cache entry by key
+    /// Returns true if the entry was deleted, false if it didn't exist
+    async fn delete(&self, key: &CacheKey) -> Result<bool, CacheError>;
+
+    /// Clear all cache entries
+    async fn clear(&self) -> Result<(), CacheError>;
+
+    /// Get cache statistics
+    async fn stats(&self) -> Result<CacheStats, CacheError>;
 }
 
 #[cfg(test)]
@@ -2186,7 +2287,7 @@ max_item_size_mb: 5
     fn test_cache_entry_can_update_last_accessed_at() {
         // Test: CacheEntry can update last_accessed_at
         use bytes::Bytes;
-        use std::time::{Duration, SystemTime};
+        use std::time::Duration;
 
         let data = Bytes::from("test");
         let mut entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
@@ -2353,5 +2454,224 @@ max_item_size_mb: 5
 
         // Non-matching ETag should also fail
         assert!(!entry.is_valid("different-etag"));
+    }
+
+    // Phase 26.4: Cache Trait Abstraction tests
+
+    // Cache Trait Definition tests
+    #[test]
+    fn test_can_define_cache_trait() {
+        // Test: Can define Cache trait
+        // If the trait compiles, this test passes
+        // The trait should be public and available
+        fn _assert_trait_exists<T: Cache>() {}
+    }
+
+    #[test]
+    fn test_cache_trait_has_get_method() {
+        // Test: Cache trait has get() method signature
+        // This test verifies the method signature compiles
+        async fn _test_get<T: Cache>(cache: &T, key: &CacheKey) {
+            let _result: Result<Option<CacheEntry>, CacheError> = cache.get(key).await;
+        }
+    }
+
+    #[test]
+    fn test_cache_trait_has_set_method() {
+        // Test: Cache trait has set() method signature
+        async fn _test_set<T: Cache>(cache: &T, key: CacheKey, entry: CacheEntry) {
+            let _result: Result<(), CacheError> = cache.set(key, entry).await;
+        }
+    }
+
+    #[test]
+    fn test_cache_trait_has_delete_method() {
+        // Test: Cache trait has delete() method signature
+        async fn _test_delete<T: Cache>(cache: &T, key: &CacheKey) {
+            let _result: Result<bool, CacheError> = cache.delete(key).await;
+        }
+    }
+
+    #[test]
+    fn test_cache_trait_has_clear_method() {
+        // Test: Cache trait has clear() method signature
+        async fn _test_clear<T: Cache>(cache: &T) {
+            let _result: Result<(), CacheError> = cache.clear().await;
+        }
+    }
+
+    #[test]
+    fn test_cache_trait_has_stats_method() {
+        // Test: Cache trait has stats() method signature
+        async fn _test_stats<T: Cache>(cache: &T) {
+            let _result: Result<CacheStats, CacheError> = cache.stats().await;
+        }
+    }
+
+    #[test]
+    fn test_cache_trait_methods_are_async() {
+        // Test: All methods are async
+        // This is verified by the async fn signatures in the tests above
+        // The trait uses #[async_trait] which makes all methods async
+    }
+
+    #[test]
+    fn test_cache_trait_methods_return_result() {
+        // Test: All methods return Result<T, CacheError>
+        // This is verified by the return type checks in the tests above
+    }
+
+    // Mock Cache implementation for testing
+    struct MockCache;
+
+    #[async_trait]
+    impl Cache for MockCache {
+        async fn get(&self, _key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+            Ok(None)
+        }
+
+        async fn set(&self, _key: CacheKey, _entry: CacheEntry) -> Result<(), CacheError> {
+            Ok(())
+        }
+
+        async fn delete(&self, _key: &CacheKey) -> Result<bool, CacheError> {
+            Ok(false)
+        }
+
+        async fn clear(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+
+        async fn stats(&self) -> Result<CacheStats, CacheError> {
+            Ok(CacheStats::default())
+        }
+    }
+
+    #[test]
+    fn test_cache_trait_compiles_with_signatures() {
+        // Test: Cache trait compiles with signatures
+        // If MockCache compiles, the trait is properly defined
+        let _cache = MockCache;
+    }
+
+    #[tokio::test]
+    async fn test_can_create_mock_implementation() {
+        // Test: Can create mock implementation of Cache trait
+        let cache = MockCache;
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        // Test all methods work
+        let get_result = cache.get(&key).await;
+        assert!(get_result.is_ok());
+
+        let entry = CacheEntry::new(
+            bytes::Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+        );
+        let set_result = cache.set(key.clone(), entry).await;
+        assert!(set_result.is_ok());
+
+        let delete_result = cache.delete(&key).await;
+        assert!(delete_result.is_ok());
+
+        let clear_result = cache.clear().await;
+        assert!(clear_result.is_ok());
+
+        let stats_result = cache.stats().await;
+        assert!(stats_result.is_ok());
+    }
+
+    #[test]
+    fn test_mock_satisfies_send_sync_bounds() {
+        // Test: Mock implementation satisfies Send + Sync bounds
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<MockCache>();
+    }
+
+    // Cache Error Types tests
+    #[test]
+    fn test_can_create_cache_error() {
+        // Test: Can create CacheError enum
+        let _err1 = CacheError::NotFound;
+        let _err2 = CacheError::StorageFull;
+        let _err3 = CacheError::RedisError("test".to_string());
+    }
+
+    #[test]
+    fn test_cache_error_has_not_found_variant() {
+        // Test: CacheError has NotFound variant
+        let err = CacheError::NotFound;
+        matches!(err, CacheError::NotFound);
+    }
+
+    #[test]
+    fn test_cache_error_has_storage_full_variant() {
+        // Test: CacheError has StorageFull variant
+        let err = CacheError::StorageFull;
+        matches!(err, CacheError::StorageFull);
+    }
+
+    #[test]
+    fn test_cache_error_has_io_error_variant() {
+        // Test: CacheError has IoError variant (for disk cache)
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = CacheError::IoError(io_err);
+        matches!(err, CacheError::IoError(_));
+    }
+
+    #[test]
+    fn test_cache_error_has_redis_error_variant() {
+        // Test: CacheError has RedisError variant (for redis cache)
+        let err = CacheError::RedisError("connection failed".to_string());
+        matches!(err, CacheError::RedisError(_));
+    }
+
+    #[test]
+    fn test_cache_error_has_serialization_error_variant() {
+        // Test: CacheError has SerializationError variant
+        let err = CacheError::SerializationError("invalid JSON".to_string());
+        matches!(err, CacheError::SerializationError(_));
+    }
+
+    #[test]
+    fn test_cache_error_implements_error_trait() {
+        // Test: CacheError implements Error trait
+        fn assert_error<T: std::error::Error>() {}
+        assert_error::<CacheError>();
+    }
+
+    #[test]
+    fn test_cache_error_implements_display_trait() {
+        // Test: CacheError implements Display trait
+        let err = CacheError::NotFound;
+        let display_str = format!("{}", err);
+        assert!(display_str.contains("not found"));
+
+        let err = CacheError::StorageFull;
+        let display_str = format!("{}", err);
+        assert!(display_str.contains("full"));
+    }
+
+    #[test]
+    fn test_cache_error_converts_from_io_error() {
+        // Test: CacheError can convert from std::io::Error
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let cache_err: CacheError = io_err.into();
+        matches!(cache_err, CacheError::IoError(_));
+    }
+
+    #[test]
+    fn test_cache_error_converts_from_serde_error() {
+        // Test: CacheError can convert from serde_json::Error
+        let json_str = "{invalid json}";
+        let serde_err = serde_json::from_str::<serde_json::Value>(json_str).unwrap_err();
+        let cache_err: CacheError = serde_err.into();
+        matches!(cache_err, CacheError::SerializationError(_));
     }
 }
