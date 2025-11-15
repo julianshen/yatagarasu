@@ -231,6 +231,68 @@ impl RedisCacheConfig {
     }
 }
 
+/// Per-bucket cache override configuration
+/// This can be included in BucketConfig to override global cache settings
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BucketCacheOverride {
+    /// Override: disable caching for this specific bucket
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Override: custom TTL for this bucket (seconds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+    /// Override: custom max item size for this bucket (MB)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_item_size_mb: Option<u64>,
+}
+
+impl BucketCacheOverride {
+    /// Merge override with global cache config to get effective config
+    pub fn merge_with_global(&self, global: &CacheConfig) -> CacheConfig {
+        let mut result = global.clone();
+
+        // Apply enabled override
+        if let Some(enabled) = self.enabled {
+            result.enabled = enabled;
+        }
+
+        // Apply TTL override
+        if let Some(ttl) = self.ttl_seconds {
+            result.memory.default_ttl_seconds = ttl;
+            result.redis.redis_ttl_seconds = ttl;
+        }
+
+        // Apply max_item_size override
+        if let Some(max_size) = self.max_item_size_mb {
+            result.memory.max_item_size_mb = max_size;
+        }
+
+        result
+    }
+
+    /// Validate bucket cache override
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate max_item_size if specified
+        if let Some(max_size) = self.max_item_size_mb {
+            if max_size == 0 {
+                return Err("max_item_size_mb must be greater than 0".to_string());
+            }
+        }
+
+        // Validate TTL if specified
+        if let Some(ttl) = self.ttl_seconds {
+            if ttl == 0 {
+                return Err(
+                    "ttl_seconds must be greater than 0 (use enabled=false to disable caching)"
+                        .to_string(),
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -867,5 +929,148 @@ cache_layers: ["memory", "redis"]
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.validate().is_ok());
+    }
+
+    // Per-Bucket Cache Configuration tests
+    #[test]
+    fn test_can_parse_per_bucket_cache_override() {
+        // Test: Can parse per-bucket cache override in bucket config
+        let yaml = r#"
+enabled: false
+ttl_seconds: 1800
+max_item_size_mb: 5
+"#;
+        let override_config: BucketCacheOverride = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(override_config.enabled, Some(false));
+        assert_eq!(override_config.ttl_seconds, Some(1800));
+        assert_eq!(override_config.max_item_size_mb, Some(5));
+    }
+
+    #[test]
+    fn test_per_bucket_cache_override_can_disable_caching() {
+        // Test: Per-bucket cache override can disable caching for specific bucket
+        let override_config = BucketCacheOverride {
+            enabled: Some(false),
+            ttl_seconds: None,
+            max_item_size_mb: None,
+        };
+
+        let global = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let merged = override_config.merge_with_global(&global);
+        assert_eq!(merged.enabled, false);
+    }
+
+    #[test]
+    fn test_per_bucket_cache_override_can_set_custom_ttl() {
+        // Test: Per-bucket cache override can set custom TTL
+        let override_config = BucketCacheOverride {
+            enabled: None,
+            ttl_seconds: Some(600),
+            max_item_size_mb: None,
+        };
+
+        let global = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let merged = override_config.merge_with_global(&global);
+        assert_eq!(merged.memory.default_ttl_seconds, 600);
+        assert_eq!(merged.redis.redis_ttl_seconds, 600);
+    }
+
+    #[test]
+    fn test_per_bucket_cache_override_can_set_custom_max_item_size() {
+        // Test: Per-bucket cache override can set custom max_item_size
+        let override_config = BucketCacheOverride {
+            enabled: None,
+            ttl_seconds: None,
+            max_item_size_mb: Some(50),
+        };
+
+        let global = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let merged = override_config.merge_with_global(&global);
+        assert_eq!(merged.memory.max_item_size_mb, 50);
+    }
+
+    #[test]
+    fn test_per_bucket_cache_inherits_global_defaults() {
+        // Test: Per-bucket cache inherits global defaults when not overridden
+        let override_config = BucketCacheOverride {
+            enabled: None,
+            ttl_seconds: None,
+            max_item_size_mb: None,
+        };
+
+        let global = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig {
+                max_item_size_mb: 10,
+                max_cache_size_mb: 1024,
+                default_ttl_seconds: 3600,
+            },
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let merged = override_config.merge_with_global(&global);
+        assert_eq!(merged.enabled, true);
+        assert_eq!(merged.memory.max_item_size_mb, 10);
+        assert_eq!(merged.memory.default_ttl_seconds, 3600);
+    }
+
+    #[test]
+    fn test_rejects_per_bucket_cache_with_invalid_values() {
+        // Test: Rejects per-bucket cache with invalid values
+
+        // Zero max_item_size_mb is invalid
+        let override_config = BucketCacheOverride {
+            enabled: None,
+            ttl_seconds: None,
+            max_item_size_mb: Some(0),
+        };
+        let result = override_config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("max_item_size_mb must be greater than 0"));
+
+        // Zero ttl_seconds is invalid
+        let override_config = BucketCacheOverride {
+            enabled: None,
+            ttl_seconds: Some(0),
+            max_item_size_mb: None,
+        };
+        let result = override_config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("ttl_seconds must be greater than 0"));
+
+        // Valid values pass
+        let override_config = BucketCacheOverride {
+            enabled: Some(true),
+            ttl_seconds: Some(300),
+            max_item_size_mb: Some(5),
+        };
+        assert!(override_config.validate().is_ok());
     }
 }

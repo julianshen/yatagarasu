@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::cache::BucketCacheOverride;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
@@ -336,6 +338,8 @@ pub struct BucketConfig {
     pub s3: S3Config,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<BucketCacheOverride>,
 }
 
 /// S3 Replica configuration (for HA bucket replication)

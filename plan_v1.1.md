@@ -152,12 +152,12 @@
 - [x] Test: Validates redis layer requires redis_enabled=true
 
 ### Per-Bucket Cache Configuration
-- [ ] Test: Can parse per-bucket cache override in bucket config
-- [ ] Test: Per-bucket cache override can disable caching for specific bucket
-- [ ] Test: Per-bucket cache override can set custom TTL
-- [ ] Test: Per-bucket cache override can set custom max_item_size
-- [ ] Test: Per-bucket cache inherits global defaults when not overridden
-- [ ] Test: Rejects per-bucket cache with invalid values
+- [x] Test: Can parse per-bucket cache override in bucket config
+- [x] Test: Per-bucket cache override can disable caching for specific bucket
+- [x] Test: Per-bucket cache override can set custom TTL
+- [x] Test: Per-bucket cache override can set custom max_item_size
+- [x] Test: Per-bucket cache inherits global defaults when not overridden
+- [x] Test: Rejects per-bucket cache with invalid values
 
 ### Environment Variable Substitution
 - [ ] Test: Can substitute environment variable in cache_dir
