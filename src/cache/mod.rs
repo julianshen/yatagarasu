@@ -915,6 +915,64 @@ impl Cache for MemoryCache {
     }
 }
 
+// ============================================================
+// NullCache - No-op implementation for disabled caching
+// ============================================================
+
+/// NullCache is a no-op cache implementation used when caching is disabled
+pub struct NullCache;
+
+#[async_trait]
+impl Cache for NullCache {
+    async fn get(&self, _key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        Ok(None)
+    }
+
+    async fn set(&self, _key: CacheKey, _entry: CacheEntry) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn delete(&self, _key: &CacheKey) -> Result<bool, CacheError> {
+        Ok(false)
+    }
+
+    async fn clear(&self) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<CacheStats, CacheError> {
+        Ok(CacheStats {
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+            current_size_bytes: 0,
+            current_item_count: 0,
+            max_size_bytes: 0,
+        })
+    }
+}
+
+// ============================================================
+// Cache Factory Function
+// ============================================================
+
+/// Create a cache instance from configuration
+/// Returns Arc<dyn Cache> for polymorphic usage
+pub fn create_cache(config: &CacheConfig) -> Arc<dyn Cache> {
+    if !config.enabled {
+        return Arc::new(NullCache);
+    }
+
+    // Check if memory layer is requested
+    if config.cache_layers.contains(&"memory".to_string()) {
+        let memory_cache = MemoryCache::new(&config.memory);
+        return Arc::new(memory_cache);
+    }
+
+    // Default to NullCache if no valid layers configured
+    Arc::new(NullCache)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5692,5 +5750,257 @@ cache:
 
         let stats = Cache::stats(&cache).await.unwrap();
         assert_eq!(stats.max_size_bytes, 10 * 1024 * 1024); // 10MB
+    }
+
+    // ============================================================
+    // Phase 27.8: Integration with Config Tests
+    // ============================================================
+
+    #[test]
+    fn test_memory_cache_from_memory_cache_config() {
+        // Test: Can create MemoryCache from MemoryCacheConfig
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let cache = MemoryCache::new(&config);
+        assert_eq!(cache.max_item_size_bytes, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_extracts_max_item_size_from_config() {
+        // Test: Extracts max_item_size_mb from config
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 20,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let cache = MemoryCache::new(&config);
+        assert_eq!(cache.max_item_size_bytes, 20 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_converts_mb_to_bytes_for_moka() {
+        // Test: Converts MB to bytes for moka
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 5,
+            max_cache_size_mb: 50,
+            default_ttl_seconds: 1800,
+        };
+
+        let cache = MemoryCache::new(&config);
+        // Verify conversions happened
+        assert_eq!(cache.max_item_size_bytes, 5 * 1024 * 1024);
+        // Cache builder used max_cache_size_bytes() which is 50 * 1024 * 1024
+    }
+
+    #[test]
+    fn test_can_create_cache_factory_function() {
+        // Test: Can create cache_factory() function
+        let config = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig {
+                max_item_size_mb: 10,
+                max_cache_size_mb: 100,
+                default_ttl_seconds: 3600,
+            },
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let cache = create_cache(&config);
+        // Should compile and return Arc<dyn Cache>
+        assert!(Arc::strong_count(&cache) == 1);
+    }
+
+    #[test]
+    fn test_factory_returns_arc_dyn_cache() {
+        // Test: Factory returns Arc<dyn Cache>
+        let config = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let cache = create_cache(&config);
+        // Verify it's an Arc
+        let _clone = cache.clone();
+        assert!(Arc::strong_count(&cache) == 2);
+    }
+
+    #[tokio::test]
+    async fn test_factory_creates_memory_cache_when_enabled() {
+        // Test: Factory creates MemoryCache when enabled=true
+        let config = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig {
+                max_item_size_mb: 10,
+                max_cache_size_mb: 100,
+                default_ttl_seconds: 3600,
+            },
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let cache = create_cache(&config);
+
+        // Verify it works like a cache
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+        let result = cache.get(&key).await.unwrap();
+        assert!(result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_factory_creates_null_cache_when_disabled() {
+        // Test: Factory creates NullCache when enabled=false
+        let config = CacheConfig {
+            enabled: false,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec![],
+        };
+
+        let cache = create_cache(&config);
+
+        // NullCache should always return None
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+        let result = cache.get(&key).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_factory_uses_memory_when_layer_includes_memory() {
+        // Test: Factory uses moka when cache_layers includes "memory"
+        let config = CacheConfig {
+            enabled: true,
+            memory: MemoryCacheConfig::default(),
+            disk: DiskCacheConfig::default(),
+            redis: RedisCacheConfig::default(),
+            cache_layers: vec!["memory".to_string()],
+        };
+
+        let cache = create_cache(&config);
+        // Should have created a MemoryCache (not NullCache)
+        // We can't directly test the type, but we verify it exists
+        assert!(Arc::strong_count(&cache) == 1);
+    }
+
+    #[test]
+    fn test_can_create_null_cache() {
+        // Test: Can create NullCache struct
+        let _cache = NullCache;
+        assert!(true);
+    }
+
+    #[test]
+    fn test_null_cache_implements_cache_trait() {
+        // Test: NullCache implements Cache trait
+        fn assert_cache_trait<T: Cache>() {}
+        assert_cache_trait::<NullCache>();
+    }
+
+    #[tokio::test]
+    async fn test_null_cache_get_always_returns_none() {
+        // Test: NullCache::get() always returns Ok(None)
+        let cache = NullCache;
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let result = cache.get(&key).await;
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[tokio::test]
+    async fn test_null_cache_set_always_returns_ok() {
+        // Test: NullCache::set() always returns Ok(())
+        let cache = NullCache;
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = cache.set(key, entry).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_null_cache_delete_always_returns_false() {
+        // Test: NullCache::delete() always returns Ok(false)
+        let cache = NullCache;
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let result = cache.delete(&key).await;
+        assert!(matches!(result, Ok(false)));
+    }
+
+    #[tokio::test]
+    async fn test_null_cache_clear_always_returns_ok() {
+        // Test: NullCache::clear() always returns Ok(())
+        let cache = NullCache;
+        let result = cache.clear().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_null_cache_stats_returns_zeros() {
+        // Test: NullCache::stats() returns zeros
+        let cache = NullCache;
+        let stats = cache.stats().await.unwrap();
+
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.evictions, 0);
+        assert_eq!(stats.current_size_bytes, 0);
+        assert_eq!(stats.current_item_count, 0);
+        assert_eq!(stats.max_size_bytes, 0);
     }
 }

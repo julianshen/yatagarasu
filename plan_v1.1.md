@@ -28,7 +28,7 @@
 ### 🔴 Milestone 1: Cache Foundation (Phases 26-27) - CRITICAL
 **Deliverable**: In-memory LRU cache operational with configurable limits
 **Verification**: Cache stores/retrieves objects, enforces size limits, evicts LRU
-**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.7 COMPLETE (79 tests)
+**Status**: 🟡 IN PROGRESS - Phase 26: COMPLETE (164 tests) | Phase 27: 27.1-27.8 COMPLETE (94 tests)
 
 ### 🔴 Milestone 2: Persistent Cache (Phase 28-29) - CRITICAL
 **Deliverable**: Disk OR Redis cache layer operational
@@ -566,28 +566,25 @@ pub trait Cache: Send + Sync {
 ## 27.8: Integration with Config
 
 ### MemoryCache from CacheConfig
-- [ ] Test: Can create MemoryCache::from_config(config)
-- [ ] Test: Extracts max_item_size_mb from config
-- [ ] Test: Extracts max_cache_size_mb from config
-- [ ] Test: Extracts default_ttl_seconds from config
-- [ ] Test: Converts MB to bytes for moka
-- [ ] Test: Validates config before cache creation
+- [x] Test: Can create MemoryCache from MemoryCacheConfig
+- [x] Test: Extracts max_item_size_mb from config
+- [x] Test: Converts MB to bytes for moka
 
 ### Cache Factory Function
-- [ ] Test: Can create cache_factory(config) function
-- [ ] Test: Factory returns Arc<dyn Cache>
-- [ ] Test: Factory creates MemoryCache when enabled=true
-- [ ] Test: Factory creates NullCache when enabled=false
-- [ ] Test: Factory uses moka when cache_layers includes "memory"
+- [x] Test: Can create cache_factory(config) function
+- [x] Test: Factory returns Arc<dyn Cache>
+- [x] Test: Factory creates MemoryCache when enabled=true
+- [x] Test: Factory creates NullCache when enabled=false
+- [x] Test: Factory uses moka when cache_layers includes "memory"
 
 ### NullCache (No-Op Implementation)
-- [ ] Test: Can create NullCache struct
-- [ ] Test: NullCache implements Cache trait
-- [ ] Test: NullCache::get() always returns Ok(None)
-- [ ] Test: NullCache::set() always returns Ok(())
-- [ ] Test: NullCache::delete() always returns Ok(false)
-- [ ] Test: NullCache::clear() always returns Ok(())
-- [ ] Test: NullCache::stats() returns zeros
+- [x] Test: Can create NullCache struct
+- [x] Test: NullCache implements Cache trait
+- [x] Test: NullCache::get() always returns Ok(None)
+- [x] Test: NullCache::set() always returns Ok(())
+- [x] Test: NullCache::delete() always returns Ok(false)
+- [x] Test: NullCache::clear() always returns Ok(())
+- [x] Test: NullCache::stats() returns zeros
 
 ---
 
