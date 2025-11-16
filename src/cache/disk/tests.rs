@@ -2728,4 +2728,400 @@ mod tests {
         let stats_final = cache.stats().await.unwrap();
         assert_eq!(stats_final.evictions, 2, "Should have 2 evictions total");
     }
+
+    #[tokio::test]
+    async fn test_can_evict_multiple_entries_in_one_pass() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 3072; // 3KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add three 1KB entries to fill cache to capacity
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![1u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file3.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![2u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3,
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Verify all three entries are cached
+        assert_eq!(cache.stats().await.unwrap().current_item_count, 3);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add a 2KB entry - should evict TWO entries (key1 and key2) in one pass
+        let key4 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file4.txt".to_string(),
+            etag: None,
+        };
+        let data4 = Bytes::from(vec![3u8; 2048]); // 2KB
+        let now4 = SystemTime::now();
+        let entry4 = CacheEntry {
+            data: data4.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data4.len(),
+            etag: "etag4".to_string(),
+            created_at: now4,
+            expires_at: future,
+            last_accessed_at: now4,
+        };
+        cache.set(key4.clone(), entry4).await.unwrap();
+
+        // Verify that 2 entries were evicted
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.evictions, 2, "Should have evicted 2 entries");
+
+        // Verify key1 and key2 are gone
+        assert!(
+            cache.get(&key1).await.unwrap().is_none(),
+            "key1 should be evicted"
+        );
+        assert!(
+            cache.get(&key2).await.unwrap().is_none(),
+            "key2 should be evicted"
+        );
+
+        // Verify key3 and key4 remain
+        assert!(
+            cache.get(&key3).await.unwrap().is_some(),
+            "key3 should still exist"
+        );
+        assert!(
+            cache.get(&key4).await.unwrap().is_some(),
+            "key4 should exist"
+        );
+
+        // Verify final count is 2 entries
+        assert_eq!(cache.stats().await.unwrap().current_item_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_evicts_in_lru_order() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 4096; // 4KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add four 1KB entries with staggered timestamps
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "oldest.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now, // T0 - oldest
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "second_oldest.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![1u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2, // T1 - second oldest
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "newer.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![2u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3, // T2 - second newest
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let key4 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "newest.txt".to_string(),
+            etag: None,
+        };
+        let data4 = Bytes::from(vec![3u8; 1024]);
+        let now4 = SystemTime::now();
+        let entry4 = CacheEntry {
+            data: data4.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data4.len(),
+            etag: "etag4".to_string(),
+            created_at: now4,
+            expires_at: future,
+            last_accessed_at: now4, // T3 - newest
+        };
+        cache.set(key4.clone(), entry4).await.unwrap();
+
+        // Verify all four entries are cached
+        assert_eq!(cache.stats().await.unwrap().current_item_count, 4);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add a 2KB entry - should evict TWO oldest entries (key1 and key2)
+        let key5 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "large_new.txt".to_string(),
+            etag: None,
+        };
+        let data5 = Bytes::from(vec![4u8; 2048]); // 2KB
+        let now5 = SystemTime::now();
+        let entry5 = CacheEntry {
+            data: data5.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data5.len(),
+            etag: "etag5".to_string(),
+            created_at: now5,
+            expires_at: future,
+            last_accessed_at: now5,
+        };
+        cache.set(key5.clone(), entry5).await.unwrap();
+
+        // Verify the TWO OLDEST entries (key1 and key2) were evicted
+        assert!(
+            cache.get(&key1).await.unwrap().is_none(),
+            "key1 (oldest) should be evicted"
+        );
+        assert!(
+            cache.get(&key2).await.unwrap().is_none(),
+            "key2 (second oldest) should be evicted"
+        );
+
+        // Verify the NEWER entries (key3 and key4) and new entry (key5) remain
+        assert!(
+            cache.get(&key3).await.unwrap().is_some(),
+            "key3 (second newest) should still exist"
+        );
+        assert!(
+            cache.get(&key4).await.unwrap().is_some(),
+            "key4 (newest) should still exist"
+        );
+        assert!(
+            cache.get(&key5).await.unwrap().is_some(),
+            "key5 (new entry) should exist"
+        );
+
+        // Verify stats
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.evictions, 2, "Should have evicted 2 entries");
+        assert_eq!(
+            stats.current_item_count, 3,
+            "Should have 3 entries remaining"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stops_when_enough_space_freed() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 5120; // 5KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add five 1KB entries to fill cache to capacity
+        let mut keys = Vec::new();
+        for i in 0..5 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            let key = CacheKey {
+                bucket: "test".to_string(),
+                object_key: format!("file{}.txt", i + 1),
+                etag: None,
+            };
+            let data = Bytes::from(vec![i as u8; 1024]);
+            let time = SystemTime::now();
+            let entry = CacheEntry {
+                data: data.clone(),
+                content_type: "text/plain".to_string(),
+                content_length: data.len(),
+                etag: format!("etag{}", i + 1),
+                created_at: time,
+                expires_at: future,
+                last_accessed_at: time,
+            };
+            cache.set(key.clone(), entry).await.unwrap();
+            keys.push(key);
+        }
+
+        // Verify all five entries are cached
+        assert_eq!(cache.stats().await.unwrap().current_item_count, 5);
+        assert_eq!(cache.stats().await.unwrap().current_size_bytes, 5120);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add a 2KB entry - should evict EXACTLY 2 entries (just enough for 2KB)
+        // Cache state: 5KB used
+        // New entry needs: 2KB
+        // After evicting 1 entry: 4KB used + 2KB new = 6KB > 5KB max (not enough)
+        // After evicting 2 entries: 3KB used + 2KB new = 5KB <= 5KB max (just enough!)
+        let new_key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "large_file.txt".to_string(),
+            etag: None,
+        };
+        let data_new = Bytes::from(vec![99u8; 2048]); // 2KB
+        let time_new = SystemTime::now();
+        let entry_new = CacheEntry {
+            data: data_new.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data_new.len(),
+            etag: "etag_new".to_string(),
+            created_at: time_new,
+            expires_at: future,
+            last_accessed_at: time_new,
+        };
+        cache.set(new_key.clone(), entry_new).await.unwrap();
+
+        // Verify EXACTLY 2 entries were evicted (not more)
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(
+            stats.evictions, 2,
+            "Should have evicted exactly 2 entries (just enough to fit 2KB)"
+        );
+
+        // Verify the two oldest entries (keys[0] and keys[1]) were evicted
+        assert!(
+            cache.get(&keys[0]).await.unwrap().is_none(),
+            "First entry should be evicted"
+        );
+        assert!(
+            cache.get(&keys[1]).await.unwrap().is_none(),
+            "Second entry should be evicted"
+        );
+
+        // Verify the remaining 3 old entries and the new entry exist
+        assert!(
+            cache.get(&keys[2]).await.unwrap().is_some(),
+            "Third entry should remain"
+        );
+        assert!(
+            cache.get(&keys[3]).await.unwrap().is_some(),
+            "Fourth entry should remain"
+        );
+        assert!(
+            cache.get(&keys[4]).await.unwrap().is_some(),
+            "Fifth entry should remain"
+        );
+        assert!(
+            cache.get(&new_key).await.unwrap().is_some(),
+            "New entry should exist"
+        );
+
+        // Verify final count is 4 entries (3 old + 1 new)
+        assert_eq!(
+            stats.current_item_count, 4,
+            "Should have exactly 4 entries remaining"
+        );
+
+        // Verify total size is exactly at or under max (3KB old + 2KB new = 5KB)
+        assert!(
+            stats.current_size_bytes <= max_size_bytes,
+            "Total size should be at or under max"
+        );
+        assert_eq!(
+            stats.current_size_bytes, 5120,
+            "Total size should be exactly 5KB (3 x 1KB + 1 x 2KB)"
+        );
+    }
 }

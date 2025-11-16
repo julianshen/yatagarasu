@@ -853,9 +853,9 @@ will be implemented in Phase 28.11 Performance Validation.
 - [x] Test: Updates stats (eviction count)
 
 ### Batch Eviction
-- [ ] Test: Can evict multiple entries in one pass
-- [ ] Test: Evicts in LRU order
-- [ ] Test: Stops when enough space freed
+- [x] Test: Can evict multiple entries in one pass
+- [x] Test: Evicts in LRU order
+- [x] Test: Stops when enough space freed
 
 ---
 
