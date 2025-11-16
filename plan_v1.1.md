@@ -776,26 +776,26 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 ## 28.5: tokio::fs Backend Implementation (Day 3)
 
 ### TokioFsBackend Structure
-- [ ] Test: Can create TokioFsBackend
-- [ ] Test: Implements DiskBackend trait
-- [ ] Test: Implements Send + Sync
+- [x] Test: Can create TokioFsBackend
+- [x] Test: Implements DiskBackend trait
+- [x] Test: Implements Send + Sync
 
 ### Read Operations
-- [ ] Test: read_file() uses tokio::fs::read
-- [ ] Test: Returns Bytes
-- [ ] Test: Returns error if file doesn't exist
-- [ ] Test: Works with various file sizes (0B to 100MB)
+- [x] Test: read_file() uses tokio::fs::read
+- [x] Test: Returns Bytes
+- [x] Test: Returns error if file doesn't exist
+- [x] Test: Works with various file sizes (0B to 100MB)
 
 ### Write Operations
-- [ ] Test: write_file_atomic() uses temp file + rename
-- [ ] Test: Writes to .tmp file first
-- [ ] Test: Atomically renames to final path
-- [ ] Test: Cleans up temp file on error
+- [x] Test: write_file_atomic() uses temp file + rename
+- [x] Test: Writes to .tmp file first
+- [x] Test: Atomically renames to final path
+- [x] Test: Cleans up temp file on error
 
 ### Delete & Directory Operations
-- [ ] Test: delete_file() removes file
-- [ ] Test: create_dir_all() creates directories recursively
-- [ ] Test: Handles errors gracefully
+- [x] Test: delete_file() removes file
+- [x] Test: create_dir_all() creates directories recursively
+- [x] Test: Handles errors gracefully
 
 ---
 

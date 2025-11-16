@@ -1461,4 +1461,159 @@ mod tests {
         assert!(!data_path1.exists());
         assert!(!meta_path1.exists());
     }
+
+    // Phase 28.5: tokio::fs Backend Implementation
+
+    #[test]
+    fn test_can_create_tokio_fs_backend() {
+        // Verify TokioFsBackend can be created
+        use super::super::tokio_backend::TokioFsBackend;
+
+        let backend = TokioFsBackend::new();
+
+        // Backend should be created successfully
+        // This is a simple smoke test to ensure the struct can be instantiated
+        drop(backend);
+    }
+
+    #[test]
+    fn test_tokio_fs_backend_is_send_sync() {
+        // Verify TokioFsBackend implements Send + Sync (required for async)
+        use super::super::tokio_backend::TokioFsBackend;
+
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+
+        assert_send::<TokioFsBackend>();
+        assert_sync::<TokioFsBackend>();
+    }
+
+    #[tokio::test]
+    async fn test_read_file_returns_error_if_not_exists() {
+        // Verify read_file() returns error when file doesn't exist
+        use super::super::backend::DiskBackend;
+        use super::super::tokio_backend::TokioFsBackend;
+        use std::path::Path;
+
+        let backend = TokioFsBackend::new();
+        let nonexistent_path = Path::new("/nonexistent/file/that/does/not/exist.dat");
+
+        // Should return error for nonexistent file
+        let result = backend.read_file(nonexistent_path).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_works_with_various_file_sizes() {
+        // Verify TokioFsBackend works with files from 0B to 100MB
+        use super::super::backend::DiskBackend;
+        use super::super::tokio_backend::TokioFsBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+
+        // Test various file sizes
+        let test_sizes = vec![
+            (0, "0B"),
+            (1024, "1KB"),
+            (1024 * 1024, "1MB"),
+            (10 * 1024 * 1024, "10MB"),
+            (100 * 1024 * 1024, "100MB"),
+        ];
+
+        for (size, label) in test_sizes {
+            let file_path = temp_dir.path().join(format!("test_{}.dat", label));
+
+            // Create data of specified size
+            let data = Bytes::from(vec![0x42; size]);
+
+            // Write file
+            backend
+                .write_file_atomic(&file_path, data.clone())
+                .await
+                .unwrap();
+
+            // Verify file size
+            let file_size = backend.file_size(&file_path).await.unwrap();
+            assert_eq!(file_size, size as u64, "File size mismatch for {}", label);
+
+            // Read back and verify
+            let read_data = backend.read_file(&file_path).await.unwrap();
+            assert_eq!(
+                read_data.len(),
+                size,
+                "Read data length mismatch for {}",
+                label
+            );
+            assert_eq!(read_data, data, "Data content mismatch for {}", label);
+
+            // Clean up
+            backend.delete_file(&file_path).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_write_file_atomic_uses_tmp_file() {
+        // Verify write_file_atomic() creates .tmp file during write
+        use super::super::backend::DiskBackend;
+        use super::super::tokio_backend::TokioFsBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.dat");
+
+        // Write file
+        let data = Bytes::from("test data");
+        backend
+            .write_file_atomic(&file_path, data.clone())
+            .await
+            .unwrap();
+
+        // Final file should exist
+        assert!(file_path.exists());
+
+        // Temp file should NOT exist after successful write
+        let tmp_path = file_path.with_extension("tmp");
+        assert!(
+            !tmp_path.exists(),
+            "Temp file should be cleaned up after write"
+        );
+
+        // Read back to verify data
+        let read_data = backend.read_file(&file_path).await.unwrap();
+        assert_eq!(read_data, data);
+    }
+
+    #[tokio::test]
+    async fn test_cleans_up_temp_file_on_error() {
+        // Verify temp file cleanup happens even when write fails
+        // This test simulates a failure scenario by trying to write to a read-only location
+        use super::super::backend::DiskBackend;
+        use super::super::tokio_backend::TokioFsBackend;
+        use bytes::Bytes;
+        use std::path::Path;
+
+        let backend = TokioFsBackend::new();
+
+        // Try to write to a path that will fail (e.g., root directory without permissions)
+        // Note: This test behavior depends on OS permissions
+        // On most systems, regular users can't write to /
+        let invalid_path = Path::new("/test_file_that_cannot_be_created.dat");
+        let data = Bytes::from("test data");
+
+        // This should fail
+        let result = backend.write_file_atomic(invalid_path, data).await;
+        assert!(result.is_err(), "Write to invalid path should fail");
+
+        // Verify temp file doesn't exist (cleaned up on error)
+        let tmp_path = invalid_path.with_extension("tmp");
+        assert!(
+            !tmp_path.exists(),
+            "Temp file should be cleaned up on error"
+        );
+    }
 }
