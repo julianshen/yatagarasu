@@ -70,6 +70,9 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
+// Disk cache submodule (Phase 28)
+pub mod disk;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     #[serde(default)]

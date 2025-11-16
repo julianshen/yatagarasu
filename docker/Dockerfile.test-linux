@@ -1,0 +1,35 @@
+# Dockerfile for testing Linux io-uring backend
+# Based on Ubuntu 22.04 with Linux kernel 5.15+ (io-uring support)
+
+FROM ubuntu:22.04
+
+# Install Rust and build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Set Rust version to match project
+RUN rustup default stable && \
+    rustup component add clippy rustfmt
+
+# Verify io-uring support
+RUN uname -r && echo "Kernel version should be 5.10+"
+
+WORKDIR /workspace
+
+# Copy project files
+COPY . .
+
+# Cache dependencies (optimization)
+RUN cargo fetch
+
+# Default command: run all tests
+CMD ["cargo", "test", "--all-features"]

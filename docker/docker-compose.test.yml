@@ -1,0 +1,48 @@
+# Docker Compose for cross-platform testing
+version: '3.8'
+
+services:
+  # Linux test environment with io-uring
+  test-linux:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test-linux
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - target-cache:/workspace/target
+    environment:
+      - RUST_BACKTRACE=1
+      - RUST_LOG=debug
+    command: cargo test --test disk_cache --features io-uring -- --nocapture
+
+  # Linux benchmark environment
+  bench-linux:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test-linux
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - target-cache:/workspace/target
+    command: cargo bench disk_cache
+
+  # Linux build environment (for CI)
+  build-linux:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test-linux
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - target-cache:/workspace/target
+    command: |
+      sh -c "
+        cargo build --release --features io-uring &&
+        cargo clippy --all-features -- -D warnings &&
+        cargo fmt --check
+      "
+
+volumes:
+  cargo-cache:
+  target-cache:

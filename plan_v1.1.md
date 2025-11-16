@@ -647,44 +647,92 @@ pub trait Cache: Send + Sync {
 
 ---
 
-# PHASE 28: Disk Cache Implementation (Week 2-3)
+# PHASE 28: Hybrid Disk Cache Implementation (Week 2-3)
 
-**Goal**: Implement persistent disk-based cache layer
-**Deliverable**: Disk cache stores/retrieves entries, persists across restarts
-**Verification**: `cargo test` passes, cache survives process restart
+**Goal**: Implement persistent disk-based cache with platform-optimized backends
+**Strategy**: Hybrid approach - io-uring on Linux 5.10+, tokio::fs elsewhere
+**Deliverable**:
+- High-performance io-uring backend (Linux)
+- Portable tokio::fs backend (all platforms)
+- Single unified API via trait abstraction
 
-## 28.1: Disk Cache Structure & Setup
+**Verification**:
+- All tests pass on all platforms
+- io-uring shows 2-3x improvement on Linux (benchmarked)
+- Cache survives process restart
+- Docker testing for Linux (from macOS/Windows)
 
-### Dependencies
-- [ ] Test: Add `tokio::fs` for async file operations
-- [ ] Test: Add `sha2` crate for cache key hashing
-- [ ] Test: Add `tempfile` crate for tests
-- [ ] Test: Can import all disk cache dependencies
+**Architecture**:
+```
+Cache Trait → DiskCache → Backend (compile-time selection)
+                          ├─ UringBackend (Linux only)
+                          └─ TokioFsBackend (all platforms)
+```
 
-### DiskCache Structure
-- [ ] Test: Can create DiskCache struct
-- [ ] Test: DiskCache contains cache_dir path
-- [ ] Test: DiskCache contains max_size configuration
-- [ ] Test: DiskCache contains stats (hits, misses, evictions)
-- [ ] Test: DiskCache contains index (HashMap of keys to metadata)
-
-### DiskCache Constructor
-- [ ] Test: Can create DiskCache::new(config)
-- [ ] Test: Constructor creates cache_dir if not exists
-- [ ] Test: Constructor initializes empty index
-- [ ] Test: Constructor initializes stats with zeros
-- [ ] Test: Returns error if cache_dir is not writable
+**Reference**: See `docs/PHASE_28_HYBRID_PLAN.md` for complete 332-test plan
+**Docker**: See `docs/DOCKER_TESTING_GUIDE.md` for Linux testing setup
 
 ---
 
-## 28.2: File Storage & Retrieval
+## 28.1: Shared Abstractions & Dependencies (Day 1)
 
-### Cache Key to File Path Mapping
-- [ ] Test: Can convert CacheKey to file path
+### Core Dependencies (All Platforms)
+- [x] Test: Add tokio for async runtime
+- [ ] Test: Add sha2 for cache key hashing
+- [ ] Test: Add serde/serde_json for metadata
+- [ ] Test: Add parking_lot for thread-safe index
+
+### Platform-Specific Dependencies
+- [ ] Test: Add tokio-uring on Linux only
+- [ ] Test: Add tempfile for test isolation
+- [ ] Test: Dependencies compile on all platforms
+- [ ] Test: Can import tokio_uring on Linux
+- [ ] Test: Build works without tokio-uring on macOS
+
+### Common Types
+- [ ] Test: Can create EntryMetadata struct
+- [ ] Test: EntryMetadata serializes to JSON
+- [ ] Test: Can create CacheIndex with thread-safe operations
+- [ ] Test: CacheIndex tracks total size atomically
+- [ ] Test: DiskCacheError enum with all variants
+
+### File Path Utilities (Shared)
+- [ ] Test: Can convert CacheKey to SHA256 hash
+- [ ] Test: Can generate file path from hash
+- [ ] Test: Path uses entries/ subdirectory
+- [ ] Test: Generates .data and .meta file paths
+- [ ] Test: Prevents path traversal attacks
+
+---
+
+## 28.2: Backend Trait Definition (Day 1)
+
+### DiskBackend Trait
+- [ ] Test: Can define DiskBackend trait
+- [ ] Test: Trait has read_file() method
+- [ ] Test: Trait has write_file_atomic() method
+- [ ] Test: Trait has delete_file() method
+- [ ] Test: Trait has create_dir_all() method
+- [ ] Test: All methods are async
+- [ ] Test: Trait is Send + Sync
+- [ ] Test: Can create trait object Arc<dyn DiskBackend>
+
+### MockDiskBackend (for testing)
+- [ ] Test: Can create MockDiskBackend
+- [ ] Test: Implements DiskBackend trait
+- [ ] Test: Stores files in HashMap (in-memory)
+- [ ] Test: Can read what was written
+- [ ] Test: Simulates errors (disk full, permission denied)
+
+---
+
+## 28.3: Cache Key Mapping & File Structure (Day 1)
+
+### Hash-Based File Naming
 - [ ] Test: Uses SHA256 hash of key for filename
-- [ ] Test: File stored in cache_dir
-- [ ] Test: Handles bucket name in path safely
-- [ ] Test: Avoids path traversal attacks
+- [ ] Test: Hash is deterministic (same key = same hash)
+- [ ] Test: Path format: {cache_dir}/entries/{hash}.data
+- [ ] Test: Metadata path: {cache_dir}/entries/{hash}.meta
 
 ### File Structure
 ```
@@ -696,153 +744,243 @@ pub trait Cache: Send + Sync {
 ```
 
 - [ ] Test: Creates entries subdirectory
-- [ ] Test: Stores data in .data file
-- [ ] Test: Stores metadata in .meta file
+- [ ] Test: Data file stores raw binary
+- [ ] Test: Metadata file stores JSON
 - [ ] Test: Both files created atomically
 
-### Set Operation - Write to Disk
-- [ ] Test: set() writes data to temp file first
-- [ ] Test: set() writes metadata to temp file
-- [ ] Test: set() atomically renames temp files
-- [ ] Test: set() updates index
-- [ ] Test: set() updates stats
-
-### Get Operation - Read from Disk
-- [ ] Test: get() checks index for key
-- [ ] Test: get() reads metadata file
-- [ ] Test: get() validates entry not expired
-- [ ] Test: get() reads data file
-- [ ] Test: get() returns CacheEntry
-- [ ] Test: get() increments hit counter
-
 ---
 
-## 28.3: Cache Index Management
+## 28.4: Index Management (Day 2)
 
-### Index Structure
-- [ ] Test: Index maps CacheKey to EntryMetadata
-- [ ] Test: EntryMetadata contains file path
-- [ ] Test: EntryMetadata contains size
-- [ ] Test: EntryMetadata contains created_at
-- [ ] Test: EntryMetadata contains expires_at
-- [ ] Test: EntryMetadata contains last_accessed_at
+### In-Memory Index
+- [ ] Test: Index maps CacheKey → EntryMetadata
+- [ ] Test: Thread-safe operations (RwLock or DashMap)
+- [ ] Test: Can add/remove/update entries
+- [ ] Test: Tracks total cache size atomically
 
 ### Index Persistence
-- [ ] Test: Index saved to index.json on updates
-- [ ] Test: Index loaded from index.json on startup
-- [ ] Test: Index handles missing file (starts empty)
-- [ ] Test: Index handles corrupted file gracefully
+- [ ] Test: Index saved to index.json
+- [ ] Test: Index loaded on startup
+- [ ] Test: Handles missing file (starts empty)
+- [ ] Test: Handles corrupted JSON (logs, starts empty)
 
-### Index Operations
-- [ ] Test: Can add entry to index
-- [ ] Test: Can remove entry from index
-- [ ] Test: Can update entry metadata in index
-- [ ] Test: Can query index for entry existence
-- [ ] Test: Can iterate over all index entries
+### Index Validation & Repair
+- [ ] Test: Scans entries/ directory on startup
+- [ ] Test: Removes orphaned files (no index entry)
+- [ ] Test: Removes index entries without files
+- [ ] Test: Recalculates total size from files
+- [ ] Test: Removes expired entries on startup
 
 ---
 
-## 28.4: LRU Eviction for Disk Cache
+## 28.5: tokio::fs Backend Implementation (Day 3)
+
+### TokioFsBackend Structure
+- [ ] Test: Can create TokioFsBackend
+- [ ] Test: Implements DiskBackend trait
+- [ ] Test: Implements Send + Sync
+
+### Read Operations
+- [ ] Test: read_file() uses tokio::fs::read
+- [ ] Test: Returns Bytes
+- [ ] Test: Returns error if file doesn't exist
+- [ ] Test: Works with various file sizes (0B to 100MB)
+
+### Write Operations
+- [ ] Test: write_file_atomic() uses temp file + rename
+- [ ] Test: Writes to .tmp file first
+- [ ] Test: Atomically renames to final path
+- [ ] Test: Cleans up temp file on error
+
+### Delete & Directory Operations
+- [ ] Test: delete_file() removes file
+- [ ] Test: create_dir_all() creates directories recursively
+- [ ] Test: Handles errors gracefully
+
+---
+
+## 28.6: tokio-uring Backend Implementation (Day 4-5)
+
+### UringBackend Structure (Linux only)
+- [ ] Test: Can create UringBackend
+- [ ] Test: Implements DiskBackend trait
+- [ ] Test: Initializes buffer pool
+
+### Buffer Pool Management
+- [ ] Test: Can create BufferPool
+- [ ] Test: Can acquire 4KB buffer
+- [ ] Test: Can acquire 64KB buffer
+- [ ] Test: Can return buffer to pool
+- [ ] Test: Pool has max capacity
+- [ ] Test: Buffers zeroed on return (security)
+
+### Read Operations (io-uring)
+- [ ] Test: read_file() uses tokio_uring::fs
+- [ ] Test: Ownership-based buffer API
+- [ ] Test: Returns (Result, buffer) tuple
+- [ ] Test: Explicitly closes file handles
+- [ ] Test: Reuses buffers from pool
+
+### Write Operations (io-uring)
+- [ ] Test: write_file_atomic() uses temp file + rename
+- [ ] Test: Ownership transfer for buffers
+- [ ] Test: Explicit fsync for durability
+- [ ] Test: Explicit close() calls
+
+### Runtime Integration
+- [ ] Test: Can spawn io-uring tasks from Tokio
+- [ ] Test: No deadlocks or race conditions
+- [ ] Test: Proper error propagation
+
+---
+
+## 28.7: LRU Eviction (Day 6)
 
 ### Size Tracking
 - [ ] Test: Tracks total disk cache size
 - [ ] Test: Size updated on set()
 - [ ] Test: Size updated on delete()
-- [ ] Test: Size updated on eviction
+- [ ] Test: Detects when size exceeds max
 
 ### Eviction Logic
-- [ ] Test: Eviction triggered when size exceeds max
-- [ ] Test: Evicts least recently accessed entry
+- [ ] Test: Eviction triggered when threshold exceeded
+- [ ] Test: Identifies least recently accessed entry
 - [ ] Test: Deletes both .data and .meta files
 - [ ] Test: Removes entry from index
 - [ ] Test: Updates stats (eviction count)
 
-### Multi-File Eviction
-- [ ] Test: Can evict multiple entries to free space
+### Batch Eviction
+- [ ] Test: Can evict multiple entries in one pass
 - [ ] Test: Evicts in LRU order
 - [ ] Test: Stops when enough space freed
 
 ---
 
-## 28.5: Recovery & Startup
+## 28.8: Recovery & Startup (Day 6)
 
-### Cache Recovery on Startup
-- [ ] Test: Scans cache_dir on startup
+### Startup Sequence
 - [ ] Test: Loads index from index.json
-- [ ] Test: Validates index against actual files
-- [ ] Test: Removes orphaned files (no index entry)
-- [ ] Test: Removes index entries without files
+- [ ] Test: Validates index against filesystem
+- [ ] Test: Removes orphaned files
+- [ ] Test: Removes invalid index entries
+- [ ] Test: Recalculates total size
+- [ ] Test: Triggers eviction if oversized
 
-### Corrupted File Handling
+### Corrupted Entry Handling
 - [ ] Test: Handles corrupted .data file
 - [ ] Test: Handles corrupted .meta file
 - [ ] Test: Handles corrupted index.json
 - [ ] Test: Logs errors but continues operation
 - [ ] Test: Removes corrupted entries from cache
 
-### Cache Size Calculation on Startup
-- [ ] Test: Calculates total cache size from files
-- [ ] Test: Updates index with correct sizes
-- [ ] Test: Triggers eviction if cache oversized
+### Temporary File Cleanup
+- [ ] Test: Deletes .tmp files from failed writes
+- [ ] Test: Doesn't delete legitimate files
 
 ---
 
-## 28.6: Atomic Operations
+## 28.9: Cache Trait Implementation (Day 7)
 
-### Atomic Write Implementation
-- [ ] Test: Uses temp file for writes
-- [ ] Test: Temp file has unique name (.tmp suffix)
-- [ ] Test: Writes complete data to temp file
-- [ ] Test: Renames temp file atomically
-- [ ] Test: Handles rename failures gracefully
+### DiskCache Structure
+- [ ] Test: Can create DiskCache
+- [ ] Test: Contains backend (either tokio::fs or io-uring)
+- [ ] Test: Contains index
+- [ ] Test: Contains config
+- [ ] Test: Contains stats tracker
 
-### Failure Scenarios
-- [ ] Test: Handles disk full error
-- [ ] Test: Handles permission denied error
-- [ ] Test: Cleans up temp files on failure
-- [ ] Test: Does not corrupt existing entries on failure
+### Backend Selection at Compile Time
+- [ ] Test: Linux builds use UringBackend
+- [ ] Test: macOS builds use TokioFsBackend
+- [ ] Test: Tests use TokioFsBackend (consistent)
+- [ ] Test: Only one backend compiled into binary
+
+### Cache::get() Implementation
+- [ ] Test: Checks index first
+- [ ] Test: Returns None if expired
+- [ ] Test: Reads data and metadata from disk
+- [ ] Test: Updates last_accessed_at
+- [ ] Test: Increments hit/miss counters
+
+### Cache::set() Implementation
+- [ ] Test: Validates entry size
+- [ ] Test: Writes data and metadata atomically
+- [ ] Test: Updates index
+- [ ] Test: Triggers eviction if needed
+- [ ] Test: Returns error on disk full
+
+### Cache::delete() / clear() / stats()
+- [ ] Test: delete() removes from index and disk
+- [ ] Test: clear() removes all entries
+- [ ] Test: stats() returns current statistics
+- [ ] Test: stats() includes backend type
 
 ---
 
-## 28.7: Cache Trait Implementation
+## 28.10: Cross-Platform Testing (Day 8-9)
 
-### Implement Cache Trait for DiskCache
-- [ ] Test: DiskCache implements Cache trait
-- [ ] Test: DiskCache implements Send + Sync
-- [ ] Test: Can use DiskCache through Cache trait object
-
-### Async Operations
-- [ ] Test: All file I/O is async (tokio::fs)
-- [ ] Test: get() is non-blocking
-- [ ] Test: set() is non-blocking
-- [ ] Test: delete() is non-blocking
-
-### Error Handling
-- [ ] Test: Returns CacheError::IoError on file errors
-- [ ] Test: Returns CacheError::StorageFull when disk full
-- [ ] Test: Returns CacheError::SerializationError on JSON errors
-
----
-
-## 28.8: Testing & Validation
-
-### Unit Tests
-- [ ] Test: All DiskCache unit tests pass
-- [ ] Test: Test uses tempfile for isolation
-- [ ] Test: Tests clean up temp directories
-- [ ] Test: No clippy warnings
+### Platform-Specific Tests
+- [ ] Test: All tests pass with UringBackend (Linux)
+- [ ] Test: All tests pass with TokioFsBackend (macOS)
+- [ ] Test: All tests pass with TokioFsBackend (Windows)
+- [ ] Test: Same behavior across platforms (functional equivalence)
 
 ### Integration Tests
-- [ ] Test: Can store and retrieve entries across restart
-- [ ] Test: Cache survives process crash (index recovery)
+- [ ] Test: Can store and retrieve 100 entries
+- [ ] Test: Cache survives process restart (Linux)
+- [ ] Test: Cache survives process restart (macOS)
 - [ ] Test: LRU eviction works end-to-end
 - [ ] Test: Handles 1000+ files efficiently
-
-### Performance Tests
-- [ ] Test: get() latency <10ms for cached entries
-- [ ] Test: set() latency <10ms for normal entries
 - [ ] Test: Handles 10GB cache size
-- [ ] Test: Recovery time <1s for 10,000 entries
+
+### Error Injection Tests
+- [ ] Test: Handles disk full error
+- [ ] Test: Handles permission denied error
+- [ ] Test: Handles read-only filesystem
+- [ ] Test: Handles corrupted files
+
+### Docker Testing (Linux from macOS/Windows)
+- [ ] Test: Docker environment builds successfully
+- [ ] Test: Can run tests in Docker container
+- [ ] Test: io-uring backend works in Docker
+- [ ] Test: Benchmarks run in Docker
+
+---
+
+## 28.11: Performance Validation (Day 10)
+
+### Small File Benchmarks (4KB)
+- [ ] Benchmark: tokio::fs read (baseline)
+- [ ] Benchmark: io-uring read (Linux)
+- [ ] Target: 2-3x throughput improvement on Linux
+- [ ] Verify: No regression on macOS
+
+### Large File Benchmarks (10MB)
+- [ ] Benchmark: tokio::fs read (baseline)
+- [ ] Benchmark: io-uring read (Linux)
+- [ ] Target: 20-40% throughput improvement on Linux
+
+### Latency Benchmarks
+- [ ] Target: P95 latency <10ms (tokio::fs)
+- [ ] Target: P95 latency <5ms (io-uring on Linux)
+
+### Resource Utilization
+- [ ] Benchmark: CPU usage under load
+- [ ] Benchmark: Memory usage
+- [ ] Verify: No file descriptor leaks
+- [ ] Verify: Buffer pool doesn't cause unbounded growth
+
+### Performance Report
+- [ ] Document: Benchmark results
+- [ ] Document: Platform comparison
+- [ ] Document: When to use io-uring
+
+---
+
+**Summary**: Phase 28 implements hybrid disk cache
+**Tests**: 332 total (detailed in PHASE_28_HYBRID_PLAN.md)
+**Backends**: io-uring (Linux) + tokio::fs (all platforms)
+**Performance**: 2-3x faster on Linux, portable everywhere
+**Docker**: Test Linux code on any platform
 
 ---
 
