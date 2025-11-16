@@ -6003,4 +6003,343 @@ cache:
         assert_eq!(stats.current_item_count, 0);
         assert_eq!(stats.max_size_bytes, 0);
     }
+
+    // ============================================================
+    // Phase 27.9: Thread Safety & Concurrency Tests
+    // ============================================================
+
+    #[test]
+    fn test_moka_cache_is_thread_safe_by_design() {
+        // Test: Moka cache is thread-safe by design
+        use moka::future::Cache;
+
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Cache<CacheKey, CacheEntry>>();
+        assert_send_sync::<MemoryCache>();
+    }
+
+    #[tokio::test]
+    async fn test_can_share_memory_cache_across_threads() {
+        // Test: Can share MemoryCache across threads
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Spawn multiple tasks that share the cache
+        let mut handles = vec![];
+        for i in 0..5 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                let key = CacheKey {
+                    bucket: "bucket".to_string(),
+                    object_key: format!("key{}", i),
+                    etag: None,
+                };
+                let entry = CacheEntry::new(
+                    Bytes::from(format!("data{}", i)),
+                    "text/plain".to_string(),
+                    format!("etag{}", i),
+                    None,
+                );
+                cache_clone.set(key, entry).await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks
+        for handle in handles {
+            assert!(handle.await.unwrap().is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_get_operations_work_correctly() {
+        // Test: Concurrent get() operations work correctly
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Insert some data first
+        for i in 0..10 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(format!("data{}", i)),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.set(key, entry).await.unwrap();
+        }
+
+        // Concurrent reads
+        let mut handles = vec![];
+        for i in 0..10 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                let key = CacheKey {
+                    bucket: "bucket".to_string(),
+                    object_key: format!("key{}", i),
+                    etag: None,
+                };
+                cache_clone.get(&key).await
+            });
+            handles.push(handle);
+        }
+
+        // All should succeed
+        for handle in handles {
+            let result = handle.await.unwrap();
+            assert!(result.is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_insert_operations_work_correctly() {
+        // Test: Concurrent insert() operations work correctly
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Concurrent writes
+        let mut handles = vec![];
+        for i in 0..20 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                let key = CacheKey {
+                    bucket: "bucket".to_string(),
+                    object_key: format!("key{}", i),
+                    etag: None,
+                };
+                let entry = CacheEntry::new(
+                    Bytes::from(format!("data{}", i)),
+                    "text/plain".to_string(),
+                    format!("etag{}", i),
+                    None,
+                );
+                cache_clone.set(key, entry).await
+            });
+            handles.push(handle);
+        }
+
+        // All should succeed
+        for handle in handles {
+            assert!(handle.await.unwrap().is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mixed_concurrent_get_and_insert() {
+        // Test: Can get() and insert() from different threads
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Insert initial data
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(format!("data{}", i)),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.set(key, entry).await.unwrap();
+        }
+
+        // Mix of reads and writes
+        let mut handles = vec![];
+        for i in 0..10 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                if i % 2 == 0 {
+                    // Read
+                    let key = CacheKey {
+                        bucket: "bucket".to_string(),
+                        object_key: format!("key{}", i % 5),
+                        etag: None,
+                    };
+                    cache_clone.get(&key).await
+                } else {
+                    // Write
+                    let key = CacheKey {
+                        bucket: "bucket".to_string(),
+                        object_key: format!("newkey{}", i),
+                        etag: None,
+                    };
+                    let entry = CacheEntry::new(
+                        Bytes::from(format!("newdata{}", i)),
+                        "text/plain".to_string(),
+                        format!("newetag{}", i),
+                        None,
+                    );
+                    cache_clone.set(key, entry).await.ok();
+                    None
+                }
+            });
+            handles.push(handle);
+        }
+
+        // All should complete without panics
+        for handle in handles {
+            handle.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stats_remain_accurate_under_concurrent_load() {
+        // Test: Stats remain accurate under concurrent load
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Concurrent operations
+        let mut handles = vec![];
+        for i in 0..20 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                let key = CacheKey {
+                    bucket: "bucket".to_string(),
+                    object_key: format!("key{}", i),
+                    etag: None,
+                };
+                let entry = CacheEntry::new(
+                    Bytes::from(format!("data{}", i)),
+                    "text/plain".to_string(),
+                    format!("etag{}", i),
+                    None,
+                );
+                cache_clone.set(key.clone(), entry).await.unwrap();
+                cache_clone.get(&key).await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Stats should reflect operations (20 hits from the gets)
+        use std::sync::atomic::Ordering;
+        let hits = cache.stats.hits.load(Ordering::Relaxed);
+        assert_eq!(hits, 20);
+    }
+
+    #[tokio::test]
+    async fn test_no_race_conditions_in_statistics_tracking() {
+        // Test: No race conditions in statistics tracking
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Many concurrent increments
+        let mut handles = vec![];
+        for _ in 0..100 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                cache_clone.stats.increment_hits();
+                cache_clone.stats.increment_misses();
+                cache_clone.stats.increment_evictions();
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // All increments should be counted
+        use std::sync::atomic::Ordering;
+        assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 100);
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 100);
+        assert_eq!(cache.stats.evictions.load(Ordering::Relaxed), 100);
+    }
+
+    #[tokio::test]
+    async fn test_stress_test_random_operations() {
+        // Test: 10 threads performing random get/set operations
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = Arc::new(MemoryCache::new(&config));
+
+        // Spawn 10 threads doing random operations
+        let mut handles = vec![];
+        for thread_id in 0..10 {
+            let cache_clone = cache.clone();
+            let handle = tokio::spawn(async move {
+                for op_id in 0..50 {
+                    let key = CacheKey {
+                        bucket: "bucket".to_string(),
+                        object_key: format!("key{}", (thread_id * 50 + op_id) % 30),
+                        etag: None,
+                    };
+
+                    if op_id % 2 == 0 {
+                        // Write
+                        let entry = CacheEntry::new(
+                            Bytes::from(format!("data-{}-{}", thread_id, op_id)),
+                            "text/plain".to_string(),
+                            format!("etag-{}-{}", thread_id, op_id),
+                            None,
+                        );
+                        let _ = cache_clone.set(key, entry).await;
+                    } else {
+                        // Read
+                        let _ = cache_clone.get(&key).await;
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete (no panics)
+        for handle in handles {
+            assert!(handle.await.is_ok());
+        }
+
+        // Cache should still be functional
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "testkey".to_string(),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from("test"),
+            "text/plain".to_string(),
+            "testetag".to_string(),
+            None,
+        );
+        assert!(cache.set(key.clone(), entry).await.is_ok());
+        assert!(cache.get(&key).await.is_some());
+    }
 }
