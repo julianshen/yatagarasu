@@ -8164,6 +8164,7 @@ fn test_can_create_s3_http_client_from_bucket_config() {
             replicas: None,
         },
         auth: None, // Public bucket
+    cache: None,
     };
 
     // Action: Create S3 client from BucketConfig
@@ -8226,6 +8227,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     let private_bucket = BucketConfig {
@@ -8245,6 +8247,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             replicas: None,
         },
         auth: Some(yatagarasu::config::AuthConfig { enabled: true }),
+    cache: None,
     };
 
     let archive_bucket = BucketConfig {
@@ -8264,6 +8267,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     // Action: Create S3 clients for each bucket
@@ -8376,6 +8380,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     let minio_client = create_s3_client(&minio_bucket.s3).expect("Should create MinIO client");
@@ -8405,6 +8410,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     let aws_client = create_s3_client(&aws_bucket.s3).expect("Should create AWS client");
@@ -8433,6 +8439,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     let localstack_client =
@@ -8490,6 +8497,7 @@ fn test_s3_client_generates_valid_aws_signature_v4() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     let s3_client = create_s3_client(&bucket_config.s3).expect("Should create S3 client");
@@ -8563,6 +8571,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             replicas: None,
         },
         auth: None, // Public bucket
+    cache: None,
     };
 
     // Bucket 2: Private (authenticated, AWS S3)
@@ -8585,6 +8594,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
         auth: Some(yatagarasu::config::AuthConfig {
             enabled: true, // Requires JWT
         }),
+    cache: None,
     };
 
     // Bucket 3: Archive (MinIO, custom endpoint)
@@ -8605,6 +8615,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     // Simulate proxy initialization: Create isolated S3 client for each bucket
@@ -8734,6 +8745,7 @@ fn test_get_request_to_products_image_fetches_from_s3() {
             replicas: None,
         },
         auth: None, // Public bucket
+    cache: None,
     }];
 
     let router = Router::new(buckets.clone());
@@ -9569,6 +9581,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             replicas: None,
         },
         auth: None, // Public bucket, no JWT required
+    cache: None,
     };
 
     // Bucket 2: Private (sensitive data with full access credentials)
@@ -9589,6 +9602,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
+    cache: None,
     };
 
     // Bucket 3: Archive (long-term storage with archive-specific credentials)
@@ -9609,6 +9623,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
             replicas: None,
         },
         auth: None,
+    cache: None,
     };
 
     // Create isolated S3 clients for each bucket

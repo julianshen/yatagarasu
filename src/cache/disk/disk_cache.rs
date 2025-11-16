@@ -100,9 +100,25 @@ impl Cache for DiskCache {
         Ok(())
     }
 
-    async fn delete(&self, _key: &CacheKey) -> Result<bool, CacheError> {
-        // TODO: Implement
-        Ok(false)
+    async fn delete(&self, key: &CacheKey) -> Result<bool, CacheError> {
+        use super::utils::generate_paths;
+        use super::utils::key_to_hash;
+
+        // Try to remove from index first
+        let _metadata = match self.index.remove(key) {
+            Some(meta) => meta,
+            None => return Ok(false), // Entry doesn't exist
+        };
+
+        // Generate file paths
+        let hash = key_to_hash(key);
+        let (data_path, meta_path) = generate_paths(&self.cache_dir, &hash);
+
+        // Delete both files (ignore errors - index is already updated)
+        let _ = self.backend.delete_file(&data_path).await;
+        let _ = self.backend.delete_file(&meta_path).await;
+
+        Ok(true)
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
