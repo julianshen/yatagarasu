@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub struct DiskCache {
     #[allow(dead_code)] // Will be used in Phase 28.9 (Cache::get/set implementation)
     backend: Arc<dyn DiskBackend>,
-    index: Arc<CacheIndex>,
+    pub(crate) index: Arc<CacheIndex>, // pub(crate) for testing
     #[allow(dead_code)] // Will be used in Phase 28.9 (Cache::set for file paths)
     cache_dir: PathBuf,
     max_size_bytes: u64,
@@ -188,7 +188,15 @@ impl Cache for DiskCache {
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        // TODO: Implement
+        // Clear the index
+        self.index.clear();
+
+        // Reset eviction counter
+        self.eviction_count.store(0, Ordering::SeqCst);
+
+        // TODO: Optionally delete all files from disk (left for later optimization)
+        // For now, orphaned files will be cleaned up during next validate_and_repair()
+
         Ok(())
     }
 

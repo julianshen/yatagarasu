@@ -178,6 +178,7 @@ impl CacheIndex {
         let mut fs_hashes = HashSet::new();
         let mut data_files = HashMap::new();
         let mut meta_files = HashMap::new();
+        let mut tmp_files = Vec::new();
 
         for file_path in files {
             if let Some(filename) = file_path.file_name().and_then(|n| n.to_str()) {
@@ -187,8 +188,16 @@ impl CacheIndex {
                 } else if let Some(hash) = filename.strip_suffix(".meta") {
                     fs_hashes.insert(hash.to_string());
                     meta_files.insert(hash.to_string(), file_path.clone());
+                } else if filename.ends_with(".tmp") {
+                    // Collect .tmp files for cleanup
+                    tmp_files.push(file_path.clone());
                 }
             }
+        }
+
+        // Delete orphaned .tmp files from failed writes
+        for tmp_file in tmp_files {
+            let _ = backend.delete_file(&tmp_file).await;
         }
 
         // Build map of index keys to their hashes

@@ -3124,4 +3124,1595 @@ mod tests {
             "Total size should be exactly 5KB (3 x 1KB + 1 x 2KB)"
         );
     }
+
+    // Phase 28.8: Recovery & Startup Tests
+    #[tokio::test]
+    async fn test_loads_index_from_json() {
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use crate::cache::CacheKey;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let index_path = PathBuf::from("/cache/index.json");
+
+        // Create an index with some entries
+        let index1 = CacheIndex::new();
+
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            PathBuf::from("/cache/entries/hash1.data"),
+            1024,
+            1000,
+            2000,
+        );
+        index1.insert(key1.clone(), metadata1);
+
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            PathBuf::from("/cache/entries/hash2.data"),
+            2048,
+            1100,
+            2100,
+        );
+        index1.insert(key2.clone(), metadata2);
+
+        // Save index to file
+        index1.save_to_file(&index_path, &backend).await.unwrap();
+
+        // Load index from file
+        let index2 = CacheIndex::load_from_file(&index_path, &backend)
+            .await
+            .unwrap();
+
+        // Verify loaded index has same entries
+        let loaded_meta1 = index2.get(&key1).expect("key1 should exist");
+        assert_eq!(loaded_meta1.cache_key, key1);
+        assert_eq!(loaded_meta1.size_bytes, 1024);
+        assert_eq!(loaded_meta1.created_at, 1000);
+        assert_eq!(loaded_meta1.expires_at, 2000);
+
+        let loaded_meta2 = index2.get(&key2).expect("key2 should exist");
+        assert_eq!(loaded_meta2.cache_key, key2);
+        assert_eq!(loaded_meta2.size_bytes, 2048);
+        assert_eq!(loaded_meta2.created_at, 1100);
+        assert_eq!(loaded_meta2.expires_at, 2100);
+
+        // Verify total size matches
+        assert_eq!(index2.total_size(), 3072);
+        assert_eq!(index2.entry_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_validates_index_against_filesystem() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with two entries
+        let index = CacheIndex::new();
+
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            data_path1.clone(),
+            1024,
+            1000,
+            9999999999, // Not expired
+        );
+        index.insert(key1.clone(), metadata1.clone());
+
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            data_path2.clone(),
+            2048,
+            1100,
+            9999999999, // Not expired
+        );
+        index.insert(key2.clone(), metadata2.clone());
+
+        // Create corresponding files in backend
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        backend
+            .write_file_atomic(&data_path2, Bytes::from(vec![1u8; 2048]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path2,
+                Bytes::from(serde_json::to_string(&metadata2).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Validate and repair
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify both entries still exist
+        assert!(index.get(&key1).is_some(), "key1 should still exist");
+        assert!(index.get(&key2).is_some(), "key2 should still exist");
+
+        // Verify total size is correct
+        assert_eq!(index.total_size(), 3072);
+        assert_eq!(index.entry_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_removes_orphaned_files() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with one entry
+        let index = CacheIndex::new();
+
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            data_path1.clone(),
+            1024,
+            1000,
+            9999999999, // Not expired
+        );
+        index.insert(key1.clone(), metadata1.clone());
+
+        // Create files for the valid entry
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Create orphaned files (not in index)
+        let orphan_data = entries_dir.join("orphan_hash.data");
+        let orphan_meta = entries_dir.join("orphan_hash.meta");
+
+        backend
+            .write_file_atomic(&orphan_data, Bytes::from(vec![0u8; 512]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(&orphan_meta, Bytes::from("orphaned metadata"))
+            .await
+            .unwrap();
+
+        // Verify orphaned files exist before validation
+        assert!(
+            backend.read_file(&orphan_data).await.is_ok(),
+            "Orphan data should exist before validation"
+        );
+        assert!(
+            backend.read_file(&orphan_meta).await.is_ok(),
+            "Orphan meta should exist before validation"
+        );
+
+        // Validate and repair
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify orphaned files are deleted
+        assert!(
+            backend.read_file(&orphan_data).await.is_err(),
+            "Orphan data should be deleted after validation"
+        );
+        assert!(
+            backend.read_file(&orphan_meta).await.is_err(),
+            "Orphan meta should be deleted after validation"
+        );
+
+        // Verify valid entry still exists
+        assert!(index.get(&key1).is_some(), "key1 should still exist");
+        assert_eq!(index.total_size(), 1024);
+        assert_eq!(index.entry_count(), 1);
+
+        // Verify valid files still exist
+        assert!(
+            backend.read_file(&data_path1).await.is_ok(),
+            "Valid data should still exist"
+        );
+        assert!(
+            backend.read_file(&meta_path1).await.is_ok(),
+            "Valid meta should still exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_removes_invalid_index_entries() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with two entries
+        let index = CacheIndex::new();
+
+        // Entry 1: Has both data and meta files (valid)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            data_path1.clone(),
+            1024,
+            1000,
+            9999999999, // Not expired
+        );
+        index.insert(key1.clone(), metadata1.clone());
+
+        // Create files for entry 1
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Entry 2: Missing files (invalid - will be removed)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            data_path2.clone(),
+            2048,
+            1100,
+            9999999999, // Not expired
+        );
+        index.insert(key2.clone(), metadata2.clone());
+
+        // Don't create files for entry 2 (simulating missing files)
+
+        // Verify both entries exist before validation
+        assert!(index.get(&key1).is_some(), "key1 should exist initially");
+        assert!(index.get(&key2).is_some(), "key2 should exist initially");
+        assert_eq!(index.total_size(), 3072);
+        assert_eq!(index.entry_count(), 2);
+
+        // Validate and repair
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify entry with missing files is removed
+        assert!(
+            index.get(&key2).is_none(),
+            "key2 should be removed (files missing)"
+        );
+
+        // Verify valid entry still exists
+        assert!(index.get(&key1).is_some(), "key1 should still exist");
+
+        // Verify total size is updated (only key1 remains)
+        assert_eq!(index.total_size(), 1024);
+        assert_eq!(index.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_recalculates_total_size() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with entries that have incorrect size metadata
+        let index = CacheIndex::new();
+
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+
+        // Metadata says 1024 bytes, but actual file will be 2048 bytes
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            data_path1.clone(),
+            1024, // Incorrect size
+            1000,
+            9999999999,
+        );
+        index.insert(key1.clone(), metadata1.clone());
+
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+
+        // Metadata says 512 bytes, but actual file will be 1024 bytes
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            data_path2.clone(),
+            512, // Incorrect size
+            1100,
+            9999999999,
+        );
+        index.insert(key2.clone(), metadata2.clone());
+
+        // Create files with actual sizes different from metadata
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 2048])) // Actual: 2048
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        backend
+            .write_file_atomic(&data_path2, Bytes::from(vec![1u8; 1024])) // Actual: 1024
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path2,
+                Bytes::from(serde_json::to_string(&metadata2).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Verify initial (incorrect) total size
+        assert_eq!(
+            index.total_size(),
+            1536,
+            "Initial total size should be 1024 + 512"
+        );
+
+        // Validate and repair
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify total size is recalculated based on actual file sizes
+        assert_eq!(
+            index.total_size(),
+            3072,
+            "Total size should be recalculated to 2048 + 1024"
+        );
+
+        // Verify metadata is updated with correct sizes
+        let updated_meta1 = index.get(&key1).unwrap();
+        assert_eq!(
+            updated_meta1.size_bytes, 2048,
+            "key1 size should be updated to actual size"
+        );
+
+        let updated_meta2 = index.get(&key2).unwrap();
+        assert_eq!(
+            updated_meta2.size_bytes, 1024,
+            "key2 size should be updated to actual size"
+        );
+
+        assert_eq!(index.entry_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_triggers_eviction_if_oversized_after_recovery() {
+        use super::super::disk_cache::DiskCache;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::path::PathBuf;
+        use std::time::{Duration, SystemTime};
+
+        // Create DiskCache with small max_size
+        let cache_dir = PathBuf::from("/tmp/test_recovery_eviction");
+        let max_size = 3000u64;
+        let cache = DiskCache::with_config(cache_dir.clone(), max_size);
+
+        // Simulate recovery by manually populating index with entries
+        // Entry 1: 1000 bytes
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "old1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = cache_dir.join("entries").join(format!("{}.data", hash1));
+
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            data_path1.clone(),
+            1000,
+            1000, // Old access time
+            9999999999,
+        );
+        cache.index.insert(key1.clone(), metadata1);
+
+        // Entry 2: 1500 bytes (total now 2500)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "old2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = cache_dir.join("entries").join(format!("{}.data", hash2));
+
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            data_path2.clone(),
+            1500,
+            1100, // Newer access time than key1
+            9999999999,
+        );
+        cache.index.insert(key2.clone(), metadata2);
+
+        // Verify initial state
+        assert_eq!(cache.index.total_size(), 2500);
+        assert_eq!(cache.index.entry_count(), 2);
+
+        // Try to add a new entry of 1000 bytes (would exceed 3000 total)
+        let new_key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "new.txt".to_string(),
+            etag: None,
+        };
+
+        let new_entry = CacheEntry {
+            data: Bytes::from(vec![0u8; 1000]),
+            content_type: "text/plain".to_string(),
+            content_length: 1000,
+            etag: "new_etag".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+
+        // Add the new entry - this should trigger eviction of key1 (LRU)
+        cache.set(new_key.clone(), new_entry).await.unwrap();
+
+        // Verify key1 (oldest) was evicted
+        assert!(
+            cache.index.get(&key1).is_none(),
+            "key1 should be evicted (oldest)"
+        );
+
+        // Verify key2 still exists
+        assert!(cache.index.get(&key2).is_some(), "key2 should still exist");
+
+        // Verify new_key was added
+        assert!(
+            cache.index.get(&new_key).is_some(),
+            "new_key should be added"
+        );
+
+        // Verify total size is under limit (1500 + 1000 = 2500)
+        assert_eq!(cache.index.total_size(), 2500);
+        assert!(
+            cache.index.total_size() <= max_size,
+            "Total size should be under max_size"
+        );
+
+        // Verify eviction count was incremented
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.evictions, 1, "Should have 1 eviction");
+    }
+
+    // Phase 28.8: Corrupted Entry Handling
+
+    #[tokio::test]
+    async fn test_handles_corrupted_data_file() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with two entries
+        let index = CacheIndex::new();
+
+        // Entry 1: Has valid files
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+
+        let metadata1 =
+            EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+        index.insert(key1.clone(), metadata1.clone());
+
+        // Create valid files for entry 1
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Entry 2: Has meta file but corrupted/missing data file
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+
+        let metadata2 =
+            EntryMetadata::new(key2.clone(), data_path2.clone(), 2048, 1100, 9999999999);
+        index.insert(key2.clone(), metadata2.clone());
+
+        // Create only meta file for entry 2 (data file missing/corrupted)
+        backend
+            .write_file_atomic(
+                &meta_path2,
+                Bytes::from(serde_json::to_string(&metadata2).unwrap()),
+            )
+            .await
+            .unwrap();
+        // Don't create data_path2 - simulating corruption/missing
+
+        // Verify both entries exist before validation
+        assert_eq!(index.entry_count(), 2);
+
+        // Validate and repair - should handle corrupted entry gracefully
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify entry with corrupted data file is removed
+        assert!(
+            index.get(&key2).is_none(),
+            "key2 should be removed (corrupted data)"
+        );
+
+        // Verify valid entry still exists
+        assert!(index.get(&key1).is_some(), "key1 should still exist");
+
+        // Verify total size and count updated
+        assert_eq!(index.total_size(), 1024);
+        assert_eq!(index.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_handles_corrupted_meta_file() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with two entries
+        let index = CacheIndex::new();
+
+        // Entry 1: Has valid files
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+
+        let metadata1 =
+            EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+        index.insert(key1.clone(), metadata1.clone());
+
+        // Create valid files for entry 1
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Entry 2: Has data file but corrupted/missing meta file
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+
+        let metadata2 =
+            EntryMetadata::new(key2.clone(), data_path2.clone(), 2048, 1100, 9999999999);
+        index.insert(key2.clone(), metadata2.clone());
+
+        // Create only data file for entry 2 (meta file missing/corrupted)
+        backend
+            .write_file_atomic(&data_path2, Bytes::from(vec![1u8; 2048]))
+            .await
+            .unwrap();
+        // Don't create meta_path2 - simulating corruption/missing
+
+        // Verify both entries exist before validation
+        assert_eq!(index.entry_count(), 2);
+
+        // Validate and repair - should handle corrupted entry gracefully
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify entry with corrupted meta file is removed
+        assert!(
+            index.get(&key2).is_none(),
+            "key2 should be removed (corrupted meta)"
+        );
+
+        // Verify valid entry still exists
+        assert!(index.get(&key1).is_some(), "key1 should still exist");
+
+        // Verify total size and count updated
+        assert_eq!(index.total_size(), 1024);
+        assert_eq!(index.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_handles_corrupted_index_json() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let index_path = PathBuf::from("/cache/index.json");
+
+        // Write corrupted JSON to index file
+        let corrupted_json = "{ invalid json with missing quotes and braces";
+        backend
+            .write_file_atomic(&index_path, Bytes::from(corrupted_json))
+            .await
+            .unwrap();
+
+        // Load index from corrupted file - should handle gracefully
+        let result = CacheIndex::load_from_file(&index_path, &backend).await;
+
+        // Should not return error - should create empty index instead
+        assert!(result.is_ok(), "Should handle corrupted JSON gracefully");
+
+        let index = result.unwrap();
+
+        // Should return empty index when JSON is corrupted
+        assert_eq!(
+            index.entry_count(),
+            0,
+            "Corrupted index should result in empty index"
+        );
+        assert_eq!(index.total_size(), 0, "Total size should be 0");
+    }
+
+    #[tokio::test]
+    async fn test_logs_errors_but_continues_operation() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        // Create index with multiple entries, some corrupted
+        let index = CacheIndex::new();
+
+        // Entry 1: Valid
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "valid.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+        let metadata1 =
+            EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+        index.insert(key1.clone(), metadata1.clone());
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Entry 2: Missing data file
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "missing_data.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            entries_dir.join(format!("{}.data", hash2)),
+            512,
+            1100,
+            9999999999,
+        );
+        index.insert(key2.clone(), metadata2.clone());
+        backend
+            .write_file_atomic(
+                &meta_path2,
+                Bytes::from(serde_json::to_string(&metadata2).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Entry 3: Missing meta file
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "missing_meta.txt".to_string(),
+            etag: None,
+        };
+        let hash3 = key_to_hash(&key3);
+        let data_path3 = entries_dir.join(format!("{}.data", hash3));
+        let metadata3 = EntryMetadata::new(key3.clone(), data_path3.clone(), 256, 1200, 9999999999);
+        index.insert(key3.clone(), metadata3);
+        backend
+            .write_file_atomic(&data_path3, Bytes::from(vec![2u8; 256]))
+            .await
+            .unwrap();
+
+        // Verify initial state
+        assert_eq!(index.entry_count(), 3);
+
+        // Validate and repair - should continue despite multiple errors
+        let result = index.validate_and_repair(&entries_dir, &backend).await;
+
+        // Should complete successfully (not fail despite errors)
+        assert!(
+            result.is_ok(),
+            "Should continue operation despite corrupted entries"
+        );
+
+        // Verify only valid entry remains
+        assert!(index.get(&key1).is_some(), "Valid entry should remain");
+        assert!(
+            index.get(&key2).is_none(),
+            "Entry with missing data should be removed"
+        );
+        assert!(
+            index.get(&key3).is_none(),
+            "Entry with missing meta should be removed"
+        );
+
+        assert_eq!(index.entry_count(), 1, "Only 1 valid entry should remain");
+        assert_eq!(index.total_size(), 1024);
+    }
+
+    #[tokio::test]
+    async fn test_removes_corrupted_entries_from_cache() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        let index = CacheIndex::new();
+
+        // Entry 1: Valid (not expired)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "valid.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+        let metadata1 = EntryMetadata::new(
+            key1.clone(),
+            data_path1.clone(),
+            1024,
+            1000,
+            9999999999, // Far future expiry
+        );
+        index.insert(key1.clone(), metadata1.clone());
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Entry 2: Expired (corrupted by time)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "expired.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+        let metadata2 = EntryMetadata::new(
+            key2.clone(),
+            data_path2.clone(),
+            512,
+            1100,
+            1000, // Expired (in the past)
+        );
+        index.insert(key2.clone(), metadata2.clone());
+        backend
+            .write_file_atomic(&data_path2, Bytes::from(vec![1u8; 512]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path2,
+                Bytes::from(serde_json::to_string(&metadata2).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Verify initial state
+        assert_eq!(index.entry_count(), 2);
+
+        // Verify files exist before validation
+        assert!(
+            backend.read_file(&data_path2).await.is_ok(),
+            "Expired entry files should exist before validation"
+        );
+
+        // Validate and repair - should remove expired entry
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify expired entry is removed from index
+        assert!(
+            index.get(&key2).is_none(),
+            "Expired entry should be removed from index"
+        );
+
+        // Verify expired entry files are deleted
+        assert!(
+            backend.read_file(&data_path2).await.is_err(),
+            "Expired entry data file should be deleted"
+        );
+        assert!(
+            backend.read_file(&meta_path2).await.is_err(),
+            "Expired entry meta file should be deleted"
+        );
+
+        // Verify valid entry still exists
+        assert!(index.get(&key1).is_some(), "Valid entry should remain");
+        assert!(
+            backend.read_file(&data_path1).await.is_ok(),
+            "Valid entry files should still exist"
+        );
+
+        assert_eq!(index.entry_count(), 1);
+        assert_eq!(index.total_size(), 1024);
+    }
+
+    // Phase 28.8: Temporary File Cleanup
+
+    #[tokio::test]
+    async fn test_deletes_tmp_files_from_failed_writes() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        let index = CacheIndex::new();
+
+        // Create a valid entry
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+        let metadata1 =
+            EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+        index.insert(key1.clone(), metadata1.clone());
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Create orphaned .tmp files (from failed writes)
+        let tmp_file1 = entries_dir.join("somehash.data.tmp");
+        let tmp_file2 = entries_dir.join("anotherhash.meta.tmp");
+
+        backend
+            .write_file_atomic(&tmp_file1, Bytes::from(vec![0u8; 100]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(&tmp_file2, Bytes::from("temp metadata"))
+            .await
+            .unwrap();
+
+        // Verify .tmp files exist before cleanup
+        assert!(
+            backend.read_file(&tmp_file1).await.is_ok(),
+            "Temp file 1 should exist before cleanup"
+        );
+        assert!(
+            backend.read_file(&tmp_file2).await.is_ok(),
+            "Temp file 2 should exist before cleanup"
+        );
+
+        // Validate and repair - should clean up .tmp files
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify .tmp files are deleted
+        assert!(
+            backend.read_file(&tmp_file1).await.is_err(),
+            "Temp file 1 should be deleted after cleanup"
+        );
+        assert!(
+            backend.read_file(&tmp_file2).await.is_err(),
+            "Temp file 2 should be deleted after cleanup"
+        );
+
+        // Verify valid entry still exists
+        assert!(index.get(&key1).is_some(), "Valid entry should remain");
+        assert!(
+            backend.read_file(&data_path1).await.is_ok(),
+            "Valid data file should still exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_doesnt_delete_legitimate_files() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::types::EntryMetadata;
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = MockDiskBackend::new();
+        let entries_dir = PathBuf::from("/cache/entries");
+
+        let index = CacheIndex::new();
+
+        // Create valid entries with .data and .meta files
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let hash1 = key_to_hash(&key1);
+        let data_path1 = entries_dir.join(format!("{}.data", hash1));
+        let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
+        let metadata1 =
+            EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+        index.insert(key1.clone(), metadata1.clone());
+        backend
+            .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path1,
+                Bytes::from(serde_json::to_string(&metadata1).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let hash2 = key_to_hash(&key2);
+        let data_path2 = entries_dir.join(format!("{}.data", hash2));
+        let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
+        let metadata2 = EntryMetadata::new(key2.clone(), data_path2.clone(), 512, 1100, 9999999999);
+        index.insert(key2.clone(), metadata2.clone());
+        backend
+            .write_file_atomic(&data_path2, Bytes::from(vec![1u8; 512]))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(
+                &meta_path2,
+                Bytes::from(serde_json::to_string(&metadata2).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Create a .tmp file (should be deleted)
+        let tmp_file = entries_dir.join("orphan.tmp");
+        backend
+            .write_file_atomic(&tmp_file, Bytes::from("temp"))
+            .await
+            .unwrap();
+
+        // Verify all files exist before cleanup
+        assert!(backend.read_file(&data_path1).await.is_ok());
+        assert!(backend.read_file(&meta_path1).await.is_ok());
+        assert!(backend.read_file(&data_path2).await.is_ok());
+        assert!(backend.read_file(&meta_path2).await.is_ok());
+        assert!(backend.read_file(&tmp_file).await.is_ok());
+
+        // Validate and repair
+        index
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // Verify .data and .meta files are NOT deleted (legitimate files preserved)
+        assert!(
+            backend.read_file(&data_path1).await.is_ok(),
+            "Legitimate .data file should not be deleted"
+        );
+        assert!(
+            backend.read_file(&meta_path1).await.is_ok(),
+            "Legitimate .meta file should not be deleted"
+        );
+        assert!(
+            backend.read_file(&data_path2).await.is_ok(),
+            "Legitimate .data file should not be deleted"
+        );
+        assert!(
+            backend.read_file(&meta_path2).await.is_ok(),
+            "Legitimate .meta file should not be deleted"
+        );
+
+        // Verify .tmp file IS deleted
+        assert!(
+            backend.read_file(&tmp_file).await.is_err(),
+            "Temp file should be deleted"
+        );
+
+        // Verify index entries are intact
+        assert_eq!(index.entry_count(), 2);
+        assert!(index.get(&key1).is_some());
+        assert!(index.get(&key2).is_some());
+    }
+
+    // Phase 28.9: Cache Trait Implementation - DiskCache Structure
+
+    #[test]
+    fn test_can_create_diskcache() {
+        use super::super::disk_cache::DiskCache;
+
+        // Test default constructor
+        let cache1 = DiskCache::new();
+        assert_eq!(cache1.index.entry_count(), 0);
+
+        // Test with_config constructor
+        let cache_dir = std::path::PathBuf::from("/tmp/test_cache");
+        let max_size = 1024 * 1024 * 10; // 10MB
+        let cache2 = DiskCache::with_config(cache_dir, max_size);
+        assert_eq!(cache2.index.entry_count(), 0);
+    }
+
+    // Phase 28.9: Cache Trait Implementation - Cache::get()
+
+    #[tokio::test]
+    async fn test_cache_get_returns_none_if_not_found() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheKey};
+
+        let cache = DiskCache::new();
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "nonexistent.txt".to_string(),
+            etag: None,
+        };
+
+        let result = cache.get(&key).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_set_and_get_roundtrip() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::new();
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "test.txt".to_string(),
+            etag: Some("etag123".to_string()),
+        };
+
+        let data = Bytes::from("Hello, World!");
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data.len(),
+            etag: "etag123".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+
+        // Set entry
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Get entry back
+        let retrieved = cache.get(&key).await.unwrap();
+        assert!(retrieved.is_some());
+
+        let retrieved_entry = retrieved.unwrap();
+        assert_eq!(retrieved_entry.data, data);
+        assert_eq!(retrieved_entry.content_length, data.len());
+    }
+
+    #[tokio::test]
+    async fn test_cache_get_returns_none_if_expired() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::new();
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "expired.txt".to_string(),
+            etag: None,
+        };
+
+        let data = Bytes::from("Expired content");
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data.len(),
+            etag: "".to_string(),
+            created_at: SystemTime::now() - Duration::from_secs(7200),
+            expires_at: SystemTime::now() - Duration::from_secs(3600), // Expired 1 hour ago
+            last_accessed_at: SystemTime::now() - Duration::from_secs(7200),
+        };
+
+        // Set entry
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Try to get expired entry - should return None
+        let retrieved = cache.get(&key).await.unwrap();
+        assert!(retrieved.is_none(), "Expired entry should return None");
+
+        // Verify it was removed from index
+        assert!(cache.index.get(&key).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_delete_removes_entry() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::new();
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "delete_me.txt".to_string(),
+            etag: None,
+        };
+
+        let data = Bytes::from("To be deleted");
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data.len(),
+            etag: "".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+
+        // Set entry
+        cache.set(key.clone(), entry).await.unwrap();
+        assert!(cache.index.get(&key).is_some());
+
+        // Delete entry
+        let deleted = cache.delete(&key).await.unwrap();
+        assert!(deleted, "Should return true when entry exists");
+
+        // Verify it's gone
+        assert!(cache.index.get(&key).is_none());
+        let retrieved = cache.get(&key).await.unwrap();
+        assert!(retrieved.is_none());
+
+        // Delete again - should return false
+        let deleted_again = cache.delete(&key).await.unwrap();
+        assert!(
+            !deleted_again,
+            "Should return false when entry doesn't exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cache_stats() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::with_config(
+            std::path::PathBuf::from("/tmp/test_cache_stats"),
+            1024 * 10, // 10KB max
+        );
+
+        // Check initial stats
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, 0);
+        assert_eq!(stats.current_size_bytes, 0);
+        assert_eq!(stats.evictions, 0);
+
+        // Add an entry
+        let key = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "stats_test.txt".to_string(),
+            etag: None,
+        };
+
+        let data = Bytes::from(vec![0u8; 1024]); // 1KB
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "application/octet-stream".to_string(),
+            content_length: data.len(),
+            etag: "".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Check updated stats
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, 1);
+        assert_eq!(stats.current_size_bytes, 1024);
+        assert_eq!(stats.max_size_bytes, 1024 * 10);
+    }
+
+    #[tokio::test]
+    async fn test_cache_clear_removes_all_entries() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::new();
+
+        // Add multiple entries
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "test".to_string(),
+                object_key: format!("file{}.txt", i),
+                etag: None,
+            };
+
+            let data = Bytes::from(format!("Content {}", i));
+            let entry = CacheEntry {
+                data: data.clone(),
+                content_type: "text/plain".to_string(),
+                content_length: data.len(),
+                etag: "".to_string(),
+                created_at: SystemTime::now(),
+                expires_at: SystemTime::now() + Duration::from_secs(3600),
+                last_accessed_at: SystemTime::now(),
+            };
+
+            cache.set(key.clone(), entry).await.unwrap();
+        }
+
+        // Verify entries exist
+        assert_eq!(cache.index.entry_count(), 5);
+
+        // Clear cache
+        cache.clear().await.unwrap();
+
+        // Verify all entries are gone
+        assert_eq!(cache.index.entry_count(), 0);
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, 0);
+        assert_eq!(stats.current_size_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cache_set_triggers_eviction_when_full() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::with_config(
+            std::path::PathBuf::from("/tmp/test_eviction"),
+            2500, // Small cache: 2.5KB
+        );
+
+        // Add first entry (1KB)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "application/octet-stream".to_string(),
+            content_length: data1.len(),
+            etag: "".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Add second entry (1KB)
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Ensure different timestamp
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![1u8; 1024]);
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "application/octet-stream".to_string(),
+            content_length: data2.len(),
+            etag: "".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        // Add third entry (1KB) - should trigger eviction of key1 (oldest)
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file3.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![2u8; 1024]);
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "application/octet-stream".to_string(),
+            content_length: data3.len(),
+            etag: "".to_string(),
+            created_at: SystemTime::now(),
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            last_accessed_at: SystemTime::now(),
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Verify key1 was evicted (LRU)
+        assert!(cache.index.get(&key1).is_none(), "key1 should be evicted");
+        assert!(cache.index.get(&key2).is_some(), "key2 should remain");
+        assert!(cache.index.get(&key3).is_some(), "key3 should remain");
+
+        // Verify stats
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, 2);
+        assert_eq!(stats.evictions, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_stores_multiple_entries() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let cache = DiskCache::new();
+
+        let entries_count = 10;
+        let mut keys = Vec::new();
+
+        // Add multiple entries
+        for i in 0..entries_count {
+            let key = CacheKey {
+                bucket: format!("bucket{}", i % 3), // 3 different buckets
+                object_key: format!("file{}.txt", i),
+                etag: Some(format!("etag{}", i)),
+            };
+
+            let data = Bytes::from(format!("Content for file {}", i));
+            let entry = CacheEntry {
+                data: data.clone(),
+                content_type: "text/plain".to_string(),
+                content_length: data.len(),
+                etag: format!("etag{}", i),
+                created_at: SystemTime::now(),
+                expires_at: SystemTime::now() + Duration::from_secs(3600),
+                last_accessed_at: SystemTime::now(),
+            };
+
+            cache.set(key.clone(), entry).await.unwrap();
+            keys.push(key);
+        }
+
+        // Verify all entries can be retrieved
+        for (i, key) in keys.iter().enumerate() {
+            let retrieved = cache.get(key).await.unwrap();
+            assert!(retrieved.is_some(), "Entry {} should exist", i);
+
+            let entry = retrieved.unwrap();
+            assert_eq!(entry.data, Bytes::from(format!("Content for file {}", i)));
+        }
+
+        // Verify stats
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, entries_count as u64);
+    }
 }
