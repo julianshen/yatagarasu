@@ -840,7 +840,7 @@ will be implemented in Phase 28.11 Performance Validation.
 ## 28.7: LRU Eviction (Day 6)
 
 ### Size Tracking
-- [ ] Test: Tracks total disk cache size
+- [x] Test: Tracks total disk cache size
 - [ ] Test: Size updated on set()
 - [ ] Test: Size updated on delete()
 - [ ] Test: Detects when size exceeds max

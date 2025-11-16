@@ -1897,4 +1897,29 @@ mod tests {
 
     // Note: Advanced optimizations (buffer pools, ownership-based APIs, zero-copy patterns)
     // will be implemented in Phase 28.11 Performance Validation.
+
+    // Phase 28.7: LRU Eviction
+    // Size Tracking tests
+
+    #[tokio::test]
+    async fn test_tracks_total_disk_cache_size() {
+        // Verify DiskCache tracks total size of all cached entries
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::Cache;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create DiskCache with max size limit
+        let max_size_bytes = 10 * 1024 * 1024; // 10MB
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        // Get initial stats
+        let stats = cache.stats().await.unwrap();
+
+        // Initial size should be 0
+        assert_eq!(stats.current_size_bytes, 0);
+        assert_eq!(stats.max_size_bytes, max_size_bytes);
+        assert_eq!(stats.current_item_count, 0);
+    }
 }
