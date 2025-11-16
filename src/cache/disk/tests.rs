@@ -2393,4 +2393,123 @@ mod tests {
         let result4 = cache.get(&key4).await.unwrap();
         assert!(result4.is_some(), "Newly added entry key4 should exist");
     }
+
+    #[tokio::test]
+    async fn test_deletes_both_data_and_meta_files() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::disk::utils::{generate_paths, key_to_hash};
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        // Create temp directory for cache
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+
+        // Create cache with 2KB max size
+        let cache = DiskCache::with_config(cache_dir.clone(), 2048);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Create first entry (1KB)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![1u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Verify files exist
+        let hash1 = key_to_hash(&key1);
+        let (data_path1, meta_path1) = generate_paths(&cache_dir, &hash1);
+
+        assert!(
+            data_path1.exists(),
+            "Data file should exist after insertion"
+        );
+        assert!(
+            meta_path1.exists(),
+            "Meta file should exist after insertion"
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // Create second entry (1KB)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![2u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2,
+        };
+
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // Create third entry (1KB) - should trigger eviction of key1
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file3.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![3u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3,
+        };
+
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Verify that key1's files are deleted
+        assert!(
+            !data_path1.exists(),
+            "Data file should be deleted after eviction"
+        );
+        assert!(
+            !meta_path1.exists(),
+            "Meta file should be deleted after eviction"
+        );
+
+        // Verify that key2 and key3 files still exist
+        let hash2 = key_to_hash(&key2);
+        let (data_path2, meta_path2) = generate_paths(&cache_dir, &hash2);
+
+        assert!(data_path2.exists(), "Data file for key2 should still exist");
+        assert!(meta_path2.exists(), "Meta file for key2 should still exist");
+
+        let hash3 = key_to_hash(&key3);
+        let (data_path3, meta_path3) = generate_paths(&cache_dir, &hash3);
+
+        assert!(data_path3.exists(), "Data file for key3 should still exist");
+        assert!(meta_path3.exists(), "Meta file for key3 should still exist");
+    }
 }
