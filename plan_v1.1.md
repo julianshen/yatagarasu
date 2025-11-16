@@ -799,42 +799,41 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 
 ---
 
-## 28.6: tokio-uring Backend Implementation (Day 4-5)
+## 28.6: UringBackend Basic Implementation (Day 4-5)
 
-**Note**: This phase establishes the UringBackend placeholder structure. Full implementation
-deferred to future work when targeting Linux production deployments requiring maximum performance.
+**Goal**: Implement basic functional UringBackend using tokio-uring for Linux deployments.
+Advanced optimizations (buffer pools, zero-copy patterns) deferred to Phase 28.11.
 
 ### UringBackend Structure (Linux only)
 - [x] Test: Can create UringBackend
 - [x] Test: Implements DiskBackend trait
 - [x] Test: Is Send + Sync (required for async)
-- [ ] Test: Initializes buffer pool (deferred - placeholder impl)
+- [ ] Test: Can be used interchangeably with TokioFsBackend
 
-### Buffer Pool Management (deferred - future work)
-- [ ] Test: Can create BufferPool
-- [ ] Test: Can acquire 4KB buffer
-- [ ] Test: Can acquire 64KB buffer
-- [ ] Test: Can return buffer to pool
-- [ ] Test: Pool has max capacity
-- [ ] Test: Buffers zeroed on return (security)
+### Read Operations (tokio-uring::fs)
+- [ ] Test: read_file() successfully reads existing file
+- [ ] Test: read_file() returns error for missing file
+- [ ] Test: read_file() returns Bytes with correct content
+- [ ] Test: Handles large files (>1MB) correctly
 
-### Read Operations (io-uring) (deferred - future work)
-- [ ] Test: read_file() uses tokio_uring::fs
-- [ ] Test: Ownership-based buffer API
-- [ ] Test: Returns (Result, buffer) tuple
-- [ ] Test: Explicitly closes file handles
-- [ ] Test: Reuses buffers from pool
+### Write Operations (tokio-uring::fs)
+- [ ] Test: write_file_atomic() creates parent directories
+- [ ] Test: write_file_atomic() writes to temp file first
+- [ ] Test: write_file_atomic() atomically renames temp to final
+- [ ] Test: write_file_atomic() handles write errors gracefully
 
-### Write Operations (io-uring) (deferred - future work)
-- [ ] Test: write_file_atomic() uses temp file + rename
-- [ ] Test: Ownership transfer for buffers
-- [ ] Test: Explicit fsync for durability
-- [ ] Test: Explicit close() calls
+### Delete Operations (tokio-uring::fs)
+- [ ] Test: delete_file() removes existing file
+- [ ] Test: delete_file() is idempotent (ignores missing files)
 
-### Runtime Integration (deferred - future work)
-- [ ] Test: Can spawn io-uring tasks from Tokio
-- [ ] Test: No deadlocks or race conditions
-- [ ] Test: Proper error propagation
+### Directory Operations (tokio-uring::fs)
+- [ ] Test: create_dir_all() creates nested directories
+- [ ] Test: create_dir_all() is idempotent
+- [ ] Test: file_size() returns correct size for existing file
+- [ ] Test: read_dir() lists directory contents
+
+**Note**: Advanced optimizations (buffer pools, ownership-based APIs, zero-copy patterns)
+will be implemented in Phase 28.11 Performance Validation.
 
 ---
 
@@ -950,7 +949,33 @@ deferred to future work when targeting Linux production deployments requiring ma
 
 ---
 
-## 28.11: Performance Validation (Day 10)
+## 28.11: Performance Validation & UringBackend Optimization (Day 10)
+
+**Goal**: Validate disk cache performance targets and implement advanced UringBackend optimizations.
+
+### UringBackend Advanced Optimizations (Linux only - Optional)
+
+**Note**: These optimizations are optional and can be implemented after basic functionality is proven.
+They provide 20-40% additional performance improvements for high-throughput scenarios.
+
+#### Buffer Pool Management
+- [ ] Test: Can create BufferPool with configurable sizes
+- [ ] Test: Can acquire 4KB buffer from pool
+- [ ] Test: Can acquire 64KB buffer from pool
+- [ ] Test: Can return buffer to pool for reuse
+- [ ] Test: Pool enforces max capacity limit
+- [ ] Test: Buffers are zeroed on return (security)
+
+#### Ownership-Based I/O APIs
+- [ ] Test: read_file() returns (Result, buffer) tuple for zero-copy
+- [ ] Test: write_file_atomic() takes ownership of buffer
+- [ ] Test: Buffers reused from pool reduce allocations
+- [ ] Test: No buffer copying in hot path
+
+#### Resource Management
+- [ ] Test: Explicit file handle close() calls
+- [ ] Test: No file descriptor leaks under load
+- [ ] Test: Proper cleanup on errors
 
 ### Small File Benchmarks (4KB)
 - [ ] Benchmark: tokio::fs read (baseline)
