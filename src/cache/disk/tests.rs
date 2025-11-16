@@ -4715,4 +4715,316 @@ mod tests {
         let stats = cache.stats().await.unwrap();
         assert_eq!(stats.current_item_count, entries_count as u64);
     }
+
+    // ========================================
+    // Phase 28.10: Cross-Platform Integration Tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_integration_store_and_retrieve_100_entries() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 100 * 1024 * 1024); // 100MB
+
+        // Store 100 entries
+        let mut keys = Vec::new();
+        for i in 0..100 {
+            let key = CacheKey {
+                bucket: "test-bucket".to_string(),
+                object_key: format!("object-{:03}.txt", i),
+                etag: None,
+            };
+
+            let data = Bytes::from(format!("Test data for entry {}", i));
+            let entry = CacheEntry {
+                data: data.clone(),
+                content_type: "text/plain".to_string(),
+                content_length: data.len(),
+                etag: format!("etag-{}", i),
+                created_at: SystemTime::now(),
+                expires_at: SystemTime::now() + Duration::from_secs(3600),
+                last_accessed_at: SystemTime::now(),
+            };
+
+            cache.set(key.clone(), entry).await.unwrap();
+            keys.push(key);
+        }
+
+        // Verify all 100 entries can be retrieved
+        for (i, key) in keys.iter().enumerate() {
+            let retrieved = cache.get(key).await.unwrap();
+            assert!(retrieved.is_some(), "Entry {} should exist in cache", i);
+
+            let entry = retrieved.unwrap();
+            assert_eq!(
+                entry.data,
+                Bytes::from(format!("Test data for entry {}", i)),
+                "Entry {} data should match",
+                i
+            );
+        }
+
+        // Verify stats
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(
+            stats.current_item_count, 100,
+            "Cache should contain 100 entries"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_index_persistence_and_recovery() {
+        use super::super::backend::DiskBackend;
+        use super::super::index::CacheIndex;
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::types::EntryMetadata;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+        let index_path = cache_dir.join("index.json");
+        let entries_dir = cache_dir.join("entries");
+        let backend = TokioFsBackend::new();
+
+        // Create entries directory
+        backend.create_dir_all(&entries_dir).await.unwrap();
+
+        // Phase 1: Create index, add entries, save to disk
+        let index1 = CacheIndex::new();
+        for i in 0..10 {
+            let key = CacheKey {
+                bucket: "persistent".to_string(),
+                object_key: format!("file-{}.dat", i),
+                etag: None,
+            };
+
+            let hash = super::super::utils::key_to_hash(&key);
+            let data_path = entries_dir.join(format!("{}.data", hash));
+            let meta_path = entries_dir.join(format!("{}.meta", hash));
+
+            // Write actual data file
+            let data = Bytes::from(vec![i as u8; 1024]);
+            backend.write_file_atomic(&data_path, data).await.unwrap();
+
+            // Create metadata
+            let metadata = EntryMetadata::new(
+                key.clone(),
+                data_path.clone(),
+                1024,
+                1000,
+                9999999999, // Far future expiration
+            );
+
+            // Write metadata file
+            let meta_json = serde_json::to_string(&metadata).unwrap();
+            backend
+                .write_file_atomic(&meta_path, Bytes::from(meta_json))
+                .await
+                .unwrap();
+
+            index1.insert(key, metadata);
+        }
+
+        // Save index to disk
+        index1.save_to_file(&index_path, &backend).await.unwrap();
+
+        // Verify index was saved
+        assert_eq!(index1.entry_count(), 10);
+        assert_eq!(index1.total_size(), 10 * 1024);
+
+        // Phase 2: Load index from disk and validate
+        let index2 = CacheIndex::load_from_file(&index_path, &backend)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            index2.entry_count(),
+            10,
+            "Loaded index should contain all 10 entries"
+        );
+        assert_eq!(
+            index2.total_size(),
+            10 * 1024,
+            "Loaded index should have correct total size"
+        );
+
+        // Phase 3: Validate and repair
+        index2
+            .validate_and_repair(&entries_dir, &backend)
+            .await
+            .unwrap();
+
+        // After validation, all entries should still be present (nothing expired or missing)
+        assert_eq!(
+            index2.entry_count(),
+            10,
+            "Index should still have 10 entries after validation"
+        );
+
+        // Verify we can look up entries in the loaded index
+        for i in 0..10 {
+            let key = CacheKey {
+                bucket: "persistent".to_string(),
+                object_key: format!("file-{}.dat", i),
+                etag: None,
+            };
+
+            let metadata = index2.get(&key);
+            assert!(metadata.is_some(), "Entry {} should be in loaded index", i);
+
+            let metadata = metadata.unwrap();
+            assert_eq!(metadata.size_bytes, 1024);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_integration_lru_eviction_end_to_end() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::{Duration, SystemTime};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        // Create cache with 5KB limit
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 5 * 1024);
+
+        // Add 3 entries, 2KB each (total 6KB - will trigger eviction)
+        for i in 0..3 {
+            let key = CacheKey {
+                bucket: "eviction-test".to_string(),
+                object_key: format!("large-file-{}.bin", i),
+                etag: None,
+            };
+
+            let data = Bytes::from(vec![i as u8; 2 * 1024]);
+            let entry = CacheEntry {
+                data: data.clone(),
+                content_type: "application/octet-stream".to_string(),
+                content_length: data.len(),
+                etag: "".to_string(),
+                created_at: SystemTime::now(),
+                expires_at: SystemTime::now() + Duration::from_secs(3600),
+                last_accessed_at: SystemTime::now(),
+            };
+
+            cache.set(key, entry).await.unwrap();
+
+            // Sleep to ensure distinct timestamps for LRU ordering
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
+        // First entry should have been evicted (LRU)
+        let key0 = CacheKey {
+            bucket: "eviction-test".to_string(),
+            object_key: "large-file-0.bin".to_string(),
+            etag: None,
+        };
+        assert!(
+            cache.get(&key0).await.unwrap().is_none(),
+            "Oldest entry should be evicted"
+        );
+
+        // Second and third entries should still exist
+        let key1 = CacheKey {
+            bucket: "eviction-test".to_string(),
+            object_key: "large-file-1.bin".to_string(),
+            etag: None,
+        };
+        let key2 = CacheKey {
+            bucket: "eviction-test".to_string(),
+            object_key: "large-file-2.bin".to_string(),
+            etag: None,
+        };
+
+        assert!(
+            cache.get(&key1).await.unwrap().is_some(),
+            "Second entry should remain"
+        );
+        assert!(
+            cache.get(&key2).await.unwrap().is_some(),
+            "Third entry should remain"
+        );
+
+        // Verify stats show eviction
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.evictions, 1, "Stats should show 1 eviction");
+    }
+
+    // ========================================
+    // Phase 28.10: Error Injection Tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_error_injection_disk_full() {
+        use super::super::backend::DiskBackend;
+        use super::super::mock_backend::MockDiskBackend;
+        use crate::cache::CacheKey;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+        let cache_dir = std::path::PathBuf::from("/tmp/test_disk_full");
+
+        // Simulate disk full condition
+        backend.set_storage_full(true);
+
+        // Try to write a file - should fail with storage full error
+        let data = Bytes::from(vec![0u8; 1024]);
+        let result = backend
+            .write_file_atomic(&cache_dir.join("test.data"), data)
+            .await;
+
+        assert!(result.is_err(), "Write should fail when disk is full");
+
+        // Verify we can still read (doesn't require disk space)
+        backend.set_storage_full(false);
+        backend
+            .write_file_atomic(&cache_dir.join("test.data"), Bytes::from(vec![1u8; 512]))
+            .await
+            .unwrap();
+
+        backend.set_storage_full(true);
+        let read_result = backend.read_file(&cache_dir.join("test.data")).await;
+        assert!(
+            read_result.is_ok(),
+            "Read should work even when disk is full"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_injection_permission_denied() {
+        use super::super::backend::DiskBackend;
+        use super::super::mock_backend::MockDiskBackend;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+        let cache_dir = std::path::PathBuf::from("/tmp/test_permission");
+
+        // First write a file successfully
+        backend
+            .write_file_atomic(&cache_dir.join("test.data"), Bytes::from(vec![0u8; 512]))
+            .await
+            .unwrap();
+
+        // Simulate permission denied
+        backend.set_permission_denied(true);
+
+        // Try to read - should fail
+        let result = backend.read_file(&cache_dir.join("test.data")).await;
+        assert!(result.is_err(), "Read should fail with permission denied");
+
+        // Try to write - should fail
+        let result = backend
+            .write_file_atomic(&cache_dir.join("test2.data"), Bytes::from(vec![1u8; 512]))
+            .await;
+        assert!(result.is_err(), "Write should fail with permission denied");
+
+        // Try to delete - should fail
+        let result = backend.delete_file(&cache_dir.join("test.data")).await;
+        assert!(result.is_err(), "Delete should fail with permission denied");
+    }
 }
