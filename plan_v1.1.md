@@ -690,18 +690,18 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Test: Build works without tokio-uring on macOS
 
 ### Common Types
-- [ ] Test: Can create EntryMetadata struct
-- [ ] Test: EntryMetadata serializes to JSON
-- [ ] Test: Can create CacheIndex with thread-safe operations
-- [ ] Test: CacheIndex tracks total size atomically
-- [ ] Test: DiskCacheError enum with all variants
+- [x] Test: Can create EntryMetadata struct
+- [x] Test: EntryMetadata serializes to JSON
+- [x] Test: Can create CacheIndex with thread-safe operations
+- [x] Test: CacheIndex tracks total size atomically
+- [x] Test: DiskCacheError enum with all variants
 
 ### File Path Utilities (Shared)
-- [ ] Test: Can convert CacheKey to SHA256 hash
-- [ ] Test: Can generate file path from hash
-- [ ] Test: Path uses entries/ subdirectory
-- [ ] Test: Generates .data and .meta file paths
-- [ ] Test: Prevents path traversal attacks
+- [x] Test: Can convert CacheKey to SHA256 hash
+- [x] Test: Can generate file path from hash
+- [x] Test: Path uses entries/ subdirectory
+- [x] Test: Generates .data and .meta file paths
+- [x] Test: Prevents path traversal attacks
 
 ---
 

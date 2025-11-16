@@ -149,4 +149,326 @@ mod tests {
 
         assert!(true, "All core imports compile successfully");
     }
+
+    // Phase 28.1.1: Common Types
+
+    #[test]
+    fn test_entry_metadata_creation() {
+        // Verify EntryMetadata struct can be created
+        use std::path::PathBuf;
+        use super::super::types::EntryMetadata;
+
+        let metadata = EntryMetadata::new(
+            PathBuf::from("/cache/entries/abc123.data"),
+            1024,
+            1000000,
+            2000000,
+        );
+
+        assert_eq!(metadata.file_path, PathBuf::from("/cache/entries/abc123.data"));
+        assert_eq!(metadata.size_bytes, 1024);
+        assert_eq!(metadata.created_at, 1000000);
+        assert_eq!(metadata.expires_at, 2000000);
+        assert_eq!(metadata.last_accessed_at, 1000000); // Should equal created_at initially
+    }
+
+    #[test]
+    fn test_entry_metadata_serialization() {
+        // Verify EntryMetadata serializes to JSON
+        use std::path::PathBuf;
+        use super::super::types::EntryMetadata;
+
+        let metadata = EntryMetadata::new(
+            PathBuf::from("/cache/test.data"),
+            2048,
+            1111111,
+            3333333,
+        );
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&metadata).unwrap();
+
+        // Verify JSON contains expected fields
+        assert!(json.contains("file_path"));
+        assert!(json.contains("2048"));
+        assert!(json.contains("1111111"));
+        assert!(json.contains("3333333"));
+
+        // Deserialize back
+        let deserialized: EntryMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.size_bytes, 2048);
+        assert_eq!(deserialized.created_at, 1111111);
+    }
+
+    #[test]
+    fn test_entry_metadata_expiration() {
+        // Verify EntryMetadata expiration check works
+        use std::path::PathBuf;
+        use super::super::types::EntryMetadata;
+
+        let metadata = EntryMetadata::new(
+            PathBuf::from("/cache/test.data"),
+            1024,
+            1000,
+            2000, // Expires at 2000
+        );
+
+        // Not expired before expiration time
+        assert!(!metadata.is_expired(1500));
+
+        // Expired at expiration time
+        assert!(metadata.is_expired(2000));
+
+        // Expired after expiration time
+        assert!(metadata.is_expired(3000));
+    }
+
+    #[test]
+    fn test_cache_index_thread_safe_operations() {
+        // Verify CacheIndex supports thread-safe operations
+        use std::path::PathBuf;
+        use super::super::index::CacheIndex;
+        use super::super::types::EntryMetadata;
+        use crate::cache::CacheKey;
+
+        let index = CacheIndex::new();
+
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "test-key".to_string(),
+            etag: None,
+        };
+
+        let metadata = EntryMetadata::new(
+            PathBuf::from("/cache/test.data"),
+            1024,
+            1000,
+            2000,
+        );
+
+        // Insert entry
+        index.insert(key.clone(), metadata.clone());
+
+        // Retrieve entry
+        let retrieved = index.get(&key);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().size_bytes, 1024);
+
+        // Remove entry
+        let removed = index.remove(&key);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().size_bytes, 1024);
+
+        // Entry should be gone
+        assert!(index.get(&key).is_none());
+    }
+
+    #[test]
+    fn test_cache_index_atomic_size_tracking() {
+        // Verify CacheIndex tracks total size atomically
+        use std::path::PathBuf;
+        use super::super::index::CacheIndex;
+        use super::super::types::EntryMetadata;
+        use crate::cache::CacheKey;
+
+        let index = CacheIndex::new();
+
+        // Initial size should be 0
+        assert_eq!(index.total_size(), 0);
+
+        // Insert first entry
+        let key1 = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+        let metadata1 = EntryMetadata::new(
+            PathBuf::from("/cache/1.data"),
+            1024,
+            1000,
+            2000,
+        );
+        index.insert(key1.clone(), metadata1);
+
+        assert_eq!(index.total_size(), 1024);
+        assert_eq!(index.entry_count(), 1);
+
+        // Insert second entry
+        let key2 = CacheKey {
+            bucket: "bucket2".to_string(),
+            object_key: "key2".to_string(),
+            etag: None,
+        };
+        let metadata2 = EntryMetadata::new(
+            PathBuf::from("/cache/2.data"),
+            2048,
+            1000,
+            2000,
+        );
+        index.insert(key2.clone(), metadata2);
+
+        assert_eq!(index.total_size(), 3072); // 1024 + 2048
+        assert_eq!(index.entry_count(), 2);
+
+        // Remove first entry
+        index.remove(&key1);
+
+        assert_eq!(index.total_size(), 2048); // Only second entry remains
+        assert_eq!(index.entry_count(), 1);
+
+        // Clear all
+        index.clear();
+
+        assert_eq!(index.total_size(), 0);
+        assert_eq!(index.entry_count(), 0);
+    }
+
+    #[test]
+    fn test_disk_cache_error_variants() {
+        // Verify DiskCacheError enum has all expected variants
+        use super::super::error::DiskCacheError;
+        use crate::cache::CacheError;
+        use std::io;
+
+        // Test Io variant
+        let io_error = DiskCacheError::Io(io::Error::new(io::ErrorKind::NotFound, "test"));
+        let cache_error: CacheError = io_error.into();
+        assert!(matches!(cache_error, CacheError::IoError(_)));
+
+        // Test Serialization variant
+        let json_error = serde_json::from_str::<u64>("not a number").unwrap_err();
+        let ser_error = DiskCacheError::Serialization(json_error);
+        let cache_error: CacheError = ser_error.into();
+        assert!(matches!(cache_error, CacheError::SerializationError(_)));
+
+        // Test StorageFull variant
+        let storage_error = DiskCacheError::StorageFull;
+        let cache_error: CacheError = storage_error.into();
+        assert!(matches!(cache_error, CacheError::StorageFull));
+
+        // Test IndexCorrupted variant
+        let index_error = DiskCacheError::IndexCorrupted;
+        let cache_error: CacheError = index_error.into();
+        assert!(matches!(cache_error, CacheError::IoError(_)));
+
+        // Test BackendUnavailable variant
+        let backend_error = DiskCacheError::BackendUnavailable;
+        let cache_error: CacheError = backend_error.into();
+        assert!(matches!(cache_error, CacheError::IoError(_)));
+    }
+
+    // Phase 28.1.1: File Path Utilities
+
+    #[test]
+    fn test_cache_key_to_sha256_hash() {
+        // Verify CacheKey converts to SHA256 hash
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "path/to/file.jpg".to_string(),
+            etag: Some("abc123".to_string()),
+        };
+
+        let hash = key_to_hash(&key);
+
+        // SHA256 hash should be 64 hex characters
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Hash should be deterministic
+        assert_eq!(hash, key_to_hash(&key));
+    }
+
+    #[test]
+    fn test_generate_file_paths_with_subdirectory() {
+        // Verify file paths use entries/ subdirectory
+        use super::super::utils::generate_paths;
+        use std::path::Path;
+
+        let cache_dir = Path::new("/cache");
+        let hash = "abc123def456";
+
+        let (data_path, meta_path) = generate_paths(cache_dir, hash);
+
+        // Both paths should be in entries/ subdirectory
+        assert!(data_path.to_str().unwrap().contains("/entries/"));
+        assert!(meta_path.to_str().unwrap().contains("/entries/"));
+
+        // Verify .data and .meta extensions
+        assert!(data_path.to_str().unwrap().ends_with(".data"));
+        assert!(meta_path.to_str().unwrap().ends_with(".meta"));
+
+        // Verify both contain the hash
+        assert!(data_path.to_str().unwrap().contains(hash));
+        assert!(meta_path.to_str().unwrap().contains(hash));
+    }
+
+    #[test]
+    fn test_file_paths_different_for_different_keys() {
+        // Verify different cache keys produce different file paths
+        use super::super::utils::{key_to_hash, generate_paths};
+        use crate::cache::CacheKey;
+        use std::path::Path;
+
+        let key1 = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let key2 = CacheKey {
+            bucket: "bucket2".to_string(),
+            object_key: "key2".to_string(),
+            etag: None,
+        };
+
+        let hash1 = key_to_hash(&key1);
+        let hash2 = key_to_hash(&key2);
+
+        // Different keys should produce different hashes
+        assert_ne!(hash1, hash2);
+
+        let cache_dir = Path::new("/cache");
+        let (data_path1, _) = generate_paths(cache_dir, &hash1);
+        let (data_path2, _) = generate_paths(cache_dir, &hash2);
+
+        // Different hashes should produce different paths
+        assert_ne!(data_path1, data_path2);
+    }
+
+    #[test]
+    fn test_hash_includes_bucket_and_key() {
+        // Verify hash changes when bucket or key changes
+        use super::super::utils::key_to_hash;
+        use crate::cache::CacheKey;
+
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let key2 = CacheKey {
+            bucket: "different-bucket".to_string(),
+            object_key: "key".to_string(),
+            etag: None,
+        };
+
+        let key3 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "different-key".to_string(),
+            etag: None,
+        };
+
+        let hash1 = key_to_hash(&key1);
+        let hash2 = key_to_hash(&key2);
+        let hash3 = key_to_hash(&key3);
+
+        // All should be different
+        assert_ne!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+        assert_ne!(hash2, hash3);
+    }
 }
