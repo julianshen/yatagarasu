@@ -879,6 +879,40 @@ impl MemoryCache {
     pub fn entry_count(&self) -> u64 {
         self.cache.entry_count()
     }
+
+    /// Get cache statistics snapshot
+    fn get_stats(&self) -> CacheStats {
+        self.stats.snapshot(
+            self.cache.weighted_size(),
+            self.cache.entry_count(),
+            self.max_item_size_bytes,
+        )
+    }
+}
+
+// Implement Cache trait for MemoryCache
+#[async_trait]
+impl Cache for MemoryCache {
+    async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        Ok(self.get(key).await)
+    }
+
+    async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        self.set(key, entry).await
+    }
+
+    async fn delete(&self, key: &CacheKey) -> Result<bool, CacheError> {
+        Ok(self.delete(key).await)
+    }
+
+    async fn clear(&self) -> Result<(), CacheError> {
+        self.clear().await;
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<CacheStats, CacheError> {
+        Ok(self.get_stats())
+    }
 }
 
 #[cfg(test)]
@@ -5240,5 +5274,423 @@ cache:
         assert_eq!(retrieved.data, Bytes::from("second"));
         assert_eq!(retrieved.content_type, "text/html");
         assert_eq!(retrieved.etag, "etag2");
+    }
+
+    // ============================================================
+    // Phase 27.7: Cache Trait Implementation Tests
+    // ============================================================
+
+    #[test]
+    fn test_memory_cache_implements_cache_trait() {
+        // Test: MemoryCache implements Cache trait
+        fn assert_cache_trait<T: Cache>() {}
+        assert_cache_trait::<MemoryCache>();
+    }
+
+    #[test]
+    fn test_memory_cache_implements_send_sync() {
+        // Test: MemoryCache implements Send + Sync
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+
+        assert_send::<MemoryCache>();
+        assert_sync::<MemoryCache>();
+    }
+
+    #[tokio::test]
+    async fn test_can_use_memory_cache_through_arc_dyn_cache() {
+        // Test: Can use MemoryCache through Arc<dyn Cache>
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let memory_cache = MemoryCache::new(&config);
+        let cache: Arc<dyn Cache> = Arc::new(memory_cache);
+
+        // Should be able to use Cache trait methods
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let result = cache.get(&key).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_get_wraps_moka_get() {
+        // Test: Cache::get() wraps moka.get()
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        // Through Cache trait
+        let result = Cache::get(&cache, &key).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_get_returns_ok_none_on_miss() {
+        // Test: Cache::get() returns Ok(None) on miss
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "nonexistent".to_string(),
+            etag: None,
+        };
+
+        let result = Cache::get(&cache, &key).await;
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_get_returns_ok_some_on_hit() {
+        // Test: Cache::get() returns Ok(Some(entry)) on hit
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        Cache::set(&cache, key.clone(), entry).await.unwrap();
+
+        let result = Cache::get(&cache, &key).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_get_updates_statistics() {
+        // Test: Cache::get() updates statistics correctly
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        Cache::set(&cache, key.clone(), entry).await.unwrap();
+
+        use std::sync::atomic::Ordering;
+        let initial_hits = cache.stats.hits.load(Ordering::Relaxed);
+
+        Cache::get(&cache, &key).await.unwrap();
+
+        let final_hits = cache.stats.hits.load(Ordering::Relaxed);
+        assert_eq!(final_hits, initial_hits + 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_set_validates_entry_size() {
+        // Test: Cache::set() validates entry size first
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "huge".to_string(),
+            etag: None,
+        };
+
+        let large_entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 5 * 1024 * 1024]), // 5MB
+            "application/octet-stream".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = Cache::set(&cache, key, large_entry).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), CacheError::StorageFull));
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_set_returns_ok_on_success() {
+        // Test: Cache::set() returns Ok(()) on success
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        let result = Cache::set(&cache, key, entry).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_delete_wraps_invalidate() {
+        // Test: Cache::delete() wraps moka.invalidate()
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        Cache::set(&cache, key.clone(), entry).await.unwrap();
+        let result = Cache::delete(&cache, &key).await;
+        
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Returns true
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_delete_returns_ok_bool() {
+        // Test: Cache::delete() returns Ok(bool)
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let result = Cache::delete(&cache, &key).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Always returns true
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_clear_wraps_invalidate_all() {
+        // Test: Cache::clear() wraps moka.invalidate_all()
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Insert some entries
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(format!("data{}", i)),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            Cache::set(&cache, key, entry).await.unwrap();
+        }
+
+        let result = Cache::clear(&cache).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_clear_preserves_stats() {
+        // Test: Cache::clear() preserves hit/miss stats
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        Cache::set(&cache, key.clone(), entry).await.unwrap();
+        Cache::get(&cache, &key).await.unwrap();
+
+        use std::sync::atomic::Ordering;
+        let hits_before = cache.stats.hits.load(Ordering::Relaxed);
+
+        Cache::clear(&cache).await.unwrap();
+
+        let hits_after = cache.stats.hits.load(Ordering::Relaxed);
+        assert_eq!(hits_after, hits_before); // Stats preserved
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_stats_returns_snapshot() {
+        // Test: Cache::stats() returns snapshot of counters
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let stats_result = Cache::stats(&cache).await;
+        assert!(stats_result.is_ok());
+
+        let stats = stats_result.unwrap();
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.evictions, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_stats_includes_all_counters() {
+        // Test: Cache::stats() includes hits, misses, evictions
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        // Generate some hits and misses
+        Cache::get(&cache, &key).await.unwrap(); // miss
+        Cache::set(&cache, key.clone(), entry).await.unwrap();
+        Cache::get(&cache, &key).await.unwrap(); // hit
+
+        let stats = Cache::stats(&cache).await.unwrap();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_stats_includes_moka_metrics() {
+        // Test: Cache::stats() includes entry_count() and weighted_size()
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 1000]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        Cache::set(&cache, key, entry).await.unwrap();
+        cache.run_pending_tasks().await;
+
+        let stats = Cache::stats(&cache).await.unwrap();
+        assert!(stats.current_size_bytes > 0);
+        assert!(stats.current_item_count > 0);
+    }
+
+    #[tokio::test]
+    async fn test_cache_trait_stats_includes_max_size() {
+        // Test: Cache::stats() includes max_size_bytes from config
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let stats = Cache::stats(&cache).await.unwrap();
+        assert_eq!(stats.max_size_bytes, 10 * 1024 * 1024); // 10MB
     }
 }
