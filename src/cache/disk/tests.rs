@@ -2062,4 +2062,99 @@ mod tests {
         let deleted = cache.delete(&key1).await.unwrap();
         assert!(!deleted, "Entry should not exist");
     }
+
+    #[tokio::test]
+    async fn test_detects_when_size_exceeds_max() {
+        // Verify DiskCache can detect when total size exceeds max_size_bytes
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create cache with small max size (2KB)
+        let max_size_bytes = 2048;
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Initially, size should not exceed max
+        let stats = cache.stats().await.unwrap();
+        assert!(stats.current_size_bytes <= stats.max_size_bytes);
+        assert_eq!(stats.max_size_bytes, max_size_bytes);
+
+        // Add entry that fits (1KB)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]); // 1KB
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Still within limit
+        let stats = cache.stats().await.unwrap();
+        assert!(stats.current_size_bytes <= stats.max_size_bytes);
+        assert_eq!(stats.current_size_bytes, 1024);
+
+        // Add another entry that fits (1KB more = 2KB total, exactly at max)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![0u8; 1024]); // 1KB
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        // Exactly at max size
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_size_bytes, 2048);
+        assert_eq!(stats.current_size_bytes, stats.max_size_bytes);
+
+        // Add third entry that exceeds max (1KB more = 3KB total, exceeds 2KB max)
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file3.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![0u8; 1024]); // 1KB
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Now size exceeds max
+        let stats = cache.stats().await.unwrap();
+        assert!(stats.current_size_bytes > stats.max_size_bytes);
+        assert_eq!(stats.current_size_bytes, 3072); // 3KB
+        assert_eq!(stats.max_size_bytes, 2048); // 2KB max
+        assert_eq!(stats.current_item_count, 3);
+    }
 }

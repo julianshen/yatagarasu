@@ -843,7 +843,7 @@ will be implemented in Phase 28.11 Performance Validation.
 - [x] Test: Tracks total disk cache size
 - [x] Test: Size updated on set()
 - [x] Test: Size updated on delete()
-- [ ] Test: Detects when size exceeds max
+- [x] Test: Detects when size exceeds max
 
 ### Eviction Logic
 - [ ] Test: Eviction triggered when threshold exceeded
