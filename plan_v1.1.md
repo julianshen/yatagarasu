@@ -753,23 +753,23 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 ## 28.4: Index Management (Day 2)
 
 ### In-Memory Index
-- [ ] Test: Index maps CacheKey → EntryMetadata
-- [ ] Test: Thread-safe operations (RwLock or DashMap)
-- [ ] Test: Can add/remove/update entries
-- [ ] Test: Tracks total cache size atomically
+- [x] Test: Index maps CacheKey → EntryMetadata
+- [x] Test: Thread-safe operations (RwLock or DashMap)
+- [x] Test: Can add/remove/update entries
+- [x] Test: Tracks total cache size atomically
 
 ### Index Persistence
-- [ ] Test: Index saved to index.json
-- [ ] Test: Index loaded on startup
-- [ ] Test: Handles missing file (starts empty)
-- [ ] Test: Handles corrupted JSON (logs, starts empty)
+- [x] Test: Index saved to index.json
+- [x] Test: Index loaded on startup
+- [x] Test: Handles missing file (starts empty)
+- [x] Test: Handles corrupted JSON (logs, starts empty)
 
 ### Index Validation & Repair
-- [ ] Test: Scans entries/ directory on startup
-- [ ] Test: Removes orphaned files (no index entry)
-- [ ] Test: Removes index entries without files
-- [ ] Test: Recalculates total size from files
-- [ ] Test: Removes expired entries on startup
+- [x] Test: Scans entries/ directory on startup
+- [x] Test: Removes orphaned files (no index entry)
+- [x] Test: Removes index entries without files
+- [x] Test: Recalculates total size from files
+- [x] Test: Removes expired entries on startup
 
 ---
 

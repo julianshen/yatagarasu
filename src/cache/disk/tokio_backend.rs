@@ -1,10 +1,10 @@
 //! Tokio-based filesystem backend (portable, works on all platforms)
 
+use super::backend::DiskBackend;
+use super::error::DiskCacheError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::path::Path;
-use super::backend::DiskBackend;
-use super::error::DiskCacheError;
 
 /// Portable filesystem backend using tokio::fs
 pub struct TokioFsBackend;

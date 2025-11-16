@@ -1,15 +1,15 @@
 //! io-uring based filesystem backend (Linux only, high performance)
 
 #[cfg(target_os = "linux")]
+use super::backend::DiskBackend;
+#[cfg(target_os = "linux")]
+use super::error::DiskCacheError;
+#[cfg(target_os = "linux")]
 use async_trait::async_trait;
 #[cfg(target_os = "linux")]
 use bytes::Bytes;
 #[cfg(target_os = "linux")]
 use std::path::Path;
-#[cfg(target_os = "linux")]
-use super::backend::DiskBackend;
-#[cfg(target_os = "linux")]
-use super::error::DiskCacheError;
 
 #[cfg(target_os = "linux")]
 pub struct UringBackend;

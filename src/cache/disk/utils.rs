@@ -1,7 +1,7 @@
 //! Utility functions for disk cache
 
 use crate::cache::CacheKey;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 /// Convert a CacheKey to a SHA256 hash for use as a filename
@@ -23,6 +23,13 @@ pub fn generate_paths(cache_dir: &Path, hash: &str) -> (PathBuf, PathBuf) {
     let data_path = entries_dir.join(format!("{}.data", hash));
     let meta_path = entries_dir.join(format!("{}.meta", hash));
     (data_path, meta_path)
+}
+
+/// Generate file path for a cache entry (data or metadata)
+pub fn cache_key_to_file_path(entries_dir: &Path, key: &CacheKey, is_metadata: bool) -> PathBuf {
+    let hash = key_to_hash(key);
+    let ext = if is_metadata { "meta" } else { "data" };
+    entries_dir.join(format!("{}.{}", hash, ext))
 }
 
 #[cfg(test)]

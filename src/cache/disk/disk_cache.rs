@@ -1,10 +1,10 @@
 //! Main DiskCache implementation
 
+use super::backend::DiskBackend;
+use super::index::CacheIndex;
 use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
 use async_trait::async_trait;
 use std::sync::Arc;
-use super::backend::DiskBackend;
-use super::index::CacheIndex;
 
 /// Disk-based cache implementation
 pub struct DiskCache {

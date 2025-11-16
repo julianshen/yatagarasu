@@ -304,7 +304,7 @@ impl RedisCacheConfig {
 
 /// Cache key for identifying cached objects
 /// Combines bucket name and object key to uniquely identify a cache entry
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CacheKey {
     /// Bucket name
     pub bucket: String,
@@ -759,7 +759,12 @@ impl CacheStatsTracker {
     }
 
     /// Get a snapshot of current statistics
-    fn snapshot(&self, current_size_bytes: u64, current_item_count: u64, max_size_bytes: u64) -> CacheStats {
+    fn snapshot(
+        &self,
+        current_size_bytes: u64,
+        current_item_count: u64,
+        max_size_bytes: u64,
+    ) -> CacheStats {
         CacheStats {
             hits: self.hits.load(Ordering::Relaxed),
             misses: self.misses.load(Ordering::Relaxed),
@@ -3903,9 +3908,7 @@ cache:
     #[test]
     fn test_can_define_weigher_closure() {
         // Test: Can define weigher closure
-        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
-            entry.size_bytes() as u32
-        };
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 };
 
         // Test that the weigher compiles and can be called
         let key = CacheKey {
@@ -3926,9 +3929,7 @@ cache:
     #[test]
     fn test_weigher_returns_entry_size_bytes_as_u32() {
         // Test: Weigher returns entry.size_bytes() as u32
-        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
-            entry.size_bytes() as u32
-        };
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 };
 
         let key = CacheKey {
             bucket: "bucket".to_string(),
@@ -3949,9 +3950,7 @@ cache:
     #[test]
     fn test_weigher_accounts_for_data_and_metadata_size() {
         // Test: Weigher accounts for data + metadata size
-        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 {
-            entry.size_bytes() as u32
-        };
+        let weigher = |_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 };
 
         let key = CacheKey {
             bucket: "bucket".to_string(),
@@ -3967,7 +3966,7 @@ cache:
         );
 
         let weight = weigher(&key, &entry);
-        
+
         // Weight should include:
         // - 500 bytes of data
         // - content_type string bytes ("application/json" = 16 bytes)
@@ -4015,9 +4014,7 @@ cache:
 
         let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
             .max_capacity(1024 * 1024) // 1MB
-            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
-                entry.size_bytes() as u32
-            })
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 })
             .build();
 
         // Verify cache was created successfully
@@ -4032,9 +4029,7 @@ cache:
         let max_capacity = 1000u64; // 1000 bytes
         let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
             .max_capacity(max_capacity)
-            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
-                entry.size_bytes() as u32
-            })
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 })
             .build();
 
         // Insert entries totaling more than max_capacity
@@ -4069,9 +4064,7 @@ cache:
         let max_capacity = 500u64; // 500 bytes total
         let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
             .max_capacity(max_capacity)
-            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
-                entry.size_bytes() as u32
-            })
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 })
             .build();
 
         // Insert first entry (~100+ bytes)
@@ -4120,9 +4113,7 @@ cache:
 
         let cache: Cache<CacheKey, CacheEntry> = Cache::builder()
             .max_capacity(10000)
-            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 {
-                entry.size_bytes() as u32
-            })
+            .weigher(|_key: &CacheKey, entry: &CacheEntry| -> u32 { entry.size_bytes() as u32 })
             .build();
 
         // Initially empty
@@ -4260,10 +4251,10 @@ cache:
         // Get should increment hits
         use std::sync::atomic::Ordering;
         assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 0);
-        
+
         cache.get(&key).await;
         assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 1);
-        
+
         cache.get(&key).await;
         assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 2);
     }
@@ -4286,10 +4277,10 @@ cache:
 
         use std::sync::atomic::Ordering;
         assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 0);
-        
+
         cache.get(&key).await;
         assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 1);
-        
+
         cache.get(&key).await;
         assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 2);
     }
@@ -4599,9 +4590,9 @@ cache:
     #[tokio::test]
     async fn test_expired_entries_dont_count_as_hits() {
         // Test: Expired entries don't count as hits
+        use std::sync::atomic::Ordering;
         use std::time::Duration;
         use tokio::time::sleep;
-        use std::sync::atomic::Ordering;
 
         let config = MemoryCacheConfig {
             max_item_size_mb: 10,
@@ -4637,7 +4628,10 @@ cache:
 
         // Should count as miss, not hit
         assert_eq!(cache.stats.hits.load(Ordering::Relaxed), initial_hits);
-        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), initial_misses + 1);
+        assert_eq!(
+            cache.stats.misses.load(Ordering::Relaxed),
+            initial_misses + 1
+        );
     }
 
     // ============================================================
@@ -4653,13 +4647,11 @@ cache:
         let eviction_count = Arc::new(AtomicU64::new(0));
         let eviction_count_clone = eviction_count.clone();
 
-        let _listener = move |_key: CacheKey, _value: CacheEntry, cause: RemovalCause| {
-            match cause {
-                RemovalCause::Size | RemovalCause::Expired => {
-                    eviction_count_clone.fetch_add(1, Ordering::Relaxed);
-                }
-                _ => {}
+        let _listener = move |_key: CacheKey, _value: CacheEntry, cause: RemovalCause| match cause {
+            RemovalCause::Size | RemovalCause::Expired => {
+                eviction_count_clone.fetch_add(1, Ordering::Relaxed);
             }
+            _ => {}
         };
 
         // Verify counter is still accessible
@@ -4711,10 +4703,10 @@ cache:
         let _listener = |_key: CacheKey, _value: CacheEntry, cause: RemovalCause| {
             // Verify we can match on RemovalCause variants
             match cause {
-                RemovalCause::Explicit => {},
-                RemovalCause::Replaced => {},
-                RemovalCause::Size => {},
-                RemovalCause::Expired => {},
+                RemovalCause::Explicit => {}
+                RemovalCause::Replaced => {}
+                RemovalCause::Size => {}
+                RemovalCause::Expired => {}
             }
         };
 
@@ -4727,7 +4719,7 @@ cache:
         // Test: Listener tracks Size-based evictions separately from Expired
         // Note: In our implementation, we increment the same counter for both,
         // but we verify the listener receives the correct RemovalCause
-        
+
         let config = MemoryCacheConfig {
             max_item_size_mb: 1,
             max_cache_size_mb: 1,
@@ -5567,7 +5559,7 @@ cache:
 
         Cache::set(&cache, key.clone(), entry).await.unwrap();
         let result = Cache::delete(&cache, &key).await;
-        
+
         assert!(result.is_ok());
         assert!(result.unwrap()); // Returns true
     }

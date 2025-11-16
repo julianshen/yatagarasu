@@ -1,9 +1,9 @@
 //! Backend trait for filesystem operations
 
+use super::error::DiskCacheError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::path::Path;
-use super::error::DiskCacheError;
 
 /// Abstraction over filesystem operations to support multiple backends
 #[async_trait]

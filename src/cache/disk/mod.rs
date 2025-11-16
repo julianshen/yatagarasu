@@ -9,8 +9,8 @@
 
 use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
 use async_trait::async_trait;
-use std::path::{Path, PathBuf};
 use bytes::Bytes;
+use std::path::{Path, PathBuf};
 
 // Re-export main types
 pub use self::disk_cache::DiskCache;

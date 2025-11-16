@@ -1,13 +1,13 @@
 //! Mock disk backend for testing (in-memory HashMap storage)
 
+use super::backend::DiskBackend;
+use super::error::DiskCacheError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use super::backend::DiskBackend;
-use super::error::DiskCacheError;
 
 /// Mock backend that stores files in memory for testing
 #[derive(Clone)]
@@ -57,20 +57,16 @@ impl DiskBackend for MockDiskBackend {
         if *self.simulate_permission_denied.read() {
             return Err(DiskCacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "Simulated permission denied"
+                "Simulated permission denied",
             )));
         }
 
-        self.files
-            .read()
-            .get(path)
-            .cloned()
-            .ok_or_else(|| {
-                DiskCacheError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "File not found"
-                ))
-            })
+        self.files.read().get(path).cloned().ok_or_else(|| {
+            DiskCacheError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "File not found",
+            ))
+        })
     }
 
     async fn write_file_atomic(&self, path: &Path, data: Bytes) -> Result<(), DiskCacheError> {
@@ -81,7 +77,7 @@ impl DiskBackend for MockDiskBackend {
         if *self.simulate_permission_denied.read() {
             return Err(DiskCacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "Simulated permission denied"
+                "Simulated permission denied",
             )));
         }
 
@@ -98,7 +94,7 @@ impl DiskBackend for MockDiskBackend {
         if *self.simulate_permission_denied.read() {
             return Err(DiskCacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "Simulated permission denied"
+                "Simulated permission denied",
             )));
         }
 
@@ -110,7 +106,7 @@ impl DiskBackend for MockDiskBackend {
         if *self.simulate_permission_denied.read() {
             return Err(DiskCacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "Simulated permission denied"
+                "Simulated permission denied",
             )));
         }
 
@@ -125,7 +121,7 @@ impl DiskBackend for MockDiskBackend {
         if *self.simulate_permission_denied.read() {
             return Err(DiskCacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "Simulated permission denied"
+                "Simulated permission denied",
             )));
         }
 
@@ -136,7 +132,7 @@ impl DiskBackend for MockDiskBackend {
             .ok_or_else(|| {
                 DiskCacheError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "File not found"
+                    "File not found",
                 ))
             })
     }
@@ -145,7 +141,7 @@ impl DiskBackend for MockDiskBackend {
         if *self.simulate_permission_denied.read() {
             return Err(DiskCacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "Simulated permission denied"
+                "Simulated permission denied",
             )));
         }
 
