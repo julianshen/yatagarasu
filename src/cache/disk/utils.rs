@@ -18,6 +18,7 @@ pub fn key_to_hash(key: &CacheKey) -> String {
 }
 
 /// Generate file paths for data and metadata files
+#[allow(dead_code)] // Will be used in Phase 28.9 (Cache Trait Implementation)
 pub fn generate_paths(cache_dir: &Path, hash: &str) -> (PathBuf, PathBuf) {
     let entries_dir = cache_dir.join("entries");
     let data_path = entries_dir.join(format!("{}.data", hash));
@@ -26,6 +27,7 @@ pub fn generate_paths(cache_dir: &Path, hash: &str) -> (PathBuf, PathBuf) {
 }
 
 /// Generate file path for a cache entry (data or metadata)
+#[allow(dead_code)] // Used by Index::validate(), will be called in Phase 28.8
 pub fn cache_key_to_file_path(entries_dir: &Path, key: &CacheKey, is_metadata: bool) -> PathBuf {
     let hash = key_to_hash(key);
     let ext = if is_metadata { "meta" } else { "data" };

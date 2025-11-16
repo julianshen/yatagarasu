@@ -7,9 +7,13 @@
 //! The backend is selected at compile time based on the target platform,
 //! providing zero runtime overhead.
 
+#[allow(unused_imports)] // Will be used in Phase 28.7+ (DiskCache implementation)
 use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
+#[allow(unused_imports)]
 use async_trait::async_trait;
+#[allow(unused_imports)]
 use bytes::Bytes;
+#[allow(unused_imports)]
 use std::path::{Path, PathBuf};
 
 // Re-export main types
@@ -33,9 +37,11 @@ mod tokio_backend;
 
 // Select backend at compile time
 #[cfg(target_os = "linux")]
+#[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
 use uring_backend as platform_backend;
 
 #[cfg(not(target_os = "linux"))]
+#[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
 use tokio_backend as platform_backend;
 
 #[cfg(test)]

@@ -12,6 +12,12 @@ pub struct DiskCache {
     _index: Arc<CacheIndex>,
 }
 
+impl Default for DiskCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiskCache {
     pub fn new() -> Self {
         // Use platform-specific backend

@@ -7,6 +7,7 @@ use std::path::Path;
 
 /// Abstraction over filesystem operations to support multiple backends
 #[async_trait]
+#[allow(dead_code)] // Methods will be used starting Phase 28.7 (LRU Eviction)
 pub trait DiskBackend: Send + Sync {
     /// Read entire file contents
     async fn read_file(&self, path: &Path) -> Result<Bytes, DiskCacheError>;

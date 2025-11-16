@@ -26,16 +26,19 @@ impl CacheIndex {
         }
     }
 
+    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache Trait Implementation)
     pub fn get(&self, key: &CacheKey) -> Option<EntryMetadata> {
         self.entries.read().get(key).cloned()
     }
 
+    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache Trait Implementation)
     pub fn insert(&self, key: CacheKey, metadata: EntryMetadata) {
         let size = metadata.size_bytes;
         self.entries.write().insert(key, metadata);
         self.total_size.fetch_add(size, Ordering::SeqCst);
     }
 
+    #[allow(dead_code)] // Will be used in Phase 28.7 (LRU Eviction)
     pub fn remove(&self, key: &CacheKey) -> Option<EntryMetadata> {
         let removed = self.entries.write().remove(key);
         if let Some(ref metadata) = removed {
@@ -45,20 +48,24 @@ impl CacheIndex {
         removed
     }
 
+    #[allow(dead_code)] // Will be used in Phase 28.7 (LRU Eviction)
     pub fn total_size(&self) -> u64 {
         self.total_size.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache Trait Implementation)
     pub fn entry_count(&self) -> usize {
         self.entries.read().len()
     }
 
+    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache Trait Implementation)
     pub fn clear(&self) {
         self.entries.write().clear();
         self.total_size.store(0, Ordering::SeqCst);
     }
 
     /// Save index to JSON file
+    #[allow(dead_code)] // Will be called in Phase 28.8 (Recovery & Startup)
     pub async fn save_to_file<B: DiskBackend>(
         &self,
         path: &Path,
@@ -90,6 +97,7 @@ impl CacheIndex {
     }
 
     /// Load index from JSON file
+    #[allow(dead_code)] // Will be called in Phase 28.8 (Recovery & Startup)
     pub async fn load_from_file<B: DiskBackend>(
         path: &Path,
         backend: &B,
@@ -140,6 +148,7 @@ impl CacheIndex {
     }
 
     /// Validate and repair the index by scanning the filesystem
+    #[allow(dead_code)] // Will be called in Phase 28.8 (Recovery & Startup)
     pub async fn validate_and_repair<B: DiskBackend>(
         &self,
         entries_dir: &Path,
@@ -300,6 +309,7 @@ impl CacheIndex {
 
 /// Serializable snapshot of the cache index
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)] // Used in save_to_file/load_from_file (Phase 28.8)
 struct IndexSnapshot {
     entries: Vec<IndexEntry>,
     version: u32,
@@ -307,6 +317,7 @@ struct IndexSnapshot {
 
 /// A single index entry for serialization
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)] // Used in save_to_file/load_from_file (Phase 28.8)
 struct IndexEntry {
     key: CacheKey,
     metadata: EntryMetadata,
