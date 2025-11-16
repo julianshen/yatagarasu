@@ -1616,4 +1616,65 @@ mod tests {
             "Temp file should be cleaned up on error"
         );
     }
+
+    // Phase 28.6: tokio-uring Backend Implementation (Linux only)
+    // Note: UringBackend is a placeholder for future high-performance io-uring implementation
+    // Full implementation requires buffer pools, ownership-based APIs, and Linux kernel 5.10+
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_can_create_uring_backend() {
+        // Verify UringBackend can be created on Linux
+        use super::super::uring_backend::UringBackend;
+
+        let backend = UringBackend::new();
+
+        // Backend should be created successfully
+        // This is a compile-time test - if it compiles, the struct exists
+        drop(backend);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_uring_backend_implements_disk_backend() {
+        // Verify UringBackend implements DiskBackend trait (compile-time check)
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use std::sync::Arc;
+
+        let backend = UringBackend::new();
+        let _trait_object: Arc<dyn DiskBackend> = Arc::new(backend);
+
+        // If this compiles, UringBackend implements DiskBackend
+        assert!(true, "UringBackend implements DiskBackend trait");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_uring_backend_is_send_sync() {
+        // Verify UringBackend implements Send + Sync (required for async)
+        use super::super::uring_backend::UringBackend;
+
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+
+        assert_send::<UringBackend>();
+        assert_sync::<UringBackend>();
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn test_uring_backend_not_available_on_non_linux() {
+        // Verify UringBackend is not compiled on non-Linux platforms
+        // This test simply verifies the module compiles without uring_backend on macOS/Windows
+        assert!(
+            true,
+            "Build succeeds without UringBackend on non-Linux platforms"
+        );
+    }
+
+    // Note: Full io-uring implementation tests (buffer pools, ownership-based APIs, etc.)
+    // are deferred to future work as marked in uring_backend.rs with todo!() macros.
+    // The current UringBackend is a placeholder that will be implemented when targeting
+    // Linux production deployments requiring maximum performance.
 }

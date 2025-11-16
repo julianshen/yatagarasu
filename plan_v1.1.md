@@ -801,12 +801,16 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 
 ## 28.6: tokio-uring Backend Implementation (Day 4-5)
 
-### UringBackend Structure (Linux only)
-- [ ] Test: Can create UringBackend
-- [ ] Test: Implements DiskBackend trait
-- [ ] Test: Initializes buffer pool
+**Note**: This phase establishes the UringBackend placeholder structure. Full implementation
+deferred to future work when targeting Linux production deployments requiring maximum performance.
 
-### Buffer Pool Management
+### UringBackend Structure (Linux only)
+- [x] Test: Can create UringBackend
+- [x] Test: Implements DiskBackend trait
+- [x] Test: Is Send + Sync (required for async)
+- [ ] Test: Initializes buffer pool (deferred - placeholder impl)
+
+### Buffer Pool Management (deferred - future work)
 - [ ] Test: Can create BufferPool
 - [ ] Test: Can acquire 4KB buffer
 - [ ] Test: Can acquire 64KB buffer
@@ -814,20 +818,20 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [ ] Test: Pool has max capacity
 - [ ] Test: Buffers zeroed on return (security)
 
-### Read Operations (io-uring)
+### Read Operations (io-uring) (deferred - future work)
 - [ ] Test: read_file() uses tokio_uring::fs
 - [ ] Test: Ownership-based buffer API
 - [ ] Test: Returns (Result, buffer) tuple
 - [ ] Test: Explicitly closes file handles
 - [ ] Test: Reuses buffers from pool
 
-### Write Operations (io-uring)
+### Write Operations (io-uring) (deferred - future work)
 - [ ] Test: write_file_atomic() uses temp file + rename
 - [ ] Test: Ownership transfer for buffers
 - [ ] Test: Explicit fsync for durability
 - [ ] Test: Explicit close() calls
 
-### Runtime Integration
+### Runtime Integration (deferred - future work)
 - [ ] Test: Can spawn io-uring tasks from Tokio
 - [ ] Test: No deadlocks or race conditions
 - [ ] Test: Proper error propagation
