@@ -849,7 +849,7 @@ will be implemented in Phase 28.11 Performance Validation.
 - [x] Test: Eviction triggered when threshold exceeded
 - [x] Test: Identifies least recently accessed entry
 - [x] Test: Deletes both .data and .meta files
-- [ ] Test: Removes entry from index
+- [x] Test: Removes entry from index
 - [ ] Test: Updates stats (eviction count)
 
 ### Batch Eviction

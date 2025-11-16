@@ -2512,4 +2512,101 @@ mod tests {
         assert!(data_path3.exists(), "Data file for key3 should still exist");
         assert!(meta_path3.exists(), "Meta file for key3 should still exist");
     }
+
+    #[tokio::test]
+    async fn test_removes_entry_from_index() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 2048; // 2KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add first entry (1KB) at time T0
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "old_file.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Verify entry is in cache
+        let result1 = cache.get(&key1).await.unwrap();
+        assert!(result1.is_some(), "Entry key1 should exist after insertion");
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add second entry (1KB) at time T1
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "middle_file.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![1u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add third entry (1KB) at time T2 - should trigger eviction of key1
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "new_file.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![2u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3,
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Verify key1 was evicted and is no longer in the index
+        let result1_after = cache.get(&key1).await.unwrap();
+        assert!(
+            result1_after.is_none(),
+            "Entry key1 should be evicted and not in index"
+        );
+
+        // Verify key2 and key3 are still in the index
+        let result2 = cache.get(&key2).await.unwrap();
+        assert!(result2.is_some(), "Entry key2 should still exist in index");
+
+        let result3 = cache.get(&key3).await.unwrap();
+        assert!(
+            result3.is_some(),
+            "Newly added entry key3 should exist in index"
+        );
+    }
 }
