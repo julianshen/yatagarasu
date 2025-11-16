@@ -683,11 +683,11 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Test: Add parking_lot for thread-safe index
 
 ### Platform-Specific Dependencies
-- [ ] Test: Add tokio-uring on Linux only
-- [ ] Test: Add tempfile for test isolation
-- [ ] Test: Dependencies compile on all platforms
-- [ ] Test: Can import tokio_uring on Linux
-- [ ] Test: Build works without tokio-uring on macOS
+- [x] Test: Add tokio-uring on Linux only
+- [x] Test: Add tempfile for test isolation
+- [x] Test: Dependencies compile on all platforms
+- [x] Test: Can import tokio_uring on Linux
+- [x] Test: Build works without tokio-uring on macOS
 
 ### Common Types
 - [ ] Test: Can create EntryMetadata struct

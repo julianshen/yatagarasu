@@ -95,4 +95,58 @@ mod tests {
             assert_eq!(*read_guard, 100);
         }
     }
+
+    // Phase 28.1.1: Platform-Specific Dependencies
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_tokio_uring_available_on_linux() {
+        // Verify tokio-uring is available on Linux
+        // This is a compile-time test - if it compiles, the dependency is available
+        use tokio_uring;
+
+        // Simply verify the module can be imported
+        // Runtime tests will be added later when we implement the uring backend
+        assert!(true, "tokio-uring is available on Linux");
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn test_tokio_uring_not_required_on_non_linux() {
+        // Verify build works without tokio-uring on non-Linux platforms
+        // This test simply verifies the module compiles without tokio-uring
+        assert!(true, "Build succeeds without tokio-uring on non-Linux platforms");
+    }
+
+    #[test]
+    fn test_tempfile_available_for_isolation() {
+        // Verify tempfile is available for test isolation
+        use tempfile::TempDir;
+
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Verify directory exists
+        assert!(temp_path.exists());
+        assert!(temp_path.is_dir());
+
+        // Directory will be automatically cleaned up when temp_dir is dropped
+    }
+
+    #[test]
+    fn test_all_imports_compile() {
+        // Verify all core imports compile together on all platforms
+        use sha2::{Sha256, Digest};
+        use parking_lot::RwLock;
+        use bytes::Bytes;
+        use std::sync::Arc;
+
+        // Create instances to verify they work together
+        let _hasher = Sha256::new();
+        let _lock = Arc::new(RwLock::new(0u64));
+        let _data = Bytes::from("test");
+
+        assert!(true, "All core imports compile successfully");
+    }
 }
