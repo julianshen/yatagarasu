@@ -2609,4 +2609,123 @@ mod tests {
             "Newly added entry key3 should exist in index"
         );
     }
+
+    #[tokio::test]
+    async fn test_updates_stats_eviction_count() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 2048; // 2KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        // Check initial stats
+        let initial_stats = cache.stats().await.unwrap();
+        assert_eq!(
+            initial_stats.evictions, 0,
+            "Initial eviction count should be 0"
+        );
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add first entry (1KB)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add second entry (1KB)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![1u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        // Stats should still show 0 evictions
+        let stats_before = cache.stats().await.unwrap();
+        assert_eq!(stats_before.evictions, 0, "No evictions yet");
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add third entry (1KB) - should trigger eviction of key1
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file3.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![2u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3,
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Stats should now show 1 eviction
+        let stats_after = cache.stats().await.unwrap();
+        assert_eq!(
+            stats_after.evictions, 1,
+            "Should have 1 eviction after exceeding capacity"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add fourth entry (1KB) - should trigger another eviction (key2)
+        let key4 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file4.txt".to_string(),
+            etag: None,
+        };
+        let data4 = Bytes::from(vec![3u8; 1024]);
+        let now4 = SystemTime::now();
+        let entry4 = CacheEntry {
+            data: data4.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data4.len(),
+            etag: "etag4".to_string(),
+            created_at: now4,
+            expires_at: future,
+            last_accessed_at: now4,
+        };
+        cache.set(key4.clone(), entry4).await.unwrap();
+
+        // Stats should now show 2 evictions
+        let stats_final = cache.stats().await.unwrap();
+        assert_eq!(stats_final.evictions, 2, "Should have 2 evictions total");
+    }
 }

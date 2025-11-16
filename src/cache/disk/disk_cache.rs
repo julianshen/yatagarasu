@@ -5,6 +5,7 @@ use super::index::CacheIndex;
 use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
 use async_trait::async_trait;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Disk-based cache implementation
@@ -15,6 +16,7 @@ pub struct DiskCache {
     #[allow(dead_code)] // Will be used in Phase 28.9 (Cache::set for file paths)
     cache_dir: PathBuf,
     max_size_bytes: u64,
+    eviction_count: Arc<AtomicU64>,
 }
 
 impl Default for DiskCache {
@@ -42,6 +44,7 @@ impl DiskCache {
             index: Arc::new(CacheIndex::new()),
             cache_dir,
             max_size_bytes,
+            eviction_count: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -114,6 +117,8 @@ impl Cache for DiskCache {
             if let Some((lru_key, _lru_metadata)) = self.index.find_lru_entry() {
                 // Delete the LRU entry
                 let _ = self.delete(&lru_key).await;
+                // Increment eviction counter
+                self.eviction_count.fetch_add(1, Ordering::SeqCst);
             } else {
                 // No entries to evict - cache is empty
                 break;
@@ -189,9 +194,9 @@ impl Cache for DiskCache {
 
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(CacheStats {
-            hits: 0,      // TODO: Track hits
-            misses: 0,    // TODO: Track misses
-            evictions: 0, // TODO: Track evictions
+            hits: 0,   // TODO: Track hits
+            misses: 0, // TODO: Track misses
+            evictions: self.eviction_count.load(Ordering::SeqCst),
             current_size_bytes: self.index.total_size(),
             current_item_count: self.index.entry_count() as u64,
             max_size_bytes: self.max_size_bytes,

@@ -850,7 +850,7 @@ will be implemented in Phase 28.11 Performance Validation.
 - [x] Test: Identifies least recently accessed entry
 - [x] Test: Deletes both .data and .meta files
 - [x] Test: Removes entry from index
-- [ ] Test: Updates stats (eviction count)
+- [x] Test: Updates stats (eviction count)
 
 ### Batch Eviction
 - [ ] Test: Can evict multiple entries in one pass
