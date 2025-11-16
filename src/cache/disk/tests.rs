@@ -694,4 +694,175 @@ mod tests {
         assert!(write_result.is_err());
         assert!(matches!(write_result.unwrap_err(), DiskCacheError::Io(_)));
     }
+
+    // Phase 28.3: Cache Key Mapping & File Structure
+
+    #[tokio::test]
+    async fn test_creates_entries_subdirectory() {
+        // Verify backend creates entries/ subdirectory
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::backend::DiskBackend;
+        use super::super::utils::generate_paths;
+        use tempfile::TempDir;
+        use bytes::Bytes;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let hash = "abc123def456";
+
+        let (data_path, _) = generate_paths(temp_dir.path(), hash);
+
+        // Write file - should create entries/ subdirectory
+        backend.write_file_atomic(&data_path, Bytes::from("test")).await.unwrap();
+
+        // Verify entries/ subdirectory was created
+        let entries_dir = temp_dir.path().join("entries");
+        assert!(entries_dir.exists());
+        assert!(entries_dir.is_dir());
+
+        // Verify file exists in subdirectory
+        assert!(data_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_data_file_stores_raw_binary() {
+        // Verify .data file stores raw binary data
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::backend::DiskBackend;
+        use super::super::utils::generate_paths;
+        use tempfile::TempDir;
+        use bytes::Bytes;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let hash = "test_binary_hash";
+
+        let (data_path, _) = generate_paths(temp_dir.path(), hash);
+
+        // Create binary data (including non-UTF8 bytes)
+        let binary_data = Bytes::from(vec![0x00, 0xFF, 0x42, 0xCA, 0xFE, 0xBA, 0xBE]);
+
+        // Write binary data
+        backend.write_file_atomic(&data_path, binary_data.clone()).await.unwrap();
+
+        // Read back and verify exact binary match
+        let read_data = backend.read_file(&data_path).await.unwrap();
+        assert_eq!(read_data, binary_data);
+
+        // Verify file size matches
+        let size = backend.file_size(&data_path).await.unwrap();
+        assert_eq!(size, binary_data.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_file_stores_json() {
+        // Verify .meta file stores JSON metadata
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::backend::DiskBackend;
+        use super::super::utils::generate_paths;
+        use super::super::types::EntryMetadata;
+        use tempfile::TempDir;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let hash = "test_meta_hash";
+
+        let (_, meta_path) = generate_paths(temp_dir.path(), hash);
+
+        // Create metadata
+        let metadata = EntryMetadata::new(
+            PathBuf::from("/cache/entries/test.data"),
+            4096,
+            1234567890,
+            9999999999,
+        );
+
+        // Serialize to JSON and write
+        let json = serde_json::to_string(&metadata).unwrap();
+        backend.write_file_atomic(&meta_path, Bytes::from(json.clone())).await.unwrap();
+
+        // Read back and verify
+        let read_json = backend.read_file(&meta_path).await.unwrap();
+        let read_str = String::from_utf8(read_json.to_vec()).unwrap();
+
+        // Parse JSON to verify it's valid
+        let parsed: EntryMetadata = serde_json::from_str(&read_str).unwrap();
+        assert_eq!(parsed.size_bytes, 4096);
+        assert_eq!(parsed.created_at, 1234567890);
+        assert_eq!(parsed.expires_at, 9999999999);
+    }
+
+    #[tokio::test]
+    async fn test_files_created_atomically() {
+        // Verify write_file_atomic creates files atomically
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::backend::DiskBackend;
+        use tempfile::TempDir;
+        use bytes::Bytes;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("entries").join("atomic.data");
+
+        // Write data atomically
+        let data = Bytes::from("atomic write test");
+        backend.write_file_atomic(&file_path, data.clone()).await.unwrap();
+
+        // File should exist after atomic write
+        assert!(file_path.exists());
+
+        // Verify no .tmp file remains (atomic write cleaned up)
+        let tmp_path = file_path.with_extension("tmp");
+        assert!(!tmp_path.exists());
+
+        // Read back to verify data integrity
+        let read_data = backend.read_file(&file_path).await.unwrap();
+        assert_eq!(read_data, data);
+    }
+
+    #[tokio::test]
+    async fn test_both_data_and_meta_files_created() {
+        // Verify both .data and .meta files can be created for same entry
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::backend::DiskBackend;
+        use super::super::utils::generate_paths;
+        use super::super::types::EntryMetadata;
+        use tempfile::TempDir;
+        use bytes::Bytes;
+        use std::path::PathBuf;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let hash = "complete_entry_hash";
+
+        let (data_path, meta_path) = generate_paths(temp_dir.path(), hash);
+
+        // Write data file
+        let data = Bytes::from("entry data content");
+        backend.write_file_atomic(&data_path, data.clone()).await.unwrap();
+
+        // Write metadata file
+        let metadata = EntryMetadata::new(
+            data_path.clone(),
+            data.len() as u64,
+            1000000,
+            2000000,
+        );
+        let meta_json = serde_json::to_string(&metadata).unwrap();
+        backend.write_file_atomic(&meta_path, Bytes::from(meta_json)).await.unwrap();
+
+        // Verify both files exist
+        assert!(data_path.exists());
+        assert!(meta_path.exists());
+
+        // Verify both are in entries/ subdirectory
+        assert_eq!(data_path.parent().unwrap().file_name().unwrap(), "entries");
+        assert_eq!(meta_path.parent().unwrap().file_name().unwrap(), "entries");
+
+        // Verify extensions
+        assert_eq!(data_path.extension().unwrap(), "data");
+        assert_eq!(meta_path.extension().unwrap(), "meta");
+    }
 }

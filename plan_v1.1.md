@@ -729,10 +729,10 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 ## 28.3: Cache Key Mapping & File Structure (Day 1)
 
 ### Hash-Based File Naming
-- [ ] Test: Uses SHA256 hash of key for filename
-- [ ] Test: Hash is deterministic (same key = same hash)
-- [ ] Test: Path format: {cache_dir}/entries/{hash}.data
-- [ ] Test: Metadata path: {cache_dir}/entries/{hash}.meta
+- [x] Test: Uses SHA256 hash of key for filename
+- [x] Test: Hash is deterministic (same key = same hash)
+- [x] Test: Path format: {cache_dir}/entries/{hash}.data
+- [x] Test: Metadata path: {cache_dir}/entries/{hash}.meta
 
 ### File Structure
 ```
@@ -743,10 +743,10 @@ Cache Trait → DiskCache → Backend (compile-time selection)
     └── <hash>.meta         # Entry metadata (JSON)
 ```
 
-- [ ] Test: Creates entries subdirectory
-- [ ] Test: Data file stores raw binary
-- [ ] Test: Metadata file stores JSON
-- [ ] Test: Both files created atomically
+- [x] Test: Creates entries subdirectory
+- [x] Test: Data file stores raw binary
+- [x] Test: Metadata file stores JSON
+- [x] Test: Both files created atomically
 
 ---
 
