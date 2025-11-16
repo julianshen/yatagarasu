@@ -948,14 +948,15 @@ will be implemented in Phase 28.11 Performance Validation.
 
 ---
 
-## 28.11: Performance Validation & UringBackend Optimization (Day 10)
+## 28.11: Performance Validation & UringBackend Advanced Optimizations (Day 10)
 
-**Goal**: Validate disk cache performance targets and implement advanced UringBackend optimizations.
+**Goal**: Validate disk cache performance targets. Optionally implement advanced UringBackend optimizations.
 
-### UringBackend Advanced Optimizations (Linux only - Optional)
+**Note**: UringBackend basic implementation is MANDATORY and already complete (Phase 28.6).
+The optimizations below are OPTIONAL enhancements that provide 20-40% additional performance
+improvements for high-throughput scenarios.
 
-**Note**: These optimizations are optional and can be implemented after basic functionality is proven.
-They provide 20-40% additional performance improvements for high-throughput scenarios.
+### Advanced Optimizations (Linux only - Optional)
 
 #### Buffer Pool Management
 - [ ] Test: Can create BufferPool with configurable sizes
