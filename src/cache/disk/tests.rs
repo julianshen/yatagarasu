@@ -471,4 +471,227 @@ mod tests {
         assert_ne!(hash1, hash3);
         assert_ne!(hash2, hash3);
     }
+
+    // Phase 28.2: Backend Trait Definition
+
+    #[test]
+    fn test_disk_backend_trait_defined() {
+        // Verify DiskBackend trait exists and has expected structure
+        // This is a compile-time test - the trait must exist for this to compile
+        use super::super::backend::DiskBackend;
+        use std::sync::Arc;
+
+        // Verify we can reference the trait
+        fn _accept_backend(_backend: Arc<dyn DiskBackend>) {
+            // This function verifies DiskBackend is object-safe
+        }
+
+        assert!(true, "DiskBackend trait is defined and object-safe");
+    }
+
+    #[test]
+    fn test_disk_backend_is_send_sync() {
+        // Verify DiskBackend trait is Send + Sync
+        use super::super::backend::DiskBackend;
+
+        fn _assert_send<T: Send>() {}
+        fn _assert_sync<T: Sync>() {}
+
+        // These will only compile if DiskBackend requires Send + Sync
+        _assert_send::<Box<dyn DiskBackend>>();
+        _assert_sync::<Box<dyn DiskBackend>>();
+
+        assert!(true, "DiskBackend is Send + Sync");
+    }
+
+    #[tokio::test]
+    async fn test_disk_backend_trait_has_required_methods() {
+        // Verify DiskBackend trait has all required async methods
+        // We'll use the TokioFsBackend to verify the trait methods exist
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::backend::DiskBackend;
+        use std::path::Path;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let backend = TokioFsBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.dat");
+
+        // Test write_file_atomic (verifies method exists and is async)
+        let data = Bytes::from("test data");
+        backend.write_file_atomic(&test_path, data.clone()).await.unwrap();
+
+        // Test file_size (verifies method exists and is async)
+        let size = backend.file_size(&test_path).await.unwrap();
+        assert_eq!(size, 9); // "test data" is 9 bytes
+
+        // Test read_file (verifies method exists and is async)
+        let read_data = backend.read_file(&test_path).await.unwrap();
+        assert_eq!(read_data, data);
+
+        // Test read_dir (verifies method exists and is async)
+        let entries = backend.read_dir(temp_dir.path()).await.unwrap();
+        assert_eq!(entries.len(), 1);
+
+        // Test create_dir_all (verifies method exists and is async)
+        let subdir = temp_dir.path().join("subdir");
+        backend.create_dir_all(&subdir).await.unwrap();
+        assert!(subdir.exists());
+
+        // Test delete_file (verifies method exists and is async)
+        backend.delete_file(&test_path).await.unwrap();
+        assert!(!test_path.exists());
+    }
+
+    #[test]
+    fn test_can_create_trait_object() {
+        // Verify we can create Arc<dyn DiskBackend> trait objects
+        use super::super::backend::DiskBackend;
+        use super::super::tokio_backend::TokioFsBackend;
+        use std::sync::Arc;
+
+        let backend = TokioFsBackend::new();
+        let trait_object: Arc<dyn DiskBackend> = Arc::new(backend);
+
+        // Verify the trait object can be cloned (Arc)
+        let _cloned = trait_object.clone();
+
+        assert!(true, "Can create Arc<dyn DiskBackend> trait objects");
+    }
+
+    // Phase 28.2: MockDiskBackend (for testing)
+
+    #[test]
+    fn test_can_create_mock_backend() {
+        // Verify MockDiskBackend can be created
+        use super::super::mock_backend::MockDiskBackend;
+
+        let backend = MockDiskBackend::new();
+
+        // Verify initial state
+        assert_eq!(backend.file_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_mock_backend_implements_disk_backend() {
+        // Verify MockDiskBackend implements DiskBackend trait
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::backend::DiskBackend;
+        use std::path::Path;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+
+        // Use backend through trait interface
+        let path = Path::new("/test/file.dat");
+        let data = Bytes::from("test data");
+
+        // Write through trait
+        backend.write_file_atomic(path, data.clone()).await.unwrap();
+
+        // Read through trait
+        let read_data = backend.read_file(path).await.unwrap();
+        assert_eq!(read_data, data);
+    }
+
+    #[tokio::test]
+    async fn test_mock_backend_stores_in_memory() {
+        // Verify MockDiskBackend stores files in HashMap (in-memory)
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::backend::DiskBackend;
+        use std::path::Path;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+
+        // Write multiple files
+        backend.write_file_atomic(Path::new("/file1.dat"), Bytes::from("data1")).await.unwrap();
+        backend.write_file_atomic(Path::new("/file2.dat"), Bytes::from("data2")).await.unwrap();
+        backend.write_file_atomic(Path::new("/file3.dat"), Bytes::from("data3")).await.unwrap();
+
+        // Verify count
+        assert_eq!(backend.file_count(), 3);
+
+        // Clear and verify
+        backend.clear();
+        assert_eq!(backend.file_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_mock_backend_can_read_what_was_written() {
+        // Verify MockDiskBackend can read what was written
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::backend::DiskBackend;
+        use std::path::Path;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+        let path = Path::new("/test/data.bin");
+        let original_data = Bytes::from("Hello, World! 🦀");
+
+        // Write data
+        backend.write_file_atomic(path, original_data.clone()).await.unwrap();
+
+        // Read back and verify
+        let read_data = backend.read_file(path).await.unwrap();
+        assert_eq!(read_data, original_data);
+
+        // Verify file size
+        let size = backend.file_size(path).await.unwrap();
+        assert_eq!(size, original_data.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn test_mock_backend_simulates_storage_full() {
+        // Verify MockDiskBackend can simulate storage full errors
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::backend::DiskBackend;
+        use super::super::error::DiskCacheError;
+        use std::path::Path;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+
+        // Enable storage full simulation
+        backend.set_storage_full(true);
+
+        // Try to write - should fail with StorageFull
+        let result = backend.write_file_atomic(
+            Path::new("/test.dat"),
+            Bytes::from("data")
+        ).await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DiskCacheError::StorageFull));
+    }
+
+    #[tokio::test]
+    async fn test_mock_backend_simulates_permission_denied() {
+        // Verify MockDiskBackend can simulate permission denied errors
+        use super::super::mock_backend::MockDiskBackend;
+        use super::super::backend::DiskBackend;
+        use super::super::error::DiskCacheError;
+        use std::path::Path;
+        use bytes::Bytes;
+
+        let backend = MockDiskBackend::new();
+        let path = Path::new("/test.dat");
+
+        // First write some data (permission OK)
+        backend.write_file_atomic(path, Bytes::from("data")).await.unwrap();
+
+        // Enable permission denied simulation
+        backend.set_permission_denied(true);
+
+        // Try to read - should fail with permission denied
+        let read_result = backend.read_file(path).await;
+        assert!(read_result.is_err());
+        assert!(matches!(read_result.unwrap_err(), DiskCacheError::Io(_)));
+
+        // Try to write - should fail with permission denied
+        let write_result = backend.write_file_atomic(path, Bytes::from("new data")).await;
+        assert!(write_result.is_err());
+        assert!(matches!(write_result.unwrap_err(), DiskCacheError::Io(_)));
+    }
 }

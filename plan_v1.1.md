@@ -708,21 +708,21 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 ## 28.2: Backend Trait Definition (Day 1)
 
 ### DiskBackend Trait
-- [ ] Test: Can define DiskBackend trait
-- [ ] Test: Trait has read_file() method
-- [ ] Test: Trait has write_file_atomic() method
-- [ ] Test: Trait has delete_file() method
-- [ ] Test: Trait has create_dir_all() method
-- [ ] Test: All methods are async
-- [ ] Test: Trait is Send + Sync
-- [ ] Test: Can create trait object Arc<dyn DiskBackend>
+- [x] Test: Can define DiskBackend trait
+- [x] Test: Trait has read_file() method
+- [x] Test: Trait has write_file_atomic() method
+- [x] Test: Trait has delete_file() method
+- [x] Test: Trait has create_dir_all() method
+- [x] Test: All methods are async
+- [x] Test: Trait is Send + Sync
+- [x] Test: Can create trait object Arc<dyn DiskBackend>
 
 ### MockDiskBackend (for testing)
-- [ ] Test: Can create MockDiskBackend
-- [ ] Test: Implements DiskBackend trait
-- [ ] Test: Stores files in HashMap (in-memory)
-- [ ] Test: Can read what was written
-- [ ] Test: Simulates errors (disk full, permission denied)
+- [x] Test: Can create MockDiskBackend
+- [x] Test: Implements DiskBackend trait
+- [x] Test: Stores files in HashMap (in-memory)
+- [x] Test: Can read what was written
+- [x] Test: Simulates errors (disk full, permission denied)
 
 ---
 

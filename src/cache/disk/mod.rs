@@ -27,7 +27,8 @@ mod utils;
 #[cfg(target_os = "linux")]
 mod uring_backend;
 
-#[cfg(not(target_os = "linux"))]
+// Make tokio_backend available for non-Linux or for tests
+#[cfg(any(not(target_os = "linux"), test))]
 mod tokio_backend;
 
 // Select backend at compile time
@@ -36,6 +37,9 @@ use uring_backend as platform_backend;
 
 #[cfg(not(target_os = "linux"))]
 use tokio_backend as platform_backend;
+
+#[cfg(test)]
+mod mock_backend;
 
 #[cfg(test)]
 mod tests;
