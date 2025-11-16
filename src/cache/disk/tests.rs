@@ -1922,4 +1922,66 @@ mod tests {
         assert_eq!(stats.max_size_bytes, max_size_bytes);
         assert_eq!(stats.current_item_count, 0);
     }
+
+    #[tokio::test]
+    async fn test_size_updated_on_set() {
+        // Verify DiskCache updates total size when entries are added
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 10 * 1024 * 1024);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600); // Expires in 1 hour
+
+        // Add first entry (1KB)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file1.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]); // 1KB
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Verify size increased
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_size_bytes, 1024);
+        assert_eq!(stats.current_item_count, 1);
+
+        // Add second entry (2KB)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "file2.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![0u8; 2048]); // 2KB
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        // Verify size increased again
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_size_bytes, 3072); // 1KB + 2KB
+        assert_eq!(stats.current_item_count, 2);
+    }
 }

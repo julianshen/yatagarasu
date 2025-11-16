@@ -53,8 +53,50 @@ impl Cache for DiskCache {
         Ok(None)
     }
 
-    async fn set(&self, _key: CacheKey, _entry: CacheEntry) -> Result<(), CacheError> {
-        // TODO: Implement
+    async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        use super::types::EntryMetadata;
+        use super::utils::{generate_paths, key_to_hash};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+
+        // Generate file paths
+        let hash = key_to_hash(&key);
+        let (data_path, meta_path) = generate_paths(&self.cache_dir, &hash);
+
+        // Write data file
+        self.backend
+            .write_file_atomic(&data_path, entry.data.clone())
+            .await?;
+
+        // Create metadata
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expires_at_unix = entry
+            .expires_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let metadata = EntryMetadata::new(
+            key.clone(),
+            data_path.clone(),
+            entry.data.len() as u64,
+            now,
+            expires_at_unix,
+        );
+
+        // Write metadata file
+        let meta_json = serde_json::to_string(&metadata)
+            .map_err(|e| CacheError::SerializationError(e.to_string()))?;
+        self.backend
+            .write_file_atomic(&meta_path, Bytes::from(meta_json))
+            .await?;
+
+        // Update index
+        self.index.insert(key, metadata);
+
         Ok(())
     }
 
