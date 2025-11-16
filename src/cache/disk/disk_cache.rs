@@ -48,9 +48,56 @@ impl DiskCache {
 
 #[async_trait]
 impl Cache for DiskCache {
-    async fn get(&self, _key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
-        // TODO: Implement
-        Ok(None)
+    async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        use super::utils::generate_paths;
+        use super::utils::key_to_hash;
+        use std::time::SystemTime;
+
+        // Check if entry exists in index
+        let metadata = match self.index.get(key) {
+            Some(meta) => meta,
+            None => return Ok(None),
+        };
+
+        // Check if expired
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        if metadata.is_expired(now) {
+            // Remove expired entry
+            let _ = self.delete(key).await;
+            return Ok(None);
+        }
+
+        // Read data file
+        let hash = key_to_hash(key);
+        let (data_path, _meta_path) = generate_paths(&self.cache_dir, &hash);
+
+        let data = match self.backend.read_file(&data_path).await {
+            Ok(d) => d,
+            Err(_) => {
+                // File doesn't exist - remove from index
+                let _ = self.delete(key).await;
+                return Ok(None);
+            }
+        };
+
+        // Reconstruct CacheEntry
+        let entry = CacheEntry {
+            data: data.clone(),
+            content_type: "application/octet-stream".to_string(), // TODO: Store in metadata
+            content_length: data.len(),
+            etag: "".to_string(), // TODO: Store in metadata
+            created_at: SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(metadata.created_at),
+            expires_at: SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(metadata.expires_at),
+            last_accessed_at: SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(metadata.last_accessed_at),
+        };
+
+        Ok(Some(entry))
     }
 
     async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
@@ -58,6 +105,20 @@ impl Cache for DiskCache {
         use super::utils::{generate_paths, key_to_hash};
         use bytes::Bytes;
         use std::time::SystemTime;
+
+        let new_entry_size = entry.data.len() as u64;
+
+        // Evict entries if necessary to make room for new entry
+        while self.index.total_size() + new_entry_size > self.max_size_bytes {
+            // Find least recently accessed entry
+            if let Some((lru_key, _lru_metadata)) = self.index.find_lru_entry() {
+                // Delete the LRU entry
+                let _ = self.delete(&lru_key).await;
+            } else {
+                // No entries to evict - cache is empty
+                break;
+            }
+        }
 
         // Generate file paths
         let hash = key_to_hash(&key);
@@ -128,8 +189,8 @@ impl Cache for DiskCache {
 
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(CacheStats {
-            hits: 0, // TODO: Track hits
-            misses: 0, // TODO: Track misses
+            hits: 0,      // TODO: Track hits
+            misses: 0,    // TODO: Track misses
             evictions: 0, // TODO: Track evictions
             current_size_bytes: self.index.total_size(),
             current_item_count: self.index.entry_count() as u64,

@@ -64,6 +64,16 @@ impl CacheIndex {
         self.total_size.store(0, Ordering::SeqCst);
     }
 
+    /// Find the least recently accessed entry (for LRU eviction)
+    #[allow(dead_code)] // Will be used in Phase 28.7 (LRU Eviction)
+    pub fn find_lru_entry(&self) -> Option<(CacheKey, EntryMetadata)> {
+        let entries = self.entries.read();
+        entries
+            .iter()
+            .min_by_key(|(_, meta)| meta.last_accessed_at)
+            .map(|(k, v)| (k.clone(), v.clone()))
+    }
+
     /// Save index to JSON file
     #[allow(dead_code)] // Will be called in Phase 28.8 (Recovery & Startup)
     pub async fn save_to_file<B: DiskBackend>(

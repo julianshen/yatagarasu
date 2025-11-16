@@ -240,7 +240,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
                 replicas: None,
             },
             auth: None,
-        cache: None,
+            cache: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -259,7 +259,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
                 replicas: None,
             },
             auth: None,
-        cache: None,
+            cache: None,
         },
     ];
 
@@ -301,7 +301,7 @@ fn test_requests_to_products_route_to_products_bucket() {
             replicas: None,
         },
         auth: None,
-    cache: None,
+        cache: None,
     }];
 
     let router = Router::new(buckets);
@@ -350,7 +350,7 @@ fn test_requests_to_private_route_to_private_bucket() {
             replicas: None,
         },
         auth: None,
-    cache: None,
+        cache: None,
     }];
 
     let router = Router::new(buckets);
@@ -400,7 +400,7 @@ fn test_longest_prefix_matching_works() {
                 replicas: None,
             },
             auth: None,
-        cache: None,
+            cache: None,
         },
         BucketConfig {
             name: "products".to_string(),
@@ -419,7 +419,7 @@ fn test_longest_prefix_matching_works() {
                 replicas: None,
             },
             auth: None,
-        cache: None,
+            cache: None,
         },
     ];
 
@@ -473,7 +473,7 @@ fn test_unmapped_paths_return_none() {
             replicas: None,
         },
         auth: None,
-    cache: None,
+        cache: None,
     }];
 
     let router = Router::new(buckets);
@@ -522,7 +522,7 @@ fn test_s3_key_is_extracted_from_path() {
             replicas: None,
         },
         auth: None,
-    cache: None,
+        cache: None,
     }];
 
     let router = Router::new(buckets);
@@ -579,7 +579,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
             replicas: None,
         },
         auth: None,
-    cache: None,
+        cache: None,
     };
 
     // Add the bucket config to the context
@@ -624,7 +624,7 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: false }),
-    cache: None,
+        cache: None,
     };
 
     // Create a request context without any JWT token
@@ -679,7 +679,7 @@ fn test_auth_middleware_validates_jwt_for_private_buckets() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
-    cache: None,
+        cache: None,
     };
 
     // Create a request context with a JWT token in Authorization header
@@ -1144,7 +1144,7 @@ fn test_missing_jwt_on_private_bucket_returns_401() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
-    cache: None,
+        cache: None,
     };
 
     // Create a request context WITHOUT any JWT token
@@ -1548,7 +1548,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
-    cache: None,
+        cache: None,
     }];
 
     let secret = "test_secret_key_123";
@@ -1686,7 +1686,7 @@ fn test_middleware_can_short_circuit_request() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
-    cache: None,
+        cache: None,
     }];
 
     // Create request WITHOUT JWT token (will fail auth)
@@ -1784,7 +1784,7 @@ fn test_short_circuit_prevents_handler_execution() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
-    cache: None,
+        cache: None,
     }];
 
     let router = Router::new(buckets);
@@ -1855,7 +1855,7 @@ fn test_middleware_can_modify_request_context() {
             replicas: None,
         },
         auth: Some(AuthConfig { enabled: true }),
-    cache: None,
+        cache: None,
     }];
 
     // Create JWT token
@@ -2017,7 +2017,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
                 replicas: None,
             },
             auth: None, // Public bucket
-        cache: None,
+            cache: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -2036,7 +2036,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
                 replicas: None,
             },
             auth: Some(AuthConfig { enabled: true }),
-        cache: None,
+            cache: None,
         },
     ];
 

@@ -2150,11 +2150,118 @@ mod tests {
         };
         cache.set(key3.clone(), entry3).await.unwrap();
 
-        // Now size exceeds max
+        // Eviction should have kept size at or under max
         let stats = cache.stats().await.unwrap();
-        assert!(stats.current_size_bytes > stats.max_size_bytes);
-        assert_eq!(stats.current_size_bytes, 3072); // 3KB
+        assert!(stats.current_size_bytes <= stats.max_size_bytes);
+        assert_eq!(stats.current_size_bytes, 2048); // 2KB (after eviction)
         assert_eq!(stats.max_size_bytes, 2048); // 2KB max
-        assert_eq!(stats.current_item_count, 3);
+        assert_eq!(stats.current_item_count, 2); // One entry evicted
+    }
+
+    // ============================================================================
+    // Phase 28.7: Eviction Logic Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_eviction_triggered_when_threshold_exceeded() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 2048; // 2KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add first entry (1KB) at time T0
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "old_file.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![0u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Sleep to ensure different timestamps (longer sleep for parallel test execution)
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Add second entry (1KB) at time T1
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "middle_file.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![1u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        // Size should be 2KB (at max)
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_size_bytes, 2048);
+        assert_eq!(stats.current_item_count, 2);
+
+        // Sleep to ensure different timestamps (longer sleep for parallel test execution)
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Add third entry (1KB) at time T2 - this should trigger eviction
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "new_file.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![2u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3,
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Eviction should have occurred
+        let stats = cache.stats().await.unwrap();
+
+        // Size should be back under or at max (evicted oldest entry)
+        assert!(stats.current_size_bytes <= max_size_bytes);
+
+        // Should have 2 entries (oldest evicted)
+        assert_eq!(stats.current_item_count, 2);
+
+        // Oldest entry (key1) should be gone
+        let result1 = cache.get(&key1).await.unwrap();
+        assert!(result1.is_none(), "Oldest entry should have been evicted");
+
+        // Newer entries should still exist
+        let result2 = cache.get(&key2).await.unwrap();
+        assert!(result2.is_some(), "Second entry should still exist");
+
+        let result3 = cache.get(&key3).await.unwrap();
+        assert!(result3.is_some(), "Newest entry should still exist");
     }
 }
