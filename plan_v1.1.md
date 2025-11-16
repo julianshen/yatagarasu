@@ -678,9 +678,9 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 
 ### Core Dependencies (All Platforms)
 - [x] Test: Add tokio for async runtime
-- [ ] Test: Add sha2 for cache key hashing
-- [ ] Test: Add serde/serde_json for metadata
-- [ ] Test: Add parking_lot for thread-safe index
+- [x] Test: Add sha2 for cache key hashing
+- [x] Test: Add serde/serde_json for metadata
+- [x] Test: Add parking_lot for thread-safe index
 
 ### Platform-Specific Dependencies
 - [ ] Test: Add tokio-uring on Linux only
