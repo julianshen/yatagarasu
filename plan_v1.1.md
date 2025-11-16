@@ -847,7 +847,7 @@ will be implemented in Phase 28.11 Performance Validation.
 
 ### Eviction Logic
 - [x] Test: Eviction triggered when threshold exceeded
-- [ ] Test: Identifies least recently accessed entry
+- [x] Test: Identifies least recently accessed entry
 - [ ] Test: Deletes both .data and .meta files
 - [ ] Test: Removes entry from index
 - [ ] Test: Updates stats (eviction count)

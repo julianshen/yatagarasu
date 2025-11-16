@@ -2196,7 +2196,7 @@ mod tests {
         cache.set(key1.clone(), entry1).await.unwrap();
 
         // Sleep to ensure different timestamps (longer sleep for parallel test execution)
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         // Add second entry (1KB) at time T1
         let key2 = CacheKey {
@@ -2223,7 +2223,7 @@ mod tests {
         assert_eq!(stats.current_item_count, 2);
 
         // Sleep to ensure different timestamps (longer sleep for parallel test execution)
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         // Add third entry (1KB) at time T2 - this should trigger eviction
         let key3 = CacheKey {
@@ -2263,5 +2263,134 @@ mod tests {
 
         let result3 = cache.get(&key3).await.unwrap();
         assert!(result3.is_some(), "Newest entry should still exist");
+    }
+
+    #[tokio::test]
+    async fn test_identifies_least_recently_accessed_entry() {
+        use super::super::disk_cache::DiskCache;
+        use crate::cache::{Cache, CacheEntry, CacheKey};
+        use bytes::Bytes;
+        use std::time::SystemTime;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let max_size_bytes = 3072; // 3KB max
+        let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), max_size_bytes);
+
+        let now = SystemTime::now();
+        let future = now + std::time::Duration::from_secs(3600);
+
+        // Add three entries, each 1KB, with clear temporal ordering
+
+        // Entry 1: Oldest (created first)
+        let key1 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "oldest.txt".to_string(),
+            etag: None,
+        };
+        let data1 = Bytes::from(vec![1u8; 1024]);
+        let entry1 = CacheEntry {
+            data: data1.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data1.len(),
+            etag: "etag1".to_string(),
+            created_at: now,
+            expires_at: future,
+            last_accessed_at: now,
+        };
+        cache.set(key1.clone(), entry1).await.unwrap();
+
+        // Sleep to ensure distinct timestamp
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Entry 2: Middle (created second)
+        let key2 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "middle.txt".to_string(),
+            etag: None,
+        };
+        let data2 = Bytes::from(vec![2u8; 1024]);
+        let now2 = SystemTime::now();
+        let entry2 = CacheEntry {
+            data: data2.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data2.len(),
+            etag: "etag2".to_string(),
+            created_at: now2,
+            expires_at: future,
+            last_accessed_at: now2,
+        };
+        cache.set(key2.clone(), entry2).await.unwrap();
+
+        // Sleep to ensure distinct timestamp
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Entry 3: Newest (created third)
+        let key3 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "newest.txt".to_string(),
+            etag: None,
+        };
+        let data3 = Bytes::from(vec![3u8; 1024]);
+        let now3 = SystemTime::now();
+        let entry3 = CacheEntry {
+            data: data3.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data3.len(),
+            etag: "etag3".to_string(),
+            created_at: now3,
+            expires_at: future,
+            last_accessed_at: now3,
+        };
+        cache.set(key3.clone(), entry3).await.unwrap();
+
+        // Verify all three entries are in cache
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, 3);
+        assert_eq!(stats.current_size_bytes, 3072); // Exactly at max
+
+        // Sleep to ensure distinct timestamp
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Add a fourth entry to trigger eviction
+        let key4 = CacheKey {
+            bucket: "test".to_string(),
+            object_key: "trigger_eviction.txt".to_string(),
+            etag: None,
+        };
+        let data4 = Bytes::from(vec![4u8; 1024]);
+        let now4 = SystemTime::now();
+        let entry4 = CacheEntry {
+            data: data4.clone(),
+            content_type: "text/plain".to_string(),
+            content_length: data4.len(),
+            etag: "etag4".to_string(),
+            created_at: now4,
+            expires_at: future,
+            last_accessed_at: now4,
+        };
+        cache.set(key4.clone(), entry4).await.unwrap();
+
+        // Verify eviction occurred
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.current_item_count, 3); // One was evicted
+        assert_eq!(stats.current_size_bytes, 3072); // Back to max size
+
+        // The OLDEST entry (key1) should have been evicted
+        let result1 = cache.get(&key1).await.unwrap();
+        assert!(
+            result1.is_none(),
+            "Oldest entry (key1) should have been evicted as LRU"
+        );
+
+        // All other entries should still exist
+        let result2 = cache.get(&key2).await.unwrap();
+        assert!(result2.is_some(), "Entry key2 should still exist");
+
+        let result3 = cache.get(&key3).await.unwrap();
+        assert!(result3.is_some(), "Entry key3 should still exist");
+
+        let result4 = cache.get(&key4).await.unwrap();
+        assert!(result4.is_some(), "Newly added entry key4 should exist");
     }
 }
