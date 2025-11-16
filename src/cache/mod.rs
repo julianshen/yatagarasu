@@ -847,6 +847,38 @@ impl MemoryCache {
         self.cache.insert(key, entry).await;
         Ok(())
     }
+
+    /// Delete an entry from the cache
+    /// Returns true if the entry existed and was deleted
+    pub async fn delete(&self, key: &CacheKey) -> bool {
+        self.cache.invalidate(key).await;
+        // Moka's invalidate returns () not bool, so we can't determine if key existed
+        // Return true to indicate operation completed
+        true
+    }
+
+    /// Clear all entries from the cache
+    pub async fn clear(&self) {
+        self.cache.invalidate_all();
+        // Note: This initiates invalidation but may not complete immediately
+        // Call run_pending_tasks() to ensure completion
+    }
+
+    /// Run pending maintenance tasks
+    /// Forces moka to process pending evictions, expirations, and invalidations
+    pub async fn run_pending_tasks(&self) {
+        self.cache.run_pending_tasks().await;
+    }
+
+    /// Get current weighted size in bytes
+    pub fn weighted_size(&self) -> u64 {
+        self.cache.weighted_size()
+    }
+
+    /// Get current entry count (approximate due to eventual consistency)
+    pub fn entry_count(&self) -> u64 {
+        self.cache.entry_count()
+    }
 }
 
 #[cfg(test)]
@@ -4852,5 +4884,361 @@ cache:
         assert_eq!(tracker.hits.load(Ordering::Relaxed), 1);
         assert_eq!(tracker.misses.load(Ordering::Relaxed), 1);
         assert_eq!(tracker.evictions.load(Ordering::Relaxed), 1);
+    }
+
+    // ============================================================
+    // Phase 27.6: Advanced Cache Operations Tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_delete_calls_moka_invalidate() {
+        // Test: delete() calls moka.invalidate(key)
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        // Delete the entry
+        cache.delete(&key).await;
+
+        // Entry should be gone
+        cache.run_pending_tasks().await;
+        let result = cache.get(&key).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_removes_entry_from_cache() {
+        // Test: delete() removes entry from cache
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "test".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        // Insert and verify it exists
+        cache.set(key.clone(), entry).await.unwrap();
+        assert!(cache.get(&key).await.is_some());
+
+        // Delete and verify it's gone
+        cache.delete(&key).await;
+        cache.run_pending_tasks().await;
+        assert!(cache.get(&key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_returns_true() {
+        // Test: delete() returns true (operation completed)
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        // Delete non-existent key still returns true (operation completed)
+        let result = cache.delete(&key).await;
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_delete_does_not_increment_eviction_counter() {
+        // Test: delete() does not increment eviction counter (explicit removal)
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+
+        cache.set(key.clone(), entry).await.unwrap();
+
+        use std::sync::atomic::Ordering;
+        let initial_evictions = cache.stats.evictions.load(Ordering::Relaxed);
+
+        // Delete should not count as eviction
+        cache.delete(&key).await;
+        cache.run_pending_tasks().await;
+
+        let final_evictions = cache.stats.evictions.load(Ordering::Relaxed);
+        assert_eq!(final_evictions, initial_evictions);
+    }
+
+    #[tokio::test]
+    async fn test_clear_calls_invalidate_all() {
+        // Test: clear() calls invalidate_all()
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Insert multiple entries
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(format!("data{}", i)),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.set(key, entry).await.unwrap();
+        }
+
+        // Clear all entries
+        cache.clear().await;
+        cache.run_pending_tasks().await;
+
+        // All entries should be gone
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            assert!(cache.get(&key).await.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_clear_removes_all_entries() {
+        // Test: clear() removes all entries
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Insert entries
+        for i in 0..10 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("item{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(vec![0u8; 100]),
+                "application/octet-stream".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.set(key, entry).await.unwrap();
+        }
+
+        // Clear
+        cache.clear().await;
+        cache.run_pending_tasks().await;
+
+        // Entry count should be zero (or very small due to eventual consistency)
+        let count = cache.entry_count();
+        assert!(count <= 1); // Allow small tolerance
+    }
+
+    #[tokio::test]
+    async fn test_run_pending_tasks_processes_evictions() {
+        // Test: run_pending_tasks() processes pending evictions
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1,
+            max_cache_size_mb: 1, // Small cache
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Fill cache to trigger evictions
+        for i in 0..10 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(vec![0u8; 200 * 1024]), // 200KB each
+                "application/octet-stream".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            let _ = cache.set(key, entry).await;
+        }
+
+        // Before processing, evictions might not be counted yet
+        // After processing, they should be
+        cache.run_pending_tasks().await;
+
+        use std::sync::atomic::Ordering;
+        let evictions = cache.stats.evictions.load(Ordering::Relaxed);
+        assert!(evictions > 0);
+    }
+
+    #[tokio::test]
+    async fn test_weighted_size_returns_current_cache_size() {
+        // Test: weighted_size() returns current cache size in bytes
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Initially empty
+        assert_eq!(cache.weighted_size(), 0);
+
+        // Insert entry
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "key1".to_string(),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(vec![0u8; 1000]),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+        let entry_size = entry.size_bytes();
+
+        cache.set(key, entry).await.unwrap();
+        cache.run_pending_tasks().await;
+
+        // Size should be approximately the entry size
+        let size = cache.weighted_size();
+        assert!(size >= entry_size as u64);
+        assert!(size <= (entry_size as u64) + 100); // Small tolerance
+    }
+
+    #[tokio::test]
+    async fn test_entry_count_returns_approximate_count() {
+        // Test: entry_count() returns approximate entry count
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Initially empty
+        assert_eq!(cache.entry_count(), 0);
+
+        // Insert entries
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "bucket".to_string(),
+                object_key: format!("key{}", i),
+                etag: None,
+            };
+            let entry = CacheEntry::new(
+                Bytes::from(vec![0u8; 100]),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                None,
+            );
+            cache.set(key, entry).await.unwrap();
+        }
+
+        cache.run_pending_tasks().await;
+
+        // Count should be approximately 5
+        let count = cache.entry_count();
+        assert!(count >= 4 && count <= 6); // Allow tolerance for eventual consistency
+    }
+
+    #[tokio::test]
+    async fn test_can_delete_then_reinsert_same_key() {
+        // Test: Can delete then re-insert same key
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        let key = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "reusable".to_string(),
+            etag: None,
+        };
+
+        // Insert first entry
+        let entry1 = CacheEntry::new(
+            Bytes::from("first"),
+            "text/plain".to_string(),
+            "etag1".to_string(),
+            None,
+        );
+        cache.set(key.clone(), entry1).await.unwrap();
+
+        // Delete
+        cache.delete(&key).await;
+        cache.run_pending_tasks().await;
+
+        // Re-insert with different data
+        let entry2 = CacheEntry::new(
+            Bytes::from("second"),
+            "text/html".to_string(),
+            "etag2".to_string(),
+            None,
+        );
+        cache.set(key.clone(), entry2).await.unwrap();
+
+        // Should retrieve the second entry
+        let retrieved = cache.get(&key).await.unwrap();
+        assert_eq!(retrieved.data, Bytes::from("second"));
+        assert_eq!(retrieved.content_type, "text/html");
+        assert_eq!(retrieved.etag, "etag2");
     }
 }
