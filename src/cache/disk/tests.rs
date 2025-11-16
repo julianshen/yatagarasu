@@ -1673,8 +1673,228 @@ mod tests {
         );
     }
 
-    // Note: Full io-uring implementation tests (buffer pools, ownership-based APIs, etc.)
-    // are deferred to future work as marked in uring_backend.rs with todo!() macros.
-    // The current UringBackend is a placeholder that will be implemented when targeting
-    // Linux production deployments requiring maximum performance.
+    // Functional tests for UringBackend (Linux only)
+    // These tests verify basic file operations work correctly
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_write_file() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test_file.txt");
+
+        let backend = UringBackend::new();
+        let data = Bytes::from("Hello, io-uring!");
+
+        // Write file
+        backend
+            .write_file_atomic(&file_path, data.clone())
+            .await
+            .unwrap();
+
+        // Read file
+        let read_data = backend.read_file(&file_path).await.unwrap();
+
+        assert_eq!(data, read_data);
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_missing_file() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("missing_file.txt");
+
+        let backend = UringBackend::new();
+
+        // Reading missing file should error
+        let result = backend.read_file(&file_path).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_write_creates_parent_dirs() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("subdir").join("test_file.txt");
+
+        let backend = UringBackend::new();
+        let data = Bytes::from("Test data");
+
+        // Write should create parent directories
+        backend
+            .write_file_atomic(&file_path, data.clone())
+            .await
+            .unwrap();
+
+        // File should exist
+        assert!(file_path.exists());
+
+        // Content should match
+        let read_data = backend.read_file(&file_path).await.unwrap();
+        assert_eq!(data, read_data);
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_delete_file() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("delete_test.txt");
+
+        let backend = UringBackend::new();
+
+        // Write file
+        backend
+            .write_file_atomic(&file_path, Bytes::from("data"))
+            .await
+            .unwrap();
+        assert!(file_path.exists());
+
+        // Delete file
+        backend.delete_file(&file_path).await.unwrap();
+
+        // File should be gone
+        assert!(!file_path.exists());
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_delete_missing_file_is_idempotent() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("missing.txt");
+
+        let backend = UringBackend::new();
+
+        // Deleting missing file should not error (idempotent)
+        backend.delete_file(&file_path).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_file_size() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("size_test.txt");
+
+        let backend = UringBackend::new();
+        let data = Bytes::from("12345");
+
+        // Write file
+        backend
+            .write_file_atomic(&file_path, data.clone())
+            .await
+            .unwrap();
+
+        // Get file size
+        let size = backend.file_size(&file_path).await.unwrap();
+        assert_eq!(size, 5);
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_create_dir_all() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let nested_dir = temp_dir.path().join("a").join("b").join("c");
+
+        let backend = UringBackend::new();
+
+        // Create nested directories
+        backend.create_dir_all(&nested_dir).await.unwrap();
+
+        // Directory should exist
+        assert!(nested_dir.exists());
+        assert!(nested_dir.is_dir());
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_dir() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let backend = UringBackend::new();
+
+        // Create some files
+        for i in 0..3 {
+            let file_path = temp_dir.path().join(format!("file{}.txt", i));
+            backend
+                .write_file_atomic(&file_path, Bytes::from("data"))
+                .await
+                .unwrap();
+        }
+
+        // Read directory
+        let entries = backend.read_dir(temp_dir.path()).await.unwrap();
+
+        // Should have 3 entries (excluding temp files)
+        let files: Vec<_> = entries
+            .iter()
+            .filter(|p| p.extension().map_or(false, |e| e == "txt"))
+            .collect();
+        assert_eq!(files.len(), 3);
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_large_file() {
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("large_file.bin");
+
+        let backend = UringBackend::new();
+
+        // Create 1MB file
+        let data = Bytes::from(vec![0xAB; 1024 * 1024]);
+
+        // Write large file
+        backend
+            .write_file_atomic(&file_path, data.clone())
+            .await
+            .unwrap();
+
+        // Read large file
+        let read_data = backend.read_file(&file_path).await.unwrap();
+
+        assert_eq!(data.len(), read_data.len());
+        assert_eq!(data, read_data);
+    }
+
+    // Note: Advanced optimizations (buffer pools, ownership-based APIs, zero-copy patterns)
+    // will be implemented in Phase 28.11 Performance Validation.
 }
