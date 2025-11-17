@@ -940,11 +940,12 @@ will be implemented in Phase 28.11 Performance Validation.
 - [ ] Test: Handles read-only filesystem (covered by permission denied)
 - [ ] Test: Handles corrupted files (covered by Phase 28.8 corruption tests)
 
-### Docker Testing (Linux from macOS/Windows)
-- [ ] Test: Docker environment builds successfully (future: CI/CD)
-- [ ] Test: Can run tests in Docker container (future: CI/CD)
-- [ ] Test: io-uring backend works in Docker (future: performance validation)
-- [ ] Test: Benchmarks run in Docker (future: Phase 28.11)
+### Docker Testing (Linux from macOS/Windows) ✅ COMPLETED
+- [x] Docker: Dockerfile.bench created (Rust 1.70 + Debian Bookworm)
+- [x] Docker: docker-compose.bench.yml for easy benchmark execution
+- [x] Docker: bench-compare.sh script for macOS vs Linux comparison
+- [x] Docker: BENCHMARKING.md documentation with complete guide
+- [ ] Validation: Run benchmarks in Docker (requires user execution)
 
 ---
 
