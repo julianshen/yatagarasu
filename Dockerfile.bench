@@ -1,0 +1,23 @@
+# Dockerfile for running benchmarks on Linux with io-uring support
+FROM rust:1.70-bookworm
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy project files
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY benches ./benches
+
+# Build benchmarks in release mode (will use UringBackend on Linux)
+RUN cargo build --release --benches
+
+# Default command: run disk cache benchmarks
+CMD ["cargo", "bench", "--bench", "disk_cache", "--", "--color", "always"]

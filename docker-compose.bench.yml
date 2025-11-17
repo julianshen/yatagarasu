@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Run benchmarks on Linux with UringBackend
+  benchmarks:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench
+    volumes:
+      # Mount target directory to preserve build artifacts
+      - ./target:/app/target
+      # Mount benchmark results
+      - ./target/criterion:/app/target/criterion
+    environment:
+      - RUST_BACKTRACE=1
+    # Use tmpfs for /tmp to ensure fast I/O for benchmarks
+    tmpfs:
+      - /tmp:mode=1777,size=2g
+    # Allocate more resources for accurate benchmarks
+    mem_limit: 4g
+    cpus: 2
+    command: cargo bench --bench disk_cache -- --color always
+
+  # Compare TokioFsBackend vs UringBackend (requires manual inspection)
+  compare:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench
+    volumes:
+      - ./target:/app/target
+      - ./target/criterion:/app/target/criterion
+    environment:
+      - RUST_BACKTRACE=1
+    tmpfs:
+      - /tmp:mode=1777,size=2g
+    mem_limit: 4g
+    cpus: 2
+    command: >
+      sh -c "echo '=== Running disk_cache benchmarks on Linux with UringBackend ===' &&
+             cargo bench --bench disk_cache -- --color always &&
+             echo '' &&
+             echo '=== Benchmark Results Summary ===' &&
+             echo 'Results saved to: target/criterion/' &&
+             echo 'View HTML reports: open target/criterion/report/index.html'"
