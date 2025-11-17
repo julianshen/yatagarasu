@@ -114,3 +114,7 @@ harness = false
 [[bench]]
 name = "s3_signature"
 harness = false
+
+[[bench]]
+name = "disk_cache"
+harness = false
