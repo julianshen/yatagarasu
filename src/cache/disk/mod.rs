@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 pub use self::disk_cache::DiskCache;
 pub use self::error::DiskCacheError;
 
-mod backend;
+// Make backend trait public for benchmarks
+pub mod backend;
 mod disk_cache;
 mod error;
 mod index;
@@ -31,11 +32,12 @@ mod utils;
 // Using io-uring crate (not tokio-uring) for Linux
 // io-uring has Send + Sync types, wrapped with spawn_blocking
 #[cfg(target_os = "linux")]
-mod uring_backend;
+pub mod uring_backend;
 
-// Make tokio_backend available for non-Linux or for tests
-#[cfg(any(not(target_os = "linux"), test))]
-mod tokio_backend;
+// Make tokio_backend always available for testing and benchmarking
+// On Linux: both backends compiled, uring_backend used in production
+// On other platforms: only tokio_backend available
+pub mod tokio_backend;
 
 // Select backend at compile time
 // Use uring_backend on Linux (production), but tokio_backend for tests (until Phase 28.11)
