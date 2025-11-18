@@ -1158,16 +1158,17 @@ Benchmark data proves that:
 - [x] Test: Is Send + Sync (required for async)
 
 ### Constructor & Connection
-- [ ] Test: Can create RedisCache::new(config) async
-- [ ] Test: Constructor creates ConnectionManager
-- [ ] Test: ConnectionManager handles connection multiplexing
-- [ ] Test: Constructor connects to Redis server
-- [ ] Test: Constructor authenticates with password if provided
-- [ ] Test: Constructor selects database number (Redis SELECT)
-- [ ] Test: Constructor validates connection (Redis PING)
-- [ ] Test: Returns CacheError::ConnectionFailed if unreachable
-- [ ] Test: Returns CacheError::AuthenticationFailed if wrong password
-- [ ] Test: Connection timeout enforced (configured timeout)
+- [x] Test: Can create RedisCache::new(config) async
+- [x] Test: Constructor creates ConnectionManager
+- [x] Test: ConnectionManager handles connection multiplexing
+- [x] Test: Constructor connects to Redis server
+- [ ] Test: Constructor authenticates with password if provided (defer to Phase 29.11)
+- [ ] Test: Constructor selects database number (Redis SELECT) (defer to Phase 29.11)
+- [ ] Test: Constructor validates connection (Redis PING) (defer to Phase 29.2 Health Check)
+- [x] Test: Returns CacheError::ConnectionFailed if unreachable
+- [x] Test: Returns CacheError::ConfigurationError if redis_url missing
+- [x] Test: Returns CacheError::ConnectionFailed if invalid URL
+- [ ] Test: Connection timeout enforced (configured timeout) (defer to Phase 29.11)
 
 ### Health Check
 - [ ] Test: Can call health_check() to verify Redis alive

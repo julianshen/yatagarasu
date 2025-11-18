@@ -154,6 +154,17 @@ fn _assert_send_sync() {
     assert_sync::<RedisCache>();
 }
 
+// Manual Debug implementation (ConnectionManager doesn't implement Debug)
+impl std::fmt::Debug for RedisCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisCache")
+            .field("config", &self.config)
+            .field("key_prefix", &self.key_prefix)
+            .field("connection", &"<ConnectionManager>")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
