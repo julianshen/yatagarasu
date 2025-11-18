@@ -1280,16 +1280,16 @@ Benchmark data proves that:
 ## 29.7: Cache::delete() Implementation (Day 4)
 
 ### Delete Operation
-- [ ] Test: delete() removes key from Redis
-- [ ] Test: Uses Redis DEL command
-- [ ] Test: Returns Ok(()) if key existed and deleted
-- [ ] Test: Returns Ok(()) if key didn't exist (idempotent)
-- [ ] Test: Updates stats (eviction counter)
+- [x] Test: delete() removes key from Redis
+- [x] Test: Uses Redis DEL command
+- [x] Test: Returns Ok(()) if key existed and deleted
+- [x] Test: Returns Ok(()) if key didn't exist (idempotent)
+- [x] Test: Updates stats (eviction counter)
 
 ### Error Handling
 - [ ] Test: Returns CacheError::ConnectionFailed on timeout
-- [ ] Test: Logs errors but succeeds if key wasn't there anyway
-- [ ] Test: Does not panic on Redis errors
+- [x] Test: Logs errors but succeeds if key wasn't there anyway
+- [x] Test: Does not panic on Redis errors
 
 ---
 

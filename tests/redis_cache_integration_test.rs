@@ -158,7 +158,10 @@ async fn test_health_check_returns_true_when_redis_alive() {
     let cache = RedisCache::new(config).await.unwrap();
     let health = cache.health_check().await;
 
-    assert!(health, "health_check() should return true when Redis is alive");
+    assert!(
+        health,
+        "health_check() should return true when Redis is alive"
+    );
 }
 
 #[tokio::test]
@@ -348,4 +351,167 @@ async fn test_get_and_set_roundtrip() {
     assert_eq!(retrieved.data, data);
     assert_eq!(retrieved.content_type, "text/plain");
     assert_eq!(retrieved.etag, "etag-456");
+}
+
+#[tokio::test]
+async fn test_delete_removes_key_from_redis() {
+    // Test: delete() removes key from Redis
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // First, set an entry
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Verify it exists
+    let result = cache.get(&key).await.unwrap();
+    assert!(result.is_some());
+
+    // Delete it
+    let delete_result = cache.delete(&key).await;
+    assert!(delete_result.is_ok());
+
+    // Verify it's gone
+    let result_after_delete = cache.get(&key).await.unwrap();
+    assert!(result_after_delete.is_none());
+}
+
+#[tokio::test]
+async fn test_delete_returns_ok_if_key_existed() {
+    // Test: Returns Ok(()) if key existed and deleted
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set and delete
+    cache.set(key.clone(), entry).await.unwrap();
+    let result = cache.delete(&key).await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_delete_returns_ok_if_key_didnt_exist() {
+    // Test: Returns Ok(()) if key didn't exist (idempotent)
+    use yatagarasu::cache::CacheKey;
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "nonexistent.txt".to_string(),
+        etag: None,
+    };
+
+    // Delete a key that doesn't exist - should still succeed (idempotent)
+    let result = cache.delete(&key).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_delete_uses_del_command() {
+    // Test: Uses Redis DEL command
+    // This is verified by the fact that the key is actually removed
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    cache.set(key.clone(), entry).await.unwrap();
+    cache.delete(&key).await.unwrap();
+
+    // If DEL worked correctly, the key should be gone
+    assert!(cache.get(&key).await.unwrap().is_none());
 }

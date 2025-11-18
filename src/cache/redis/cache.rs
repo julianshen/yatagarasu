@@ -2,8 +2,7 @@
 //
 // Provides distributed caching using Redis with production-ready error handling.
 
-use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
-use async_trait::async_trait;
+use crate::cache::{CacheEntry, CacheError, CacheKey, CacheStats};
 use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -113,14 +112,14 @@ impl RedisCache {
     /// - Cannot select database
     pub async fn new(config: RedisConfig) -> Result<Self, CacheError> {
         // Validate that redis_url is provided
-        let redis_url = config.redis_url.as_ref().ok_or_else(|| {
-            CacheError::ConfigurationError("redis_url is required".to_string())
-        })?;
+        let redis_url = config
+            .redis_url
+            .as_ref()
+            .ok_or_else(|| CacheError::ConfigurationError("redis_url is required".to_string()))?;
 
         // Create Redis client
-        let client = Client::open(redis_url.as_str()).map_err(|e| {
-            CacheError::RedisConnectionFailed(format!("Invalid Redis URL: {}", e))
-        })?;
+        let client = Client::open(redis_url.as_str())
+            .map_err(|e| CacheError::RedisConnectionFailed(format!("Invalid Redis URL: {}", e)))?;
 
         // Create connection manager (handles connection pooling and reconnection)
         let connection = ConnectionManager::new(client).await.map_err(|e| {
@@ -254,6 +253,44 @@ impl RedisCache {
 
         // Increment set counter
         self.stats.increment_sets();
+
+        Ok(())
+    }
+
+    /// Deletes an entry from the Redis cache
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key to delete
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, whether or not the key existed (idempotent)
+    ///
+    /// # Errors
+    ///
+    /// Returns `CacheError` on Redis connection errors
+    pub async fn delete(&self, key: &CacheKey) -> Result<(), CacheError> {
+        // Format Redis key
+        let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
+
+        // Validate the key
+        if let Err(e) = key::validate_key(&redis_key) {
+            return Err(CacheError::ConfigurationError(e));
+        }
+
+        // Clone connection for async operation
+        let mut conn = self.connection.clone();
+
+        // Use DEL command to remove the key
+        // DEL returns the number of keys deleted (0 or 1), but we don't care about the return value
+        // because delete is idempotent - we succeed whether the key existed or not
+        conn.del::<_, ()>(&redis_key)
+            .await
+            .map_err(|e| CacheError::RedisError(format!("Redis DEL failed: {}", e)))?;
+
+        // Increment eviction counter
+        self.stats.increment_evictions();
 
         Ok(())
     }
