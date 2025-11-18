@@ -515,3 +515,230 @@ async fn test_delete_uses_del_command() {
     // If DEL worked correctly, the key should be gone
     assert!(cache.get(&key).await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn test_clear_removes_all_keys_with_prefix() {
+    // Test: clear() removes all keys with prefix
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_clear".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create multiple entries
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    for i in 0..10 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+        cache.set(key, entry.clone()).await.unwrap();
+    }
+
+    // Clear all keys
+    let deleted = cache.clear().await.unwrap();
+    assert_eq!(deleted, 10, "Should delete all 10 keys");
+
+    // Verify all keys are gone
+    for i in 0..10 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+        assert!(cache.get(&key).await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn test_clear_uses_scan_for_safe_iteration() {
+    // Test: Uses Redis SCAN for safe iteration
+    // This is verified by the fact that clear() completes successfully
+    // SCAN is non-blocking unlike KEYS which can block Redis
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_scan".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create some entries
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    for i in 0..5 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+        cache.set(key, entry.clone()).await.unwrap();
+    }
+
+    // SCAN-based clear should succeed without blocking
+    let result = cache.clear().await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 5);
+}
+
+#[tokio::test]
+async fn test_clear_does_not_affect_other_prefixes() {
+    // Test: Does not affect other Redis keys (different prefixes)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    // Create two caches with different prefixes
+    let config1 = RedisConfig {
+        redis_url: Some(redis_url.clone()),
+        redis_key_prefix: "prefix1".to_string(),
+        ..Default::default()
+    };
+
+    let config2 = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "prefix2".to_string(),
+        ..Default::default()
+    };
+
+    let cache1 = RedisCache::new(config1).await.unwrap();
+    let cache2 = RedisCache::new(config2).await.unwrap();
+
+    // Create entries in both caches
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    cache1.set(key.clone(), entry.clone()).await.unwrap();
+    cache2.set(key.clone(), entry).await.unwrap();
+
+    // Clear cache1
+    let deleted = cache1.clear().await.unwrap();
+    assert_eq!(deleted, 1);
+
+    // Verify cache1 is empty
+    assert!(cache1.get(&key).await.unwrap().is_none());
+
+    // Verify cache2 still has data
+    assert!(cache2.get(&key).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn test_clear_handles_large_key_count() {
+    // Test: Handles large key count efficiently (>100 keys)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_large".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create 150 entries to test batch processing
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    for i in 0..150 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+        cache.set(key, entry.clone()).await.unwrap();
+    }
+
+    // Clear should handle all keys efficiently
+    let deleted = cache.clear().await.unwrap();
+    assert_eq!(deleted, 150, "Should delete all 150 keys");
+}
+
+#[tokio::test]
+async fn test_clear_returns_zero_when_no_keys() {
+    // Test: Returns 0 when cache is already empty
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_empty".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Clear empty cache
+    let deleted = cache.clear().await.unwrap();
+    assert_eq!(deleted, 0, "Should delete 0 keys when cache is empty");
+}

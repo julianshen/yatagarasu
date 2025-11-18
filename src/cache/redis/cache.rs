@@ -294,6 +294,67 @@ impl RedisCache {
 
         Ok(())
     }
+
+    /// Clears all entries from the Redis cache with the configured prefix
+    ///
+    /// Uses Redis SCAN for safe iteration (non-blocking) and deletes keys in batches.
+    /// This operation is safe for production use and won't block the Redis server.
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of keys deleted
+    ///
+    /// # Errors
+    ///
+    /// Returns `CacheError` on Redis connection errors
+    pub async fn clear(&self) -> Result<usize, CacheError> {
+        let mut conn = self.connection.clone();
+        let mut cursor: u64 = 0;
+        let mut total_deleted = 0;
+        let batch_size = 100;
+
+        // Pattern to match all keys with our prefix
+        let pattern = format!("{}:*", self.key_prefix);
+
+        loop {
+            // Use SCAN with pattern matching
+            // SCAN cursor MATCH pattern COUNT batch_size
+            let scan_result: (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(&pattern)
+                .arg("COUNT")
+                .arg(batch_size)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| CacheError::RedisError(format!("Redis SCAN failed: {}", e)))?;
+
+            cursor = scan_result.0;
+            let keys = scan_result.1;
+
+            // Delete the batch of keys if any were found
+            if !keys.is_empty() {
+                let deleted: usize = conn
+                    .del(&keys)
+                    .await
+                    .map_err(|e| CacheError::RedisError(format!("Redis DEL failed: {}", e)))?;
+
+                total_deleted += deleted;
+
+                // Update eviction counter for each deleted key
+                for _ in 0..deleted {
+                    self.stats.increment_evictions();
+                }
+            }
+
+            // SCAN returns 0 when iteration is complete
+            if cursor == 0 {
+                break;
+            }
+        }
+
+        Ok(total_deleted)
+    }
 }
 
 // Verify Send + Sync bounds (required for async trait)
