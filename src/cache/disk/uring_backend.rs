@@ -37,6 +37,65 @@ pub fn create_backend() -> UringBackend {
     UringBackend::new()
 }
 
+/// Blocking helper to write file using io-uring
+#[cfg(target_os = "linux")]
+fn write_file_blocking(path: &Path, data: &[u8]) -> Result<(), DiskCacheError> {
+    use io_uring::{opcode, types, IoUring};
+    use std::fs::File;
+    use std::os::unix::io::AsRawFd;
+
+    // Create/truncate file for writing
+    let file = File::create(path)?;
+    let fd = file.as_raw_fd();
+
+    // Create io_uring instance with queue depth of 8
+    let mut ring = IoUring::new(8)?;
+
+    // Submit write operation
+    let write_op = opcode::Write::new(types::Fd(fd), data.as_ptr(), data.len() as u32)
+        .offset(0)
+        .build()
+        .user_data(1);
+
+    unsafe {
+        ring.submission().push(&write_op).map_err(|_| {
+            DiskCacheError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to push write operation",
+            ))
+        })?;
+    }
+
+    // Submit and wait for completion
+    ring.submit_and_wait(1)?;
+
+    // Retrieve completion event
+    let cqe = ring.completion().next().ok_or_else(|| {
+        DiskCacheError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "No completion event",
+        ))
+    })?;
+
+    // Check result
+    let result = cqe.result();
+    if result < 0 {
+        return Err(DiskCacheError::Io(std::io::Error::from_raw_os_error(
+            -result,
+        )));
+    }
+
+    // Verify all bytes were written
+    if result as usize != data.len() {
+        return Err(DiskCacheError::Io(std::io::Error::new(
+            std::io::ErrorKind::WriteZero,
+            format!("Partial write: {} of {} bytes", result, data.len()),
+        )));
+    }
+
+    Ok(())
+}
+
 /// Blocking helper to read file using io-uring
 #[cfg(target_os = "linux")]
 fn read_file_blocking(path: &Path) -> Result<Bytes, DiskCacheError> {
@@ -108,9 +167,25 @@ impl DiskBackend for UringBackend {
             .map_err(|e| DiskCacheError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
     }
 
-    async fn write_file_atomic(&self, _path: &Path, _data: Bytes) -> Result<(), DiskCacheError> {
-        // TODO: Implement with io-uring
-        todo!("implement write_file_atomic with io-uring")
+    async fn write_file_atomic(&self, path: &Path, data: Bytes) -> Result<(), DiskCacheError> {
+        // Create parent directory if needed (use tokio::fs for directory operations)
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        // Write to temp file using io-uring
+        let temp_path = path.with_extension("tmp");
+        let temp_path_clone = temp_path.clone();
+        let data_vec = data.to_vec(); // Convert Bytes to Vec for moving into closure
+
+        tokio::task::spawn_blocking(move || write_file_blocking(&temp_path_clone, &data_vec))
+            .await
+            .map_err(|e| DiskCacheError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
+
+        // Atomically rename temp to final (use tokio::fs for rename)
+        tokio::fs::rename(&temp_path, path).await?;
+
+        Ok(())
     }
 
     async fn delete_file(&self, _path: &Path) -> Result<(), DiskCacheError> {

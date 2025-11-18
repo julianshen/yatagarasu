@@ -1866,6 +1866,45 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_write_creates_parent_dirs() {
+        // Test: write_file_atomic() creates parent directories
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let nested_path = temp_dir
+            .path()
+            .join("subdir1")
+            .join("subdir2")
+            .join("test_file.txt");
+
+        // Verify parent directories don't exist yet
+        assert!(!nested_path.parent().unwrap().exists());
+
+        // Write file using UringBackend (should create parent dirs)
+        let backend = UringBackend::new();
+        let data = Bytes::from("test data");
+        backend
+            .write_file_atomic(&nested_path, data.clone())
+            .await
+            .unwrap();
+
+        // Verify parent directories were created
+        assert!(
+            nested_path.parent().unwrap().exists(),
+            "Parent directories should be created"
+        );
+
+        // Verify file was written correctly
+        assert!(nested_path.exists(), "File should exist");
+        let read_data = tokio::fs::read(&nested_path).await.unwrap();
+        assert_eq!(read_data, data.as_ref(), "File content should match");
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
