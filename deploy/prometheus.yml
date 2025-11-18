@@ -1,0 +1,49 @@
+# Prometheus configuration for Yatagarasu S3 Proxy
+# Scrapes metrics from the Yatagarasu proxy and Redis exporter
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'yatagarasu-dev'
+    environment: 'local'
+
+# Alertmanager configuration (optional, for production)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Rule files for alerting (optional)
+# rule_files:
+#   - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Scrape Yatagarasu S3 Proxy metrics
+  # The proxy should expose metrics at :8080/metrics (or configured port)
+  - job_name: 'yatagarasu'
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          service: 'yatagarasu-proxy'
+          component: 'cache'
+    # Scrape interval for cache metrics (more frequent)
+    scrape_interval: 10s
+    metrics_path: '/metrics'
+
+  # Scrape Redis metrics (if redis_exporter is added)
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+  #       labels:
+  #         service: 'redis'
+  #         component: 'cache-backend'

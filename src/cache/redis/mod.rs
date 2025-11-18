@@ -6,10 +6,12 @@
 pub mod cache;
 pub mod config;
 pub mod key;
+pub mod metrics;
 pub mod serialization;
 
 pub use cache::RedisCache;
 pub use config::RedisConfig;
+pub use metrics::RedisCacheMetrics;
 
 #[cfg(test)]
 mod tests {

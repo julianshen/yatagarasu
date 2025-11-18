@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use super::config::RedisConfig;
 use super::key;
+use super::metrics::RedisCacheMetrics;
 use super::serialization;
 
 /// Statistics tracker for Redis cache operations
@@ -165,6 +166,9 @@ impl RedisCache {
     ///
     /// Returns `CacheError` on Redis connection errors or deserialization failures
     pub async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        // Start timing the operation
+        let _timer = RedisCacheMetrics::global().start_operation_timer("get");
+
         // Format Redis key
         let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
 
@@ -180,12 +184,21 @@ impl RedisCache {
         let bytes: Option<Vec<u8>> = conn
             .get(&redis_key)
             .await
-            .map_err(|e| CacheError::RedisError(format!("Redis GET failed: {}", e)))?;
+            .map_err(|e| {
+                RedisCacheMetrics::global().errors.inc();
+                CacheError::RedisError(format!("Redis GET failed: {}", e))
+            })?;
 
         match bytes {
             Some(data) => {
                 // Deserialize the entry
-                match serialization::deserialize_entry(&data) {
+                let deserialize_result = {
+                    let _timer =
+                        RedisCacheMetrics::global().start_serialization_timer("deserialize");
+                    serialization::deserialize_entry(&data)
+                };
+
+                match deserialize_result {
                     Ok(entry) => {
                         // Double-check entry hasn't expired locally (clock skew protection)
                         if entry.expires_at <= std::time::SystemTime::now() {
@@ -195,6 +208,7 @@ impl RedisCache {
                                 redis_key
                             );
                             self.stats.increment_misses();
+                            RedisCacheMetrics::global().misses.inc();
 
                             // Asynchronously delete the expired entry
                             let mut delete_conn = self.connection.clone();
@@ -208,11 +222,13 @@ impl RedisCache {
 
                         // Increment hit counter
                         self.stats.increment_hits();
+                        RedisCacheMetrics::global().hits.inc();
                         Ok(Some(entry))
                     }
                     Err(e) => {
                         // Increment error counter on deserialization failure
                         self.stats.increment_errors();
+                        RedisCacheMetrics::global().errors.inc();
                         // Treat deserialization errors as cache miss (return None)
                         // Log the error but don't fail the operation
                         tracing::warn!(
@@ -221,6 +237,7 @@ impl RedisCache {
                             e
                         );
                         self.stats.increment_misses();
+                        RedisCacheMetrics::global().misses.inc();
                         Ok(None)
                     }
                 }
@@ -228,6 +245,7 @@ impl RedisCache {
             None => {
                 // Key not found - increment miss counter
                 self.stats.increment_misses();
+                RedisCacheMetrics::global().misses.inc();
                 Ok(None)
             }
         }
@@ -248,6 +266,9 @@ impl RedisCache {
     ///
     /// Returns `CacheError` on Redis connection errors or serialization failures
     pub async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        // Start timing the operation
+        let _timer = RedisCacheMetrics::global().start_operation_timer("set");
+
         // Format Redis key
         let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
 
@@ -256,8 +277,11 @@ impl RedisCache {
             return Err(CacheError::ConfigurationError(e));
         }
 
-        // Serialize the entry
-        let bytes = serialization::serialize_entry(&entry)?;
+        // Serialize the entry with timing
+        let bytes = {
+            let _timer = RedisCacheMetrics::global().start_serialization_timer("serialize");
+            serialization::serialize_entry(&entry)?
+        };
 
         // Clone connection for async operation
         let mut conn = self.connection.clone();
@@ -280,10 +304,14 @@ impl RedisCache {
         // Use SETEX to set with TTL
         conn.set_ex::<_, _, ()>(&redis_key, bytes, ttl_secs)
             .await
-            .map_err(|e| CacheError::RedisError(format!("Redis SETEX failed: {}", e)))?;
+            .map_err(|e| {
+                RedisCacheMetrics::global().errors.inc();
+                CacheError::RedisError(format!("Redis SETEX failed: {}", e))
+            })?;
 
         // Increment set counter
         self.stats.increment_sets();
+        RedisCacheMetrics::global().sets.inc();
 
         Ok(())
     }
@@ -302,6 +330,9 @@ impl RedisCache {
     ///
     /// Returns `CacheError` on Redis connection errors
     pub async fn delete(&self, key: &CacheKey) -> Result<(), CacheError> {
+        // Start timing the operation
+        let _timer = RedisCacheMetrics::global().start_operation_timer("delete");
+
         // Format Redis key
         let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
 
@@ -318,10 +349,14 @@ impl RedisCache {
         // because delete is idempotent - we succeed whether the key existed or not
         conn.del::<_, ()>(&redis_key)
             .await
-            .map_err(|e| CacheError::RedisError(format!("Redis DEL failed: {}", e)))?;
+            .map_err(|e| {
+                RedisCacheMetrics::global().errors.inc();
+                CacheError::RedisError(format!("Redis DEL failed: {}", e))
+            })?;
 
         // Increment eviction counter
         self.stats.increment_evictions();
+        RedisCacheMetrics::global().evictions.inc();
 
         Ok(())
     }
@@ -339,6 +374,9 @@ impl RedisCache {
     ///
     /// Returns `CacheError` on Redis connection errors
     pub async fn clear(&self) -> Result<usize, CacheError> {
+        // Start timing the operation
+        let _timer = RedisCacheMetrics::global().start_operation_timer("clear");
+
         let mut conn = self.connection.clone();
         let mut cursor: u64 = 0;
         let mut total_deleted = 0;
@@ -358,23 +396,27 @@ impl RedisCache {
                 .arg(batch_size)
                 .query_async(&mut conn)
                 .await
-                .map_err(|e| CacheError::RedisError(format!("Redis SCAN failed: {}", e)))?;
+                .map_err(|e| {
+                    RedisCacheMetrics::global().errors.inc();
+                    CacheError::RedisError(format!("Redis SCAN failed: {}", e))
+                })?;
 
             cursor = scan_result.0;
             let keys = scan_result.1;
 
             // Delete the batch of keys if any were found
             if !keys.is_empty() {
-                let deleted: usize = conn
-                    .del(&keys)
-                    .await
-                    .map_err(|e| CacheError::RedisError(format!("Redis DEL failed: {}", e)))?;
+                let deleted: usize = conn.del(&keys).await.map_err(|e| {
+                    RedisCacheMetrics::global().errors.inc();
+                    CacheError::RedisError(format!("Redis DEL failed: {}", e))
+                })?;
 
                 total_deleted += deleted;
 
                 // Update eviction counter for each deleted key
                 for _ in 0..deleted {
                     self.stats.increment_evictions();
+                    RedisCacheMetrics::global().evictions.inc();
                 }
             }
 
