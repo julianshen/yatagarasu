@@ -33,10 +33,7 @@ impl DiskCache {
 
     pub fn with_config(cache_dir: PathBuf, max_size_bytes: u64) -> Self {
         // Use platform-specific backend
-        #[cfg(target_os = "linux")]
-        let backend: Arc<dyn DiskBackend> = Arc::new(super::uring_backend::UringBackend::new());
-
-        #[cfg(not(target_os = "linux"))]
+        // TEMP: Using TokioFsBackend on all platforms until uring_backend Send issues are resolved
         let backend: Arc<dyn DiskBackend> = Arc::new(super::tokio_backend::TokioFsBackend::new());
 
         Self {

@@ -28,19 +28,17 @@ mod types;
 mod utils;
 
 // Platform-specific backends
-#[cfg(target_os = "linux")]
-mod uring_backend;
+// TEMP: Disabled uring_backend due to compilation issues (async_trait Send bounds)
+// Will be re-enabled after fixing Send trait issues in Phase 28.11
+//#[cfg(target_os = "linux")]
+//mod uring_backend;
 
-// Make tokio_backend available for non-Linux or for tests
-#[cfg(any(not(target_os = "linux"), test))]
+// Make tokio_backend available on all platforms
+// TEMP: Always enabled (including Linux) until uring_backend is fixed
 mod tokio_backend;
 
 // Select backend at compile time
-#[cfg(target_os = "linux")]
-#[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
-use uring_backend as platform_backend;
-
-#[cfg(not(target_os = "linux"))]
+// TEMP: Using tokio_backend on all platforms until uring_backend Send issues are resolved
 #[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
 use tokio_backend as platform_backend;
 
