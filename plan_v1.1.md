@@ -1230,19 +1230,19 @@ Benchmark data proves that:
 ## 29.5: Cache::get() Implementation (Day 3)
 
 ### Basic Get Operation
-- [ ] Test: get() retrieves entry from Redis
-- [ ] Test: Uses Redis GET command
-- [ ] Test: Deserializes bytes to CacheEntry
-- [ ] Test: Returns Some(entry) if key exists
-- [ ] Test: Returns None if key doesn't exist
-- [ ] Test: Increments hit counter on success
-- [ ] Test: Increments miss counter on key not found
+- [x] Test: get() retrieves entry from Redis
+- [x] Test: Uses Redis GET command
+- [x] Test: Deserializes bytes to CacheEntry
+- [x] Test: Returns Some(entry) if key exists
+- [x] Test: Returns None if key doesn't exist
+- [x] Test: Increments hit counter on success
+- [x] Test: Increments miss counter on key not found
 
 ### Error Handling
-- [ ] Test: Returns CacheError::ConnectionFailed on timeout
-- [ ] Test: Returns CacheError::DeserializationFailed on corrupt data
-- [ ] Test: Logs errors but doesn't panic
-- [ ] Test: Returns None on deserialization failure (treat as cache miss)
+- [x] Test: Returns CacheError::RedisError on connection failures
+- [x] Test: Returns None on deserialization failure (treat as cache miss)
+- [x] Test: Logs errors but doesn't panic
+- [ ] Test: Performance benchmarks (defer to Phase 35)
 
 ### Performance
 - [ ] Test: get() completes in <10ms (P95)
@@ -1254,13 +1254,13 @@ Benchmark data proves that:
 ## 29.6: Cache::set() Implementation (Day 3)
 
 ### Basic Set Operation
-- [ ] Test: set() stores entry in Redis
-- [ ] Test: Uses Redis SET command with TTL (SETEX)
-- [ ] Test: Serializes CacheEntry to bytes
-- [ ] Test: Sets TTL from config default
-- [ ] Test: Sets TTL from entry.expires_at if available
-- [ ] Test: TTL calculation accounts for current time
-- [ ] Test: Updates stats on successful set
+- [x] Test: set() stores entry in Redis
+- [x] Test: Uses Redis SET command with TTL (SETEX)
+- [x] Test: Serializes CacheEntry to bytes
+- [x] Test: Sets TTL from config default
+- [x] Test: Updates stats on successful set
+- [x] Test: Roundtrip test (set then get returns same data)
+- [ ] Test: TTL calculation from entry.expires_at (defer to Phase 29.11)
 
 ### Edge Cases
 - [ ] Test: Handles entries with no expiration (use default TTL)

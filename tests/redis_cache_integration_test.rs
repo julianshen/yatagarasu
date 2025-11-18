@@ -182,3 +182,170 @@ async fn test_health_check_uses_ping_command() {
     // If PING works, health check should succeed
     assert!(cache.health_check().await);
 }
+
+#[tokio::test]
+async fn test_get_retrieves_entry_from_redis() {
+    // Test: get() retrieves entry from Redis
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create a test entry
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set the entry
+    cache.set(key.clone(), entry.clone()).await.unwrap();
+
+    // Get the entry back
+    let result = cache.get(&key).await.unwrap();
+    assert!(result.is_some());
+
+    let retrieved = result.unwrap();
+    assert_eq!(retrieved.data, entry.data);
+    assert_eq!(retrieved.content_type, entry.content_type);
+    assert_eq!(retrieved.etag, entry.etag);
+}
+
+#[tokio::test]
+async fn test_get_returns_none_if_key_doesnt_exist() {
+    // Test: Returns None if key doesn't exist
+    use yatagarasu::cache::CacheKey;
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "nonexistent.txt".to_string(),
+        etag: None,
+    };
+
+    let result = cache.get(&key).await.unwrap();
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn test_set_stores_entry_in_redis() {
+    // Test: set() stores entry in Redis with TTL
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set should succeed
+    let result = cache.set(key.clone(), entry).await;
+    assert!(result.is_ok());
+
+    // Verify it was stored by getting it back
+    let retrieved = cache.get(&key).await.unwrap();
+    assert!(retrieved.is_some());
+}
+
+#[tokio::test]
+async fn test_get_and_set_roundtrip() {
+    // Test: Full roundtrip - set then get returns same data
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let data = Bytes::from("Hello, Redis!");
+    let entry = CacheEntry::new(
+        data.clone(),
+        "text/plain".to_string(),
+        "etag-456".to_string(),
+        Some(Duration::from_secs(600)),
+    );
+
+    let key = CacheKey {
+        bucket: "images".to_string(),
+        object_key: "photo.jpg".to_string(),
+        etag: None,
+    };
+
+    // Set
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Get
+    let retrieved = cache.get(&key).await.unwrap().unwrap();
+
+    assert_eq!(retrieved.data, data);
+    assert_eq!(retrieved.content_type, "text/plain");
+    assert_eq!(retrieved.etag, "etag-456");
+}

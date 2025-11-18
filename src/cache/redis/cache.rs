@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::config::RedisConfig;
+use super::key;
+use super::serialization;
 
 /// Statistics tracker for Redis cache operations
 #[derive(Debug)]
@@ -148,6 +150,112 @@ impl RedisCache {
             Ok(response) => response == "PONG",
             Err(_) => false,
         }
+    }
+
+    /// Retrieves an entry from the Redis cache
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key to retrieve
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(CacheEntry)` if the key exists, `None` if not found
+    ///
+    /// # Errors
+    ///
+    /// Returns `CacheError` on Redis connection errors or deserialization failures
+    pub async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        // Format Redis key
+        let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
+
+        // Validate the key
+        if let Err(e) = key::validate_key(&redis_key) {
+            return Err(CacheError::ConfigurationError(e));
+        }
+
+        // Clone connection for async operation
+        let mut conn = self.connection.clone();
+
+        // Get bytes from Redis using GET command
+        let bytes: Option<Vec<u8>> = conn
+            .get(&redis_key)
+            .await
+            .map_err(|e| CacheError::RedisError(format!("Redis GET failed: {}", e)))?;
+
+        match bytes {
+            Some(data) => {
+                // Deserialize the entry
+                match serialization::deserialize_entry(&data) {
+                    Ok(entry) => {
+                        // Increment hit counter
+                        self.stats.increment_hits();
+                        Ok(Some(entry))
+                    }
+                    Err(e) => {
+                        // Increment error counter on deserialization failure
+                        self.stats.increment_errors();
+                        // Treat deserialization errors as cache miss (return None)
+                        // Log the error but don't fail the operation
+                        tracing::warn!(
+                            "Failed to deserialize cache entry for key '{}': {}",
+                            redis_key,
+                            e
+                        );
+                        self.stats.increment_misses();
+                        Ok(None)
+                    }
+                }
+            }
+            None => {
+                // Key not found - increment miss counter
+                self.stats.increment_misses();
+                Ok(None)
+            }
+        }
+    }
+
+    /// Stores an entry in the Redis cache
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key
+    /// * `entry` - The cache entry to store
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns `CacheError` on Redis connection errors or serialization failures
+    pub async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        // Format Redis key
+        let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
+
+        // Validate the key
+        if let Err(e) = key::validate_key(&redis_key) {
+            return Err(CacheError::ConfigurationError(e));
+        }
+
+        // Serialize the entry
+        let bytes = serialization::serialize_entry(&entry)?;
+
+        // Clone connection for async operation
+        let mut conn = self.connection.clone();
+
+        // Calculate TTL in seconds
+        let ttl_secs = self.config.redis_ttl_seconds;
+
+        // Use SETEX to set with TTL
+        conn.set_ex::<_, _, ()>(&redis_key, bytes, ttl_secs)
+            .await
+            .map_err(|e| CacheError::RedisError(format!("Redis SETEX failed: {}", e)))?;
+
+        // Increment set counter
+        self.stats.increment_sets();
+
+        Ok(())
     }
 }
 
