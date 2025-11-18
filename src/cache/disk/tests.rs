@@ -1809,6 +1809,63 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_large_file() {
+        // Test: Handles large files (>1MB) correctly
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("large_file.bin");
+
+        // Create 2MB file with repeating pattern for verification
+        let pattern: Vec<u8> = vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11];
+        let mut large_data = Vec::new();
+        let target_size = 2 * 1024 * 1024; // 2MB
+
+        while large_data.len() < target_size {
+            large_data.extend_from_slice(&pattern);
+        }
+        large_data.truncate(target_size); // Exactly 2MB
+
+        // Write large file using tokio::fs
+        tokio::fs::write(&file_path, &large_data).await.unwrap();
+
+        // Read file using UringBackend
+        let backend = UringBackend::new();
+        let read_data = backend.read_file(&file_path).await.unwrap();
+
+        // Verify size matches
+        assert_eq!(
+            read_data.len(),
+            target_size,
+            "Large file size should match (2MB)"
+        );
+
+        // Verify exact content match
+        assert_eq!(
+            read_data,
+            Bytes::from(large_data.clone()),
+            "Large file content should match exactly"
+        );
+
+        // Verify pattern at different positions to ensure no corruption
+        assert_eq!(&read_data[0..8], &pattern[..], "Pattern at start");
+        assert_eq!(
+            &read_data[1024 * 1024..1024 * 1024 + 8],
+            &pattern[..],
+            "Pattern at 1MB offset"
+        );
+        assert_eq!(
+            &read_data[target_size - 8..],
+            &pattern[..],
+            "Pattern at end"
+        );
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;

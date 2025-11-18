@@ -822,7 +822,7 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Test: read_file() successfully reads existing file
 - [x] Test: read_file() returns error for missing file
 - [x] Test: read_file() returns Bytes with correct content
-- [ ] Test: Handles large files (>1MB) correctly
+- [x] Test: Handles large files (>1MB) correctly
 - [x] Implementation: Wrap io_uring::opcode::Read in spawn_blocking
 
 ### Write Operations (io-uring + spawn_blocking)
