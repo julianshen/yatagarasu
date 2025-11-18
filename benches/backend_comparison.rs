@@ -1,7 +1,7 @@
 //! Backend performance comparison benchmarks
 //!
-//! Compares tokio::fs (portable) vs tokio-uring (Linux only)
-//! to validate performance improvements from io-uring.
+//! Compares TokioFsBackend (portable) vs UringBackend (Linux only)
+//! to validate performance improvements from io-uring with spawn_blocking.
 //!
 //! Expected results on Linux:
 //! - Small files (4KB): 2-3x throughput improvement
@@ -11,23 +11,29 @@ use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::path::PathBuf;
 use tempfile::TempDir;
+use yatagarasu::cache::disk::backend::DiskBackend;
+use yatagarasu::cache::disk::tokio_backend::TokioFsBackend;
 
-/// Benchmark tokio::fs for small file (4KB) reads
+#[cfg(target_os = "linux")]
+use yatagarasu::cache::disk::uring_backend::UringBackend;
+
+/// Benchmark TokioFsBackend for small file (4KB) reads
 fn bench_tokio_small_file_read(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
+    let backend = TokioFsBackend::new();
 
     // Pre-populate test files
-    let test_files: Vec<PathBuf> = (0..100)
-        .map(|i| {
+    let test_files: Vec<PathBuf> = rt.block_on(async {
+        let mut files = Vec::new();
+        for i in 0..100 {
             let path = temp_dir.path().join(format!("small-{}.bin", i));
-            let data = vec![0u8; 4 * 1024];
-            rt.block_on(async {
-                tokio::fs::write(&path, &data).await.unwrap();
-            });
-            path
-        })
-        .collect();
+            let data = Bytes::from(vec![0u8; 4 * 1024]);
+            backend.write_file_atomic(&path, data).await.unwrap();
+            files.push(path);
+        }
+        files
+    });
 
     let mut group = c.benchmark_group("backend_tokio_small_file");
     group.bench_function("4kb_read", |b| {
@@ -37,7 +43,7 @@ fn bench_tokio_small_file_read(c: &mut Criterion) {
             counter += 1;
 
             rt.block_on(async {
-                let result = tokio::fs::read(black_box(path)).await.unwrap();
+                let result = backend.read_file(black_box(path)).await.unwrap();
                 assert_eq!(result.len(), 4 * 1024);
             });
         });
@@ -45,22 +51,50 @@ fn bench_tokio_small_file_read(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark tokio::fs for large file (10MB) reads
+/// Benchmark TokioFsBackend for small file (4KB) writes
+fn bench_tokio_small_file_write(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let backend = TokioFsBackend::new();
+
+    // Pre-generate data
+    let data = Bytes::from(vec![0u8; 4 * 1024]);
+
+    let mut group = c.benchmark_group("backend_tokio_small_file");
+    group.bench_function("4kb_write", |b| {
+        let mut counter = 0;
+        b.iter(|| {
+            let path = temp_dir.path().join(format!("write-{}.bin", counter));
+            counter += 1;
+
+            rt.block_on(async {
+                backend
+                    .write_file_atomic(black_box(&path), data.clone())
+                    .await
+                    .unwrap();
+            });
+        });
+    });
+    group.finish();
+}
+
+/// Benchmark TokioFsBackend for large file (10MB) reads
 fn bench_tokio_large_file_read(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
+    let backend = TokioFsBackend::new();
 
     // Pre-populate test files
-    let test_files: Vec<PathBuf> = (0..10)
-        .map(|i| {
+    let test_files: Vec<PathBuf> = rt.block_on(async {
+        let mut files = Vec::new();
+        for i in 0..10 {
             let path = temp_dir.path().join(format!("large-{}.bin", i));
-            let data = vec![0u8; 10 * 1024 * 1024];
-            rt.block_on(async {
-                tokio::fs::write(&path, &data).await.unwrap();
-            });
-            path
-        })
-        .collect();
+            let data = Bytes::from(vec![0u8; 10 * 1024 * 1024]);
+            backend.write_file_atomic(&path, data).await.unwrap();
+            files.push(path);
+        }
+        files
+    });
 
     let mut group = c.benchmark_group("backend_tokio_large_file");
     group.sample_size(10); // Fewer samples for large files
@@ -71,7 +105,7 @@ fn bench_tokio_large_file_read(c: &mut Criterion) {
             counter += 1;
 
             rt.block_on(async {
-                let result = tokio::fs::read(black_box(path)).await.unwrap();
+                let result = backend.read_file(black_box(path)).await.unwrap();
                 assert_eq!(result.len(), 10 * 1024 * 1024);
             });
         });
@@ -79,22 +113,20 @@ fn bench_tokio_large_file_read(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark tokio-uring for small file (4KB) reads (Linux only)
+/// Benchmark UringBackend for small file (4KB) reads (Linux only)
 #[cfg(target_os = "linux")]
 fn bench_uring_small_file_read(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
+    let backend = UringBackend::new();
 
-    // Pre-populate test files using tokio-uring
-    let test_files: Vec<PathBuf> = tokio_uring::start(async {
+    // Pre-populate test files
+    let test_files: Vec<PathBuf> = rt.block_on(async {
         let mut files = Vec::new();
         for i in 0..100 {
             let path = temp_dir.path().join(format!("small-uring-{}.bin", i));
-            let data = vec![0u8; 4 * 1024];
-
-            let file = tokio_uring::fs::File::create(&path).await.unwrap();
-            let (res, _) = file.write_at(data, 0).await;
-            res.unwrap();
-
+            let data = Bytes::from(vec![0u8; 4 * 1024]);
+            backend.write_file_atomic(&path, data).await.unwrap();
             files.push(path);
         }
         files
@@ -107,38 +139,57 @@ fn bench_uring_small_file_read(c: &mut Criterion) {
             let path = &test_files[counter % 100];
             counter += 1;
 
-            tokio_uring::start(async {
-                let file = tokio_uring::fs::File::open(black_box(path)).await.unwrap();
-
-                // Read the file (we know it's 4KB)
-                let buf = vec![0u8; 4 * 1024];
-                let (res, buf) = file.read_at(buf, 0).await;
-                res.unwrap();
-                let data = Bytes::from(buf);
-
-                assert_eq!(data.len(), 4 * 1024);
+            rt.block_on(async {
+                let result = backend.read_file(black_box(path)).await.unwrap();
+                assert_eq!(result.len(), 4 * 1024);
             });
         });
     });
     group.finish();
 }
 
-/// Benchmark tokio-uring for large file (10MB) reads (Linux only)
+/// Benchmark UringBackend for small file (4KB) writes (Linux only)
+#[cfg(target_os = "linux")]
+fn bench_uring_small_file_write(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let backend = UringBackend::new();
+
+    // Pre-generate data
+    let data = Bytes::from(vec![0u8; 4 * 1024]);
+
+    let mut group = c.benchmark_group("backend_uring_small_file");
+    group.bench_function("4kb_write", |b| {
+        let mut counter = 0;
+        b.iter(|| {
+            let path = temp_dir.path().join(format!("write-uring-{}.bin", counter));
+            counter += 1;
+
+            rt.block_on(async {
+                backend
+                    .write_file_atomic(black_box(&path), data.clone())
+                    .await
+                    .unwrap();
+            });
+        });
+    });
+    group.finish();
+}
+
+/// Benchmark UringBackend for large file (10MB) reads (Linux only)
 #[cfg(target_os = "linux")]
 fn bench_uring_large_file_read(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
+    let backend = UringBackend::new();
 
-    // Pre-populate test files using tokio-uring
-    let test_files: Vec<PathBuf> = tokio_uring::start(async {
+    // Pre-populate test files
+    let test_files: Vec<PathBuf> = rt.block_on(async {
         let mut files = Vec::new();
         for i in 0..10 {
             let path = temp_dir.path().join(format!("large-uring-{}.bin", i));
-            let data = vec![0u8; 10 * 1024 * 1024];
-
-            let file = tokio_uring::fs::File::create(&path).await.unwrap();
-            let (res, _) = file.write_at(data, 0).await;
-            res.unwrap();
-
+            let data = Bytes::from(vec![0u8; 10 * 1024 * 1024]);
+            backend.write_file_atomic(&path, data).await.unwrap();
             files.push(path);
         }
         files
@@ -152,16 +203,9 @@ fn bench_uring_large_file_read(c: &mut Criterion) {
             let path = &test_files[counter % 10];
             counter += 1;
 
-            tokio_uring::start(async {
-                let file = tokio_uring::fs::File::open(black_box(path)).await.unwrap();
-
-                // Read the file (we know it's 10MB)
-                let buf = vec![0u8; 10 * 1024 * 1024];
-                let (res, buf) = file.read_at(buf, 0).await;
-                res.unwrap();
-                let data = Bytes::from(buf);
-
-                assert_eq!(data.len(), 10 * 1024 * 1024);
+            rt.block_on(async {
+                let result = backend.read_file(black_box(path)).await.unwrap();
+                assert_eq!(result.len(), 10 * 1024 * 1024);
             });
         });
     });
@@ -173,8 +217,10 @@ fn bench_uring_large_file_read(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_tokio_small_file_read,
+    bench_tokio_small_file_write,
     bench_tokio_large_file_read,
     bench_uring_small_file_read,
+    bench_uring_small_file_write,
     bench_uring_large_file_read,
 );
 
@@ -182,6 +228,7 @@ criterion_group!(
 criterion_group!(
     benches,
     bench_tokio_small_file_read,
+    bench_tokio_small_file_write,
     bench_tokio_large_file_read,
 );
 
