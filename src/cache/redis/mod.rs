@@ -9,6 +9,9 @@ use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client, RedisError};
 use std::sync::Arc;
 
+pub mod config;
+pub use config::RedisConfig;
+
 #[cfg(test)]
 mod tests {
     use super::*;

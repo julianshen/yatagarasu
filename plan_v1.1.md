@@ -1129,15 +1129,15 @@ Benchmark data proves that:
 - [x] Test: Can import redis::RedisError
 
 ### RedisConfig Structure
-- [ ] Test: Can create RedisConfig from YAML
-- [ ] Test: Config has redis_url field (e.g., "redis://localhost:6379")
-- [ ] Test: Config has optional password field
-- [ ] Test: Config has database number (default: 0)
-- [ ] Test: Config has connection pool settings (min/max)
-- [ ] Test: Config has key_prefix (default: "yatagarasu")
-- [ ] Test: Config has default_ttl_seconds (default: 3600)
-- [ ] Test: Config has connection_timeout_ms (default: 5000)
-- [ ] Test: Config has operation_timeout_ms (default: 2000)
+- [x] Test: Can create RedisConfig from YAML
+- [x] Test: Config has redis_url field (e.g., "redis://localhost:6379")
+- [x] Test: Config has optional password field
+- [x] Test: Config has database number (default: 0)
+- [x] Test: Config has connection pool settings (min/max)
+- [x] Test: Config has key_prefix (default: "yatagarasu")
+- [x] Test: Config has default_ttl_seconds (default: 3600)
+- [x] Test: Config has connection_timeout_ms (default: 5000)
+- [x] Test: Config has operation_timeout_ms (default: 2000)
 
 ### Environment Variable Substitution
 - [ ] Test: Can substitute ${REDIS_URL} with env var
