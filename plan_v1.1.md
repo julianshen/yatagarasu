@@ -1714,6 +1714,88 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 
 ---
 
+## 30.10: End-to-End Tests for All Cache Implementations
+
+### Memory Cache End-to-End Tests
+- [ ] E2E: Full proxy request → memory cache hit → response
+- [ ] E2E: Full proxy request → memory cache miss → S3 → cache population → response
+- [ ] E2E: Verify cache-control headers respected
+- [ ] E2E: Verify ETag validation on cache hit
+- [ ] E2E: Verify If-None-Match returns 304 on match
+- [ ] E2E: Range requests bypass memory cache entirely
+- [ ] E2E: Large files (>max_item_size) bypass memory cache
+- [ ] E2E: Small files (<max_item_size) cached in memory
+- [ ] E2E: LRU eviction works under memory pressure
+- [ ] E2E: Concurrent requests for same object coalesce correctly
+- [ ] E2E: Memory cache metrics tracked correctly
+- [ ] E2E: Purge API clears memory cache
+- [ ] E2E: Stats API returns memory cache stats
+
+### Disk Cache End-to-End Tests
+- [ ] E2E: Full proxy request → disk cache hit → response
+- [ ] E2E: Full proxy request → disk cache miss → S3 → cache population → response
+- [ ] E2E: Verify cache persists across proxy restarts
+- [ ] E2E: Verify ETag validation on cache hit
+- [ ] E2E: Verify If-None-Match returns 304 on match
+- [ ] E2E: Range requests bypass disk cache entirely
+- [ ] E2E: Large files (>max_item_size) bypass disk cache
+- [ ] E2E: Files written to disk correctly (tokio::fs)
+- [ ] E2E: LRU eviction works when disk space threshold reached
+- [ ] E2E: Concurrent requests for same object coalesce correctly
+- [ ] E2E: Disk cache metrics tracked correctly
+- [ ] E2E: Purge API clears disk cache files
+- [ ] E2E: Stats API returns disk cache stats
+- [ ] E2E: Index persists and loads correctly on restart
+- [ ] E2E: Cleanup removes old files on startup
+
+### Redis Cache End-to-End Tests
+- [ ] E2E: Full proxy request → redis cache hit → response
+- [ ] E2E: Full proxy request → redis cache miss → S3 → cache population → response
+- [ ] E2E: Verify cache persists across proxy restarts
+- [ ] E2E: Verify ETag validation on cache hit
+- [ ] E2E: Verify If-None-Match returns 304 on match
+- [ ] E2E: Range requests bypass redis cache entirely
+- [ ] E2E: Large files (>max_item_size) bypass redis cache
+- [ ] E2E: Entries expire via Redis TTL automatically
+- [ ] E2E: Concurrent requests for same object coalesce correctly
+- [ ] E2E: Redis cache metrics tracked correctly (Prometheus)
+- [ ] E2E: Purge API clears redis cache entries
+- [ ] E2E: Stats API returns redis cache stats
+- [ ] E2E: Connection pool handles reconnections gracefully
+- [ ] E2E: Handles Redis server restart gracefully
+- [ ] E2E: Serialization/deserialization works with real data
+
+### Tiered Cache End-to-End Tests
+- [ ] E2E: Memory hit → immediate response (fastest path)
+- [ ] E2E: Memory miss → disk hit → promote to memory → response
+- [ ] E2E: Memory miss → disk miss → redis hit → promote to disk+memory → response
+- [ ] E2E: All layers miss → S3 → populate all layers → response
+- [ ] E2E: Verify promotion is async (doesn't block response)
+- [ ] E2E: Verify promotion failures logged but don't fail request
+- [ ] E2E: delete() removes from all layers
+- [ ] E2E: clear() clears all layers
+- [ ] E2E: Stats aggregated across all layers correctly
+- [ ] E2E: Purge API clears all layers
+- [ ] E2E: Per-layer metrics tracked correctly
+- [ ] E2E: Verify write-through strategy (all layers updated on set)
+- [ ] E2E: Verify cache consistency across layers
+- [ ] E2E: Large files bypass all cache layers
+- [ ] E2E: Range requests bypass all cache layers
+
+### Cross-Cache Integration Tests
+- [ ] Integration: Memory → Disk fallback (memory disabled/full)
+- [ ] Integration: Disk → Redis fallback (disk disabled/full)
+- [ ] Integration: Mixed configuration (memory+redis, no disk)
+- [ ] Integration: Single-layer configuration (memory only)
+- [ ] Integration: Single-layer configuration (disk only)
+- [ ] Integration: Single-layer configuration (redis only)
+- [ ] Integration: All caches disabled (direct S3 proxy)
+- [ ] Integration: Cache warmup on startup (reload from disk/redis)
+- [ ] Integration: Graceful degradation when one layer fails
+- [ ] Integration: Metrics consistent across all configurations
+
+---
+
 # PHASE 31: Advanced JWT Algorithms (Week 4)
 
 **Goal**: Support RS256 (RSA) and ES256 (ECDSA) JWT algorithms, JWKS endpoint
@@ -2175,47 +2257,585 @@ buckets:
 
 ---
 
-## PHASE 35-38: Performance & Resilience Testing (Week 7) - POST-v1.0
+## PHASE 35: Comprehensive Cache Benchmarks - Comparative Analysis (Week 7)
 
-**Note**: Includes stress testing and resource monitoring deferred from Phase 28
+**Goal**: Benchmark all cache implementations (memory, disk, redis, tiered) for comparative analysis
+**Deliverable**: Performance report with recommendations for each use case
+**Deferred from**: Phase 27 (memory), Phase 28 (disk), Phase 29 (redis)
 
-### Phase 35: Disk Cache Stress Testing (Deferred from Phase 28)
-- [ ] Test: Handles 1000+ files efficiently
-- [ ] Test: Handles 10GB cache size
-- [ ] Test: LRU eviction performance with large cache
-- [ ] Test: Index persistence with 10,000+ entries
-- [ ] Benchmark: CPU usage under sustained load
-- [ ] Benchmark: Memory usage with large cache
+### 35.1: Benchmark Infrastructure
+
+#### Criterion Setup
+- [ ] Benchmark: Create benches/cache_comparison.rs
+- [ ] Benchmark: Use Criterion for statistical rigor
+- [ ] Benchmark: Configure warm-up iterations (5 iterations)
+- [ ] Benchmark: Configure measurement iterations (100 iterations)
+- [ ] Benchmark: Use testcontainers for Redis benchmarks
+- [ ] Benchmark: Generate HTML reports with graphs
+- [ ] Benchmark: Add benchmark CI job (GitHub Actions)
+
+#### Test Data Generation
+- [ ] Benchmark: Generate 1KB test data (typical small file)
+- [ ] Benchmark: Generate 10KB test data (medium file)
+- [ ] Benchmark: Generate 100KB test data (large cacheable file)
+- [ ] Benchmark: Generate 1MB test data (near max_item_size)
+- [ ] Benchmark: Generate 10MB test data (exceeds cache limit)
+- [ ] Benchmark: Generate diverse content types (JSON, image, binary)
+- [ ] Benchmark: Generate test keys with realistic naming patterns
+
+---
+
+### 35.2: Memory Cache Benchmarks (Moka)
+
+#### Small Entry Benchmarks (1KB)
+- [ ] Benchmark: 1KB set() operation - Target: <100μs P95
+- [ ] Benchmark: 1KB get() operation (cache hit) - Target: <50μs P95
+- [ ] Benchmark: 1KB get() operation (cache miss) - Target: <10μs P95
+- [ ] Benchmark: 1KB concurrent get() (10 threads) - Target: <200μs P95
+- [ ] Benchmark: 1KB concurrent set() (10 threads) - Target: <500μs P95
+- [ ] Benchmark: 1KB mixed workload (70% read, 30% write) - Target: <100μs P95
+
+#### Medium Entry Benchmarks (100KB)
+- [ ] Benchmark: 100KB set() operation - Target: <500μs P95
+- [ ] Benchmark: 100KB get() operation (cache hit) - Target: <200μs P95
+- [ ] Benchmark: 100KB concurrent get() (10 threads) - Target: <500μs P95
+- [ ] Benchmark: 100KB concurrent set() (10 threads) - Target: <1ms P95
+
+#### Large Entry Benchmarks (1MB)
+- [ ] Benchmark: 1MB set() operation - Target: <5ms P95
+- [ ] Benchmark: 1MB get() operation (cache hit) - Target: <2ms P95
+- [ ] Benchmark: 1MB concurrent get() (10 threads) - Target: <5ms P95
+
+#### Eviction Performance
+- [ ] Benchmark: LRU eviction with 1000 entries - Target: <1ms P95
+- [ ] Benchmark: LRU eviction with 10,000 entries - Target: <5ms P95
+- [ ] Benchmark: Memory usage with 10,000 entries (1KB each) - Target: <100MB
+- [ ] Benchmark: Memory usage with 1,000 entries (1MB each) - Target: <1.5GB
+
+#### Throughput Benchmarks
+- [ ] Benchmark: Sequential operations (baseline) - Target: >100,000 ops/s
+- [ ] Benchmark: Concurrent operations (10 parallel) - Target: >500,000 ops/s
+- [ ] Benchmark: Concurrent operations (100 parallel) - Target: >1,000,000 ops/s
+- [ ] Verify: No lock contention at high concurrency
+
+---
+
+### 35.3: Disk Cache Benchmarks (tokio::fs)
+
+#### Small Entry Benchmarks (1KB)
+- [ ] Benchmark: 1KB set() operation - Target: <5ms P95 (disk I/O)
+- [ ] Benchmark: 1KB get() operation (cache hit) - Target: <3ms P95
+- [ ] Benchmark: 1KB get() operation (cache miss) - Target: <1ms P95 (index only)
+- [ ] Benchmark: 1KB concurrent get() (10 threads) - Target: <10ms P95
+- [ ] Benchmark: 1KB concurrent set() (10 threads) - Target: <20ms P95
+
+#### Medium Entry Benchmarks (100KB)
+- [ ] Benchmark: 100KB set() operation - Target: <10ms P95
+- [ ] Benchmark: 100KB get() operation (cache hit) - Target: <8ms P95
+- [ ] Benchmark: 100KB concurrent get() (10 threads) - Target: <20ms P95
+- [ ] Benchmark: 100KB concurrent set() (10 threads) - Target: <30ms P95
+
+#### Large Entry Benchmarks (1MB)
+- [ ] Benchmark: 1MB set() operation - Target: <50ms P95
+- [ ] Benchmark: 1MB get() operation - Target: <40ms P95
+- [ ] Benchmark: 1MB concurrent get() (10 threads) - Target: <100ms P95
+- [ ] Benchmark: 1MB concurrent set() (10 threads) - Target: <150ms P95
+
+#### Eviction & Persistence
+- [ ] Benchmark: LRU eviction with 1000 files - Target: <100ms P95
+- [ ] Benchmark: LRU eviction with 10,000 files - Target: <500ms P95
+- [ ] Benchmark: Index save with 1,000 entries - Target: <50ms P95
+- [ ] Benchmark: Index save with 10,000 entries - Target: <200ms P95
+- [ ] Benchmark: Index load with 1,000 entries - Target: <30ms P95
+- [ ] Benchmark: Index load with 10,000 entries - Target: <100ms P95
+- [ ] Benchmark: Disk space calculation (10GB cache) - Target: <10ms
+
+#### File System Operations
+- [ ] Benchmark: File creation (tokio::fs) vs blocking - Comparison
+- [ ] Benchmark: File read (tokio::fs) vs blocking - Comparison
+- [ ] Benchmark: File deletion (tokio::fs) - Target: <5ms P95
+- [ ] Benchmark: Directory cleanup (1000 files) - Target: <1s
 - [ ] Verify: No file descriptor leaks after 1M operations
-- [ ] Verify: Consistent performance over 24 hours
+- [ ] Verify: Disk I/O doesn't block async runtime
 
-### Phase 36: Cold Cache Performance Tests
-- [ ] Test: 1000+ concurrent users, all cache misses
-- [ ] Test: P95 latency <200ms (uncached)
-- [ ] Test: Error rate <0.1%
-- [ ] Test: Memory growth <10% over 30 minutes
-- [ ] Test: Throughput matches v1.0.0
+#### Throughput Benchmarks
+- [ ] Benchmark: Sequential operations (baseline) - Target: >200 ops/s
+- [ ] Benchmark: Concurrent operations (10 parallel) - Target: >1,000 ops/s
+- [ ] Benchmark: Concurrent operations (100 parallel) - Target: >5,000 ops/s
 
-### Phase 37: Hot Cache Performance Tests
-- [ ] Test: 1000+ concurrent users, 90%+ cache hit rate
-- [ ] Test: P95 latency <50ms (cached)
-- [ ] Test: Cache hit rate >80%
-- [ ] Test: Memory stable under sustained load
-- [ ] Test: Throughput >v1.0.0 baseline
+---
 
-### Phase 38: Large File Streaming Tests
-- [ ] Test: 100 concurrent large file downloads (>5GB each)
-- [ ] Test: Zero-copy streaming: ~64KB memory per connection
-- [ ] Test: Total memory <500MB
-- [ ] Test: P95 TTFB <500ms
-- [ ] Test: No memory leaks over 30 minutes
+### 35.4: Redis Cache Benchmarks (redis crate + MessagePack)
 
-### Phase 39: Extreme Concurrency Tests
-- [ ] Test: 10,000 concurrent users, 1KB files
-- [ ] Test: P95 latency <100ms
-- [ ] Test: Throughput >1000 req/s
-- [ ] Test: Error rate <0.1%
-- [ ] Test: No connection pool exhaustion
+#### Small Entry Benchmarks (1KB)
+- [ ] Benchmark: 1KB set() operation - Target: <5ms P95 (network + Redis)
+- [ ] Benchmark: 1KB get() operation (cache hit) - Target: <3ms P95
+- [ ] Benchmark: 1KB get() operation (cache miss) - Target: <2ms P95
+- [ ] Benchmark: 1KB concurrent get() (10 threads) - Target: <10ms P95
+- [ ] Benchmark: 1KB concurrent set() (10 threads) - Target: <15ms P95
+- [ ] Benchmark: MessagePack serialization (1KB) - Target: <100μs P95
+- [ ] Benchmark: MessagePack deserialization (1KB) - Target: <100μs P95
+
+#### Medium Entry Benchmarks (100KB)
+- [ ] Benchmark: 100KB set() operation - Target: <10ms P95
+- [ ] Benchmark: 100KB get() operation (cache hit) - Target: <8ms P95
+- [ ] Benchmark: 100KB concurrent get() (10 threads) - Target: <20ms P95
+- [ ] Benchmark: MessagePack serialization (100KB) - Target: <500μs P95
+- [ ] Benchmark: MessagePack deserialization (100KB) - Target: <500μs P95
+
+#### Large Entry Benchmarks (1MB)
+- [ ] Benchmark: 1MB set() operation - Target: <50ms P95
+- [ ] Benchmark: 1MB get() operation - Target: <50ms P95
+- [ ] Benchmark: 1MB concurrent get() (10 threads) - Target: <150ms P95
+- [ ] Benchmark: MessagePack serialization (1MB) - Target: <5ms P95
+- [ ] Benchmark: MessagePack deserialization (1MB) - Target: <5ms P95
+
+#### Network & Connection Pool
+- [ ] Benchmark: Connection acquisition from pool - Target: <1ms P95
+- [ ] Benchmark: Redis PING command (health check) - Target: <2ms P95
+- [ ] Benchmark: Pipeline performance (100 commands) - Target: <20ms P95
+- [ ] Benchmark: Network latency (localhost) - Measure baseline
+- [ ] Benchmark: Network latency (remote Redis) - Measure baseline
+- [ ] Verify: Connection pool reuses connections efficiently
+- [ ] Verify: No connection pool exhaustion at 1000 concurrent requests
+
+#### TTL & Expiration
+- [ ] Benchmark: SETEX command (set with TTL) - Target: <5ms P95
+- [ ] Benchmark: TTL calculation overhead - Target: <1μs P95
+- [ ] Benchmark: Expiration check on get() - Target: <10μs P95
+
+#### Throughput Benchmarks
+- [ ] Benchmark: Sequential operations (baseline) - Target: >200 ops/s
+- [ ] Benchmark: Concurrent operations (10 parallel) - Target: >1,000 ops/s
+- [ ] Benchmark: Concurrent operations (100 parallel) - Target: >5,000 ops/s
+- [ ] Benchmark: Compare vs memory cache (should be slower) - Comparison
+
+---
+
+### 35.5: Tiered Cache Benchmarks (Memory → Disk → Redis)
+
+#### Multi-Layer Hit Scenarios
+- [ ] Benchmark: Memory hit (L1) - Target: <100μs P95 (fastest)
+- [ ] Benchmark: Memory miss → Disk hit (L2) - Target: <5ms P95
+- [ ] Benchmark: Memory miss → Disk miss → Redis hit (L3) - Target: <10ms P95
+- [ ] Benchmark: All layers miss - Target: <15ms P95 (total lookup overhead)
+
+#### Promotion Performance
+- [ ] Benchmark: L2 → L1 promotion (disk to memory) - Target: <10ms P95 (async)
+- [ ] Benchmark: L3 → L2 → L1 promotion (redis to all) - Target: <20ms P95 (async)
+- [ ] Benchmark: Promotion doesn't block get() response - Verify: <1ms added latency
+- [ ] Benchmark: Concurrent promotions (10 parallel) - Target: <50ms P95
+
+#### Write-Through Performance
+- [ ] Benchmark: set() to all layers (memory + disk + redis) - Target: <60ms P95
+- [ ] Benchmark: set() with write-behind strategy (memory only sync) - Target: <1ms P95
+- [ ] Benchmark: Background write queue processing - Target: >500 ops/s
+
+#### Aggregated Operations
+- [ ] Benchmark: delete() from all layers - Target: <70ms P95
+- [ ] Benchmark: clear() all layers - Target: <1s (with 1000 entries)
+- [ ] Benchmark: stats() aggregation - Target: <1ms P95
+
+#### Failure Scenarios
+- [ ] Benchmark: Redis unavailable → fallback to disk - Target: <10ms P95
+- [ ] Benchmark: Disk I/O error → fallback to memory - Target: <1ms P95
+- [ ] Benchmark: All layers miss → S3 fetch - Baseline measurement
+
+---
+
+### 35.6: Comparative Analysis & Reporting
+
+#### Performance Comparison
+- [ ] Report: Create comparison table (ops/s, latency P50/P95/P99)
+- [ ] Report: Graph: Get latency by cache type (memory < disk < redis)
+- [ ] Report: Graph: Set latency by cache type
+- [ ] Report: Graph: Throughput by concurrency level (1, 10, 100 threads)
+- [ ] Report: Graph: Memory usage by entry size (1KB, 100KB, 1MB)
+- [ ] Report: Graph: Serialization overhead (MessagePack vs none)
+
+#### Use Case Recommendations
+- [ ] Document: When to use memory cache (ultra-low latency, high throughput)
+- [ ] Document: When to use disk cache (persistence, moderate cost)
+- [ ] Document: When to use redis cache (distributed systems, shared cache)
+- [ ] Document: When to use tiered cache (best of all worlds, complexity)
+- [ ] Document: Trade-offs: latency vs persistence vs cost
+- [ ] Document: Scaling characteristics (vertical vs horizontal)
+
+#### Performance Targets Summary
+- [ ] Verify: Memory cache 10x faster than disk for gets
+- [ ] Verify: Memory cache 5x faster than redis for gets
+- [ ] Verify: Disk cache provides persistence with acceptable latency
+- [ ] Verify: Redis cache suitable for distributed deployments
+- [ ] Verify: Tiered cache provides optimal balance
+- [ ] Verify: All caches meet P95 latency targets
+
+---
+
+## PHASE 36: Load Testing - All Cache Implementations (Week 7)
+
+**Goal**: Validate cache performance under realistic production load
+**Tools**: k6, hey, wrk, or custom Rust load generator
+
+### 36.1: Memory Cache Load Tests
+
+#### Cold Cache Scenario (All Misses)
+- [ ] Load: 100 RPS, 5 minutes, cold cache → measure P95 latency
+- [ ] Load: 500 RPS, 5 minutes, cold cache → measure P95 latency, error rate
+- [ ] Load: 1000 RPS, 5 minutes, cold cache → verify no degradation
+- [ ] Load: 5000 RPS, 1 minute, cold cache → stress test, verify graceful handling
+- [ ] Verify: Error rate <0.1% at all load levels
+- [ ] Verify: Latency P95 <200ms at 1000 RPS
+
+#### Hot Cache Scenario (90% Hit Rate)
+- [ ] Load: 100 RPS, 5 minutes, 90% hits → measure P95 latency
+- [ ] Load: 500 RPS, 5 minutes, 90% hits → measure cache efficiency
+- [ ] Load: 1000 RPS, 5 minutes, 90% hits → verify P95 <50ms
+- [ ] Load: 5000 RPS, 1 minute, 90% hits → verify throughput >v1.0.0
+- [ ] Load: 10000 RPS, 30 seconds, 90% hits → extreme load test
+- [ ] Verify: Cache hit rate >85% (accounting for evictions)
+- [ ] Verify: Memory stable (no leaks over 5 minutes)
+
+#### Mixed Workload
+- [ ] Load: 70% reads, 30% writes, 1000 RPS, 10 minutes
+- [ ] Load: 90% reads, 10% writes, 1000 RPS, 10 minutes
+- [ ] Load: 50% reads, 50% writes, 500 RPS, 5 minutes
+- [ ] Verify: LRU eviction works correctly under load
+- [ ] Verify: No lock contention at high concurrency
+
+#### Sustained Load (Endurance)
+- [ ] Load: 500 RPS, 1 hour, 80% hit rate → verify stability
+- [ ] Load: 1000 RPS, 30 minutes, 80% hit rate → verify performance consistency
+- [ ] Verify: Memory usage stable (no slow leaks)
+- [ ] Verify: Latency does not degrade over time
+- [ ] Verify: Cache hit rate remains consistent
+
+---
+
+### 36.2: Disk Cache Load Tests
+
+#### Cold Cache Scenario (All Misses)
+- [ ] Load: 50 RPS, 5 minutes, cold cache → measure disk I/O impact
+- [ ] Load: 100 RPS, 5 minutes, cold cache → verify no blocking
+- [ ] Load: 500 RPS, 5 minutes, cold cache → stress test file creation
+- [ ] Verify: tokio::fs doesn't block async runtime
+- [ ] Verify: File descriptor count stays reasonable (<1000)
+
+#### Hot Cache Scenario (90% Hit Rate)
+- [ ] Load: 50 RPS, 5 minutes, 90% hits → measure read performance
+- [ ] Load: 100 RPS, 5 minutes, 90% hits → verify P95 <10ms
+- [ ] Load: 500 RPS, 5 minutes, 90% hits → stress test
+- [ ] Verify: Cache hit rate >85%
+- [ ] Verify: Disk I/O doesn't overwhelm system
+
+#### Eviction Under Load
+- [ ] Load: Fill cache to max_size_bytes, continue writing
+- [ ] Load: Verify LRU eviction happens correctly
+- [ ] Load: Verify old files deleted promptly
+- [ ] Load: Verify disk space stays below threshold
+- [ ] Verify: No file descriptor leaks during eviction
+
+#### Restart & Recovery
+- [ ] Load: Populate cache with 1000 entries, restart proxy
+- [ ] Load: Verify index loads correctly
+- [ ] Load: Verify cache operational immediately after restart
+- [ ] Load: Verify cleanup removes orphaned files
+
+#### Sustained Load (Endurance)
+- [ ] Load: 100 RPS, 1 hour, 70% hit rate → verify stability
+- [ ] Verify: Index file size doesn't grow unbounded
+- [ ] Verify: No disk space leaks
+- [ ] Verify: Performance consistent over time
+
+---
+
+### 36.3: Redis Cache Load Tests
+
+#### Cold Cache Scenario (All Misses)
+- [ ] Load: 50 RPS, 5 minutes, cold cache → measure Redis + network overhead
+- [ ] Load: 100 RPS, 5 minutes, cold cache → verify connection pooling
+- [ ] Load: 500 RPS, 5 minutes, cold cache → stress test connections
+- [ ] Verify: Connection pool doesn't exhaust (monitor pool size)
+- [ ] Verify: No connection timeouts at high load
+
+#### Hot Cache Scenario (90% Hit Rate)
+- [ ] Load: 50 RPS, 5 minutes, 90% hits → measure latency with Redis
+- [ ] Load: 100 RPS, 5 minutes, 90% hits → verify P95 <10ms
+- [ ] Load: 500 RPS, 5 minutes, 90% hits → stress test
+- [ ] Load: 1000 RPS, 1 minute, 90% hits → extreme load
+- [ ] Verify: Cache hit rate >85%
+- [ ] Verify: Redis memory usage reasonable
+
+#### TTL Expiration Under Load
+- [ ] Load: Set entries with short TTL (10s), verify expiration works
+- [ ] Load: Verify expired entries not returned
+- [ ] Load: Verify Redis handles expirations automatically
+- [ ] Verify: No manual cleanup needed
+
+#### Connection Resilience
+- [ ] Load: 100 RPS sustained, restart Redis mid-test
+- [ ] Load: Verify ConnectionManager reconnects automatically
+- [ ] Load: Verify error rate spike <5% during restart
+- [ ] Load: Verify recovery time <5 seconds
+- [ ] Load: Verify no hanging connections after recovery
+
+#### Sustained Load (Endurance)
+- [ ] Load: 100 RPS, 1 hour, 70% hit rate → verify stability
+- [ ] Verify: No memory leaks in connection pool
+- [ ] Verify: Redis memory usage stable
+- [ ] Verify: Performance consistent over time
+
+---
+
+### 36.4: Tiered Cache Load Tests
+
+#### Promotion Under Load
+- [ ] Load: 100 RPS, prime redis cache, verify promotion to disk+memory
+- [ ] Load: Verify promotion doesn't block responses
+- [ ] Load: Verify L1 (memory) hit rate increases over time
+- [ ] Load: Verify promotion failures logged but don't fail requests
+
+#### Multi-Layer Performance
+- [ ] Load: 100 RPS, 50% L1 hits, 30% L2 hits, 20% L3 hits
+- [ ] Load: Verify latency distribution matches expected layers
+- [ ] Load: Verify metrics tracked per layer correctly
+- [ ] Load: 500 RPS, verify all layers scale appropriately
+
+#### Failure Scenarios Under Load
+- [ ] Load: 100 RPS, disable Redis mid-test → verify fallback to disk
+- [ ] Load: 100 RPS, disable disk mid-test → verify fallback to memory
+- [ ] Load: Verify error rate <1% during layer failure
+- [ ] Load: Verify automatic recovery when layer restored
+
+#### Sustained Load (Endurance)
+- [ ] Load: 100 RPS, 2 hours, 80% total hit rate → verify stability
+- [ ] Verify: Memory layer stays within limits
+- [ ] Verify: Disk layer evicts correctly
+- [ ] Verify: Redis layer TTLs work correctly
+- [ ] Verify: Promotion keeps hot data in fast layers
+
+---
+
+## PHASE 37: Stress & Endurance Testing (Week 7)
+
+**Goal**: Push caches to their limits, identify breaking points
+
+### 37.1: Memory Cache Stress Tests
+
+#### Extreme Concurrency
+- [ ] Stress: 10,000 concurrent requests (1KB files)
+- [ ] Stress: 50,000 concurrent requests (1KB files)
+- [ ] Stress: Measure thread pool saturation point
+- [ ] Verify: Graceful degradation (no crashes)
+- [ ] Verify: Error rate <5% at extreme load
+
+#### Memory Pressure
+- [ ] Stress: Fill cache to max_capacity_bytes
+- [ ] Stress: Continue writing, verify eviction keeps up
+- [ ] Stress: Rapidly alternating large entries (thrashing)
+- [ ] Verify: Memory usage doesn't exceed configured limit
+- [ ] Verify: OOM killer not triggered
+
+#### Long-Running Stability (24+ hours)
+- [ ] Endurance: 500 RPS, 24 hours, 70% hit rate
+- [ ] Endurance: Monitor CPU usage over time (should be flat)
+- [ ] Endurance: Monitor memory usage over time (should be flat)
+- [ ] Endurance: Verify no gradual performance degradation
+- [ ] Verify: No memory leaks (RSS stable)
+- [ ] Verify: Cache hit rate stable
+
+---
+
+### 37.2: Disk Cache Stress Tests
+
+#### Large Cache Size
+- [ ] Stress: Populate with 10,000 files (10GB total)
+- [ ] Stress: Verify LRU eviction performance
+- [ ] Stress: Verify index save/load time acceptable
+- [ ] Stress: Measure max practical cache size
+
+#### Rapid File Creation/Deletion
+- [ ] Stress: 1000 set() operations in 1 second
+- [ ] Stress: 1000 delete() operations in 1 second
+- [ ] Stress: Alternating set/delete (thrashing)
+- [ ] Verify: File system keeps up
+- [ ] Verify: No file descriptor leaks
+
+#### Disk Space Exhaustion
+- [ ] Stress: Fill disk to max_size_bytes
+- [ ] Stress: Verify eviction triggered correctly
+- [ ] Stress: Continue writing, verify space reclaimed
+- [ ] Verify: No disk full errors
+- [ ] Verify: Eviction frees enough space
+
+#### Long-Running Stability (24+ hours)
+- [ ] Endurance: 100 RPS, 24 hours, 60% hit rate
+- [ ] Endurance: Verify index file doesn't grow unbounded
+- [ ] Endurance: Verify no orphaned files
+- [ ] Endurance: Verify performance remains consistent
+
+---
+
+### 37.3: Redis Cache Stress Tests
+
+#### Connection Pool Exhaustion
+- [ ] Stress: 10,000 concurrent requests
+- [ ] Stress: Measure connection pool saturation
+- [ ] Stress: Verify queue waits if pool full
+- [ ] Verify: No connection refused errors
+- [ ] Verify: Graceful degradation
+
+#### Large Entry Stress
+- [ ] Stress: Store 1000 entries of 1MB each (1GB in Redis)
+- [ ] Stress: Verify Redis memory usage acceptable
+- [ ] Stress: Verify serialization handles large data
+- [ ] Verify: No MessagePack limits hit
+
+#### Redis Server Stress
+- [ ] Stress: Monitor Redis CPU/memory under load
+- [ ] Stress: Verify Redis doesn't become bottleneck
+- [ ] Stress: Test with Redis maxmemory-policy=allkeys-lru
+- [ ] Verify: Redis evictions happen correctly
+
+#### Long-Running Stability (24+ hours)
+- [ ] Endurance: 100 RPS, 24 hours, 70% hit rate
+- [ ] Endurance: Verify connection pool stable
+- [ ] Endurance: Verify no connection leaks
+- [ ] Endurance: Verify Redis memory stable
+
+---
+
+## PHASE 38: Large File Streaming Tests (Week 7)
+
+**Goal**: Verify constant memory usage for large files (bypass cache)
+
+### 38.1: Large File Streaming (Cache Bypass)
+
+#### Single Large File
+- [ ] Stream: Download 1GB file, verify memory <100MB
+- [ ] Stream: Download 5GB file, verify memory <100MB
+- [ ] Stream: Download 10GB file, verify memory <100MB
+- [ ] Verify: Streaming buffer size ~64KB per connection
+- [ ] Verify: No full file buffering in memory
+
+#### Concurrent Large Files
+- [ ] Stream: 10 concurrent 1GB downloads
+- [ ] Stream: 50 concurrent 1GB downloads
+- [ ] Stream: 100 concurrent 5GB downloads
+- [ ] Verify: Total memory <500MB (10 * 64KB * 100 = 64MB + overhead)
+- [ ] Verify: Memory per connection constant (~64KB)
+- [ ] Verify: No memory leaks after completion
+
+#### Range Requests (Streaming)
+- [ ] Stream: HTTP Range request for 1GB file (bytes=0-1000000)
+- [ ] Stream: Multiple range requests on same large file
+- [ ] Stream: Parallel range requests (simulating video seek)
+- [ ] Verify: Each range request uses ~64KB memory
+- [ ] Verify: Range requests bypass cache entirely
+
+#### Client Disconnection
+- [ ] Stream: Start 5GB download, disconnect after 1GB
+- [ ] Stream: Verify S3 stream cancelled promptly
+- [ ] Stream: Verify memory released immediately
+- [ ] Verify: No hanging S3 connections
+- [ ] Verify: No memory leaks from partial downloads
+
+#### Sustained Streaming Load
+- [ ] Stream: 100 concurrent users, 1GB files each, 30 minutes
+- [ ] Stream: Verify memory stable <1GB total
+- [ ] Stream: Verify throughput limited only by network/S3
+- [ ] Verify: No performance degradation over time
+- [ ] Verify: P95 TTFB <500ms
+
+---
+
+### 38.2: Mixed Workload (Cached + Streamed)
+
+#### Small Files (Cached) + Large Files (Streamed)
+- [ ] Mixed: 50% small files (<1MB, cached), 50% large files (>10MB, streamed)
+- [ ] Mixed: 1000 RPS total, 10 minutes
+- [ ] Verify: Small files benefit from cache
+- [ ] Verify: Large files bypass cache correctly
+- [ ] Verify: Cache metrics only track cacheable files
+- [ ] Verify: Memory usage reasonable (~cache size + streaming overhead)
+
+#### Cache Hit Path + Streaming Path
+- [ ] Mixed: Concurrent cache hits and large file streams
+- [ ] Verify: Cache hits fast (<10ms) even during streaming load
+- [ ] Verify: Streaming doesn't impact cache performance
+- [ ] Verify: Resource isolation between paths
+
+---
+
+## PHASE 39: Extreme Concurrency & Scalability Tests (Week 7)
+
+**Goal**: Test maximum concurrent connections and identify scalability limits
+
+### 39.1: Extreme Concurrency - Memory Cache
+
+#### High Connection Count
+- [ ] Concurrency: 10,000 concurrent requests, 1KB files
+- [ ] Concurrency: 50,000 concurrent requests, 1KB files
+- [ ] Concurrency: 100,000 concurrent requests (if system capable)
+- [ ] Verify: P95 latency <100ms at 10K connections
+- [ ] Verify: Throughput >10,000 req/s
+- [ ] Verify: Error rate <0.1%
+- [ ] Verify: No connection pool exhaustion
+- [ ] Verify: Graceful degradation beyond capacity
+
+#### Thread Pool Saturation
+- [ ] Measure: Maximum effective concurrency for cache operations
+- [ ] Measure: Tokio runtime thread pool usage
+- [ ] Measure: Lock contention at extreme concurrency
+- [ ] Verify: No thread pool starvation
+- [ ] Verify: Work stealing effective
+
+### 39.2: Extreme Concurrency - Disk Cache
+
+#### High Concurrent File Operations
+- [ ] Concurrency: 1,000 concurrent file reads
+- [ ] Concurrency: 1,000 concurrent file writes
+- [ ] Concurrency: Mixed read/write (500 each)
+- [ ] Verify: tokio::fs handles load without blocking
+- [ ] Verify: File descriptor limits not exceeded
+- [ ] Verify: Disk I/O queue depth reasonable
+
+### 39.3: Extreme Concurrency - Redis Cache
+
+#### High Connection Concurrency
+- [ ] Concurrency: 1,000 concurrent Redis operations
+- [ ] Concurrency: 5,000 concurrent Redis operations
+- [ ] Concurrency: 10,000 concurrent Redis operations
+- [ ] Verify: Connection pool sizing adequate
+- [ ] Verify: Redis server can handle load
+- [ ] Verify: Network buffers don't overflow
+- [ ] Measure: Redis CPU/memory usage at peak
+
+### 39.4: Scalability Testing
+
+#### Vertical Scaling
+- [ ] Scale: Test with 1 CPU core, measure max RPS
+- [ ] Scale: Test with 2 CPU cores, measure max RPS
+- [ ] Scale: Test with 4 CPU cores, measure max RPS
+- [ ] Scale: Test with 8 CPU cores, measure max RPS
+- [ ] Scale: Test with 16 CPU cores, measure max RPS
+- [ ] Verify: Performance scales linearly with cores (up to a point)
+- [ ] Measure: Identify CPU bottleneck point
+
+#### Memory Scaling
+- [ ] Scale: Test with 1GB cache size, measure hit rate
+- [ ] Scale: Test with 10GB cache size, measure hit rate
+- [ ] Scale: Test with 50GB cache size, measure hit rate
+- [ ] Verify: Eviction performance doesn't degrade with size
+- [ ] Verify: Memory usage matches configuration
+
+#### Horizontal Scaling (Multiple Proxy Instances)
+- [ ] Scale: 2 proxy instances + shared Redis cache
+- [ ] Scale: 5 proxy instances + shared Redis cache
+- [ ] Scale: 10 proxy instances + shared Redis cache
+- [ ] Verify: Cache sharing works correctly
+- [ ] Verify: No cache inconsistencies
+- [ ] Verify: Combined throughput scales linearly
+- [ ] Measure: Redis becomes bottleneck at N instances
 
 ---
 
