@@ -1760,6 +1760,55 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_file_binary_data_integrity() {
+        // Test: read_file() returns Bytes with correct content (binary data)
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("binary_data.bin");
+
+        // Create binary data with various byte values including null bytes
+        let binary_data: Vec<u8> = vec![
+            0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD, // Various byte values
+            0x48, 0x65, 0x6C, 0x6C, 0x6F, // "Hello"
+            0x00, 0x00, // Null bytes
+            0xDE, 0xAD, 0xBE, 0xEF, // Common hex pattern
+        ];
+
+        // Write binary file using tokio::fs
+        tokio::fs::write(&file_path, &binary_data).await.unwrap();
+
+        // Read file using UringBackend
+        let backend = UringBackend::new();
+        let read_data = backend.read_file(&file_path).await.unwrap();
+
+        // Verify exact byte-for-byte match
+        assert_eq!(
+            read_data,
+            Bytes::from(binary_data.clone()),
+            "Binary data should match exactly"
+        );
+        assert_eq!(
+            read_data.len(),
+            binary_data.len(),
+            "Binary data length should match"
+        );
+
+        // Verify specific byte values to ensure no corruption
+        assert_eq!(read_data[0], 0x00, "First byte should be null");
+        assert_eq!(read_data[3], 0xFF, "High-value byte should be preserved");
+        assert_eq!(
+            &read_data[6..11],
+            b"Hello",
+            "ASCII portion should be readable"
+        );
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
