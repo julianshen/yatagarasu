@@ -1725,6 +1725,41 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_missing_file_returns_error() {
+        // Test: read_file() returns error for missing file
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let missing_file = temp_dir.path().join("does_not_exist.txt");
+
+        // Verify file doesn't exist
+        assert!(!missing_file.exists());
+
+        // Try to read missing file using UringBackend
+        let backend = UringBackend::new();
+        let result = backend.read_file(&missing_file).await;
+
+        // Should return error (not panic)
+        assert!(result.is_err(), "Reading missing file should return error");
+
+        // Verify it's an IO error
+        match result {
+            Err(e) => {
+                let error_string = e.to_string().to_lowercase();
+                assert!(
+                    error_string.contains("no such file") || error_string.contains("not found"),
+                    "Error should indicate file not found, got: {}",
+                    e
+                );
+            }
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
