@@ -2097,6 +2097,155 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_create_dir_all_nested() {
+        // Test: create_dir_all() creates nested directories
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let nested_path = temp_dir.path().join("level1").join("level2").join("level3");
+
+        // Verify path doesn't exist
+        assert!(
+            !nested_path.exists(),
+            "Nested path should not exist initially"
+        );
+
+        let backend = UringBackend::new();
+
+        // Create nested directories
+        backend.create_dir_all(&nested_path).await.unwrap();
+
+        // Verify all levels exist
+        assert!(nested_path.exists(), "Nested path should exist after create");
+        assert!(
+            nested_path.is_dir(),
+            "Nested path should be a directory"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_create_dir_all_idempotent() {
+        // Test: create_dir_all() is idempotent
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let dir_path = temp_dir.path().join("test_dir");
+
+        let backend = UringBackend::new();
+
+        // Create directory first time
+        backend.create_dir_all(&dir_path).await.unwrap();
+        assert!(dir_path.exists(), "Directory should exist after first create");
+
+        // Create again - should succeed (idempotent)
+        let result = backend.create_dir_all(&dir_path).await;
+        assert!(
+            result.is_ok(),
+            "create_dir_all() should succeed when directory already exists"
+        );
+
+        // Verify directory still exists
+        assert!(dir_path.exists(), "Directory should still exist");
+        assert!(dir_path.is_dir(), "Path should still be a directory");
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_file_size() {
+        // Test: file_size() returns correct size for existing file
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test_file.txt");
+
+        let backend = UringBackend::new();
+
+        // Create a file with known size
+        let data = Bytes::from("Hello, io-uring! This is a test file.");
+        let expected_size = data.len() as u64;
+
+        backend
+            .write_file_atomic(&file_path, data)
+            .await
+            .unwrap();
+
+        // Get file size
+        let size = backend.file_size(&file_path).await.unwrap();
+
+        // Verify size is correct
+        assert_eq!(
+            size, expected_size,
+            "file_size() should return correct file size"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_dir() {
+        // Test: read_dir() lists directory contents
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_dir = temp_dir.path().join("test_dir");
+
+        let backend = UringBackend::new();
+
+        // Create directory
+        backend.create_dir_all(&test_dir).await.unwrap();
+
+        // Create some files in the directory
+        let file1 = test_dir.join("file1.txt");
+        let file2 = test_dir.join("file2.txt");
+        let file3 = test_dir.join("file3.txt");
+
+        backend
+            .write_file_atomic(&file1, Bytes::from("content1"))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(&file2, Bytes::from("content2"))
+            .await
+            .unwrap();
+        backend
+            .write_file_atomic(&file3, Bytes::from("content3"))
+            .await
+            .unwrap();
+
+        // Read directory contents
+        let mut entries = backend.read_dir(&test_dir).await.unwrap();
+
+        // Sort entries for consistent comparison (filesystem order can vary)
+        entries.sort();
+
+        // Verify all files are listed
+        assert_eq!(entries.len(), 3, "Should list exactly 3 files");
+        assert!(
+            entries.contains(&file1),
+            "Should contain file1.txt"
+        );
+        assert!(
+            entries.contains(&file2),
+            "Should contain file2.txt"
+        );
+        assert!(
+            entries.contains(&file3),
+            "Should contain file3.txt"
+        );
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;

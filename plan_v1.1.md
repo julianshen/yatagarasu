@@ -838,11 +838,11 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Implementation: May use tokio::fs for simplicity
 
 ### Directory Operations (standard fs)
-- [ ] Test: create_dir_all() creates nested directories
-- [ ] Test: create_dir_all() is idempotent
-- [ ] Test: file_size() returns correct size for existing file
-- [ ] Test: read_dir() lists directory contents
-- [ ] Implementation: Use tokio::fs (io-uring optimizes file I/O, not directory ops)
+- [x] Test: create_dir_all() creates nested directories
+- [x] Test: create_dir_all() is idempotent
+- [x] Test: file_size() returns correct size for existing file
+- [x] Test: read_dir() lists directory contents
+- [x] Implementation: Use tokio::fs (io-uring optimizes file I/O, not directory ops)
 
 **Note**:
 - Proof-of-concept validated: io-uring + spawn_blocking works!
