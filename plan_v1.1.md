@@ -1150,12 +1150,12 @@ Benchmark data proves that:
 ## 29.2: RedisCache Structure & Constructor (Day 1)
 
 ### RedisCache Structure
-- [ ] Test: Can create RedisCache struct
-- [ ] Test: Contains ConnectionManager (async, multiplexed)
-- [ ] Test: Contains config (RedisConfig)
-- [ ] Test: Contains stats (Arc<CacheStats>)
-- [ ] Test: Contains key_prefix (String)
-- [ ] Test: Is Send + Sync (required for async)
+- [x] Test: Can create RedisCache struct
+- [x] Test: Contains ConnectionManager (async, multiplexed)
+- [x] Test: Contains config (RedisConfig)
+- [x] Test: Contains stats (Arc<CacheStats>)
+- [x] Test: Contains key_prefix (String)
+- [x] Test: Is Send + Sync (required for async)
 
 ### Constructor & Connection
 - [ ] Test: Can create RedisCache::new(config) async

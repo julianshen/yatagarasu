@@ -9,7 +9,10 @@ use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client, RedisError};
 use std::sync::Arc;
 
+pub mod cache;
 pub mod config;
+
+pub use cache::RedisCache;
 pub use config::RedisConfig;
 
 #[cfg(test)]

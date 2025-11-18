@@ -578,8 +578,12 @@ pub enum CacheError {
     StorageFull,
     /// I/O error (for disk cache)
     IoError(std::io::Error),
-    /// Redis error (for redis cache)
+    /// Redis connection failed
+    RedisConnectionFailed(String),
+    /// Redis operation error
     RedisError(String),
+    /// Configuration error
+    ConfigurationError(String),
     /// Serialization/deserialization error
     SerializationError(String),
 }
@@ -590,7 +594,9 @@ impl std::fmt::Display for CacheError {
             CacheError::NotFound => write!(f, "Cache entry not found"),
             CacheError::StorageFull => write!(f, "Cache storage is full"),
             CacheError::IoError(err) => write!(f, "I/O error: {}", err),
+            CacheError::RedisConnectionFailed(msg) => write!(f, "Redis connection failed: {}", msg),
             CacheError::RedisError(msg) => write!(f, "Redis error: {}", msg),
+            CacheError::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
             CacheError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
         }
     }
