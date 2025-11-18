@@ -188,9 +188,11 @@ impl DiskBackend for UringBackend {
         Ok(())
     }
 
-    async fn delete_file(&self, _path: &Path) -> Result<(), DiskCacheError> {
-        // TODO: Implement with tokio::fs (simpler for delete)
-        todo!("implement delete_file")
+    async fn delete_file(&self, path: &Path) -> Result<(), DiskCacheError> {
+        // Use tokio::fs for delete (metadata operation, doesn't benefit from io-uring)
+        // Ignore error if file doesn't exist (idempotent)
+        let _ = tokio::fs::remove_file(path).await;
+        Ok(())
     }
 
     async fn create_dir_all(&self, _path: &Path) -> Result<(), DiskCacheError> {

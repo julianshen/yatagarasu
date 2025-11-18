@@ -833,9 +833,9 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Implementation: Wrap io_uring::opcode::Write in spawn_blocking
 
 ### Delete Operations (standard fs or io-uring)
-- [ ] Test: delete_file() removes existing file
-- [ ] Test: delete_file() is idempotent (ignores missing files)
-- [ ] Implementation: May use tokio::fs for simplicity
+- [x] Test: delete_file() removes existing file
+- [x] Test: delete_file() is idempotent (ignores missing files)
+- [x] Implementation: May use tokio::fs for simplicity
 
 ### Directory Operations (standard fs)
 - [ ] Test: create_dir_all() creates nested directories

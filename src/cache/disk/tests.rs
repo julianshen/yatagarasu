@@ -2036,6 +2036,67 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_delete_removes_file() {
+        // Test: delete_file() removes existing file
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("file_to_delete.txt");
+
+        // Create a file first
+        let backend = UringBackend::new();
+        let data = Bytes::from("delete me");
+        backend
+            .write_file_atomic(&file_path, data)
+            .await
+            .unwrap();
+
+        // Verify file exists
+        assert!(file_path.exists(), "File should exist before delete");
+
+        // Delete the file
+        backend.delete_file(&file_path).await.unwrap();
+
+        // Verify file no longer exists
+        assert!(!file_path.exists(), "File should not exist after delete");
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_delete_is_idempotent() {
+        // Test: delete_file() is idempotent (ignores missing files)
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("nonexistent_file.txt");
+
+        // Verify file doesn't exist
+        assert!(!file_path.exists(), "File should not exist initially");
+
+        let backend = UringBackend::new();
+
+        // Delete non-existent file - should succeed (idempotent)
+        let result = backend.delete_file(&file_path).await;
+        assert!(
+            result.is_ok(),
+            "delete_file() should succeed for non-existent file"
+        );
+
+        // Delete again - should still succeed (idempotent)
+        let result2 = backend.delete_file(&file_path).await;
+        assert!(
+            result2.is_ok(),
+            "delete_file() should succeed when called multiple times"
+        );
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
