@@ -1182,20 +1182,20 @@ Benchmark data proves that:
 ## 29.3: Key Formatting & Hashing (Day 2)
 
 ### Key Construction
-- [ ] Test: Formats Redis key with prefix
-- [ ] Test: Key format: "{prefix}:{bucket}:{object_key}"
-- [ ] Test: Example: "yatagarasu:images:cat.jpg"
-- [ ] Test: Handles bucket names with special chars
-- [ ] Test: Handles object keys with special chars (URL encoding)
-- [ ] Test: Handles Unicode keys correctly (UTF-8)
-- [ ] Test: Handles very long keys (>250 chars) via SHA256 hash
-- [ ] Test: Hash format: "{prefix}:hash:{sha256}" for long keys
-- [ ] Test: Key collision avoidance (different buckets/objects → different keys)
+- [x] Test: Formats Redis key with prefix
+- [x] Test: Key format: "{prefix}:{bucket}:{object_key}"
+- [x] Test: Example: "yatagarasu:images:cat.jpg"
+- [x] Test: Handles bucket names with special chars
+- [x] Test: Handles object keys with special chars (URL encoding)
+- [x] Test: Handles Unicode keys correctly (UTF-8)
+- [x] Test: Handles very long keys (>250 chars) via SHA256 hash
+- [x] Test: Hash format: "{prefix}:hash:{sha256}" for long keys
+- [x] Test: Key collision avoidance (different buckets/objects → different keys)
 
 ### Key Validation
-- [ ] Test: Rejects keys with null bytes
-- [ ] Test: Rejects keys exceeding Redis limits (512MB key size)
-- [ ] Test: Validates key before Redis operations
+- [x] Test: Rejects keys with null bytes
+- [x] Test: Rejects keys exceeding Redis limits (512MB key size)
+- [x] Test: Validates key before Redis operations
 
 ---
 
