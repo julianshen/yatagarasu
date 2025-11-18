@@ -5,7 +5,7 @@
 use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
 use async_trait::async_trait;
 use redis::aio::ConnectionManager;
-use redis::Client;
+use redis::{AsyncCommands, Client};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -140,8 +140,14 @@ impl RedisCache {
     ///
     /// Sends a PING command to verify Redis is responsive
     pub async fn health_check(&self) -> bool {
-        // Will implement in next phase
-        true
+        // Clone the connection for the PING command
+        let mut conn = self.connection.clone();
+
+        // Try to PING Redis - returns "PONG" on success
+        match redis::cmd("PING").query_async::<_, String>(&mut conn).await {
+            Ok(response) => response == "PONG",
+            Err(_) => false,
+        }
     }
 }
 

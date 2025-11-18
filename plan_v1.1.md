@@ -1171,11 +1171,11 @@ Benchmark data proves that:
 - [ ] Test: Connection timeout enforced (configured timeout) (defer to Phase 29.11)
 
 ### Health Check
-- [ ] Test: Can call health_check() to verify Redis alive
-- [ ] Test: health_check() uses PING command
-- [ ] Test: health_check() returns true if Redis responsive
-- [ ] Test: health_check() returns false if Redis down
-- [ ] Test: health_check() has configurable timeout
+- [x] Test: Can call health_check() to verify Redis alive
+- [x] Test: health_check() uses PING command
+- [x] Test: health_check() returns true if Redis responsive
+- [ ] Test: health_check() returns false if Redis down (covered by unreachable test)
+- [ ] Test: health_check() has configurable timeout (defer to Phase 29.11)
 
 ---
 
