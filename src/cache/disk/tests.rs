@@ -1664,6 +1664,29 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn test_uring_backend_interchangeable_with_tokio_backend() {
+        // Verify UringBackend and TokioFsBackend can be used interchangeably through DiskBackend trait
+        use super::super::backend::DiskBackend;
+        use super::super::tokio_backend::TokioFsBackend;
+        use super::super::uring_backend::UringBackend;
+        use std::sync::Arc;
+
+        // Both backends can be stored in same type (Arc<dyn DiskBackend>)
+        let backends: Vec<Arc<dyn DiskBackend>> = vec![
+            Arc::new(UringBackend::new()),
+            Arc::new(TokioFsBackend::new()),
+        ];
+
+        // Verify we have both backends
+        assert_eq!(
+            backends.len(),
+            2,
+            "Both backends can be used as trait objects"
+        );
+    }
+
+    #[test]
     #[cfg(not(target_os = "linux"))]
     fn test_uring_backend_not_available_on_non_linux() {
         // Verify UringBackend is not compiled on non-Linux platforms

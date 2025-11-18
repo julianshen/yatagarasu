@@ -816,7 +816,7 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Test: Can create UringBackend (using io-uring::IoUring)
 - [x] Test: Implements DiskBackend trait (with Send futures)
 - [x] Test: Is Send + Sync (required for async)
-- [ ] Test: Can be used interchangeably with TokioFsBackend
+- [x] Test: Can be used interchangeably with TokioFsBackend
 
 ### Read Operations (io-uring + spawn_blocking)
 - [ ] Test: read_file() successfully reads existing file
