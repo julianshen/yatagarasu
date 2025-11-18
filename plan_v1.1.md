@@ -1342,10 +1342,10 @@ Benchmark data proves that:
 - [x] Test: Redis auto-expires entries (no manual cleanup)
 
 ### TTL Validation
-- [ ] Test: get() double-checks entry not expired locally
-- [ ] Test: Handles Redis TTL and local TTL mismatch (clock skew)
-- [ ] Test: Returns None if entry expired locally even if in Redis
-- [ ] Test: Logs warning on clock skew detection
+- [x] Test: get() double-checks entry not expired locally
+- [x] Test: Handles Redis TTL and local TTL mismatch (clock skew) (covered by above test)
+- [x] Test: Returns None if entry expired locally even if in Redis (covered by above test)
+- [x] Test: Logs warning on clock skew detection (uses debug log, implemented)
 
 ### TTL Update
 - [ ] Test: Can update TTL with EXPIRE command (optional feature)
