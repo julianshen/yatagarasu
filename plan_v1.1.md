@@ -1111,156 +1111,402 @@ Benchmark data proves that:
 
 # PHASE 29: Redis Cache Implementation (Week 3)
 
-**Goal**: Implement distributed Redis-based cache layer
-**Deliverable**: Redis cache stores/retrieves entries, supports distributed caching
-**Verification**: `cargo test` passes with Redis, failover to disk works
-
-## 29.1: Redis Integration Setup
-
-### Dependencies
-- [ ] Test: Add `redis` crate to Cargo.toml (with async support)
-- [ ] Test: Can import redis::Client
-- [ ] Test: Can import redis::AsyncCommands
-- [ ] Test: Can create connection pool
-
-### RedisCache Structure
-- [ ] Test: Can create RedisCache struct
-- [ ] Test: RedisCache contains redis Client
-- [ ] Test: RedisCache contains connection pool
-- [ ] Test: RedisCache contains config (URL, password, key prefix)
-- [ ] Test: RedisCache contains stats
-
-### RedisCache Constructor
-- [ ] Test: Can create RedisCache::new(config)
-- [ ] Test: Constructor connects to Redis server
-- [ ] Test: Constructor authenticates with password if provided
-- [ ] Test: Constructor selects database number
-- [ ] Test: Returns error if Redis unreachable
+**Goal**: Implement distributed Redis-based cache layer with production-ready error handling
+**Deliverable**: Redis cache stores/retrieves entries, supports distributed caching, graceful degradation
+**Verification**: `cargo test` passes with Redis (via testcontainers), failover to disk works
+**Target**: Container-based deployment (Linux + macOS development)
 
 ---
 
-## 29.2: Basic Redis Operations
+## 29.1: Redis Configuration & Setup (Day 1)
 
-### Key Formatting
+### Dependencies & Imports
+- [ ] Test: Add `redis` crate to Cargo.toml (async support with tokio)
+- [ ] Test: Add `rmp-serde` for MessagePack serialization
+- [ ] Test: Can import redis::Client
+- [ ] Test: Can import redis::aio::ConnectionManager (async)
+- [ ] Test: Can import redis::AsyncCommands
+- [ ] Test: Can import redis::RedisError
+
+### RedisConfig Structure
+- [ ] Test: Can create RedisConfig from YAML
+- [ ] Test: Config has redis_url field (e.g., "redis://localhost:6379")
+- [ ] Test: Config has optional password field
+- [ ] Test: Config has database number (default: 0)
+- [ ] Test: Config has connection pool settings (min/max)
+- [ ] Test: Config has key_prefix (default: "yatagarasu")
+- [ ] Test: Config has default_ttl_seconds (default: 3600)
+- [ ] Test: Config has connection_timeout_ms (default: 5000)
+- [ ] Test: Config has operation_timeout_ms (default: 2000)
+
+### Environment Variable Substitution
+- [ ] Test: Can substitute ${REDIS_URL} with env var
+- [ ] Test: Can substitute ${REDIS_PASSWORD} with env var
+- [ ] Test: Handles missing env vars with error
+- [ ] Test: Handles empty env vars appropriately
+
+---
+
+## 29.2: RedisCache Structure & Constructor (Day 1)
+
+### RedisCache Structure
+- [ ] Test: Can create RedisCache struct
+- [ ] Test: Contains ConnectionManager (async, multiplexed)
+- [ ] Test: Contains config (RedisConfig)
+- [ ] Test: Contains stats (Arc<CacheStats>)
+- [ ] Test: Contains key_prefix (String)
+- [ ] Test: Is Send + Sync (required for async)
+
+### Constructor & Connection
+- [ ] Test: Can create RedisCache::new(config) async
+- [ ] Test: Constructor creates ConnectionManager
+- [ ] Test: ConnectionManager handles connection multiplexing
+- [ ] Test: Constructor connects to Redis server
+- [ ] Test: Constructor authenticates with password if provided
+- [ ] Test: Constructor selects database number (Redis SELECT)
+- [ ] Test: Constructor validates connection (Redis PING)
+- [ ] Test: Returns CacheError::ConnectionFailed if unreachable
+- [ ] Test: Returns CacheError::AuthenticationFailed if wrong password
+- [ ] Test: Connection timeout enforced (configured timeout)
+
+### Health Check
+- [ ] Test: Can call health_check() to verify Redis alive
+- [ ] Test: health_check() uses PING command
+- [ ] Test: health_check() returns true if Redis responsive
+- [ ] Test: health_check() returns false if Redis down
+- [ ] Test: health_check() has configurable timeout
+
+---
+
+## 29.3: Key Formatting & Hashing (Day 2)
+
+### Key Construction
 - [ ] Test: Formats Redis key with prefix
-- [ ] Test: Redis key format: "yatagarasu:bucket:object_key"
-- [ ] Test: Escapes special characters in key
-- [ ] Test: Handles Unicode keys correctly
+- [ ] Test: Key format: "{prefix}:{bucket}:{object_key}"
+- [ ] Test: Example: "yatagarasu:images:cat.jpg"
+- [ ] Test: Handles bucket names with special chars
+- [ ] Test: Handles object keys with special chars (URL encoding)
+- [ ] Test: Handles Unicode keys correctly (UTF-8)
+- [ ] Test: Handles very long keys (>250 chars) via SHA256 hash
+- [ ] Test: Hash format: "{prefix}:hash:{sha256}" for long keys
+- [ ] Test: Key collision avoidance (different buckets/objects → different keys)
 
-### Set Operation
-- [ ] Test: set() stores entry in Redis
-- [ ] Test: Uses Redis SET command
-- [ ] Test: Sets TTL with SETEX if configured
-- [ ] Test: Serializes CacheEntry to bytes (MessagePack or JSON)
-- [ ] Test: Updates stats on successful set
+### Key Validation
+- [ ] Test: Rejects keys with null bytes
+- [ ] Test: Rejects keys exceeding Redis limits (512MB key size)
+- [ ] Test: Validates key before Redis operations
 
-### Get Operation
+---
+
+## 29.4: Serialization & Deserialization (Day 2)
+
+### Entry Serialization (MessagePack)
+- [ ] Test: Can serialize CacheEntry to bytes
+- [ ] Test: Uses MessagePack for compact binary format
+- [ ] Test: Serialized format includes version marker
+- [ ] Test: Includes all entry fields (data, content_type, etag, etc.)
+- [ ] Test: Handles small entries (<1KB)
+- [ ] Test: Handles medium entries (1KB-1MB)
+- [ ] Test: Handles large entries (>1MB, up to Redis limit)
+- [ ] Test: Serialization is deterministic (same input → same output)
+
+### Entry Deserialization (MessagePack)
+- [ ] Test: Can deserialize bytes to CacheEntry
+- [ ] Test: Validates version marker (schema version)
+- [ ] Test: Returns CacheError::DeserializationFailed on corrupt data
+- [ ] Test: Returns CacheError::DeserializationFailed on truncated data
+- [ ] Test: Handles schema evolution (forward/backward compatibility)
+- [ ] Test: Validates deserialized entry fields (non-empty data, valid timestamps)
+
+### Compression (Optional)
+- [ ] Test: Can compress large entries before storage (optional)
+- [ ] Test: Compression threshold configurable (e.g., >10KB)
+- [ ] Test: Uses fast compression (LZ4 or Snappy)
+- [ ] Test: Decompresses transparently on retrieval
+
+---
+
+## 29.5: Cache::get() Implementation (Day 3)
+
+### Basic Get Operation
 - [ ] Test: get() retrieves entry from Redis
 - [ ] Test: Uses Redis GET command
 - [ ] Test: Deserializes bytes to CacheEntry
+- [ ] Test: Returns Some(entry) if key exists
 - [ ] Test: Returns None if key doesn't exist
 - [ ] Test: Increments hit counter on success
 - [ ] Test: Increments miss counter on key not found
 
----
+### Error Handling
+- [ ] Test: Returns CacheError::ConnectionFailed on timeout
+- [ ] Test: Returns CacheError::DeserializationFailed on corrupt data
+- [ ] Test: Logs errors but doesn't panic
+- [ ] Test: Returns None on deserialization failure (treat as cache miss)
 
-## 29.3: Serialization & Deserialization
-
-### Entry Serialization
-- [ ] Test: Can serialize CacheEntry to bytes
-- [ ] Test: Uses MessagePack for compact binary format
-- [ ] Test: Includes all entry fields (data, metadata)
-- [ ] Test: Handles large entries (>1MB)
-
-### Entry Deserialization
-- [ ] Test: Can deserialize bytes to CacheEntry
-- [ ] Test: Handles version compatibility
-- [ ] Test: Returns error on corrupt data
-- [ ] Test: Validates deserialized entry
+### Performance
+- [ ] Test: get() completes in <10ms (P95)
+- [ ] Test: get() uses connection pool (no connection overhead)
+- [ ] Test: Concurrent gets don't block each other
 
 ---
 
-## 29.4: TTL & Expiration
+## 29.6: Cache::set() Implementation (Day 3)
 
-### TTL Management
-- [ ] Test: Sets Redis TTL on entry insertion
-- [ ] Test: Uses config default TTL if not specified
-- [ ] Test: Uses custom TTL if provided
-- [ ] Test: Redis auto-expires entries (no manual cleanup needed)
+### Basic Set Operation
+- [ ] Test: set() stores entry in Redis
+- [ ] Test: Uses Redis SET command with TTL (SETEX)
+- [ ] Test: Serializes CacheEntry to bytes
+- [ ] Test: Sets TTL from config default
+- [ ] Test: Sets TTL from entry.expires_at if available
+- [ ] Test: TTL calculation accounts for current time
+- [ ] Test: Updates stats on successful set
 
-### TTL Validation
-- [ ] Test: get() validates entry not expired locally (double-check)
-- [ ] Test: Redis TTL and local TTL are consistent
-- [ ] Test: Handles clock skew gracefully
-
----
-
-## 29.5: Connection Pool & Error Handling
-
-### Connection Pooling
-- [ ] Test: Uses connection pool for Redis connections
-- [ ] Test: Pool size configurable
-- [ ] Test: Connections reused across requests
-- [ ] Test: Handles connection exhaustion gracefully
+### Edge Cases
+- [ ] Test: Handles entries with no expiration (use default TTL)
+- [ ] Test: Handles entries already expired (don't store)
+- [ ] Test: Handles very large entries (Redis max value size: 512MB)
+- [ ] Test: Returns CacheError::ValueTooLarge if exceeds Redis limit
+- [ ] Test: Handles Redis out of memory (ENOMEM error)
 
 ### Error Handling
+- [ ] Test: Returns CacheError::ConnectionFailed on timeout
+- [ ] Test: Returns CacheError::SerializationFailed on serialization error
+- [ ] Test: Logs errors on Redis failures
+- [ ] Test: Does not panic on Redis errors
+
+---
+
+## 29.7: Cache::delete() Implementation (Day 4)
+
+### Delete Operation
+- [ ] Test: delete() removes key from Redis
+- [ ] Test: Uses Redis DEL command
+- [ ] Test: Returns Ok(()) if key existed and deleted
+- [ ] Test: Returns Ok(()) if key didn't exist (idempotent)
+- [ ] Test: Updates stats (eviction counter)
+
+### Error Handling
+- [ ] Test: Returns CacheError::ConnectionFailed on timeout
+- [ ] Test: Logs errors but succeeds if key wasn't there anyway
+- [ ] Test: Does not panic on Redis errors
+
+---
+
+## 29.8: Cache::clear() Implementation (Day 4)
+
+### Clear All Keys with Prefix
+- [ ] Test: clear() removes all keys with prefix
+- [ ] Test: Uses Redis SCAN for safe iteration
+- [ ] Test: SCAN cursor pattern: SCAN 0 MATCH prefix:* COUNT 100
+- [ ] Test: Deletes keys in batches using pipeline
+- [ ] Test: Handles large key count efficiently (>10,000 keys)
+- [ ] Test: Does not affect other Redis keys (different prefixes)
+- [ ] Test: Completes in reasonable time (<5s for 10,000 keys)
+
+### Safety & Atomicity
+- [ ] Test: clear() doesn't block Redis (uses SCAN, not KEYS)
+- [ ] Test: Partial failure: some keys deleted, some remain
+- [ ] Test: Logs count of keys deleted
+- [ ] Test: Returns Ok(()) even if some deletes fail
+
+---
+
+## 29.9: Cache::stats() Implementation (Day 5)
+
+### Statistics Tracking
+- [ ] Test: stats() returns current statistics
+- [ ] Test: Returns hit count (tracked locally with AtomicU64)
+- [ ] Test: Returns miss count (tracked locally)
+- [ ] Test: Returns set count (tracked locally)
+- [ ] Test: Returns eviction count (delete operations)
+- [ ] Test: Returns error count (tracked locally)
+
+### Redis Server Stats (Optional)
+- [ ] Test: Can query Redis INFO for memory usage
+- [ ] Test: Can query Redis DBSIZE for key count estimate
+- [ ] Test: INFO parsing works correctly
+- [ ] Test: Handles INFO command failure gracefully
+
+---
+
+## 29.10: TTL & Expiration (Day 5)
+
+### TTL Management
+- [ ] Test: Sets Redis TTL on entry insertion (SETEX)
+- [ ] Test: Uses config default TTL if entry.expires_at is None
+- [ ] Test: Calculates TTL from entry.expires_at if present
+- [ ] Test: TTL calculation: expires_at - now = remaining_seconds
+- [ ] Test: Minimum TTL: 1 second (don't set 0 or negative)
+- [ ] Test: Maximum TTL: configurable (default: 86400 = 1 day)
+- [ ] Test: Redis auto-expires entries (no manual cleanup)
+
+### TTL Validation
+- [ ] Test: get() double-checks entry not expired locally
+- [ ] Test: Handles Redis TTL and local TTL mismatch (clock skew)
+- [ ] Test: Returns None if entry expired locally even if in Redis
+- [ ] Test: Logs warning on clock skew detection
+
+### TTL Update
+- [ ] Test: Can update TTL with EXPIRE command (optional feature)
+- [ ] Test: set() with existing key updates TTL
+- [ ] Test: get() optionally refreshes TTL (LRU behavior)
+
+---
+
+## 29.11: Connection Pool & Resilience (Day 6)
+
+### Connection Pooling
+- [ ] Test: Uses ConnectionManager for multiplexed connections
+- [ ] Test: ConnectionManager handles reconnection automatically
+- [ ] Test: Connection pool size configurable (default: 10)
+- [ ] Test: Connections reused across requests
+- [ ] Test: No connection creation overhead on hot path
+
+### Connection Failures
 - [ ] Test: Handles Redis connection timeout
 - [ ] Test: Handles Redis server down
 - [ ] Test: Handles Redis authentication failure
+- [ ] Test: Handles Redis master failover (reconnect)
 - [ ] Test: Returns CacheError::RedisError on failures
 - [ ] Test: Logs errors but doesn't crash
 
 ### Retry Logic
-- [ ] Test: Retries failed operations (configurable)
-- [ ] Test: Exponential backoff on retries
+- [ ] Test: Retries failed operations (configurable, default: 3)
+- [ ] Test: Exponential backoff on retries (100ms, 200ms, 400ms)
 - [ ] Test: Gives up after max retries
-- [ ] Test: Circuit breaker for Redis (optional)
+- [ ] Test: Does NOT retry on client errors (serialization, etc.)
+- [ ] Test: Only retries on network/server errors
 
 ---
 
-## 29.6: Cache Trait Implementation
+## 29.12: Error Handling & Observability (Day 6)
 
-### Implement Cache Trait for RedisCache
-- [ ] Test: RedisCache implements Cache trait
-- [ ] Test: RedisCache implements Send + Sync
-- [ ] Test: Can use RedisCache through Cache trait object
+### Error Types
+- [ ] Test: Define CacheError::RedisConnectionFailed
+- [ ] Test: Define CacheError::RedisOperationFailed
+- [ ] Test: Define CacheError::SerializationFailed
+- [ ] Test: Define CacheError::DeserializationFailed
+- [ ] Test: Define CacheError::ValueTooLarge
+- [ ] Test: RedisError conversion to CacheError
 
-### delete() Implementation
-- [ ] Test: delete() removes key from Redis
-- [ ] Test: Uses Redis DEL command
-- [ ] Test: Returns true if key existed
-- [ ] Test: Returns false if key didn't exist
+### Error Logging
+- [ ] Test: Errors logged with tracing::error!
+- [ ] Test: Errors include context (operation, key, error message)
+- [ ] Test: Error logging doesn't leak sensitive data (passwords)
 
-### clear() Implementation
-- [ ] Test: clear() removes all keys with prefix
-- [ ] Test: Uses Redis SCAN + DEL for prefix match
-- [ ] Test: Handles large key count efficiently
-- [ ] Test: Does not affect other Redis keys (other prefixes)
-
-### stats() Implementation
-- [ ] Test: stats() returns current statistics
-- [ ] Test: Stats tracked locally (Redis doesn't provide these)
-- [ ] Test: Can optionally query Redis INFO for size estimate
+### Metrics
+- [ ] Test: Metrics track Redis operation latency
+- [ ] Test: Metrics track Redis connection pool usage
+- [ ] Test: Metrics track serialization/deserialization time
+- [ ] Test: Metrics exported via Prometheus (if enabled)
 
 ---
 
-## 29.7: Testing with Redis
+## 29.13: Integration Testing (Day 7)
 
 ### Unit Tests (Mocked Redis)
 - [ ] Test: Unit tests use mocked Redis client
 - [ ] Test: Tests don't require running Redis server
-- [ ] Test: All Redis operations covered
+- [ ] Test: Mock supports GET, SET, DEL, SCAN operations
+- [ ] Test: Mock simulates errors (timeout, connection refused)
+- [ ] Test: All Redis operations covered by unit tests
 
-### Integration Tests (Real Redis)
-- [ ] Test: Integration tests use real Redis (via Docker)
+### Integration Tests (Real Redis via testcontainers)
+- [ ] Test: Integration tests use testcontainers-redis
+- [ ] Test: Tests start Redis container automatically
+- [ ] Test: Tests wait for Redis to be ready (health check)
 - [ ] Test: Tests clean up Redis keys after run
-- [ ] Test: Can store and retrieve entries
-- [ ] Test: TTL expiration works correctly
-
-### Integration Test Setup
-- [ ] Test: docker-compose includes Redis service
-- [ ] Test: Tests wait for Redis to be ready
 - [ ] Test: Tests use unique key prefixes (avoid collisions)
+- [ ] Test: Can store and retrieve small entries (1KB)
+- [ ] Test: Can store and retrieve medium entries (100KB)
+- [ ] Test: Can store and retrieve large entries (1MB)
+- [ ] Test: TTL expiration works correctly (wait + verify)
+- [ ] Test: clear() removes all keys
+
+### Docker Compose Setup
+- [ ] Test: Create docker-compose.test.yml with Redis
+- [ ] Test: Redis container uses official image (redis:7-alpine)
+- [ ] Test: Redis container exposed on port 6379
+- [ ] Test: Can run integration tests with `docker-compose up`
+
+---
+
+## 29.14: Performance Benchmarking (Day 7)
+
+### Benchmark Infrastructure
+- [ ] Benchmark: Create benches/redis_cache.rs
+- [ ] Benchmark: Use Criterion for statistical rigor
+- [ ] Benchmark: Use testcontainers for Redis
+
+### Small Entry Benchmarks (1KB)
+- [ ] Benchmark: 1KB set() operation - Target: <5ms P95
+- [ ] Benchmark: 1KB get() operation (cache hit) - Target: <3ms P95
+- [ ] Benchmark: 1KB get() operation (cache miss) - Target: <3ms P95
+- [ ] Benchmark: Compare vs memory cache (should be slower)
+
+### Large Entry Benchmarks (1MB)
+- [ ] Benchmark: 1MB set() operation - Target: <50ms P95
+- [ ] Benchmark: 1MB get() operation - Target: <50ms P95
+- [ ] Benchmark: Serialization overhead measurement
+- [ ] Benchmark: Network transfer time measurement
+
+### Throughput Benchmarks
+- [ ] Benchmark: Sequential operations (baseline)
+- [ ] Benchmark: Concurrent operations (10 parallel)
+- [ ] Benchmark: Concurrent operations (100 parallel)
+- [ ] Verify: No connection pool exhaustion
+
+---
+
+## 29.15: Documentation & Production Readiness (Day 7)
+
+### Documentation
+- [ ] Doc: Create REDIS_CACHE.md with architecture
+- [ ] Doc: Document configuration options
+- [ ] Doc: Document Redis deployment best practices
+- [ ] Doc: Document failover behavior
+- [ ] Doc: Document performance characteristics
+- [ ] Doc: Document troubleshooting guide
+
+### Production Checklist
+- [ ] Verify: All tests passing (unit + integration)
+- [ ] Verify: Benchmarks meet targets
+- [ ] Verify: Error handling comprehensive
+- [ ] Verify: Logging appropriate (no secrets leaked)
+- [ ] Verify: Metrics exported
+- [ ] Verify: Connection pooling working
+- [ ] Verify: TTL management correct
+- [ ] Verify: Works in Docker container
+
+---
+
+## Phase 29 - COMPLETION CRITERIA
+
+**Definition of Done**:
+1. ✅ All 100+ tests passing (unit + integration)
+2. ✅ Benchmarks meet performance targets (<5ms P95 for 1KB)
+3. ✅ RedisCache implements Cache trait
+4. ✅ Integration tests with real Redis (testcontainers)
+5. ✅ Error handling comprehensive (connection failures, timeouts)
+6. ✅ Docker Compose setup for development
+7. ✅ Documentation complete (REDIS_CACHE.md)
+8. ✅ Production-ready for container deployment
+
+**Key Deliverables**:
+- `src/cache/redis/mod.rs` - RedisCache implementation
+- `src/cache/redis/config.rs` - RedisConfig
+- `src/cache/redis/serialization.rs` - MessagePack serialization
+- `src/cache/redis/tests.rs` - Unit tests (mocked Redis)
+- `tests/redis_integration_test.rs` - Integration tests (real Redis)
+- `benches/redis_cache.rs` - Performance benchmarks
+- `docker-compose.test.yml` - Redis test environment
+- `REDIS_CACHE.md` - Documentation
+
+**Not in Scope** (Deferred to Phase 30):
+- Tiered cache (memory → disk → redis)
+- Cache promotion/demotion
+- Write-through vs write-behind strategies
+- Management API (purge, stats endpoints)
 
 ---
 
