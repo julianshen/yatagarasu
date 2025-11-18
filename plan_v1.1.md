@@ -799,41 +799,56 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 
 ---
 
-## 28.6: UringBackend Basic Implementation (Day 4-5)
+## 28.6: UringBackend Implementation - REVISED (Using io-uring crate)
 
-**Goal**: Implement basic functional UringBackend using tokio-uring for Linux deployments.
-Advanced optimizations (buffer pools, zero-copy patterns) deferred to Phase 28.11.
+**Original Goal**: Implement UringBackend using tokio-uring
+**Status**: ❌ Blocked - tokio-uring has !Send futures (intentional design using Rc<T>)
+
+**NEW Goal**: Implement UringBackend using low-level **io-uring crate** + spawn_blocking wrapper
+
+**Architecture Change**:
+- **OLD**: tokio-uring (high-level, !Send futures, blocked by async_trait)
+- **NEW**: io-uring (low-level, Send + Sync types, wrapped with spawn_blocking)
+
+**Solution**: Wrap io-uring operations in `tokio::task::spawn_blocking` to get Send futures
 
 ### UringBackend Structure (Linux only)
-- [x] Test: Can create UringBackend
-- [x] Test: Implements DiskBackend trait
-- [x] Test: Is Send + Sync (required for async)
-- [x] Test: Can be used interchangeably with TokioFsBackend
+- [ ] Test: Can create UringBackend (using io-uring::IoUring)
+- [ ] Test: Implements DiskBackend trait (with Send futures)
+- [ ] Test: Is Send + Sync (required for async)
+- [ ] Test: Can be used interchangeably with TokioFsBackend
 
-### Read Operations (tokio-uring::fs)
-- [x] Test: read_file() successfully reads existing file
-- [x] Test: read_file() returns error for missing file
-- [x] Test: read_file() returns Bytes with correct content
-- [x] Test: Handles large files (>1MB) correctly
+### Read Operations (io-uring + spawn_blocking)
+- [ ] Test: read_file() successfully reads existing file
+- [ ] Test: read_file() returns error for missing file
+- [ ] Test: read_file() returns Bytes with correct content
+- [ ] Test: Handles large files (>1MB) correctly
+- [ ] Implementation: Wrap io_uring::opcode::Read in spawn_blocking
 
-### Write Operations (tokio-uring::fs)
-- [x] Test: write_file_atomic() creates parent directories
-- [x] Test: write_file_atomic() writes to temp file first
-- [x] Test: write_file_atomic() atomically renames temp to final
-- [x] Test: write_file_atomic() handles write errors gracefully (implicit in other tests)
+### Write Operations (io-uring + spawn_blocking)
+- [ ] Test: write_file_atomic() creates parent directories
+- [ ] Test: write_file_atomic() writes to temp file first
+- [ ] Test: write_file_atomic() atomically renames temp to final
+- [ ] Test: write_file_atomic() handles write errors gracefully
+- [ ] Implementation: Wrap io_uring::opcode::Write in spawn_blocking
 
-### Delete Operations (tokio-uring::fs)
-- [x] Test: delete_file() removes existing file
-- [x] Test: delete_file() is idempotent (ignores missing files)
+### Delete Operations (standard fs or io-uring)
+- [ ] Test: delete_file() removes existing file
+- [ ] Test: delete_file() is idempotent (ignores missing files)
+- [ ] Implementation: May use tokio::fs for simplicity
 
-### Directory Operations (tokio-uring::fs)
-- [x] Test: create_dir_all() creates nested directories
-- [x] Test: create_dir_all() is idempotent (tested implicitly)
-- [x] Test: file_size() returns correct size for existing file
-- [x] Test: read_dir() lists directory contents
+### Directory Operations (standard fs)
+- [ ] Test: create_dir_all() creates nested directories
+- [ ] Test: create_dir_all() is idempotent
+- [ ] Test: file_size() returns correct size for existing file
+- [ ] Test: read_dir() lists directory contents
+- [ ] Implementation: Use tokio::fs (io-uring optimizes file I/O, not directory ops)
 
-**Note**: Advanced optimizations (buffer pools, ownership-based APIs, zero-copy patterns)
-will be implemented in Phase 28.11 Performance Validation.
+**Note**:
+- Proof-of-concept validated: io-uring + spawn_blocking works!
+- See IO_URING_FEASIBILITY.md for implementation guide
+- All previous [x] marks were INVALID - tests never actually ran due to !Send blocker
+- Advanced optimizations (dedicated runtime thread) deferred to Phase 28.11 based on benchmarks
 
 ---
 
@@ -949,49 +964,72 @@ will be implemented in Phase 28.11 Performance Validation.
 
 ---
 
-## 28.11: Performance Validation & UringBackend Advanced Optimizations (Day 10)
+## 28.11: Performance Validation & io-uring Integration (Day 10) - REVISED
 
-**Goal**: Validate disk cache performance targets. Optionally implement advanced UringBackend optimizations.
+**Original Goal**: Validate performance and optionally add optimizations
+**Status**: ✅ **UNBLOCKED** - io-uring crate solution found!
 
-**Note**: UringBackend basic implementation is MANDATORY and already complete (Phase 28.6).
-The optimizations below are OPTIONAL enhancements that provide 20-40% additional performance
-improvements for high-throughput scenarios.
+**Updated Goal**:
+1. Benchmark io-uring (spawn_blocking) vs tokio::fs on Linux
+2. Decide on optimization: keep spawn_blocking vs dedicated runtime thread
 
-### Advanced Optimizations (Linux only - Optional)
+**Key Findings from Investigation**:
+- ❌ tokio-uring: !Send futures (intentional Rc<T> design) → blocked by async_trait
+- ✅ io-uring crate: Send + Sync types → works with spawn_blocking wrapper!
+- ✅ Proof-of-concept validated: See IO_URING_FEASIBILITY.md
 
-#### Buffer Pool Management
-- [ ] Test: Can create BufferPool with configurable sizes
-- [ ] Test: Can acquire 4KB buffer from pool
-- [ ] Test: Can acquire 64KB buffer from pool
-- [ ] Test: Can return buffer to pool for reuse
-- [ ] Test: Pool enforces max capacity limit
-- [ ] Test: Buffers are zeroed on return (security)
+### Implementation Approach Decision
 
-#### Ownership-Based I/O APIs
-- [ ] Test: read_file() returns (Result, buffer) tuple for zero-copy
-- [ ] Test: write_file_atomic() takes ownership of buffer
-- [ ] Test: Buffers reused from pool reduce allocations
-- [ ] Test: No buffer copying in hot path
+**Option A: spawn_blocking (Simple)** - IMPLEMENT FIRST
+- Thread pool overhead: ~5-10%
+- Easy implementation (1-2 days)
+- Still faster than tokio::fs on Linux
+- ✅ Proven with POC
 
-#### Resource Management
-- [ ] Test: Explicit file handle close() calls
-- [ ] Test: No file descriptor leaks under load
-- [ ] Test: Proper cleanup on errors
+**Option B: Dedicated Runtime Thread (Optimal)** - OPTIONAL
+- Minimal overhead
+- Shared IoUring instance
+- Implement ONLY if benchmarks show spawn_blocking insufficient
 
-### Small File Benchmarks (4KB) ✅
+### Benchmarking Tasks
+
+#### Small File Benchmarks (4KB)
 - [x] Benchmark: tokio::fs read (baseline) - 17.7 µs read, 428 µs write
-- [ ] Benchmark: io-uring read (Linux) - requires Linux environment
-- [ ] Target: 2-3x throughput improvement on Linux - requires Linux environment
+- [ ] Benchmark: io-uring (spawn_blocking) read (Linux)
+- [ ] Target: 2-3x throughput improvement on Linux
 - [x] Verify: No regression on macOS - ✅ 17.7 µs (excellent performance)
 
-### Large File Benchmarks (10MB) ✅
+#### Large File Benchmarks (10MB)
 - [x] Benchmark: tokio::fs read (baseline) - 558 µs read, 2.43 ms write
-- [ ] Benchmark: io-uring read (Linux) - requires Linux environment
-- [ ] Target: 20-40% throughput improvement on Linux - requires Linux environment
+- [ ] Benchmark: io-uring (spawn_blocking) read (Linux)
+- [ ] Target: 20-40% throughput improvement on Linux
 
-### Latency Benchmarks ✅
+#### spawn_blocking Overhead Analysis
+- [ ] Benchmark: Measure spawn_blocking overhead
+- [ ] Benchmark: Compare spawn_blocking vs dedicated thread
+- [ ] Decision: Keep spawn_blocking or implement dedicated thread?
+
+### Latency Benchmarks
 - [x] Target: P95 latency <10ms (tokio::fs) - ✅ All operations <3ms
-- [ ] Target: P95 latency <5ms (io-uring on Linux) - requires Linux environment
+- [ ] Target: P95 latency <5ms (io-uring spawn_blocking on Linux)
+- [ ] Stretch: P95 latency <3ms (io-uring dedicated thread on Linux)
+
+### Advanced Optimizations (DEFERRED until benchmarks)
+
+**NOTE**: These are now DEFERRED until benchmarks prove spawn_blocking insufficient
+
+#### Dedicated Runtime Thread (if needed)
+- [ ] Implementation: Create dedicated thread with IoUring instance
+- [ ] Implementation: Channel-based request/response
+- [ ] Test: No file descriptor leaks under load
+- [ ] Test: Proper cleanup on errors
+- [ ] Benchmark: Compare vs spawn_blocking
+
+#### Buffer Pool Management (future optimization)
+- [ ] DEFERRED: Implement only if dedicated thread shows value
+- [ ] DEFERRED: Buffer pools, zero-copy patterns
+
+**Current Status**: spawn_blocking approach proven viable, ready for implementation
 
 ### Resource Utilization
 - [ ] Benchmark: CPU usage under load

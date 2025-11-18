@@ -77,7 +77,10 @@ hex = "0.4"
 moka = { version = "0.12", features = ["future"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tokio-uring = "0.5"
+# Using low-level io-uring instead of tokio-uring
+# tokio-uring has !Send futures (uses Rc<T>) which conflicts with async_trait
+# io-uring has Send + Sync types, wrapped with spawn_blocking for async API
+io-uring = "0.7"
 
 [dev-dependencies]
 # Testing
