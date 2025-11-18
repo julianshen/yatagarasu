@@ -76,6 +76,9 @@ pub mod disk;
 // Redis cache submodule (Phase 29)
 pub mod redis;
 
+// Tiered cache submodule (Phase 30)
+pub mod tiered;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     #[serde(default)]

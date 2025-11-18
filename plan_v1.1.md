@@ -1539,10 +1539,10 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.1: Tiered Cache Implementation
 
 ### TieredCache Structure
-- [ ] Test: Can create TieredCache struct
-- [ ] Test: TieredCache contains ordered list of cache layers
-- [ ] Test: TieredCache preserves layer order (memory, disk, redis)
-- [ ] Test: TieredCache can have 1, 2, or 3 layers
+- [x] Test: Can create TieredCache struct
+- [x] Test: TieredCache contains ordered list of cache layers
+- [x] Test: TieredCache preserves layer order (memory, disk, redis)
+- [x] Test: TieredCache can have 1, 2, or 3 layers
 
 ### TieredCache Constructor
 - [ ] Test: Can create TieredCache from config
