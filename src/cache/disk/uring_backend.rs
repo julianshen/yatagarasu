@@ -31,6 +31,12 @@ impl UringBackend {
     }
 }
 
+/// Factory function for platform_backend module
+#[cfg(target_os = "linux")]
+pub fn create_backend() -> UringBackend {
+    UringBackend::new()
+}
+
 #[cfg(target_os = "linux")]
 #[async_trait]
 impl DiskBackend for UringBackend {

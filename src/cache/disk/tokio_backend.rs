@@ -15,6 +15,11 @@ impl TokioFsBackend {
     }
 }
 
+/// Factory function for platform_backend module
+pub fn create_backend() -> TokioFsBackend {
+    TokioFsBackend::new()
+}
+
 #[async_trait]
 impl DiskBackend for TokioFsBackend {
     async fn read_file(&self, path: &Path) -> Result<Bytes, DiskCacheError> {

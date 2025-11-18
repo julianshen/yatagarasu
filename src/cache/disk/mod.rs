@@ -38,12 +38,11 @@ mod uring_backend;
 mod tokio_backend;
 
 // Select backend at compile time
-#[cfg(target_os = "linux")]
-#[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
+// Use uring_backend on Linux (production), but tokio_backend for tests (until Phase 28.11)
+#[cfg(all(target_os = "linux", not(test)))]
 use uring_backend as platform_backend;
 
-#[cfg(not(target_os = "linux"))]
-#[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
+#[cfg(any(not(target_os = "linux"), test))]
 use tokio_backend as platform_backend;
 
 #[cfg(test)]

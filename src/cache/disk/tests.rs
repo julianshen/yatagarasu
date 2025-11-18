@@ -1636,7 +1636,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
+    #[cfg(target_os = "linux")]
     fn test_uring_backend_implements_disk_backend() {
         // Verify UringBackend implements DiskBackend trait (compile-time check)
         use super::super::backend::DiskBackend;
@@ -1646,12 +1646,12 @@ mod tests {
         let backend = UringBackend::new();
         let _trait_object: Arc<dyn DiskBackend> = Arc::new(backend);
 
-        // If this compiles, UringBackend implements DiskBackend
+        // If this compiles, UringBackend implements DiskBackend trait with Send futures
         assert!(true, "UringBackend implements DiskBackend trait");
     }
 
     #[test]
-    #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
+    #[cfg(target_os = "linux")]
     fn test_uring_backend_is_send_sync() {
         // Verify UringBackend implements Send + Sync (required for async)
         use super::super::uring_backend::UringBackend;
