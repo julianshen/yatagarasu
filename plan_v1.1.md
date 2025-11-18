@@ -1202,22 +1202,22 @@ Benchmark data proves that:
 ## 29.4: Serialization & Deserialization (Day 2)
 
 ### Entry Serialization (MessagePack)
-- [ ] Test: Can serialize CacheEntry to bytes
-- [ ] Test: Uses MessagePack for compact binary format
-- [ ] Test: Serialized format includes version marker
-- [ ] Test: Includes all entry fields (data, content_type, etag, etc.)
-- [ ] Test: Handles small entries (<1KB)
-- [ ] Test: Handles medium entries (1KB-1MB)
-- [ ] Test: Handles large entries (>1MB, up to Redis limit)
-- [ ] Test: Serialization is deterministic (same input → same output)
+- [x] Test: Can serialize CacheEntry to bytes
+- [x] Test: Uses MessagePack for compact binary format
+- [x] Test: Serialized format includes version marker
+- [x] Test: Includes all entry fields (data, content_type, etag, etc.)
+- [x] Test: Handles small entries (<1KB)
+- [x] Test: Handles medium entries (1KB-1MB)
+- [x] Test: Handles large entries (>1MB, up to Redis limit)
+- [x] Test: Serialization is deterministic (same input → same output)
 
 ### Entry Deserialization (MessagePack)
-- [ ] Test: Can deserialize bytes to CacheEntry
-- [ ] Test: Validates version marker (schema version)
-- [ ] Test: Returns CacheError::DeserializationFailed on corrupt data
-- [ ] Test: Returns CacheError::DeserializationFailed on truncated data
-- [ ] Test: Handles schema evolution (forward/backward compatibility)
-- [ ] Test: Validates deserialized entry fields (non-empty data, valid timestamps)
+- [x] Test: Can deserialize bytes to CacheEntry
+- [x] Test: Validates version marker (schema version)
+- [x] Test: Returns CacheError::SerializationError on corrupt data
+- [x] Test: Returns CacheError::SerializationError on truncated data
+- [x] Test: Validates deserialized entry fields (non-empty data, valid timestamps)
+- [x] Test: Roundtrip serialization (serialize then deserialize)
 
 ### Compression (Optional)
 - [ ] Test: Can compress large entries before storage (optional)

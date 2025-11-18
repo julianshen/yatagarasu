@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub mod cache;
 pub mod config;
 pub mod key;
+pub mod serialization;
 
 pub use cache::RedisCache;
 pub use config::RedisConfig;
