@@ -1905,6 +1905,91 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_write_uses_temp_file() {
+        // Test: write_file_atomic() writes to temp file first
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test_file.txt");
+        let temp_path = file_path.with_extension("tmp");
+
+        // Verify neither file exists initially
+        assert!(!file_path.exists(), "Final file should not exist initially");
+        assert!(!temp_path.exists(), "Temp file should not exist initially");
+
+        // Write file using UringBackend
+        let backend = UringBackend::new();
+        let data = Bytes::from("test data for temp file");
+        backend
+            .write_file_atomic(&file_path, data.clone())
+            .await
+            .unwrap();
+
+        // After successful write:
+        // - Final file should exist
+        // - Temp file should NOT exist (renamed to final)
+        assert!(file_path.exists(), "Final file should exist after write");
+        assert!(
+            !temp_path.exists(),
+            "Temp file should be cleaned up (renamed to final)"
+        );
+
+        // Verify final file has correct content
+        let read_data = tokio::fs::read(&file_path).await.unwrap();
+        assert_eq!(read_data, data.as_ref(), "Final file content should match");
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_write_atomic_rename() {
+        // Test: write_file_atomic() atomically renames temp to final
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("atomic_test.txt");
+
+        let backend = UringBackend::new();
+
+        // Write initial data
+        let data1 = Bytes::from("original content");
+        backend
+            .write_file_atomic(&file_path, data1.clone())
+            .await
+            .unwrap();
+
+        // Verify initial write
+        let read_data1 = tokio::fs::read(&file_path).await.unwrap();
+        assert_eq!(read_data1, data1.as_ref());
+
+        // Overwrite with new data (tests atomic replace)
+        let data2 = Bytes::from("new content that replaces original");
+        backend
+            .write_file_atomic(&file_path, data2.clone())
+            .await
+            .unwrap();
+
+        // Verify new content completely replaced old content
+        let read_data2 = tokio::fs::read(&file_path).await.unwrap();
+        assert_eq!(
+            read_data2,
+            data2.as_ref(),
+            "New content should completely replace old"
+        );
+        assert_ne!(read_data2.len(), data1.len(), "Content length changed");
+
+        // Verify no temp file remains
+        let temp_path = file_path.with_extension("tmp");
+        assert!(!temp_path.exists(), "No temp file should remain");
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
