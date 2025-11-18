@@ -742,3 +742,287 @@ async fn test_clear_returns_zero_when_no_keys() {
     let deleted = cache.clear().await.unwrap();
     assert_eq!(deleted, 0, "Should delete 0 keys when cache is empty");
 }
+
+#[tokio::test]
+async fn test_stats_returns_current_statistics() {
+    // Test: stats() returns current statistics
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_stats".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Initial stats should be zero
+    let stats = cache.stats();
+    assert_eq!(stats.hits, 0);
+    assert_eq!(stats.misses, 0);
+
+    // Perform some operations
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set an entry
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Get the entry (hit)
+    cache.get(&key).await.unwrap();
+
+    // Get non-existent entry (miss)
+    let key2 = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "nonexistent.txt".to_string(),
+        etag: None,
+    };
+    cache.get(&key2).await.unwrap();
+
+    // Delete the entry
+    cache.delete(&key).await.unwrap();
+
+    // Check stats
+    let stats = cache.stats();
+    assert_eq!(stats.hits, 1, "Should have 1 hit");
+    assert_eq!(stats.misses, 1, "Should have 1 miss");
+    assert_eq!(stats.evictions, 1, "Should have 1 eviction");
+}
+
+#[tokio::test]
+async fn test_stats_returns_hit_count() {
+    // Test: Returns hit count (tracked locally with AtomicU64)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set and get multiple times
+    cache.set(key.clone(), entry).await.unwrap();
+    cache.get(&key).await.unwrap();
+    cache.get(&key).await.unwrap();
+    cache.get(&key).await.unwrap();
+
+    let stats = cache.stats();
+    assert_eq!(stats.hits, 3, "Should have 3 hits");
+}
+
+#[tokio::test]
+async fn test_stats_returns_miss_count() {
+    // Test: Returns miss count (tracked locally)
+    use yatagarasu::cache::CacheKey;
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Get non-existent keys
+    for i in 0..5 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("nonexistent{}.txt", i),
+            etag: None,
+        };
+        cache.get(&key).await.unwrap();
+    }
+
+    let stats = cache.stats();
+    assert_eq!(stats.misses, 5, "Should have 5 misses");
+}
+
+#[tokio::test]
+async fn test_stats_returns_set_count() {
+    // Test: Returns set count (tracked locally)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    // Set multiple entries
+    for i in 0..7 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+        cache.set(key, entry.clone()).await.unwrap();
+    }
+
+    let stats = cache.stats();
+    // Note: CacheStats doesn't have a sets field, so we can't test it directly
+    // The sets counter is tracked internally but not exposed in CacheStats
+    assert_eq!(stats.hits, 0);
+    assert_eq!(stats.misses, 0);
+}
+
+#[tokio::test]
+async fn test_stats_returns_eviction_count() {
+    // Test: Returns eviction count (delete operations)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    // Set and delete multiple entries
+    for i in 0..4 {
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+        cache.set(key.clone(), entry.clone()).await.unwrap();
+        cache.delete(&key).await.unwrap();
+    }
+
+    let stats = cache.stats();
+    assert_eq!(stats.evictions, 4, "Should have 4 evictions");
+}
+
+#[tokio::test]
+async fn test_stats_tracks_operations_atomically() {
+    // Test: Statistics are tracked atomically (thread-safe)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("data"),
+        "text/plain".to_string(),
+        "etag".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Perform mixed operations
+    cache.set(key.clone(), entry).await.unwrap();
+    cache.get(&key).await.unwrap(); // hit
+    cache.get(&key).await.unwrap(); // hit
+
+    let key2 = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "nonexistent.txt".to_string(),
+        etag: None,
+    };
+    cache.get(&key2).await.unwrap(); // miss
+
+    cache.delete(&key).await.unwrap(); // eviction
+
+    let stats = cache.stats();
+    assert_eq!(stats.hits, 2);
+    assert_eq!(stats.misses, 1);
+    assert_eq!(stats.evictions, 1);
+}

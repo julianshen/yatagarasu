@@ -355,6 +355,21 @@ impl RedisCache {
 
         Ok(total_deleted)
     }
+
+    /// Returns a snapshot of current cache statistics
+    ///
+    /// # Returns
+    ///
+    /// Returns a `CacheStats` struct with current statistics:
+    /// - hits: Number of successful cache retrievals
+    /// - misses: Number of cache misses
+    /// - evictions: Number of deleted keys
+    /// - current_size_bytes: 0 (Redis doesn't track size locally)
+    /// - current_item_count: 0 (would need DBSIZE call)
+    /// - max_size_bytes: 0 (not applicable to Redis)
+    pub fn stats(&self) -> CacheStats {
+        self.stats.snapshot()
+    }
 }
 
 // Verify Send + Sync bounds (required for async trait)
