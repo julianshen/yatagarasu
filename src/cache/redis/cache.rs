@@ -243,8 +243,20 @@ impl RedisCache {
         // Clone connection for async operation
         let mut conn = self.connection.clone();
 
-        // Calculate TTL in seconds
-        let ttl_secs = self.config.redis_ttl_seconds;
+        // Calculate TTL from entry.expires_at
+        let ttl_secs = match entry.expires_at.duration_since(std::time::SystemTime::now()) {
+            Ok(remaining) => {
+                let secs = remaining.as_secs();
+                // Apply minimum TTL: 1 second (don't set 0 or negative)
+                // Apply maximum TTL: configurable (default: 86400 = 1 day)
+                secs.max(1).min(self.config.redis_max_ttl_seconds)
+            }
+            Err(_) => {
+                // Entry already expired or clock skew
+                // Use minimum TTL (1 second) to allow immediate expiration
+                1
+            }
+        };
 
         // Use SETEX to set with TTL
         conn.set_ex::<_, _, ()>(&redis_key, bytes, ttl_secs)
