@@ -187,6 +187,25 @@ impl RedisCache {
                 // Deserialize the entry
                 match serialization::deserialize_entry(&data) {
                     Ok(entry) => {
+                        // Double-check entry hasn't expired locally (clock skew protection)
+                        if entry.expires_at <= std::time::SystemTime::now() {
+                            // Entry expired locally - treat as miss and delete from Redis
+                            tracing::debug!(
+                                "Entry expired locally for key '{}', deleting from Redis",
+                                redis_key
+                            );
+                            self.stats.increment_misses();
+
+                            // Asynchronously delete the expired entry
+                            let mut delete_conn = self.connection.clone();
+                            let delete_key = redis_key.clone();
+                            tokio::spawn(async move {
+                                let _ = delete_conn.del::<_, ()>(&delete_key).await;
+                            });
+
+                            return Ok(None);
+                        }
+
                         // Increment hit counter
                         self.stats.increment_hits();
                         Ok(Some(entry))

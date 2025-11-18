@@ -1212,3 +1212,59 @@ async fn test_redis_auto_expires_entries() {
         "Entry should be auto-expired by Redis after TTL"
     );
 }
+
+#[tokio::test]
+async fn test_get_double_checks_entry_not_expired_locally() {
+    // Test: get() double-checks entry not expired locally
+    // Even if Redis has the entry, return None if expires_at is in the past
+    use bytes::Bytes;
+    use std::time::{Duration, SystemTime};
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_local_expire".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create an entry that's already expired (expires_at in the past)
+    // We'll manually construct a CacheEntry with past expiration
+    let now = SystemTime::now();
+    let past = now - Duration::from_secs(10); // 10 seconds ago
+
+    let entry = CacheEntry {
+        data: Bytes::from("test data"),
+        content_type: "text/plain".to_string(),
+        content_length: 9,
+        etag: "etag123".to_string(),
+        created_at: past - Duration::from_secs(60),
+        expires_at: past, // Expired 10 seconds ago
+        last_accessed_at: past,
+    };
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set the entry - Redis will accept it (with minimum 1 second TTL)
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Get should return None because entry is locally expired
+    // even though it might still be in Redis
+    let result = cache.get(&key).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should return None for locally expired entry"
+    );
+}
