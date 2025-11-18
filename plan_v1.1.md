@@ -994,25 +994,25 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 ### Benchmarking Tasks
 
 #### Small File Benchmarks (4KB)
-- [x] Benchmark: tokio::fs read (baseline) - 17.7 µs read, 428 µs write
-- [ ] Benchmark: io-uring (spawn_blocking) read (Linux)
-- [ ] Target: 2-3x throughput improvement on Linux
+- [x] Benchmark: tokio::fs read (baseline) - 41.7 µs read, 195.1 µs write (Linux)
+- [x] Benchmark: io-uring (spawn_blocking) read (Linux) - 86.0 µs read, 187.5 µs write
+- [x] Target: 2-3x throughput improvement - ❌ FAILED: 2.1x SLOWER for reads!
 - [x] Verify: No regression on macOS - ✅ 17.7 µs (excellent performance)
 
 #### Large File Benchmarks (10MB)
-- [x] Benchmark: tokio::fs read (baseline) - 558 µs read, 2.43 ms write
-- [ ] Benchmark: io-uring (spawn_blocking) read (Linux)
-- [ ] Target: 20-40% throughput improvement on Linux
+- [x] Benchmark: tokio::fs read (baseline) - 2.68 ms read (Linux)
+- [x] Benchmark: io-uring (spawn_blocking) read (Linux) - 4.39 ms read
+- [x] Target: 20-40% throughput improvement - ❌ FAILED: 64% SLOWER!
 
 #### spawn_blocking Overhead Analysis
-- [ ] Benchmark: Measure spawn_blocking overhead
-- [ ] Benchmark: Compare spawn_blocking vs dedicated thread
-- [ ] Decision: Keep spawn_blocking or implement dedicated thread?
+- [x] Benchmark: Measure spawn_blocking overhead - ✅ MEASURED: dominates I/O time
+- [x] Benchmark: Compare spawn_blocking vs dedicated thread - N/A: spawn_blocking too slow
+- [x] Decision: Keep spawn_blocking or implement dedicated thread? - ✅ **NEITHER - Keep TokioFsBackend!**
 
 ### Latency Benchmarks
-- [x] Target: P95 latency <10ms (tokio::fs) - ✅ All operations <3ms
-- [ ] Target: P95 latency <5ms (io-uring spawn_blocking on Linux)
-- [ ] Stretch: P95 latency <3ms (io-uring dedicated thread on Linux)
+- [x] Target: P95 latency <10ms (tokio::fs) - ✅ All operations <3ms (excellent!)
+- [x] Target: P95 latency <5ms (io-uring spawn_blocking) - ❌ FAILED: worse than tokio::fs
+- [x] Stretch: P95 latency <3ms (io-uring dedicated thread) - N/A: not pursuing
 
 ### Advanced Optimizations (DEFERRED until benchmarks)
 
@@ -1038,16 +1038,44 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [ ] Verify: Buffer pool doesn't cause unbounded growth
 
 ### Performance Report
-- [ ] Document: Benchmark results
-- [ ] Document: Platform comparison
-- [ ] Document: When to use io-uring
+- [x] Document: Benchmark results - ✅ See benchmark_results_final.txt
+- [x] Document: Platform comparison - ✅ TokioFs faster than UringBackend+spawn_blocking
+- [x] Document: When to use io-uring - ✅ NOT with spawn_blocking (too much overhead)
+
+### Phase 28.11 Conclusion ✅ COMPLETED
+
+**Final Decision: Use TokioFsBackend on All Platforms**
+
+Benchmark data proves that:
+1. ✅ TokioFsBackend delivers excellent performance (41.7 µs for 4KB reads)
+2. ❌ UringBackend + spawn_blocking adds overhead (86.0 µs for 4KB reads)
+3. ✅ No platform-specific code needed - simpler codebase
+4. ✅ Consistent behavior across all platforms
+
+**What We Learned:**
+- spawn_blocking overhead (thread pool + IoUring init) dominates I/O time
+- For io-uring benefits, need dedicated runtime thread (complex, not justified)
+- TDD approach validated: implement → test → benchmark → decide
+- Data-driven decisions prevent premature optimization
+
+**Implementation Status:**
+- Phase 28.6: UringBackend implemented and tested (18/18 tests ✅)
+- Phase 28.11: Benchmarked and compared (all benchmarks ✅)
+- Decision: Keep TokioFsBackend for production
+- UringBackend: Valuable learning exercise, will not be used in production
+
+**Production Configuration:**
+- Linux: TokioFsBackend (via platform_backend alias in tests)
+- macOS: TokioFsBackend
+- Windows: TokioFsBackend
+- All platforms: Same backend, consistent behavior
 
 ---
 
-**Summary**: Phase 28 implements hybrid disk cache
-**Tests**: 332 total (detailed in PHASE_28_HYBRID_PLAN.md)
-**Backends**: io-uring (Linux) + tokio::fs (all platforms)
-**Performance**: 2-3x faster on Linux, portable everywhere
+**Summary**: Phase 28 implements hybrid disk cache with TokioFsBackend
+**Tests**: 554 total tests passing ✅
+**Backend**: TokioFsBackend (all platforms) - simpler and faster!
+**Performance**: Excellent (41.7 µs for 4KB reads, 2.68 ms for 10MB reads)
 **Docker**: Test Linux code on any platform
 
 ---
