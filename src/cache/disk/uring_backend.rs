@@ -37,12 +37,75 @@ pub fn create_backend() -> UringBackend {
     UringBackend::new()
 }
 
+/// Blocking helper to read file using io-uring
+#[cfg(target_os = "linux")]
+fn read_file_blocking(path: &Path) -> Result<Bytes, DiskCacheError> {
+    use io_uring::{opcode, types, IoUring};
+    use std::fs::File;
+    use std::os::unix::io::AsRawFd;
+
+    // Open file for reading
+    let file = File::open(path)?;
+    let fd = file.as_raw_fd();
+
+    // Get file size
+    let metadata = file.metadata()?;
+    let file_size = metadata.len() as usize;
+
+    // Allocate buffer for file contents
+    let mut buffer = vec![0u8; file_size];
+
+    // Create io_uring instance with queue depth of 8
+    let mut ring = IoUring::new(8)?;
+
+    // Submit read operation
+    let read_op = opcode::Read::new(types::Fd(fd), buffer.as_mut_ptr(), file_size as u32)
+        .offset(0)
+        .build()
+        .user_data(1);
+
+    unsafe {
+        ring.submission().push(&read_op).map_err(|_| {
+            DiskCacheError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to push read operation",
+            ))
+        })?;
+    }
+
+    // Submit and wait for completion
+    ring.submit_and_wait(1)?;
+
+    // Retrieve completion event
+    let cqe = ring.completion().next().ok_or_else(|| {
+        DiskCacheError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "No completion event",
+        ))
+    })?;
+
+    // Check result
+    let result = cqe.result();
+    if result < 0 {
+        return Err(DiskCacheError::Io(std::io::Error::from_raw_os_error(
+            -result,
+        )));
+    }
+
+    // Return bytes
+    Ok(Bytes::from(buffer))
+}
+
 #[cfg(target_os = "linux")]
 #[async_trait]
 impl DiskBackend for UringBackend {
-    async fn read_file(&self, _path: &Path) -> Result<Bytes, DiskCacheError> {
-        // TODO: Implement with io-uring
-        todo!("implement read_file with io-uring")
+    async fn read_file(&self, path: &Path) -> Result<Bytes, DiskCacheError> {
+        // Wrap io-uring operations in spawn_blocking for Send-compatible async
+        let path_buf = path.to_path_buf();
+
+        tokio::task::spawn_blocking(move || read_file_blocking(&path_buf))
+            .await
+            .map_err(|e| DiskCacheError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
     }
 
     async fn write_file_atomic(&self, _path: &Path, _data: Bytes) -> Result<(), DiskCacheError> {

@@ -819,11 +819,11 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Test: Can be used interchangeably with TokioFsBackend
 
 ### Read Operations (io-uring + spawn_blocking)
-- [ ] Test: read_file() successfully reads existing file
+- [x] Test: read_file() successfully reads existing file
 - [ ] Test: read_file() returns error for missing file
 - [ ] Test: read_file() returns Bytes with correct content
 - [ ] Test: Handles large files (>1MB) correctly
-- [ ] Implementation: Wrap io_uring::opcode::Read in spawn_blocking
+- [x] Implementation: Wrap io_uring::opcode::Read in spawn_blocking
 
 ### Write Operations (io-uring + spawn_blocking)
 - [ ] Test: write_file_atomic() creates parent directories

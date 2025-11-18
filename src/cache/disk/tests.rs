@@ -1701,6 +1701,30 @@ mod tests {
     // These tests verify basic file operations work correctly
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_read_file_successfully() {
+        // Test: read_file() successfully reads existing file
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test_read.txt");
+
+        // Create file using tokio::fs (not the backend under test)
+        let content = "Hello from io-uring!";
+        tokio::fs::write(&file_path, content).await.unwrap();
+
+        // Read file using UringBackend
+        let backend = UringBackend::new();
+        let read_data = backend.read_file(&file_path).await.unwrap();
+
+        // Verify content matches
+        assert_eq!(read_data, Bytes::from(content));
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
