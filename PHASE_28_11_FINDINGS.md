@@ -25,7 +25,7 @@ error: future cannot be sent between threads safely
 - All tests for Phase 28.6 are marked complete `[x]` but never actually ran on Linux
 - Cannot run Phase 28.11 benchmarks to validate io-uring performance
 
-### 2. API Incompatibility: statx() Method Missing
+### 2. API Incompatibility: statx() Method Missing (RESOLVED in 0.5.0)
 
 **Problem**: The UringBackend implementation calls `file.statx().await` but `tokio-uring` 0.4 doesn't provide this method.
 
@@ -33,7 +33,12 @@ error: future cannot be sent between threads safely
 - `open()`, `create()`, `read_at()`, `write_at()`, `sync_all()`, `sync_data()`, `close()`
 - No `statx()` method available
 
-**Workaround**: Use fixed buffer sizes or `tokio::fs::metadata()` for file size.
+**Resolution**: ✅ Upgraded to tokio-uring 0.5.0 which adds full `statx()` support!
+- New method: `file.statx().await` returns `libc::statx` with `stx_size` field
+- New module: `tokio_uring::fs::statx` with `StatxBuilder` for custom queries
+- Standalone function: `tokio_uring::fs::statx(path)` for path-based queries
+
+**However**: Send trait issue remains unresolved in 0.5.0 (see below).
 
 ## Work Completed
 
@@ -130,21 +135,53 @@ The fundamental issue is an architectural mismatch:
 - [ ] Update plan_v1.1.md with findings
 - [ ] Create follow-up phase for UringBackend architectural fix if warranted
 
+## tokio-uring 0.5.0 Investigation
+
+### Upgrade Attempt
+
+**Action**: Upgraded from tokio-uring 0.4 → 0.5.0 to check if issues were resolved
+
+**Results**:
+- ✅ **statx() API**: Fully implemented in 0.5.0!
+  - `file.statx().await` available
+  - Returns `libc::statx` struct with all fields including `stx_size`
+  - New `StatxBuilder` for custom queries
+- ❌ **Send trait issue**: UNCHANGED in 0.5.0
+  - Still uses `Rc<tokio_uring::io::shared_fd::Inner>` internally
+  - Still generates `!Send` futures
+  - Fundamental design limitation, not a bug
+
+**Conclusion**: The Send trait incompatibility is **intentional** in tokio-uring's design for single-threaded performance. Upgrading to 0.5.0 solves the API issue but not the architectural mismatch.
+
+### Why tokio-uring is !Send
+
+tokio-uring is designed for single-threaded event loops to maximize io_uring performance:
+- Uses `Rc<T>` instead of `Arc<T>` for zero-cost sharing within a single thread
+- Avoids atomic operations (`Rc` vs `Arc`)
+- All operations bound to a single tokio-uring runtime thread
+
+This design is **by choice** for performance, not an oversight.
+
 ## Files Modified
 
+- `Cargo.toml` - Upgraded tokio-uring 0.4 → 0.5.0 (✅ completed)
 - `benches/backend_comparison.rs` - Created new benchmark (✅ compiles)
-- `src/cache/disk/mod.rs` - Temporarily disabled uring_backend (⚠️ workaround)
-- `src/cache/disk/disk_cache.rs` - Using TokioFsBackend on Linux (⚠️ workaround)
+- `src/cache/disk/mod.rs` - Disabled uring_backend with updated comments (⚠️ permanent until arch decision)
+- `src/cache/disk/disk_cache.rs` - Using TokioFsBackend with updated comments (⚠️ permanent until arch decision)
 
 ## Conclusion
 
 Phase 28.11 revealed that **Phase 28.6 (UringBackend) was never actually functional on Linux**. The tests were marked complete but the code has fundamental Send trait incompatibilities that prevent compilation.
 
-Before proceeding with io-uring integration, we need actual performance data to justify the architectural changes required. The benchmark infrastructure is in place but needs debugging to execute.
+**Key Finding**: tokio-uring 0.5.0 upgrade confirmed that the !Send design is **intentional for performance**, not a bug. The library is optimized for single-threaded event loops using `Rc<T>` to avoid atomic overhead.
+
+**Path Forward**: Before making architectural changes (Option 2: dedicated runtime thread pool), we need benchmark data showing io_uring provides sufficient performance gains (2-3x for small files) to justify the added complexity.
+
+The benchmark infrastructure exists but has a separate Criterion registration issue to debug.
 
 ---
 
-Generated: 2025-11-18
+Generated: 2025-11-18 (Updated)
 Platform: Linux (Fedora 41, kernel 6.13.9)
 Rust: stable
-tokio-uring: 0.4.0
+tokio-uring: 0.5.0 (upgraded from 0.4.0)

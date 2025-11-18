@@ -28,17 +28,16 @@ mod types;
 mod utils;
 
 // Platform-specific backends
-// TEMP: Disabled uring_backend due to compilation issues (async_trait Send bounds)
-// Will be re-enabled after fixing Send trait issues in Phase 28.11
+// Note: UringBackend disabled - tokio-uring 0.5.0 adds statx() but still !Send
+// Send trait incompatibility is fundamental to tokio-uring's single-threaded design
 //#[cfg(target_os = "linux")]
 //mod uring_backend;
 
 // Make tokio_backend available on all platforms
-// TEMP: Always enabled (including Linux) until uring_backend is fixed
 mod tokio_backend;
 
 // Select backend at compile time
-// TEMP: Using tokio_backend on all platforms until uring_backend Send issues are resolved
+// Using tokio_backend on all platforms until architectural decision on !Send traits
 #[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
 use tokio_backend as platform_backend;
 

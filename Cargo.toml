@@ -77,7 +77,7 @@ hex = "0.4"
 moka = { version = "0.12", features = ["future"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tokio-uring = "0.4"
+tokio-uring = "0.5"
 
 [dev-dependencies]
 # Testing
