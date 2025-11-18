@@ -110,12 +110,12 @@ pub fn deserialize_entry(bytes: &[u8]) -> Result<CacheEntry, CacheError> {
     }
 
     // Convert timestamps back to SystemTime
-    let created_at = SystemTime::UNIX_EPOCH
-        + std::time::Duration::from_secs(serializable.created_at_secs);
-    let expires_at = SystemTime::UNIX_EPOCH
-        + std::time::Duration::from_secs(serializable.expires_at_secs);
-    let last_accessed_at = SystemTime::UNIX_EPOCH
-        + std::time::Duration::from_secs(serializable.last_accessed_at_secs);
+    let created_at =
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(serializable.created_at_secs);
+    let expires_at =
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(serializable.expires_at_secs);
+    let last_accessed_at =
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(serializable.last_accessed_at_secs);
 
     Ok(CacheEntry {
         data: Bytes::from(serializable.data),

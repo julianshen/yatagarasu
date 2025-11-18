@@ -107,8 +107,10 @@ mod tests {
         // Test: Handles object keys with special chars (URL encoding)
         let key = format_key("prefix", "bucket", "path/to/file with spaces.txt");
         // Spaces should be encoded as %20
-        assert!(key.contains("path%2Fto%2Ffile+with+spaces.txt") ||
-                key.contains("path%2Fto%2Ffile%20with%20spaces.txt"));
+        assert!(
+            key.contains("path%2Fto%2Ffile+with+spaces.txt")
+                || key.contains("path%2Fto%2Ffile%20with%20spaces.txt")
+        );
     }
 
     #[test]

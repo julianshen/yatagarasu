@@ -2050,10 +2050,7 @@ mod tests {
         // Create a file first
         let backend = UringBackend::new();
         let data = Bytes::from("delete me");
-        backend
-            .write_file_atomic(&file_path, data)
-            .await
-            .unwrap();
+        backend.write_file_atomic(&file_path, data).await.unwrap();
 
         // Verify file exists
         assert!(file_path.exists(), "File should exist before delete");
@@ -2119,11 +2116,11 @@ mod tests {
         backend.create_dir_all(&nested_path).await.unwrap();
 
         // Verify all levels exist
-        assert!(nested_path.exists(), "Nested path should exist after create");
         assert!(
-            nested_path.is_dir(),
-            "Nested path should be a directory"
+            nested_path.exists(),
+            "Nested path should exist after create"
         );
+        assert!(nested_path.is_dir(), "Nested path should be a directory");
     }
 
     #[tokio::test]
@@ -2141,7 +2138,10 @@ mod tests {
 
         // Create directory first time
         backend.create_dir_all(&dir_path).await.unwrap();
-        assert!(dir_path.exists(), "Directory should exist after first create");
+        assert!(
+            dir_path.exists(),
+            "Directory should exist after first create"
+        );
 
         // Create again - should succeed (idempotent)
         let result = backend.create_dir_all(&dir_path).await;
@@ -2173,10 +2173,7 @@ mod tests {
         let data = Bytes::from("Hello, io-uring! This is a test file.");
         let expected_size = data.len() as u64;
 
-        backend
-            .write_file_atomic(&file_path, data)
-            .await
-            .unwrap();
+        backend.write_file_atomic(&file_path, data).await.unwrap();
 
         // Get file size
         let size = backend.file_size(&file_path).await.unwrap();
@@ -2231,18 +2228,9 @@ mod tests {
 
         // Verify all files are listed
         assert_eq!(entries.len(), 3, "Should list exactly 3 files");
-        assert!(
-            entries.contains(&file1),
-            "Should contain file1.txt"
-        );
-        assert!(
-            entries.contains(&file2),
-            "Should contain file2.txt"
-        );
-        assert!(
-            entries.contains(&file3),
-            "Should contain file3.txt"
-        );
+        assert!(entries.contains(&file1), "Should contain file1.txt");
+        assert!(entries.contains(&file2), "Should contain file2.txt");
+        assert!(entries.contains(&file3), "Should contain file3.txt");
     }
 
     #[tokio::test]

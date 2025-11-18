@@ -3,12 +3,6 @@
 // Provides distributed caching using Redis with production-ready error handling.
 // Supports MessagePack serialization for efficient storage.
 
-use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
-use async_trait::async_trait;
-use redis::aio::ConnectionManager;
-use redis::{AsyncCommands, Client, RedisError};
-use std::sync::Arc;
-
 pub mod cache;
 pub mod config;
 pub mod key;
@@ -19,7 +13,8 @@ pub use config::RedisConfig;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use redis::aio::ConnectionManager;
+    use redis::{AsyncCommands, Client, RedisError};
 
     #[test]
     fn test_can_import_redis_client() {
