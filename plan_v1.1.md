@@ -1333,12 +1333,12 @@ Benchmark data proves that:
 ## 29.10: TTL & Expiration (Day 5)
 
 ### TTL Management
-- [ ] Test: Sets Redis TTL on entry insertion (SETEX)
-- [ ] Test: Uses config default TTL if entry.expires_at is None
-- [ ] Test: Calculates TTL from entry.expires_at if present
-- [ ] Test: TTL calculation: expires_at - now = remaining_seconds
-- [ ] Test: Minimum TTL: 1 second (don't set 0 or negative)
-- [ ] Test: Maximum TTL: configurable (default: 86400 = 1 day)
+- [x] Test: Sets Redis TTL on entry insertion (SETEX)
+- [x] Test: Uses config default TTL if entry.expires_at is None (N/A - expires_at always set)
+- [x] Test: Calculates TTL from entry.expires_at if present
+- [x] Test: TTL calculation: expires_at - now = remaining_seconds (included in above test)
+- [x] Test: Minimum TTL: 1 second (don't set 0 or negative) (implemented in set() method)
+- [x] Test: Maximum TTL: configurable (default: 86400 = 1 day) (implemented in set() method)
 - [ ] Test: Redis auto-expires entries (no manual cleanup)
 
 ### TTL Validation

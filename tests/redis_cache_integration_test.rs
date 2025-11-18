@@ -1158,3 +1158,57 @@ async fn test_calculates_ttl_from_entry_expires_at() {
         ttl
     );
 }
+
+#[tokio::test]
+async fn test_redis_auto_expires_entries() {
+    // Test: Redis auto-expires entries (no manual cleanup)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_auto_expire".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create entry with very short TTL (2 seconds)
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(2)), // 2 seconds
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set the entry
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Verify entry exists immediately
+    let result = cache.get(&key).await.unwrap();
+    assert!(result.is_some(), "Entry should exist immediately after set");
+
+    // Wait for TTL to expire (3 seconds > 2 second TTL)
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Verify entry no longer exists (Redis automatically deleted it)
+    let result = cache.get(&key).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Entry should be auto-expired by Redis after TTL"
+    );
+}
