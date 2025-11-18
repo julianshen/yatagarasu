@@ -1026,3 +1026,133 @@ async fn test_stats_tracks_operations_atomically() {
     assert_eq!(stats.misses, 1);
     assert_eq!(stats.evictions, 1);
 }
+
+// ============================================================================
+// Phase 29.10: TTL & Expiration Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_sets_redis_ttl_on_entry_insertion() {
+    // Test: Sets Redis TTL on entry insertion (SETEX)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url.clone()),
+        redis_key_prefix: "test_ttl".to_string(),
+        redis_ttl_seconds: 3600,
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config.clone()).await.unwrap();
+
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set the entry
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Verify TTL is set in Redis by directly querying with TTL command
+    // Format the Redis key
+    let redis_key = format!("{}:{}:{}", config.redis_key_prefix, key.bucket, key.object_key);
+
+    // Get a connection and check TTL
+    let client = redis::Client::open(redis_url.as_str()).unwrap();
+    let mut conn = client.get_async_connection().await.unwrap();
+
+    let ttl: i64 = redis::cmd("TTL")
+        .arg(&redis_key)
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+
+    // TTL should be > 0 and <= redis_ttl_seconds (3600 by default)
+    assert!(ttl > 0, "TTL should be set (> 0), got: {}", ttl);
+    assert!(
+        ttl <= config.redis_ttl_seconds as i64,
+        "TTL should be <= {}, got: {}",
+        config.redis_ttl_seconds,
+        ttl
+    );
+}
+
+#[tokio::test]
+async fn test_calculates_ttl_from_entry_expires_at() {
+    // Test: Calculates TTL from entry.expires_at if present
+    // The entry is created with a specific TTL, and the Redis TTL should match that
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url.clone()),
+        redis_key_prefix: "test_ttl_calc".to_string(),
+        redis_ttl_seconds: 7200, // Default: 2 hours
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config.clone()).await.unwrap();
+
+    // Create entry with specific TTL (1 hour = 3600 seconds)
+    // This sets entry.expires_at = now + 3600
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(3600)), // 1 hour
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    // Set the entry
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Verify TTL matches entry.expires_at (3600s), not config default (7200s)
+    let redis_key = format!("{}:{}:{}", config.redis_key_prefix, key.bucket, key.object_key);
+
+    let client = redis::Client::open(redis_url.as_str()).unwrap();
+    let mut conn = client.get_async_connection().await.unwrap();
+
+    let ttl: i64 = redis::cmd("TTL")
+        .arg(&redis_key)
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+
+    // TTL should be close to 3600 (entry TTL), not 7200 (config default)
+    // Allow for a few seconds of drift
+    assert!(
+        ttl > 3590 && ttl <= 3600,
+        "TTL should be close to 3600 (entry TTL), got: {}",
+        ttl
+    );
+}

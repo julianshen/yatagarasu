@@ -28,6 +28,10 @@ pub struct RedisConfig {
     #[serde(default = "default_redis_ttl_seconds")]
     pub redis_ttl_seconds: u64,
 
+    /// Maximum TTL for cache entries in seconds (default: 86400 = 1 day)
+    #[serde(default = "default_redis_max_ttl_seconds")]
+    pub redis_max_ttl_seconds: u64,
+
     /// Connection timeout in milliseconds (default: 5000 = 5 seconds)
     #[serde(default = "default_connection_timeout_ms")]
     pub connection_timeout_ms: u64,
@@ -53,6 +57,7 @@ impl Default for RedisConfig {
             redis_db: default_redis_db(),
             redis_key_prefix: default_redis_key_prefix(),
             redis_ttl_seconds: default_redis_ttl_seconds(),
+            redis_max_ttl_seconds: default_redis_max_ttl_seconds(),
             connection_timeout_ms: default_connection_timeout_ms(),
             operation_timeout_ms: default_operation_timeout_ms(),
             min_pool_size: default_min_pool_size(),
@@ -71,6 +76,10 @@ fn default_redis_key_prefix() -> String {
 
 fn default_redis_ttl_seconds() -> u64 {
     3600 // 1 hour
+}
+
+fn default_redis_max_ttl_seconds() -> u64 {
+    86400 // 1 day (24 hours)
 }
 
 fn default_connection_timeout_ms() -> u64 {
