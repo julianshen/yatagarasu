@@ -73,6 +73,9 @@ use std::time::SystemTime;
 // Disk cache submodule (Phase 28)
 pub mod disk;
 
+// Redis cache submodule (Phase 29)
+pub mod redis;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     #[serde(default)]

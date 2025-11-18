@@ -1121,12 +1121,12 @@ Benchmark data proves that:
 ## 29.1: Redis Configuration & Setup (Day 1)
 
 ### Dependencies & Imports
-- [ ] Test: Add `redis` crate to Cargo.toml (async support with tokio)
-- [ ] Test: Add `rmp-serde` for MessagePack serialization
-- [ ] Test: Can import redis::Client
-- [ ] Test: Can import redis::aio::ConnectionManager (async)
-- [ ] Test: Can import redis::AsyncCommands
-- [ ] Test: Can import redis::RedisError
+- [x] Test: Add `redis` crate to Cargo.toml (async support with tokio)
+- [x] Test: Add `rmp-serde` for MessagePack serialization
+- [x] Test: Can import redis::Client
+- [x] Test: Can import redis::aio::ConnectionManager (async)
+- [x] Test: Can import redis::AsyncCommands
+- [x] Test: Can import redis::RedisError
 
 ### RedisConfig Structure
 - [ ] Test: Can create RedisConfig from YAML

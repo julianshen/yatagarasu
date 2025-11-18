@@ -75,6 +75,8 @@ hex = "0.4"
 
 # Caching
 moka = { version = "0.12", features = ["future"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+rmp-serde = "1.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Using low-level io-uring instead of tokio-uring
