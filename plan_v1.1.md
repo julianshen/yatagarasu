@@ -1140,10 +1140,10 @@ Benchmark data proves that:
 - [x] Test: Config has operation_timeout_ms (default: 2000)
 
 ### Environment Variable Substitution
-- [ ] Test: Can substitute ${REDIS_URL} with env var
-- [ ] Test: Can substitute ${REDIS_PASSWORD} with env var
-- [ ] Test: Handles missing env vars with error
-- [ ] Test: Handles empty env vars appropriately
+- [x] Test: Can substitute ${REDIS_URL} with env var
+- [x] Test: Can substitute ${REDIS_PASSWORD} with env var
+- [x] Test: Handles missing env vars with error
+- [x] Test: Handles empty env vars appropriately
 
 ---
 
