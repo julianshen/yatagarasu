@@ -829,7 +829,7 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 - [x] Test: write_file_atomic() creates parent directories
 - [x] Test: write_file_atomic() writes to temp file first
 - [x] Test: write_file_atomic() atomically renames temp to final
-- [ ] Test: write_file_atomic() handles write errors gracefully
+- [x] Test: write_file_atomic() handles write errors gracefully
 - [x] Implementation: Wrap io_uring::opcode::Write in spawn_blocking
 
 ### Delete Operations (standard fs or io-uring)

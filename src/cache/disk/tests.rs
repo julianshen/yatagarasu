@@ -1990,6 +1990,52 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_uring_backend_write_handles_errors() {
+        // Test: write_file_atomic() handles write errors gracefully
+        use super::super::backend::DiskBackend;
+        use super::super::uring_backend::UringBackend;
+        use bytes::Bytes;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let backend = UringBackend::new();
+
+        // Test 1: Try to write where parent is a file (not a directory)
+        let blocking_file = temp_dir.path().join("blocking.txt");
+        tokio::fs::write(&blocking_file, "I'm a file")
+            .await
+            .unwrap();
+
+        let impossible_path = blocking_file.join("cant_create_this.txt");
+        let data = Bytes::from("test data");
+        let result = backend
+            .write_file_atomic(&impossible_path, data.clone())
+            .await;
+
+        // Should return error, not panic
+        assert!(
+            result.is_err(),
+            "Writing with file as parent should return error"
+        );
+
+        // Test 2: Verify error message is informative (file system error)
+        if let Err(e) = result {
+            let error_msg = e.to_string().to_lowercase();
+            // Error should be a file system error (not a directory, file exists, etc.)
+            assert!(
+                error_msg.contains("not a directory")
+                    || error_msg.contains("is a file")
+                    || error_msg.contains("notdir")
+                    || error_msg.contains("file exists")
+                    || error_msg.contains("i/o error"),
+                "Error should indicate file system problem, got: {}",
+                e
+            );
+        }
+    }
+
+    #[tokio::test]
     #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
     async fn test_uring_backend_read_write_file() {
         use super::super::backend::DiskBackend;
