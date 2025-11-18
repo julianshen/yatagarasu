@@ -1268,3 +1268,105 @@ async fn test_get_double_checks_entry_not_expired_locally() {
         "Should return None for locally expired entry"
     );
 }
+
+#[tokio::test]
+async fn test_can_store_and_retrieve_medium_entries_100kb() {
+    // Test: Can store and retrieve medium entries (100KB)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_medium".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create 100KB entry
+    let data_100kb = vec![0xAB; 100 * 1024]; // 100KB of 0xAB bytes
+    let entry = CacheEntry::new(
+        Bytes::from(data_100kb.clone()),
+        "application/octet-stream".to_string(),
+        "etag-100kb".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "medium-file.bin".to_string(),
+        etag: None,
+    };
+
+    // Set the medium entry
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Get it back
+    let retrieved = cache.get(&key).await.unwrap();
+    assert!(retrieved.is_some(), "Should retrieve medium entry");
+
+    let retrieved_entry = retrieved.unwrap();
+    assert_eq!(retrieved_entry.data.len(), 100 * 1024);
+    assert_eq!(retrieved_entry.data, Bytes::from(data_100kb));
+    assert_eq!(retrieved_entry.content_type, "application/octet-stream");
+    assert_eq!(retrieved_entry.etag, "etag-100kb");
+}
+
+#[tokio::test]
+async fn test_can_store_and_retrieve_large_entries_1mb() {
+    // Test: Can store and retrieve large entries (1MB)
+    use bytes::Bytes;
+    use std::time::Duration;
+    use yatagarasu::cache::{CacheEntry, CacheKey};
+
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis::default());
+    let redis_container = docker.run(redis_image);
+
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_key_prefix: "test_large".to_string(),
+        ..Default::default()
+    };
+
+    let cache = RedisCache::new(config).await.unwrap();
+
+    // Create 1MB entry
+    let data_1mb = vec![0xCD; 1024 * 1024]; // 1MB of 0xCD bytes
+    let entry = CacheEntry::new(
+        Bytes::from(data_1mb.clone()),
+        "application/octet-stream".to_string(),
+        "etag-1mb".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "large-file.bin".to_string(),
+        etag: None,
+    };
+
+    // Set the large entry
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Get it back
+    let retrieved = cache.get(&key).await.unwrap();
+    assert!(retrieved.is_some(), "Should retrieve large entry");
+
+    let retrieved_entry = retrieved.unwrap();
+    assert_eq!(retrieved_entry.data.len(), 1024 * 1024);
+    assert_eq!(retrieved_entry.data, Bytes::from(data_1mb));
+    assert_eq!(retrieved_entry.content_type, "application/octet-stream");
+    assert_eq!(retrieved_entry.etag, "etag-1mb");
+}
