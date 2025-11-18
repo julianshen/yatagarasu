@@ -28,16 +28,21 @@ mod types;
 mod utils;
 
 // Platform-specific backends
-// Note: UringBackend disabled - tokio-uring 0.5.0 adds statx() but still !Send
-// Send trait incompatibility is fundamental to tokio-uring's single-threaded design
-//#[cfg(target_os = "linux")]
-//mod uring_backend;
+// Using io-uring crate (not tokio-uring) for Linux
+// io-uring has Send + Sync types, wrapped with spawn_blocking
+#[cfg(target_os = "linux")]
+mod uring_backend;
 
-// Make tokio_backend available on all platforms
+// Make tokio_backend available for non-Linux or for tests
+#[cfg(any(not(target_os = "linux"), test))]
 mod tokio_backend;
 
 // Select backend at compile time
-// Using tokio_backend on all platforms until architectural decision on !Send traits
+#[cfg(target_os = "linux")]
+#[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
+use uring_backend as platform_backend;
+
+#[cfg(not(target_os = "linux"))]
 #[allow(unused_imports)] // Will be used in Phase 28.9 (Backend Selection)
 use tokio_backend as platform_backend;
 

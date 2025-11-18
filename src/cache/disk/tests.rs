@@ -1617,14 +1617,13 @@ mod tests {
         );
     }
 
-    // Phase 28.6: tokio-uring Backend Implementation (Linux only)
-    // NOTE: All UringBackend tests DISABLED - module compilation blocked by !Send trait issue
-    // tokio-uring's intentional !Send design (uses Rc<T>) incompatible with async_trait
-    // See PHASE_28_11_FINDINGS.md for details
-    // Tests will remain disabled until architectural decision on handling !Send traits
+    // Phase 28.6: UringBackend Implementation (Linux only)
+    // Using io-uring crate (not tokio-uring) with spawn_blocking wrapper
+    // io-uring has Send + Sync types, compatible with async_trait
+    // See IO_URING_FEASIBILITY.md for implementation approach
 
     #[test]
-    #[cfg(all(target_os = "linux", feature = "uring_backend_disabled"))] // Disabled
+    #[cfg(target_os = "linux")]
     fn test_can_create_uring_backend() {
         // Verify UringBackend can be created on Linux
         use super::super::uring_backend::UringBackend;

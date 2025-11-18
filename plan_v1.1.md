@@ -813,7 +813,7 @@ Cache Trait → DiskCache → Backend (compile-time selection)
 **Solution**: Wrap io-uring operations in `tokio::task::spawn_blocking` to get Send futures
 
 ### UringBackend Structure (Linux only)
-- [ ] Test: Can create UringBackend (using io-uring::IoUring)
+- [x] Test: Can create UringBackend (using io-uring::IoUring)
 - [ ] Test: Implements DiskBackend trait (with Send futures)
 - [ ] Test: Is Send + Sync (required for async)
 - [ ] Test: Can be used interchangeably with TokioFsBackend
