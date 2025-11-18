@@ -1339,7 +1339,7 @@ Benchmark data proves that:
 - [x] Test: TTL calculation: expires_at - now = remaining_seconds (included in above test)
 - [x] Test: Minimum TTL: 1 second (don't set 0 or negative) (implemented in set() method)
 - [x] Test: Maximum TTL: configurable (default: 86400 = 1 day) (implemented in set() method)
-- [ ] Test: Redis auto-expires entries (no manual cleanup)
+- [x] Test: Redis auto-expires entries (no manual cleanup)
 
 ### TTL Validation
 - [ ] Test: get() double-checks entry not expired locally
