@@ -1662,10 +1662,10 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.7: Integration with Proxy
 
 ### Cache Lookup in Proxy Flow
-- [ ] Test: Proxy checks cache before S3 request
-- [ ] Test: Cache hit returns cached response
-- [ ] Test: Cache miss proceeds to S3
-- [ ] Test: S3 response populates cache
+- [x] Test: Proxy checks cache before S3 request
+- [x] Test: Cache hit returns cached response
+- [x] Test: Cache miss proceeds to S3
+- [ ] Test: S3 response populates cache (deferred - requires response buffering)
 
 ### Cache Bypass Logic
 - [ ] Test: Range requests bypass cache (always)
