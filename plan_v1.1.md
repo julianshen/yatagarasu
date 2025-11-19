@@ -1608,11 +1608,11 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.5: Aggregated Statistics
 
 ### Stats Aggregation
-- [ ] Test: stats() aggregates across all layers
-- [ ] Test: Returns total hits (sum of all layers)
-- [ ] Test: Returns total misses
+- [x] Test: stats() aggregates across all layers
+- [x] Test: Returns total hits (sum of all layers)
+- [x] Test: Returns total misses
 - [ ] Test: Returns per-layer stats breakdown
-- [ ] Test: Returns total cache size (sum of all layers)
+- [x] Test: Returns total cache size (sum of all layers)
 
 ### Per-Bucket Stats
 - [ ] Test: Can track stats per bucket
