@@ -1645,12 +1645,12 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [ ] Test: Returns 404 if object not in cache
 
 ### GET /admin/cache/stats (Cache Statistics)
-- [ ] Test: Endpoint exists and responds
-- [ ] Test: Requires JWT authentication
-- [ ] Test: Returns JSON with cache stats
-- [ ] Test: Includes hits, misses, hit_rate
-- [ ] Test: Includes current_size, max_size
-- [ ] Test: Includes per-bucket breakdown
+- [x] Test: Endpoint exists and responds
+- [x] Test: Requires JWT authentication
+- [x] Test: Returns JSON with cache stats
+- [x] Test: Includes hits, misses, hit_rate
+- [x] Test: Includes current_size, max_size
+- [ ] Test: Includes per-bucket breakdown (deferred - requires per-bucket stats infrastructure)
 
 ### GET /admin/cache/stats/:bucket (Bucket Stats)
 - [ ] Test: Endpoint accepts bucket name parameter

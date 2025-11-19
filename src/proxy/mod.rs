@@ -629,7 +629,7 @@ impl ProxyHttp for YatagarasuProxy {
             || path.starts_with("/ready")
             || path.starts_with("/metrics")
             || (path == "/admin/reload" && method == "POST")
-            || (path.starts_with("/admin/cache/") && method == "POST"))
+            || (path.starts_with("/admin/cache/") && (method == "POST" || method == "GET")))
         {
             // Only GET, HEAD, and OPTIONS are allowed for S3 operations
             match method.as_str() {
@@ -1356,6 +1356,185 @@ impl ProxyHttp for YatagarasuProxy {
                 tracing::warn!(
                     request_id = %ctx.request_id(),
                     "Cache purge requested but cache is not enabled"
+                );
+
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Cache is not enabled",
+                });
+
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(404, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+
+                // Record metrics
+                self.metrics.increment_status_count(404);
+
+                return Ok(true); // Short-circuit
+            }
+        }
+
+        // Special handling for /admin/cache/stats endpoint (Phase 30: Cache Management API)
+        if path == "/admin/cache/stats" && method == "GET" {
+            // Check if cache is enabled
+            if let Some(ref cache) = self.cache {
+                // Check authentication if JWT is enabled
+                if let Some(jwt_config) = &self.config.jwt {
+                    if jwt_config.enabled {
+                        // Extract headers and query params
+                        let headers = Self::extract_headers(req);
+                        let query_params = Self::extract_query_params(req);
+
+                        // Authenticate request
+                        match authenticate_request(&headers, &query_params, jwt_config) {
+                            Ok(_claims) => {
+                                tracing::debug!(
+                                    request_id = %ctx.request_id(),
+                                    "Cache stats request authenticated successfully"
+                                );
+                            }
+                            Err(auth_error) => {
+                                tracing::warn!(
+                                    request_id = %ctx.request_id(),
+                                    error = %auth_error,
+                                    "Cache stats authentication failed"
+                                );
+
+                                // Build 401 Unauthorized response
+                                let response_json = serde_json::json!({
+                                    "status": "error",
+                                    "message": format!("Authentication required: {}", auth_error),
+                                });
+
+                                let response_body = response_json.to_string();
+
+                                let mut header = ResponseHeader::build(401, None)?;
+                                header.insert_header("Content-Type", "application/json")?;
+                                header.insert_header(
+                                    "Content-Length",
+                                    response_body.len().to_string(),
+                                )?;
+
+                                session
+                                    .write_response_header(Box::new(header), false)
+                                    .await?;
+                                session
+                                    .write_response_body(Some(response_body.into()), true)
+                                    .await?;
+
+                                // Record metrics
+                                self.metrics.increment_status_count(401);
+
+                                return Ok(true); // Short-circuit
+                            }
+                        }
+                    }
+                }
+
+                // Get cache statistics
+                match cache.stats().await {
+                    Ok(stats) => {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            hits = stats.hits,
+                            misses = stats.misses,
+                            evictions = stats.evictions,
+                            current_size_bytes = stats.current_size_bytes,
+                            current_item_count = stats.current_item_count,
+                            max_size_bytes = stats.max_size_bytes,
+                            "Cache stats retrieved successfully"
+                        );
+
+                        // Calculate hit rate
+                        let total_requests = stats.hits + stats.misses;
+                        let hit_rate = if total_requests > 0 {
+                            (stats.hits as f64) / (total_requests as f64)
+                        } else {
+                            0.0
+                        };
+
+                        // Build success response JSON
+                        let response_json = serde_json::json!({
+                            "status": "success",
+                            "data": {
+                                "hits": stats.hits,
+                                "misses": stats.misses,
+                                "hit_rate": format!("{:.4}", hit_rate),
+                                "evictions": stats.evictions,
+                                "current_size_bytes": stats.current_size_bytes,
+                                "current_item_count": stats.current_item_count,
+                                "max_size_bytes": stats.max_size_bytes,
+                            },
+                            "timestamp": std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(200, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+
+                        // Record metrics
+                        self.metrics.increment_status_count(200);
+
+                        return Ok(true); // Short-circuit
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            request_id = %ctx.request_id(),
+                            error = %e,
+                            "Failed to retrieve cache stats"
+                        );
+
+                        // Build error response JSON
+                        let response_json = serde_json::json!({
+                            "status": "error",
+                            "message": format!("Failed to retrieve cache stats: {}", e),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(500, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+
+                        // Record metrics
+                        self.metrics.increment_status_count(500);
+
+                        return Ok(true); // Short-circuit
+                    }
+                }
+            } else {
+                // Cache not enabled
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    "Cache stats requested but cache is not enabled"
                 );
 
                 let response_json = serde_json::json!({
