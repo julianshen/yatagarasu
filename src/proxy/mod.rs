@@ -1746,77 +1746,89 @@ impl ProxyHttp for YatagarasuProxy {
             // Only check cache for GET requests (not HEAD, etc.)
             let method = ctx.method();
             if method == "GET" {
-                let bucket_config = ctx.bucket_config().ok_or_else(|| {
-                    pingora_core::Error::explain(
-                        pingora_core::ErrorType::InternalError,
-                        "Missing bucket config in context",
-                    )
-                })?;
+                // Cache Bypass Logic: Range requests always bypass cache
+                // Range requests are for partial content (video seeking, parallel downloads)
+                // and we don't cache partial responses
+                let headers = ctx.headers();
+                if headers.contains_key("range") || headers.contains_key("Range") {
+                    tracing::debug!(
+                        request_id = %ctx.request_id(),
+                        "Range request detected - bypassing cache"
+                    );
+                    // Skip cache lookup - fall through to Ok(false) at the end
+                } else {
+                    let bucket_config = ctx.bucket_config().ok_or_else(|| {
+                        pingora_core::Error::explain(
+                            pingora_core::ErrorType::InternalError,
+                            "Missing bucket config in context",
+                        )
+                    })?;
 
-                // Construct cache key from bucket and object path
-                // The path includes the bucket prefix, so we need to extract just the object key
-                let path = ctx.path();
-                let object_key = path.trim_start_matches(&bucket_config.path_prefix);
+                    // Construct cache key from bucket and object path
+                    // The path includes the bucket prefix, so we need to extract just the object key
+                    let path = ctx.path();
+                    let object_key = path.trim_start_matches(&bucket_config.path_prefix);
 
-                let cache_key = CacheKey {
-                    bucket: bucket_config.name.clone(),
-                    object_key: object_key.to_string(),
-                    etag: None, // We don't know the etag yet
-                };
+                    let cache_key = CacheKey {
+                        bucket: bucket_config.name.clone(),
+                        object_key: object_key.to_string(),
+                        etag: None, // We don't know the etag yet
+                    };
 
-                // Try to get from cache
-                match cache.get(&cache_key).await {
-                    Ok(Some(cached_entry)) => {
-                        // Cache hit!
-                        tracing::debug!(
-                            request_id = %ctx.request_id(),
-                            bucket = %bucket_config.name,
-                            object_key = %object_key,
-                            "Cache hit - returning cached response"
-                        );
+                    // Try to get from cache
+                    match cache.get(&cache_key).await {
+                        Ok(Some(cached_entry)) => {
+                            // Cache hit!
+                            tracing::debug!(
+                                request_id = %ctx.request_id(),
+                                bucket = %bucket_config.name,
+                                object_key = %object_key,
+                                "Cache hit - returning cached response"
+                            );
 
-                        // Build response from cached entry
-                        let mut header = ResponseHeader::build(200, None)?;
-                        header.insert_header("Content-Type", cached_entry.content_type.as_str())?;
-                        header.insert_header("ETag", cached_entry.etag.as_str())?;
-                        header.insert_header("Content-Length", cached_entry.data.len().to_string())?;
-                        header.insert_header("X-Cache", "HIT")?; // Indicate cache hit
+                            // Build response from cached entry
+                            let mut header = ResponseHeader::build(200, None)?;
+                            header.insert_header("Content-Type", cached_entry.content_type.as_str())?;
+                            header.insert_header("ETag", cached_entry.etag.as_str())?;
+                            header.insert_header("Content-Length", cached_entry.data.len().to_string())?;
+                            header.insert_header("X-Cache", "HIT")?; // Indicate cache hit
 
-                        // Write response header
-                        session
-                            .write_response_header(Box::new(header), false)
-                            .await?;
+                            // Write response header
+                            session
+                                .write_response_header(Box::new(header), false)
+                                .await?;
 
-                        // Write cached data
-                        session
-                            .write_response_body(Some(cached_entry.data), true)
-                            .await?;
+                            // Write cached data
+                            session
+                                .write_response_body(Some(cached_entry.data), true)
+                                .await?;
 
-                        // Record metrics
-                        self.metrics.increment_status_count(200);
+                            // Record metrics
+                            self.metrics.increment_status_count(200);
 
-                        return Ok(true); // Short-circuit - don't go to upstream
-                    }
-                    Ok(None) => {
-                        // Cache miss - continue to upstream
-                        tracing::debug!(
-                            request_id = %ctx.request_id(),
-                            bucket = %bucket_config.name,
-                            object_key = %object_key,
-                            "Cache miss - proceeding to S3"
-                        );
-                        // Fall through to Ok(false) below
-                    }
-                    Err(e) => {
-                        // Cache error - log but continue to upstream (don't fail request)
-                        tracing::warn!(
-                            request_id = %ctx.request_id(),
-                            bucket = %bucket_config.name,
-                            object_key = %object_key,
-                            error = %e,
-                            "Cache lookup error - proceeding to S3"
-                        );
-                        // Fall through to Ok(false) below
+                            return Ok(true); // Short-circuit - don't go to upstream
+                        }
+                        Ok(None) => {
+                            // Cache miss - continue to upstream
+                            tracing::debug!(
+                                request_id = %ctx.request_id(),
+                                bucket = %bucket_config.name,
+                                object_key = %object_key,
+                                "Cache miss - proceeding to S3"
+                            );
+                            // Fall through to Ok(false) below
+                        }
+                        Err(e) => {
+                            // Cache error - log but continue to upstream (don't fail request)
+                            tracing::warn!(
+                                request_id = %ctx.request_id(),
+                                bucket = %bucket_config.name,
+                                object_key = %object_key,
+                                error = %e,
+                                "Cache lookup error - proceeding to S3"
+                            );
+                            // Fall through to Ok(false) below
+                        }
                     }
                 }
             }

@@ -1668,9 +1668,9 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [ ] Test: S3 response populates cache (deferred - requires response buffering)
 
 ### Cache Bypass Logic
-- [ ] Test: Range requests bypass cache (always)
-- [ ] Test: Large files (>max_item_size) bypass cache
-- [ ] Test: Conditional requests (If-None-Match) check cache ETag
+- [x] Test: Range requests bypass cache (always)
+- [ ] Test: Large files (>max_item_size) bypass cache (deferred - requires size checks)
+- [ ] Test: Conditional requests (If-None-Match) check cache ETag (deferred - requires ETag validation)
 
 ### ETag Validation
 - [ ] Test: Proxy includes ETag in cache entries
