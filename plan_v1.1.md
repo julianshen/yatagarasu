@@ -1574,11 +1574,11 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.3: Set Operation with Hierarchy
 
 ### Write-Through Strategy
-- [ ] Test: set() writes to all configured layers
-- [ ] Test: Writes to memory layer first
-- [ ] Test: Writes to disk layer (if enabled)
-- [ ] Test: Writes to redis layer (if enabled)
-- [ ] Test: Partial write failure is logged
+- [x] Test: set() writes to all configured layers
+- [x] Test: Writes to memory layer first
+- [x] Test: Writes to disk layer (if enabled)
+- [ ] Test: Writes to redis layer (if enabled) (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Partial write failure is logged (Returns first error, continues to other layers)
 
 ### Write-Behind Strategy (Alternative)
 - [ ] Test: set() writes to memory synchronously

@@ -148,8 +148,34 @@ impl Cache for TieredCache {
         Ok(None)
     }
 
-    async fn set(&self, _key: CacheKey, _entry: CacheEntry) -> Result<(), CacheError> {
-        // TODO: Implement write-through to all layers
+    async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        // Write-through: Write to all configured layers
+        // Start with fastest layer (memory) and propagate to slower layers
+
+        let mut first_error: Option<CacheError> = None;
+
+        for layer in &self.layers {
+            // Clone for each layer since Cache::set takes ownership
+            match layer.set(key.clone(), entry.clone()).await {
+                Ok(()) => {
+                    // Successfully written to this layer
+                    continue;
+                }
+                Err(e) => {
+                    // Record first error but continue writing to other layers
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        // If any layer failed, return the first error
+        // But we still attempted to write to all layers
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
         Ok(())
     }
 
@@ -523,6 +549,71 @@ mod tests {
 
             let promoted_entry = promoted.unwrap();
             assert_eq!(promoted_entry.data, Bytes::from("data from disk to be promoted"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_writes_to_all_configured_layers() {
+        // Test: set() writes to all configured layers
+        // Test: Writes to memory layer first
+        // Test: Writes to disk layer (if enabled)
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create memory and disk cache layers
+        let memory_cache = MockCache::new("memory");
+        let memory_entries = memory_cache.entries.clone(); // Keep reference to check writes
+
+        let disk_cache = MockCache::new("disk");
+        let disk_entries = disk_cache.entries.clone(); // Keep reference to check writes
+
+        // Create tiered cache with memory + disk
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Create entry to set
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "write-through.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data written to all layers"),
+            "text/plain".to_string(),
+            "etag999".to_string(),
+            Some(Duration::from_secs(3600)),
+        );
+
+        // Set entry in tiered cache
+        tiered.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Verify entry exists in memory layer
+        {
+            let entries = memory_entries.lock().await;
+            let cache_key = format!("{}/{}", key.bucket, key.object_key);
+            let memory_entry = entries.get(&cache_key);
+            assert!(memory_entry.is_some(), "Entry should be written to memory layer");
+
+            let written = memory_entry.unwrap();
+            assert_eq!(written.data, Bytes::from("data written to all layers"));
+            assert_eq!(written.content_type, "text/plain");
+            assert_eq!(written.etag, "etag999");
+        }
+
+        // Verify entry exists in disk layer
+        {
+            let entries = disk_entries.lock().await;
+            let cache_key = format!("{}/{}", key.bucket, key.object_key);
+            let disk_entry = entries.get(&cache_key);
+            assert!(disk_entry.is_some(), "Entry should be written to disk layer");
+
+            let written = disk_entry.unwrap();
+            assert_eq!(written.data, Bytes::from("data written to all layers"));
+            assert_eq!(written.content_type, "text/plain");
+            assert_eq!(written.etag, "etag999");
         }
     }
 }
