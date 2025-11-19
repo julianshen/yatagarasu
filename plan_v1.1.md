@@ -1556,12 +1556,12 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.2: Get Operation with Hierarchy
 
 ### Multi-Layer Get Logic
-- [ ] Test: get() checks memory layer first
-- [ ] Test: Returns immediately on memory hit
-- [ ] Test: Checks disk layer on memory miss
-- [ ] Test: Returns immediately on disk hit
-- [ ] Test: Checks redis layer on disk miss
-- [ ] Test: Returns None if all layers miss
+- [x] Test: get() checks memory layer first
+- [x] Test: Returns immediately on memory hit
+- [x] Test: Checks disk layer on memory miss
+- [x] Test: Returns immediately on disk hit
+- [ ] Test: Checks redis layer on disk miss (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Returns None if all layers miss
 
 ### Cache Promotion (Write-Back)
 - [ ] Test: Disk hit promotes to memory

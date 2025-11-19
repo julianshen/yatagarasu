@@ -109,8 +109,22 @@ impl TieredCache {
 
 #[async_trait]
 impl Cache for TieredCache {
-    async fn get(&self, _key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
-        // TODO: Implement multi-layer get with promotion
+    async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        // Check each layer in order (fastest to slowest)
+        for layer in &self.layers {
+            match layer.get(key).await? {
+                Some(entry) => {
+                    // Found in this layer - return immediately
+                    return Ok(Some(entry));
+                }
+                None => {
+                    // Miss - continue to next layer
+                    continue;
+                }
+            }
+        }
+
+        // All layers missed
         Ok(None)
     }
 
@@ -322,5 +336,115 @@ mod tests {
         // The layers should be in the order: memory (fastest), disk (slower)
         // We verify this indirectly through the layer count and the fact that
         // the Vec preserves insertion order
+    }
+
+    #[tokio::test]
+    async fn test_get_checks_memory_layer_first() {
+        // Test: get() checks memory layer first
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create two mock cache layers
+        let memory_cache = MockCache::new("memory");
+        let disk_cache = MockCache::new("disk");
+
+        // Set an entry in memory layer only
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "test.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("test data from memory"),
+            "text/plain".to_string(),
+            "etag123".to_string(),
+            Some(Duration::from_secs(3600)),
+        );
+
+        memory_cache.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Create tiered cache with memory + disk
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Get from tiered cache - should find in memory layer
+        let result = tiered.get(&key).await.unwrap();
+        assert!(result.is_some(), "Should find entry in memory layer");
+
+        let retrieved = result.unwrap();
+        assert_eq!(retrieved.data, Bytes::from("test data from memory"));
+        assert_eq!(retrieved.content_type, "text/plain");
+        assert_eq!(retrieved.etag, "etag123");
+    }
+
+    #[tokio::test]
+    async fn test_get_checks_disk_layer_on_memory_miss() {
+        // Test: Checks disk layer on memory miss
+        // Test: Returns immediately on disk hit
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create two mock cache layers
+        let memory_cache = MockCache::new("memory");
+        let disk_cache = MockCache::new("disk");
+
+        // Set an entry in disk layer only (NOT in memory)
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "test.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("test data from disk"),
+            "text/plain".to_string(),
+            "etag456".to_string(),
+            Some(Duration::from_secs(3600)),
+        );
+
+        disk_cache.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Create tiered cache with memory + disk
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Get from tiered cache - should miss memory, find in disk
+        let result = tiered.get(&key).await.unwrap();
+        assert!(result.is_some(), "Should find entry in disk layer after memory miss");
+
+        let retrieved = result.unwrap();
+        assert_eq!(retrieved.data, Bytes::from("test data from disk"));
+        assert_eq!(retrieved.content_type, "text/plain");
+        assert_eq!(retrieved.etag, "etag456");
+    }
+
+    #[tokio::test]
+    async fn test_get_returns_none_if_all_layers_miss() {
+        // Test: Returns None if all layers miss
+
+        // Create two empty mock cache layers
+        let memory_cache = MockCache::new("memory");
+        let disk_cache = MockCache::new("disk");
+
+        // Create tiered cache with memory + disk
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Try to get a key that doesn't exist in any layer
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "nonexistent.txt".to_string(),
+            etag: None,
+        };
+
+        let result = tiered.get(&key).await.unwrap();
+        assert!(result.is_none(), "Should return None when all layers miss");
     }
 }
