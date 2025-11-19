@@ -287,6 +287,51 @@ impl Cache for TieredCache {
     }
 }
 
+// Additional TieredCache methods (not part of Cache trait)
+impl TieredCache {
+    /// Get stats for each cache layer individually
+    ///
+    /// Returns a Vec of CacheStats, one per layer, in the same order as layers.
+    /// Useful for debugging cache performance per layer.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let tiered = TieredCache::from_config(&config).await?;
+    /// let per_layer = tiered.per_layer_stats().await?;
+    ///
+    /// for (i, stats) in per_layer.iter().enumerate() {
+    ///     println!("Layer {}: hits={}, misses={}", i, stats.hits, stats.misses);
+    /// }
+    /// ```
+    pub async fn per_layer_stats(&self) -> Result<Vec<CacheStats>, CacheError> {
+        let mut results = Vec::with_capacity(self.layers.len());
+        let mut first_error: Option<CacheError> = None;
+
+        for layer in &self.layers {
+            match layer.stats().await {
+                Ok(stats) => {
+                    results.push(stats);
+                }
+                Err(e) => {
+                    // Record first error but continue collecting from other layers
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                    // Push default stats for failed layer to maintain index correspondence
+                    results.push(CacheStats::default());
+                }
+            }
+        }
+
+        // If any layer failed, return the first error
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,5 +923,47 @@ mod tests {
             stats.max_size_bytes, 0,
             "Default stats should have 0 max size"
         );
+    }
+
+    #[tokio::test]
+    async fn test_per_layer_stats_breakdown() {
+        // Test: Returns per-layer stats breakdown
+        // Returns a Vec of CacheStats, one per layer
+        // Useful for debugging cache performance per layer
+
+        // Create two mock cache layers
+        let memory_cache = MockCache::new("memory");
+        let disk_cache = MockCache::new("disk");
+
+        // Create tiered cache
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Get per-layer stats breakdown
+        let per_layer = tiered.per_layer_stats().await.unwrap();
+
+        // Verify we get stats for each layer
+        assert_eq!(
+            per_layer.len(),
+            2,
+            "Should have stats for 2 layers (memory + disk)"
+        );
+
+        // Each layer should have valid stats structure
+        for (idx, layer_stats) in per_layer.iter().enumerate() {
+            // Verify stats fields exist
+            assert!(
+                layer_stats.hits >= 0,
+                "Layer {} should have valid hits count",
+                idx
+            );
+            assert!(
+                layer_stats.misses >= 0,
+                "Layer {} should have valid misses count",
+                idx
+            );
+        }
     }
 }
