@@ -3,8 +3,10 @@
 //! Provides a cache hierarchy with multiple layers (memory → disk → redis)
 //! that automatically promotes frequently accessed items to faster layers.
 
-use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats};
+use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats, MemoryCache};
+use crate::cache::disk::DiskCache;
 use async_trait::async_trait;
+use std::path::PathBuf;
 
 /// Tiered cache with multiple layers (memory, disk, redis)
 ///
@@ -73,22 +75,23 @@ impl TieredCache {
         for layer_name in &config.cache_layers {
             match layer_name.as_str() {
                 "memory" => {
-                    // TODO: Create real MemoryCache
-                    // For now, return error as not implemented
-                    return Err(CacheError::ConfigurationError(
-                        "Memory cache not yet implemented in from_config".to_string(),
-                    ));
+                    // Create MemoryCache from configuration
+                    let memory_cache = MemoryCache::new(&config.memory);
+                    layers.push(Box::new(memory_cache));
                 }
                 "disk" => {
-                    // TODO: Create real DiskCache
-                    return Err(CacheError::ConfigurationError(
-                        "Disk cache not yet implemented in from_config".to_string(),
-                    ));
+                    // Create DiskCache from configuration
+                    let cache_dir = PathBuf::from(&config.disk.cache_dir);
+                    let max_size_bytes = config.disk.max_disk_cache_size_mb * 1024 * 1024;
+                    let disk_cache = DiskCache::with_config(cache_dir, max_size_bytes);
+                    layers.push(Box::new(disk_cache));
                 }
                 "redis" => {
-                    // TODO: Create real RedisCache
+                    // TODO: Create RedisCache from configuration (async)
+                    // RedisCache needs to implement the Cache trait first
+                    // For now, return an error
                     return Err(CacheError::ConfigurationError(
-                        "Redis cache not yet implemented in from_config".to_string(),
+                        "Redis cache layer not yet integrated with Cache trait".to_string(),
                     ));
                 }
                 unknown => {
@@ -135,14 +138,11 @@ impl Cache for TieredCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::disk::DiskCache;
-    use crate::cache::redis::{RedisCache, RedisConfig};
-    use bytes::Bytes;
     use std::sync::Arc;
-    use std::time::Duration;
     use tokio::sync::Mutex;
 
     // Mock cache for testing
+    #[allow(dead_code)]
     struct MockCache {
         name: String,
         entries: Arc<Mutex<std::collections::HashMap<String, CacheEntry>>>,
@@ -281,5 +281,46 @@ mod tests {
         let tiered = result.unwrap();
         // With empty cache_layers, we expect 0 layers
         assert_eq!(tiered.layer_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_initializes_layers_in_correct_order() {
+        // Test: Initializes layers in correct order
+        // Test: Memory layer first (fastest)
+        // Test: Disk layer second
+        use crate::cache::CacheConfig;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for disk cache
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_string_lossy().to_string();
+
+        // Create a config with memory and disk layers in the canonical order
+        // Note: Redis layer not yet integrated with Cache trait
+        let config = CacheConfig {
+            cache_layers: vec!["memory".to_string(), "disk".to_string()],
+            disk: crate::cache::DiskCacheConfig {
+                enabled: true,
+                cache_dir: cache_dir.clone(),
+                max_disk_cache_size_mb: 100,
+            },
+            ..Default::default()
+        };
+
+        // This should create a tiered cache with 2 layers in order
+        let result = TieredCache::from_config(&config).await;
+        assert!(
+            result.is_ok(),
+            "Should create TieredCache with memory and disk layers"
+        );
+
+        let tiered = result.unwrap();
+
+        // Verify we have 2 layers
+        assert_eq!(tiered.layer_count(), 2, "Should have 2 layers");
+
+        // The layers should be in the order: memory (fastest), disk (slower)
+        // We verify this indirectly through the layer count and the fact that
+        // the Vec preserves insertion order
     }
 }

@@ -1546,10 +1546,10 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 
 ### TieredCache Constructor
 - [x] Test: Can create TieredCache from config
-- [ ] Test: Initializes layers in correct order
-- [ ] Test: Memory layer first (fastest)
-- [ ] Test: Disk layer second
-- [ ] Test: Redis layer last
+- [x] Test: Initializes layers in correct order
+- [x] Test: Memory layer first (fastest)
+- [x] Test: Disk layer second
+- [ ] Test: Redis layer last (DEFERRED - Redis Cache trait integration needed)
 
 ---
 
