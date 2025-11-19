@@ -1591,17 +1591,17 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.4: Delete & Clear Operations
 
 ### Delete from All Layers
-- [ ] Test: delete() removes from all layers
-- [ ] Test: Removes from memory layer
-- [ ] Test: Removes from disk layer
-- [ ] Test: Removes from redis layer
-- [ ] Test: Returns true if any layer had the key
+- [x] Test: delete() removes from all layers
+- [x] Test: Removes from memory layer
+- [x] Test: Removes from disk layer
+- [ ] Test: Removes from redis layer (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Returns true if any layer had the key
 
 ### Clear All Layers
-- [ ] Test: clear() clears all layers
-- [ ] Test: Clears memory layer
-- [ ] Test: Clears disk layer
-- [ ] Test: Clears redis layer
+- [x] Test: clear() clears all layers
+- [x] Test: Clears memory layer
+- [x] Test: Clears disk layer
+- [ ] Test: Clears redis layer (DEFERRED - Redis Cache trait integration needed)
 
 ---
 

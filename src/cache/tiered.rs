@@ -179,13 +179,62 @@ impl Cache for TieredCache {
         Ok(())
     }
 
-    async fn delete(&self, _key: &CacheKey) -> Result<bool, CacheError> {
-        // TODO: Implement delete from all layers
-        Ok(false)
+    async fn delete(&self, key: &CacheKey) -> Result<bool, CacheError> {
+        // Delete from all layers
+        // Returns true if any layer had the key
+
+        let mut any_deleted = false;
+        let mut first_error: Option<CacheError> = None;
+
+        for layer in &self.layers {
+            match layer.delete(key).await {
+                Ok(was_deleted) => {
+                    if was_deleted {
+                        any_deleted = true;
+                    }
+                }
+                Err(e) => {
+                    // Record first error but continue deleting from other layers
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        // If any layer failed, return the first error
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
+        Ok(any_deleted)
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        // TODO: Implement clear all layers
+        // Clear all layers
+
+        let mut first_error: Option<CacheError> = None;
+
+        for layer in &self.layers {
+            match layer.clear().await {
+                Ok(()) => {
+                    // Successfully cleared this layer
+                    continue;
+                }
+                Err(e) => {
+                    // Record first error but continue clearing other layers
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        // If any layer failed, return the first error
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
         Ok(())
     }
 
@@ -614,6 +663,137 @@ mod tests {
             assert_eq!(written.data, Bytes::from("data written to all layers"));
             assert_eq!(written.content_type, "text/plain");
             assert_eq!(written.etag, "etag999");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_removes_from_all_layers() {
+        // Test: delete() removes from all layers
+        // Test: Removes from memory layer
+        // Test: Removes from disk layer
+        // Test: Returns true if any layer had the key
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create memory and disk cache layers
+        let memory_cache = MockCache::new("memory");
+        let memory_entries = memory_cache.entries.clone();
+
+        let disk_cache = MockCache::new("disk");
+        let disk_entries = disk_cache.entries.clone();
+
+        // Create key and entry
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "to-delete.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data to be deleted"),
+            "text/plain".to_string(),
+            "etag111".to_string(),
+            Some(Duration::from_secs(3600)),
+        );
+
+        // Set entry in both layers
+        memory_cache.set(key.clone(), entry.clone()).await.unwrap();
+        disk_cache.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Verify entry exists in both layers
+        {
+            let memory_count = memory_entries.lock().await.len();
+            let disk_count = disk_entries.lock().await.len();
+            assert_eq!(memory_count, 1, "Memory should have 1 entry");
+            assert_eq!(disk_count, 1, "Disk should have 1 entry");
+        }
+
+        // Create tiered cache
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Delete from tiered cache
+        let deleted = tiered.delete(&key).await.unwrap();
+        assert!(deleted, "Should return true when entry exists");
+
+        // Verify entry is removed from memory layer
+        {
+            let entries = memory_entries.lock().await;
+            let cache_key = format!("{}/{}", key.bucket, key.object_key);
+            assert!(entries.get(&cache_key).is_none(), "Entry should be removed from memory");
+        }
+
+        // Verify entry is removed from disk layer
+        {
+            let entries = disk_entries.lock().await;
+            let cache_key = format!("{}/{}", key.bucket, key.object_key);
+            assert!(entries.get(&cache_key).is_none(), "Entry should be removed from disk");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_clear_clears_all_layers() {
+        // Test: clear() clears all layers
+        // Test: Clears memory layer
+        // Test: Clears disk layer
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create memory and disk cache layers
+        let memory_cache = MockCache::new("memory");
+        let memory_entries = memory_cache.entries.clone();
+
+        let disk_cache = MockCache::new("disk");
+        let disk_entries = disk_cache.entries.clone();
+
+        // Add multiple entries to both layers
+        for i in 0..5 {
+            let key = CacheKey {
+                bucket: "test-bucket".to_string(),
+                object_key: format!("file{}.txt", i),
+                etag: None,
+            };
+
+            let entry = CacheEntry::new(
+                Bytes::from(format!("data {}", i)),
+                "text/plain".to_string(),
+                format!("etag{}", i),
+                Some(Duration::from_secs(3600)),
+            );
+
+            memory_cache.set(key.clone(), entry.clone()).await.unwrap();
+            disk_cache.set(key, entry).await.unwrap();
+        }
+
+        // Verify entries exist
+        {
+            let memory_count = memory_entries.lock().await.len();
+            let disk_count = disk_entries.lock().await.len();
+            assert_eq!(memory_count, 5, "Memory should have 5 entries");
+            assert_eq!(disk_count, 5, "Disk should have 5 entries");
+        }
+
+        // Create tiered cache
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Clear all layers
+        tiered.clear().await.unwrap();
+
+        // Verify memory layer is cleared
+        {
+            let memory_count = memory_entries.lock().await.len();
+            assert_eq!(memory_count, 0, "Memory should be cleared");
+        }
+
+        // Verify disk layer is cleared
+        {
+            let disk_count = disk_entries.lock().await.len();
+            assert_eq!(disk_count, 0, "Disk should be cleared");
         }
     }
 }
