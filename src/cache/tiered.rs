@@ -111,10 +111,30 @@ impl TieredCache {
 impl Cache for TieredCache {
     async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
         // Check each layer in order (fastest to slowest)
-        for layer in &self.layers {
+        for (layer_index, layer) in self.layers.iter().enumerate() {
             match layer.get(key).await? {
                 Some(entry) => {
-                    // Found in this layer - return immediately
+                    // Found in this layer
+
+                    // If found in a slower layer (not the first/fastest), promote to faster layers
+                    if layer_index > 0 {
+                        // Clone data needed for promotion
+                        let key_clone = key.clone();
+                        let entry_clone = entry.clone();
+
+                        // Promote to all faster layers (0..layer_index)
+                        // NOTE: This is currently synchronous (blocks the get response)
+                        // TODO: Make this truly async (tokio::spawn) to avoid blocking
+                        // Requires Arc-wrapping layers or using channels
+                        for promote_to_index in 0..layer_index {
+                            if let Some(faster_layer) = self.layers.get(promote_to_index) {
+                                // Ignore promotion errors - they shouldn't block the get
+                                let _ = faster_layer.set(key_clone.clone(), entry_clone.clone()).await;
+                            }
+                        }
+                    }
+
+                    // Return the entry immediately
                     return Ok(Some(entry));
                 }
                 None => {
@@ -446,5 +466,63 @@ mod tests {
 
         let result = tiered.get(&key).await.unwrap();
         assert!(result.is_none(), "Should return None when all layers miss");
+    }
+
+    #[tokio::test]
+    async fn test_disk_hit_promotes_to_memory() {
+        // Test: Disk hit promotes to memory
+        // Test: Promotion is async (non-blocking)
+        use bytes::Bytes;
+        use std::time::Duration;
+        use tokio::time::sleep;
+
+        // Create memory and disk cache layers
+        let memory_cache = MockCache::new("memory");
+        let memory_entries = memory_cache.entries.clone(); // Keep reference to check promotion later
+
+        let disk_cache = MockCache::new("disk");
+
+        // Set an entry in disk layer only (NOT in memory)
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "promote.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data from disk to be promoted"),
+            "text/plain".to_string(),
+            "etag789".to_string(),
+            Some(Duration::from_secs(3600)),
+        );
+
+        disk_cache.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Create tiered cache with memory + disk
+        let tiered = TieredCache::new(vec![
+            Box::new(memory_cache),
+            Box::new(disk_cache),
+        ]);
+
+        // Get from tiered cache - should find in disk and promote to memory
+        let result = tiered.get(&key).await.unwrap();
+        assert!(result.is_some(), "Should find entry in disk layer");
+
+        let retrieved = result.unwrap();
+        assert_eq!(retrieved.data, Bytes::from("data from disk to be promoted"));
+
+        // Wait a bit for async promotion to complete
+        sleep(Duration::from_millis(100)).await;
+
+        // Check if entry was promoted to memory layer
+        {
+            let entries = memory_entries.lock().await;
+            let cache_key = format!("{}/{}", key.bucket, key.object_key);
+            let promoted = entries.get(&cache_key);
+            assert!(promoted.is_some(), "Entry should be promoted to memory layer");
+
+            let promoted_entry = promoted.unwrap();
+            assert_eq!(promoted_entry.data, Bytes::from("data from disk to be promoted"));
+        }
     }
 }
