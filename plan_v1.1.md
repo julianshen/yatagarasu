@@ -1624,13 +1624,13 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.6: Cache Management API Endpoints
 
 ### POST /admin/cache/purge (Purge All)
-- [ ] Test: Endpoint exists and responds
-- [ ] Test: Requires JWT authentication
-- [ ] Test: Requires admin claim in JWT
-- [ ] Test: Clears all cache layers
-- [ ] Test: Returns success message
-- [ ] Test: Returns 401 without valid JWT
-- [ ] Test: Returns 403 without admin claim
+- [x] Test: Endpoint exists and responds
+- [x] Test: Requires JWT authentication
+- [ ] Test: Requires admin claim in JWT (DEFERRED - future enhancement)
+- [x] Test: Clears all cache layers
+- [x] Test: Returns success message
+- [x] Test: Returns 401 without valid JWT
+- [ ] Test: Returns 403 without admin claim (DEFERRED - no admin claim check yet)
 
 ### POST /admin/cache/purge/:bucket (Purge Bucket)
 - [ ] Test: Endpoint accepts bucket name parameter

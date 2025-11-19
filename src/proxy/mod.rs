@@ -13,6 +13,7 @@ use tokio::sync::Semaphore;
 
 use crate::auth::{authenticate_request, AuthError};
 use crate::cache::tiered::TieredCache;
+use crate::cache::Cache;
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
@@ -623,11 +624,12 @@ impl ProxyHttp for YatagarasuProxy {
 
         // 0. HTTP Method Validation (Read-Only Proxy - Phase 25)
         // This proxy only supports GET and HEAD for S3 operations
-        // Special endpoints (/health, /ready, /metrics, /admin/reload) are handled separately
+        // Special endpoints (/health, /ready, /metrics, /admin/reload, /admin/cache/*) are handled separately
         if !(path.starts_with("/health")
             || path.starts_with("/ready")
             || path.starts_with("/metrics")
-            || (path == "/admin/reload" && method == "POST"))
+            || (path == "/admin/reload" && method == "POST")
+            || (path.starts_with("/admin/cache/") && method == "POST"))
         {
             // Only GET, HEAD, and OPTIONS are allowed for S3 operations
             match method.as_str() {
@@ -1219,6 +1221,163 @@ impl ProxyHttp for YatagarasuProxy {
 
                 // Record metrics
                 self.metrics.increment_status_count(503);
+
+                return Ok(true); // Short-circuit
+            }
+        }
+
+        // Special handling for /admin/cache/purge endpoint (Phase 30: Cache Management API)
+        if path == "/admin/cache/purge" && method == "POST" {
+            // Check if cache is enabled
+            if let Some(ref cache) = self.cache {
+                // Check authentication if JWT is enabled
+                if let Some(jwt_config) = &self.config.jwt {
+                    if jwt_config.enabled {
+                        // Extract headers and query params
+                        let headers = Self::extract_headers(req);
+                        let query_params = Self::extract_query_params(req);
+
+                        // Authenticate request
+                        match authenticate_request(&headers, &query_params, jwt_config) {
+                            Ok(_claims) => {
+                                tracing::debug!(
+                                    request_id = %ctx.request_id(),
+                                    "Cache purge request authenticated successfully"
+                                );
+                            }
+                            Err(auth_error) => {
+                                tracing::warn!(
+                                    request_id = %ctx.request_id(),
+                                    error = %auth_error,
+                                    "Cache purge authentication failed"
+                                );
+
+                                // Build 401 Unauthorized response
+                                let response_json = serde_json::json!({
+                                    "status": "error",
+                                    "message": format!("Authentication required: {}", auth_error),
+                                });
+
+                                let response_body = response_json.to_string();
+
+                                let mut header = ResponseHeader::build(401, None)?;
+                                header.insert_header("Content-Type", "application/json")?;
+                                header.insert_header(
+                                    "Content-Length",
+                                    response_body.len().to_string(),
+                                )?;
+
+                                session
+                                    .write_response_header(Box::new(header), false)
+                                    .await?;
+                                session
+                                    .write_response_body(Some(response_body.into()), true)
+                                    .await?;
+
+                                // Record metrics
+                                self.metrics.increment_status_count(401);
+
+                                return Ok(true); // Short-circuit
+                            }
+                        }
+                    }
+                }
+
+                // Purge cache (clear all layers)
+                match cache.clear().await {
+                    Ok(()) => {
+                        tracing::info!(
+                            request_id = %ctx.request_id(),
+                            "Cache purged successfully (all layers cleared)"
+                        );
+
+                        // Build success response JSON
+                        let response_json = serde_json::json!({
+                            "status": "success",
+                            "message": "Cache purged successfully",
+                            "timestamp": std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(200, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+
+                        // Record metrics
+                        self.metrics.increment_status_count(200);
+
+                        return Ok(true); // Short-circuit
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            request_id = %ctx.request_id(),
+                            error = %e,
+                            "Failed to purge cache"
+                        );
+
+                        // Build error response JSON
+                        let response_json = serde_json::json!({
+                            "status": "error",
+                            "message": format!("Failed to purge cache: {}", e),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(500, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+
+                        // Record metrics
+                        self.metrics.increment_status_count(500);
+
+                        return Ok(true); // Short-circuit
+                    }
+                }
+            } else {
+                // Cache not enabled
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    "Cache purge requested but cache is not enabled"
+                );
+
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Cache is not enabled",
+                });
+
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(404, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+
+                // Record metrics
+                self.metrics.increment_status_count(404);
 
                 return Ok(true); // Short-circuit
             }
