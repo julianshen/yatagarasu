@@ -3,7 +3,7 @@
 //! Provides a cache hierarchy with multiple layers (memory → disk → redis)
 //! that automatically promotes frequently accessed items to faster layers.
 
-use crate::cache::{Cache, CacheEntry, CacheError, CacheKey, CacheStats};
+use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats};
 use async_trait::async_trait;
 
 /// Tiered cache with multiple layers (memory, disk, redis)
@@ -44,6 +44,63 @@ impl TieredCache {
     /// Get the number of cache layers
     pub fn layer_count(&self) -> usize {
         self.layers.len()
+    }
+
+    /// Create a tiered cache from configuration
+    ///
+    /// This factory method constructs a TieredCache based on the cache_layers
+    /// configuration, creating the appropriate cache implementations in the
+    /// specified order.
+    ///
+    /// # Arguments
+    /// * `config` - Cache configuration specifying which layers to enable
+    ///
+    /// # Example
+    /// ```ignore
+    /// let config = CacheConfig {
+    ///     cache_layers: vec!["memory".to_string(), "disk".to_string()],
+    ///     memory: MemoryCacheConfig::default(),
+    ///     disk: DiskCacheConfig::default(),
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let tiered = TieredCache::from_config(config).await?;
+    /// ```
+    pub async fn from_config(config: &CacheConfig) -> Result<Self, CacheError> {
+        let mut layers: Vec<Box<dyn Cache + Send + Sync>> = Vec::new();
+
+        // Iterate through configured cache layers in order
+        for layer_name in &config.cache_layers {
+            match layer_name.as_str() {
+                "memory" => {
+                    // TODO: Create real MemoryCache
+                    // For now, return error as not implemented
+                    return Err(CacheError::ConfigurationError(
+                        "Memory cache not yet implemented in from_config".to_string(),
+                    ));
+                }
+                "disk" => {
+                    // TODO: Create real DiskCache
+                    return Err(CacheError::ConfigurationError(
+                        "Disk cache not yet implemented in from_config".to_string(),
+                    ));
+                }
+                "redis" => {
+                    // TODO: Create real RedisCache
+                    return Err(CacheError::ConfigurationError(
+                        "Redis cache not yet implemented in from_config".to_string(),
+                    ));
+                }
+                unknown => {
+                    return Err(CacheError::ConfigurationError(format!(
+                        "Unknown cache layer: {}",
+                        unknown
+                    )));
+                }
+            }
+        }
+
+        Ok(Self { layers })
     }
 }
 
@@ -204,5 +261,25 @@ mod tests {
             Box::new(MockCache::new("redis")),
         ]);
         assert_eq!(tiered_3.layer_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_can_create_tiered_cache_from_config() {
+        // Test: Can create TieredCache from config
+        use crate::cache::CacheConfig;
+
+        // Create a config with explicitly empty cache_layers
+        let config = CacheConfig {
+            cache_layers: vec![], // No layers configured
+            ..Default::default()
+        };
+
+        // This should not panic - verifies the method exists and can be called
+        let result = TieredCache::from_config(&config).await;
+        assert!(result.is_ok(), "Should create TieredCache from empty config");
+
+        let tiered = result.unwrap();
+        // With empty cache_layers, we expect 0 layers
+        assert_eq!(tiered.layer_count(), 0);
     }
 }

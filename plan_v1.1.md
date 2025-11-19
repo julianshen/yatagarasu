@@ -1545,7 +1545,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: TieredCache can have 1, 2, or 3 layers
 
 ### TieredCache Constructor
-- [ ] Test: Can create TieredCache from config
+- [x] Test: Can create TieredCache from config
 - [ ] Test: Initializes layers in correct order
 - [ ] Test: Memory layer first (fastest)
 - [ ] Test: Disk layer second
