@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 use crate::auth::{authenticate_request, AuthError};
+use crate::cache::tiered::TieredCache;
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
@@ -46,6 +47,9 @@ pub struct YatagarasuProxy {
     start_time: Instant,
     /// Replica sets per bucket (Phase 23: High Availability bucket replication with automatic failover)
     replica_sets: Arc<HashMap<String, crate::replica_set::ReplicaSet>>,
+    /// Tiered cache (memory → disk → redis) for caching S3 responses (Phase 30)
+    /// Optional: cache is only enabled if configured
+    cache: Option<Arc<TieredCache>>,
 }
 
 impl YatagarasuProxy {
@@ -140,6 +144,9 @@ impl YatagarasuProxy {
 
         let security_limits = config.server.security_limits.to_security_limits();
 
+        // TODO Phase 30: Initialize cache from config if enabled
+        let cache = None; // Temporarily None until cache initialization is implemented
+
         Self {
             config: Arc::new(config),
             router,
@@ -153,6 +160,7 @@ impl YatagarasuProxy {
             security_limits,
             start_time: Instant::now(),
             replica_sets: Arc::new(replica_sets),
+            cache,
         }
     }
 
@@ -248,6 +256,9 @@ impl YatagarasuProxy {
 
         let security_limits = config.server.security_limits.to_security_limits();
 
+        // TODO Phase 30: Initialize cache from config if enabled
+        let cache = None; // Temporarily None until cache initialization is implemented
+
         Self {
             config: Arc::new(config),
             router,
@@ -261,6 +272,7 @@ impl YatagarasuProxy {
             security_limits,
             start_time: Instant::now(),
             replica_sets: Arc::new(replica_sets),
+            cache,
         }
     }
 
