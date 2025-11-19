@@ -276,6 +276,13 @@ impl YatagarasuProxy {
         }
     }
 
+    /// Set the cache instance (used for testing and optional cache initialization)
+    /// Phase 30: Cache integration
+    pub fn with_cache(mut self, cache: Arc<TieredCache>) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
     /// Get a reference to the metrics instance
     pub fn metrics(&self) -> Arc<Metrics> {
         Arc::clone(&self.metrics)
