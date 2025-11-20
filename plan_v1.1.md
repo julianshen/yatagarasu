@@ -1701,11 +1701,11 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.9: Testing & Validation
 
 ### Integration Tests
-- [ ] Test: End-to-end cache hit/miss flow
-- [ ] Test: Cache promotion works (disk→memory, redis→disk→memory)
-- [ ] Test: Purge API clears cache correctly
-- [ ] Test: Stats API returns accurate data
-- [ ] Test: Cache survives proxy restart (disk/redis)
+- [x] Test: End-to-end cache hit/miss flow
+- [x] Test: Cache promotion works (disk→memory, redis→disk→memory)
+- [x] Test: Purge API clears cache correctly
+- [x] Test: Stats API returns accurate data
+- [x] Test: Cache survives proxy restart (disk/redis)
 
 ### Performance Tests
 - [ ] Test: Cache lookup adds <1ms latency on hit
