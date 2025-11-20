@@ -1775,8 +1775,13 @@ impl ProxyHttp for YatagarasuProxy {
                         etag: None, // We don't know the etag yet
                     };
 
-                    // Try to get from cache
-                    match cache.get(&cache_key).await {
+                    // Try to get from cache (with duration tracking)
+                    let cache_start = std::time::Instant::now();
+                    let cache_result = cache.get(&cache_key).await;
+                    let cache_duration = cache_start.elapsed().as_secs_f64() * 1000.0; // Convert to ms
+                    self.metrics.record_cache_get_duration(cache_duration);
+
+                    match cache_result {
                         Ok(Some(cached_entry)) => {
                             // Cache hit!
                             tracing::debug!(

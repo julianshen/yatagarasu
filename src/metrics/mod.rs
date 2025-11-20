@@ -100,6 +100,8 @@ pub struct Metrics {
     // Phase 30: Cache metrics
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
+    cache_get_durations: Mutex<Vec<u64>>, // microseconds
+    cache_set_durations: Mutex<Vec<u64>>, // microseconds
 }
 
 impl Metrics {
@@ -146,6 +148,8 @@ impl Metrics {
             active_replica: Mutex::new(HashMap::new()),
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
+            cache_get_durations: Mutex::new(Vec::new()),
+            cache_set_durations: Mutex::new(Vec::new()),
         }
     }
 
@@ -196,6 +200,22 @@ impl Metrics {
     /// Increment cache miss counter (Phase 30)
     pub fn increment_cache_miss(&self) {
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record cache get operation duration in milliseconds (Phase 30)
+    pub fn record_cache_get_duration(&self, duration_ms: f64) {
+        let duration_us = (duration_ms * 1000.0) as u64;
+        if let Ok(mut durations) = self.cache_get_durations.lock() {
+            durations.push(duration_us);
+        }
+    }
+
+    /// Record cache set operation duration in milliseconds (Phase 30)
+    pub fn record_cache_set_duration(&self, duration_ms: f64) {
+        let duration_us = (duration_ms * 1000.0) as u64;
+        if let Ok(mut durations) = self.cache_set_durations.lock() {
+            durations.push(duration_us);
+        }
     }
 
     /// Get current request count (for testing)
@@ -366,6 +386,26 @@ impl Metrics {
     #[cfg(test)]
     pub fn get_cache_miss_count(&self) -> u64 {
         self.cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Get cache get durations in microseconds (Phase 30)
+    #[cfg(test)]
+    pub fn get_cache_get_durations(&self) -> Vec<u64> {
+        self.cache_get_durations
+            .lock()
+            .ok()
+            .map(|d| d.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get cache set durations in microseconds (Phase 30)
+    #[cfg(test)]
+    pub fn get_cache_set_durations(&self) -> Vec<u64> {
+        self.cache_set_durations
+            .lock()
+            .ok()
+            .map(|d| d.clone())
+            .unwrap_or_default()
     }
 
     /// Increment counter for a specific S3 operation

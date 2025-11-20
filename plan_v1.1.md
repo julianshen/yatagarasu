@@ -1692,9 +1692,9 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [ ] Test: Metrics include bucket label (deferred - requires per-bucket cache tracking)
 
 ### Histogram Metrics
-- [ ] Test: Add cache_get_duration_seconds histogram
-- [ ] Test: Add cache_set_duration_seconds histogram
-- [ ] Test: Histograms track latency percentiles
+- [x] Test: Add cache_get_duration_seconds histogram
+- [x] Test: Add cache_set_duration_seconds histogram
+- [x] Test: Histograms track latency percentiles
 
 ---
 
