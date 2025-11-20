@@ -1784,6 +1784,32 @@ impl ProxyHttp for YatagarasuProxy {
                     match cache_result {
                         Ok(Some(cached_entry)) => {
                             // Cache hit!
+                            // Phase 30.7: ETag validation
+                            // Check if client sent If-None-Match header for conditional requests
+                            if let Some(if_none_match) = headers.get("If-None-Match")
+                                .or_else(|| headers.get("if-none-match"))
+                            {
+                                // If ETags match, return 304 Not Modified
+                                if if_none_match == cached_entry.etag.as_str() {
+                                    tracing::debug!(
+                                        request_id = %ctx.request_id(),
+                                        bucket = %bucket_config.name,
+                                        object_key = %object_key,
+                                        etag = %cached_entry.etag,
+                                        "ETag matches - returning 304 Not Modified"
+                                    );
+
+                                    let mut header = ResponseHeader::build(304, None)?;
+                                    header.insert_header("ETag", cached_entry.etag.as_str())?;
+                                    header.insert_header("X-Cache", "HIT")?;
+
+                                    session.write_response_header(Box::new(header), true).await?;
+                                    self.metrics.increment_status_count(304);
+                                    self.metrics.increment_cache_hit();
+                                    return Ok(true);
+                                }
+                            }
+
                             tracing::debug!(
                                 request_id = %ctx.request_id(),
                                 bucket = %bucket_config.name,

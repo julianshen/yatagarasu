@@ -1670,13 +1670,14 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ### Cache Bypass Logic
 - [x] Test: Range requests bypass cache (always)
 - [ ] Test: Large files (>max_item_size) bypass cache (deferred - requires size checks)
-- [ ] Test: Conditional requests (If-None-Match) check cache ETag (deferred - requires ETag validation)
+- [x] Test: Conditional requests (If-None-Match) check cache ETag
 
 ### ETag Validation
-- [ ] Test: Proxy includes ETag in cache entries
-- [ ] Test: Validates cached ETag matches S3 ETag on hit
-- [ ] Test: Invalidates cache if ETags don't match
-- [ ] Test: Refreshes cache entry with updated content
+- [x] Test: Proxy includes ETag in cache entries
+- [x] Test: Validates If-None-Match header on cache hit
+- [x] Test: Returns 304 Not Modified when ETags match
+- [ ] Test: Invalidates cache if ETags don't match (deferred - requires upstream ETag comparison)
+- [ ] Test: Refreshes cache entry with updated content (deferred - requires response buffering)
 
 ---
 
