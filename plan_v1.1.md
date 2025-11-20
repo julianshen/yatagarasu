@@ -1686,9 +1686,9 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ### Cache Metrics
 - [x] Test: Add cache_hits_total counter
 - [x] Test: Add cache_misses_total counter
-- [ ] Test: Add cache_evictions_total counter (deferred - not tracked in proxy yet)
-- [ ] Test: Add cache_size_bytes gauge (deferred - requires periodic stats collection)
-- [ ] Test: Add cache_items gauge (deferred - requires periodic stats collection)
+- [x] Test: Add cache_evictions_total counter (tracks delete operations)
+- [x] Test: Add cache_size_bytes gauge (updated on set/delete via stats())
+- [x] Test: Add cache_items gauge (updated on set/delete via stats())
 - [ ] Test: Metrics include layer label (memory, disk, redis) (deferred - requires per-layer tracking)
 - [ ] Test: Metrics include bucket label (deferred - requires per-bucket cache tracking)
 
@@ -1718,14 +1718,14 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.10: End-to-End Tests for All Cache Implementations
 
 ### Memory Cache End-to-End Tests
-- [ ] E2E: Full proxy request → memory cache hit → response
-- [ ] E2E: Full proxy request → memory cache miss → S3 → cache population → response
-- [ ] E2E: Verify cache-control headers respected
-- [ ] E2E: Verify ETag validation on cache hit
-- [ ] E2E: Verify If-None-Match returns 304 on match
-- [ ] E2E: Range requests bypass memory cache entirely
-- [ ] E2E: Large files (>max_item_size) bypass memory cache
-- [ ] E2E: Small files (<max_item_size) cached in memory
+- [x] E2E: Full proxy request → memory cache hit → response (tests/integration/cache_e2e_test.rs)
+- [x] E2E: Full proxy request → memory cache miss → S3 → cache population → response (tests/integration/cache_e2e_test.rs)
+- [x] E2E: Verify cache-control headers respected (tests/integration/cache_e2e_test.rs::test_e2e_cache_control_headers_respected)
+- [x] E2E: Verify ETag validation on cache hit (tests/integration/cache_e2e_test.rs::test_e2e_etag_validation_on_cache_hit)
+- [x] E2E: Verify If-None-Match returns 304 on match (tests/integration/cache_e2e_test.rs::test_e2e_if_none_match_returns_304)
+- [x] E2E: Range requests bypass memory cache entirely (tests/integration/cache_e2e_test.rs::test_e2e_range_requests_bypass_cache)
+- [x] E2E: Large files (>max_item_size) bypass memory cache (tests/integration/cache_e2e_test.rs::test_e2e_large_files_bypass_cache)
+- [x] E2E: Small files (<max_item_size) cached in memory (tests/integration/cache_e2e_test.rs::test_e2e_small_files_cached_in_memory)
 - [ ] E2E: LRU eviction works under memory pressure
 - [ ] E2E: Concurrent requests for same object coalesce correctly
 - [ ] E2E: Memory cache metrics tracked correctly

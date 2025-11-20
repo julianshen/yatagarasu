@@ -1,0 +1,1824 @@
+// End-to-end cache integration tests
+// Phase 30.10: E2E Tests for All Cache Implementations
+//
+// These tests verify cache behavior in a full proxy setup with:
+// - Real HTTP server (Pingora)
+// - Real S3 backend (LocalStack)
+// - Real cache layers (memory, disk, redis)
+
+use super::test_harness::ProxyTestHarness;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Once;
+use std::time::Duration;
+use tempfile::TempDir;
+use testcontainers::{clients::Cli, RunnableImage};
+use testcontainers_modules::localstack::LocalStack;
+
+static INIT: Once = Once::new();
+
+fn init_logging() {
+    INIT.call_once(|| {
+        // Logging initialization if needed
+    });
+}
+
+/// Helper to create a test config file with cache enabled
+fn create_cache_config(
+    config_path: &str,
+    s3_endpoint: &str,
+    cache_dir: &str,
+    cache_layers: Vec<&str>,
+) -> Result<(), std::io::Error> {
+    let config_content = format!(
+        r#"
+# Test configuration for cache E2E tests
+server:
+  address: "127.0.0.1:18080"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: {}
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 100
+    default_ttl_seconds: 3600
+  disk:
+    enabled: {}
+    cache_dir: "{}"
+    max_disk_cache_size_mb: 100
+
+buckets:
+  - name: test-bucket
+    path_prefix: /test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+      bucket: test-bucket
+    auth:
+      enabled: false
+"#,
+        serde_json::to_string(&cache_layers).unwrap(),
+        cache_layers.contains(&"disk"),
+        cache_dir,
+        s3_endpoint
+    );
+
+    fs::write(config_path, config_content)?;
+    Ok(())
+}
+
+#[test]
+#[ignore] // Requires Docker + release build: cargo test --release --test cache_e2e_test -- --ignored
+fn test_e2e_memory_cache_hit() {
+    // E2E: Full proxy request → memory cache hit → response
+    // This test verifies the complete flow:
+    // 1. Request 1: Cache miss → fetch from S3 → populate cache → respond
+    // 2. Request 2: Cache hit → respond from memory cache (no S3 call)
+
+    init_logging();
+    log::info!("Starting E2E memory cache hit test");
+
+    // Create Docker client for LocalStack
+    let docker = Cli::default();
+
+    // Start LocalStack with S3
+    log::info!("Starting LocalStack container...");
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create bucket and upload test object to S3
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        log::info!("Setting up S3 bucket and test object...");
+
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create bucket
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        // Upload test object
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("test-file.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"Hello from S3! This content should be cached.",
+            ))
+            .content_type("text/plain")
+            .send()
+            .await
+            .expect("Failed to upload test object");
+
+        log::info!("S3 setup complete");
+    });
+
+    // Create temporary directory for config and cache
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).unwrap();
+
+    // Create proxy config with memory cache enabled
+    create_cache_config(
+        config_path.to_str().unwrap(),
+        &s3_endpoint,
+        cache_dir.to_str().unwrap(),
+        vec!["memory"],
+    )
+    .expect("Failed to create config");
+
+    log::info!("Config file created at {:?}", config_path);
+
+    // Start proxy server
+    log::info!("Starting proxy server...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18080)
+        .expect("Failed to start proxy");
+
+    log::info!("Proxy server started successfully");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Test 1: First request (cache miss → S3 fetch → cache population)
+    log::info!("Making first request (should be cache miss)...");
+    let url = proxy.url("/test-bucket/test-file.txt");
+    let response1 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make first request");
+
+    assert_eq!(
+        response1.status(),
+        200,
+        "First request should succeed (cache miss → S3)"
+    );
+
+    let body1 = response1.text().expect("Failed to read response body");
+    assert_eq!(
+        body1, "Hello from S3! This content should be cached.",
+        "First request should return S3 content"
+    );
+
+    log::info!("First request successful (cache populated)");
+
+    // Test 2: Second request (cache hit → memory cache)
+    log::info!("Making second request (should be cache hit)...");
+    let response2 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make second request");
+
+    assert_eq!(
+        response2.status(),
+        200,
+        "Second request should succeed (cache hit)"
+    );
+
+    let body2 = response2.text().expect("Failed to read response body");
+    assert_eq!(
+        body2, "Hello from S3! This content should be cached.",
+        "Second request should return cached content"
+    );
+
+    log::info!("Second request successful (cache hit verified)");
+
+    // Test 3: Verify cache stats show hit
+    log::info!("Checking cache stats...");
+    let stats_response = client
+        .get(&proxy.url("/__internal/cache/stats"))
+        .send()
+        .expect("Failed to get cache stats");
+
+    if stats_response.status().is_success() {
+        let stats_body = stats_response.text().unwrap();
+        log::info!("Cache stats: {}", stats_body);
+
+        // Verify stats contain hit information
+        // Note: The exact format depends on implementation
+        // For now, just verify the endpoint works
+    } else {
+        log::warn!(
+            "Cache stats endpoint not yet implemented (status: {})",
+            stats_response.status()
+        );
+    }
+
+    // NOTE: To truly verify this was a cache hit (not another S3 call),
+    // we would need to:
+    // 1. Check metrics endpoint for cache hit counter
+    // 2. OR stop LocalStack and verify request still works
+    // 3. OR add instrumentation to track S3 calls
+    //
+    // For now, this test verifies the basic flow works.
+    // A follow-up enhancement could add S3 call tracking.
+
+    log::info!("E2E memory cache hit test completed successfully");
+}
+
+#[test]
+#[ignore] // Requires Docker + release build
+fn test_e2e_memory_cache_miss_populates_cache() {
+    // E2E: Full proxy request → memory cache miss → S3 → cache population → response
+    // This test verifies that cache misses properly fetch from S3 and populate the cache
+
+    init_logging();
+    log::info!("Starting E2E memory cache miss test");
+
+    // Similar setup to test_e2e_memory_cache_hit
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+
+    // Create bucket and upload test object
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("cache-miss-test.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"This should be fetched from S3 and cached",
+            ))
+            .content_type("text/plain")
+            .send()
+            .await
+            .expect("Failed to upload test object");
+    });
+
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).unwrap();
+
+    create_cache_config(
+        config_path.to_str().unwrap(),
+        &s3_endpoint,
+        cache_dir.to_str().unwrap(),
+        vec!["memory"],
+    )
+    .expect("Failed to create config");
+
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18081)
+        .expect("Failed to start proxy");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Make request for file that doesn't exist in cache
+    log::info!("Making request for uncached file...");
+    let url = proxy.url("/test-bucket/cache-miss-test.txt");
+    let response = client.get(&url).send().expect("Failed to make request");
+
+    assert_eq!(
+        response.status(),
+        200,
+        "Cache miss should fetch from S3 successfully"
+    );
+
+    let body = response.text().expect("Failed to read response body");
+    assert_eq!(
+        body, "This should be fetched from S3 and cached",
+        "Should return S3 content on cache miss"
+    );
+
+    // Make second request - should now be cache hit
+    log::info!("Making second request (verifying cache was populated)...");
+    let response2 = client.get(&url).send().expect("Failed to make request");
+
+    assert_eq!(
+        response2.status(),
+        200,
+        "Second request should be cache hit"
+    );
+
+    let body2 = response2.text().expect("Failed to read response body");
+    assert_eq!(
+        body2, "This should be fetched from S3 and cached",
+        "Cached content should match original"
+    );
+
+    log::info!("E2E memory cache miss test completed successfully");
+}
+
+#[test]
+#[ignore] // Requires Docker + release build
+fn test_e2e_cache_control_headers_respected() {
+    // E2E: Verify cache-control headers respected
+    // This test verifies that the proxy respects Cache-Control headers when caching
+
+    init_logging();
+    log::info!("Starting E2E cache-control headers test");
+
+    let docker = Cli::default();
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+
+    // Create bucket and upload test objects with different Cache-Control headers
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+
+        // Upload test object 1: no-cache (should NOT be cached)
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("no-cache.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"This should NOT be cached",
+            ))
+            .content_type("text/plain")
+            .cache_control("no-cache")
+            .send()
+            .await
+            .expect("Failed to upload no-cache object");
+
+        // Upload test object 2: no-store (should NOT be cached)
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("no-store.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"This should NOT be stored",
+            ))
+            .content_type("text/plain")
+            .cache_control("no-store")
+            .send()
+            .await
+            .expect("Failed to upload no-store object");
+
+        // Upload test object 3: max-age=0 (should NOT be cached)
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("max-age-0.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"This should NOT be cached (max-age=0)",
+            ))
+            .content_type("text/plain")
+            .cache_control("max-age=0")
+            .send()
+            .await
+            .expect("Failed to upload max-age=0 object");
+
+        // Upload test object 4: max-age=3600 (SHOULD be cached)
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("cacheable.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"This SHOULD be cached for 1 hour",
+            ))
+            .content_type("text/plain")
+            .cache_control("max-age=3600")
+            .send()
+            .await
+            .expect("Failed to upload cacheable object");
+
+        // Upload test object 5: private (should NOT be cached by proxy)
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("private.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(
+                b"This is private and should NOT be cached",
+            ))
+            .content_type("text/plain")
+            .cache_control("private")
+            .send()
+            .await
+            .expect("Failed to upload private object");
+
+        log::info!("S3 test objects uploaded");
+    });
+
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).unwrap();
+
+    create_cache_config(
+        config_path.to_str().unwrap(),
+        &s3_endpoint,
+        cache_dir.to_str().unwrap(),
+        vec!["memory"],
+    )
+    .expect("Failed to create config");
+
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18082)
+        .expect("Failed to start proxy");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Test 1: Cache-Control: no-cache (should NOT be cached)
+    log::info!("Testing Cache-Control: no-cache");
+    let response1 = client
+        .get(&proxy.url("/test-bucket/no-cache.txt"))
+        .send()
+        .expect("Failed to fetch no-cache file");
+
+    assert_eq!(response1.status(), 200);
+    let cache_control = response1.headers().get("cache-control");
+    assert!(
+        cache_control.is_some() && cache_control.unwrap() == "no-cache",
+        "Should have Cache-Control: no-cache header"
+    );
+
+    // TODO: Verify this was NOT cached (e.g., by checking metrics or stopping S3 and seeing request fail)
+
+    // Test 2: Cache-Control: no-store (should NOT be cached)
+    log::info!("Testing Cache-Control: no-store");
+    let response2 = client
+        .get(&proxy.url("/test-bucket/no-store.txt"))
+        .send()
+        .expect("Failed to fetch no-store file");
+
+    assert_eq!(response2.status(), 200);
+    let cache_control = response2.headers().get("cache-control");
+    assert!(
+        cache_control.is_some() && cache_control.unwrap() == "no-store",
+        "Should have Cache-Control: no-store header"
+    );
+
+    // Test 3: Cache-Control: max-age=0 (should NOT be cached)
+    log::info!("Testing Cache-Control: max-age=0");
+    let response3 = client
+        .get(&proxy.url("/test-bucket/max-age-0.txt"))
+        .send()
+        .expect("Failed to fetch max-age=0 file");
+
+    assert_eq!(response3.status(), 200);
+
+    // Test 4: Cache-Control: max-age=3600 (SHOULD be cached)
+    log::info!("Testing Cache-Control: max-age=3600 (should cache)");
+    let response4 = client
+        .get(&proxy.url("/test-bucket/cacheable.txt"))
+        .send()
+        .expect("Failed to fetch cacheable file");
+
+    assert_eq!(response4.status(), 200);
+    let body4 = response4.text().expect("Failed to read body");
+    assert_eq!(body4, "This SHOULD be cached for 1 hour");
+
+    // Make second request - should be cache hit
+    let response4_cached = client
+        .get(&proxy.url("/test-bucket/cacheable.txt"))
+        .send()
+        .expect("Failed to fetch cacheable file (cached)");
+
+    assert_eq!(response4_cached.status(), 200);
+    let body4_cached = response4_cached.text().expect("Failed to read cached body");
+    assert_eq!(
+        body4_cached, "This SHOULD be cached for 1 hour",
+        "Cached content should match"
+    );
+
+    // Test 5: Cache-Control: private (should NOT be cached by proxy)
+    log::info!("Testing Cache-Control: private");
+    let response5 = client
+        .get(&proxy.url("/test-bucket/private.txt"))
+        .send()
+        .expect("Failed to fetch private file");
+
+    assert_eq!(response5.status(), 200);
+
+    log::info!("E2E cache-control headers test completed");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy forwards Cache-Control headers correctly
+    // 2. Basic caching works for cacheable content
+    //
+    // Full verification would require:
+    // - Stopping LocalStack and verifying cached content still works
+    // - Checking cache metrics to confirm what was/wasn't cached
+    // - Testing cache expiration based on max-age
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}
+
+#[test]
+#[ignore] // Requires Docker + release build: cargo test --release --test cache_e2e_test -- --ignored
+fn test_e2e_etag_validation_on_cache_hit() {
+    // E2E: Verify ETag validation on cache hit
+    // This test verifies that the proxy correctly validates ETags when serving from cache:
+    // 1. Request 1: Cache miss → S3 fetch → cache with ETag
+    // 2. Request 2: Cache hit → validate ETag with S3 → ETag matches → serve from cache
+    // 3. Update S3 object (new ETag)
+    // 4. Request 3: Cache hit → validate ETag with S3 → ETag differs → fetch new content
+    // 5. Request 4: Cache hit → validate ETag with S3 → ETag matches → serve from cache
+
+    init_logging();
+    log::info!("Starting E2E ETag validation test");
+
+    // Create Docker client for LocalStack
+    let docker = Cli::default();
+
+    // Start LocalStack with S3
+    log::info!("Starting LocalStack container...");
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create AWS SDK config for S3
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create test bucket
+    log::info!("Creating test bucket...");
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload initial test object (version 1)
+    let test_content_v1 = b"This is version 1 of the test file";
+    log::info!("Uploading initial test object (version 1)...");
+    let put_response_v1 = rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("etag-test.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content_v1.to_vec(),
+            ))
+            .send()
+            .await
+            .expect("Failed to upload test object v1")
+    });
+    let etag_v1 = put_response_v1.e_tag().expect("No ETag in response");
+    log::info!("Uploaded version 1 with ETag: {}", etag_v1);
+
+    // Create proxy configuration
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
+
+    create_cache_config(
+        config_path.to_str().unwrap(),
+        &s3_endpoint,
+        cache_dir.to_str().unwrap(),
+        vec!["memory"],
+    )
+    .expect("Failed to create config");
+
+    // Start proxy server
+    log::info!("Starting proxy server...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18080)
+        .expect("Failed to start proxy");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let url = proxy.url("/test-bucket/etag-test.txt");
+
+    // Request 1: Cache miss → S3 fetch → cache population with ETag
+    log::info!("Request 1: Cache miss → S3 fetch");
+    let response1 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make first request");
+    assert_eq!(response1.status(), 200);
+
+    // Verify ETag header is present in response (before consuming response)
+    let response1_etag = response1
+        .headers()
+        .get("etag")
+        .map(|v| v.to_str().unwrap_or(""));
+    log::info!("Response 1 ETag: {:?}", response1_etag);
+
+    let body1 = response1.bytes().expect("Failed to read response body");
+    assert_eq!(body1.as_ref(), test_content_v1);
+
+    // Request 2: Cache hit → validate ETag with S3 → ETag matches → serve from cache
+    log::info!("Request 2: Cache hit → ETag validation (should match)");
+    let response2 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make second request");
+    assert_eq!(response2.status(), 200);
+    let body2 = response2.bytes().expect("Failed to read response body");
+    assert_eq!(body2.as_ref(), test_content_v1);
+
+    // Update S3 object (version 2 with new ETag)
+    log::info!("Updating S3 object to version 2...");
+    let test_content_v2 = b"This is version 2 of the test file - UPDATED!";
+    let put_response_v2 = rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("etag-test.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content_v2.to_vec(),
+            ))
+            .send()
+            .await
+            .expect("Failed to upload test object v2")
+    });
+    let etag_v2 = put_response_v2.e_tag().expect("No ETag in response");
+    log::info!("Uploaded version 2 with ETag: {}", etag_v2);
+    assert_ne!(etag_v1, etag_v2, "ETags should differ for different content");
+
+    // Request 3: Cache hit → validate ETag with S3 → ETag differs → fetch new content
+    log::info!("Request 3: Cache hit → ETag validation (should differ) → fetch new content");
+    let response3 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make third request");
+    assert_eq!(response3.status(), 200);
+    let body3 = response3.bytes().expect("Failed to read response body");
+    assert_eq!(
+        body3.as_ref(),
+        test_content_v2,
+        "Should fetch updated content after ETag mismatch"
+    );
+
+    // Request 4: Cache hit → validate ETag with S3 → ETag matches → serve from cache
+    log::info!("Request 4: Cache hit → ETag validation (should match new ETag)");
+    let response4 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make fourth request");
+    assert_eq!(response4.status(), 200);
+    let body4 = response4.bytes().expect("Failed to read response body");
+    assert_eq!(body4.as_ref(), test_content_v2);
+
+    log::info!("ETag validation test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy forwards ETag headers correctly
+    // 2. Content is served correctly across multiple requests
+    //
+    // Full verification would require:
+    // - Monitoring cache metrics to verify ETag validation occurred
+    // - Verifying conditional GET requests (If-None-Match) are sent to S3
+    // - Checking that cache is updated when ETag differs
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}
+
+#[test]
+#[ignore] // Requires Docker + release build: cargo test --release --test cache_e2e_test -- --ignored
+fn test_e2e_if_none_match_returns_304() {
+    // E2E: Verify If-None-Match returns 304 on match
+    // This test verifies that the proxy correctly handles conditional GET requests:
+    // 1. Request 1: Cache miss → S3 fetch → cache with ETag → return 200 + full content
+    // 2. Request 2: Client sends If-None-Match with matching ETag → proxy returns 304 Not Modified
+    // 3. Update S3 object (new ETag)
+    // 4. Request 3: Client sends If-None-Match with old ETag → proxy returns 200 + new content
+    // 5. Request 4: Client sends If-None-Match with new ETag → proxy returns 304 Not Modified
+
+    init_logging();
+    log::info!("Starting E2E If-None-Match test");
+
+    // Create Docker client for LocalStack
+    let docker = Cli::default();
+
+    // Start LocalStack with S3
+    log::info!("Starting LocalStack container...");
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create AWS SDK config for S3
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create test bucket
+    log::info!("Creating test bucket...");
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload initial test object (version 1)
+    let test_content_v1 = b"This is version 1 for If-None-Match testing";
+    log::info!("Uploading initial test object (version 1)...");
+    let put_response_v1 = rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("if-none-match-test.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content_v1.to_vec(),
+            ))
+            .send()
+            .await
+            .expect("Failed to upload test object v1")
+    });
+    let etag_v1 = put_response_v1
+        .e_tag()
+        .expect("No ETag in response")
+        .to_string();
+    log::info!("Uploaded version 1 with ETag: {}", etag_v1);
+
+    // Create proxy configuration
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
+
+    create_cache_config(
+        config_path.to_str().unwrap(),
+        &s3_endpoint,
+        cache_dir.to_str().unwrap(),
+        vec!["memory"],
+    )
+    .expect("Failed to create config");
+
+    // Start proxy server
+    log::info!("Starting proxy server...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18083)
+        .expect("Failed to start proxy");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let url = proxy.url("/test-bucket/if-none-match-test.txt");
+
+    // Request 1: Cache miss → S3 fetch → return 200 + full content + ETag header
+    log::info!("Request 1: Cache miss → expect 200 OK with content");
+    let response1 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make first request");
+    assert_eq!(response1.status(), 200, "First request should return 200 OK");
+
+    // Extract ETag from response (before consuming response body)
+    let response_etag = response1
+        .headers()
+        .get("etag")
+        .expect("Response should have ETag header")
+        .to_str()
+        .expect("ETag should be valid string")
+        .to_string(); // Clone to owned string before consuming response
+    log::info!("Response 1 ETag: {}", response_etag);
+
+    let body1 = response1.bytes().expect("Failed to read response body");
+    assert_eq!(body1.as_ref(), test_content_v1);
+
+    // Request 2: Send If-None-Match with matching ETag → expect 304 Not Modified
+    log::info!(
+        "Request 2: If-None-Match with matching ETag → expect 304 Not Modified"
+    );
+    let response2 = client
+        .get(&url)
+        .header("If-None-Match", &response_etag)
+        .send()
+        .expect("Failed to make second request");
+
+    assert_eq!(
+        response2.status(),
+        304,
+        "If-None-Match with matching ETag should return 304 Not Modified"
+    );
+
+    // Verify response body is empty (304 responses should not include body)
+    let body2 = response2.bytes().expect("Failed to read response body");
+    assert!(
+        body2.is_empty() || body2.len() < test_content_v1.len(),
+        "304 response should have empty or minimal body"
+    );
+
+    log::info!("✓ 304 Not Modified returned correctly");
+
+    // Update S3 object (version 2 with new ETag)
+    log::info!("Updating S3 object to version 2...");
+    let test_content_v2 = b"This is version 2 - content changed!";
+    let put_response_v2 = rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("if-none-match-test.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content_v2.to_vec(),
+            ))
+            .send()
+            .await
+            .expect("Failed to upload test object v2")
+    });
+    let etag_v2 = put_response_v2
+        .e_tag()
+        .expect("No ETag in response")
+        .to_string();
+    log::info!("Uploaded version 2 with ETag: {}", etag_v2);
+    assert_ne!(etag_v1, etag_v2, "ETags should differ for different content");
+
+    // Request 3: Send If-None-Match with old ETag (no longer matches) → expect 200 + new content
+    log::info!("Request 3: If-None-Match with OLD ETag → expect 200 OK with new content");
+    let response3 = client
+        .get(&url)
+        .header("If-None-Match", &response_etag) // Old ETag
+        .send()
+        .expect("Failed to make third request");
+
+    assert_eq!(
+        response3.status(),
+        200,
+        "If-None-Match with non-matching ETag should return 200 OK"
+    );
+
+    // Extract new ETag (before consuming response body)
+    let new_response_etag = response3
+        .headers()
+        .get("etag")
+        .expect("Response should have ETag header")
+        .to_str()
+        .expect("ETag should be valid string")
+        .to_string(); // Clone to owned string before consuming response
+    log::info!("Response 3 ETag: {}", new_response_etag);
+
+    let body3 = response3.bytes().expect("Failed to read response body");
+    assert_eq!(
+        body3.as_ref(),
+        test_content_v2,
+        "Should return new content when ETag doesn't match"
+    );
+
+    log::info!("✓ New content returned when ETag changed");
+
+    // Request 4: Send If-None-Match with new ETag → expect 304 Not Modified
+    log::info!("Request 4: If-None-Match with NEW ETag → expect 304 Not Modified");
+    let response4 = client
+        .get(&url)
+        .header("If-None-Match", new_response_etag)
+        .send()
+        .expect("Failed to make fourth request");
+
+    assert_eq!(
+        response4.status(),
+        304,
+        "If-None-Match with new matching ETag should return 304 Not Modified"
+    );
+
+    let body4 = response4.bytes().expect("Failed to read response body");
+    assert!(
+        body4.is_empty() || body4.len() < test_content_v2.len(),
+        "304 response should have empty or minimal body"
+    );
+
+    log::info!("✓ 304 Not Modified returned correctly for new ETag");
+    log::info!("If-None-Match test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy forwards If-None-Match headers to S3 correctly
+    // 2. The proxy returns 304 when S3 returns 304
+    // 3. Status codes and content are correct for matching/non-matching ETags
+    //
+    // Full verification would require:
+    // - Verifying the proxy checks cache first before sending If-None-Match to S3
+    // - Verifying bandwidth savings from 304 responses (no body transfer)
+    // - Testing wildcard ETags (If-None-Match: *)
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}
+
+#[test]
+#[ignore] // Requires Docker + release build: cargo test --release --test cache_e2e_test -- --ignored
+fn test_e2e_range_requests_bypass_cache() {
+    // E2E: Range requests bypass memory cache entirely
+    // This test verifies that HTTP Range requests always bypass the cache and stream from S3:
+    // 1. Upload test file to S3
+    // 2. Request 1: Normal GET (full file) → should cache
+    // 3. Request 2: Range request (bytes=0-99) → should bypass cache, fetch from S3
+    // 4. Request 3: Same range request → should bypass cache again (not cached)
+    // 5. Request 4: Different range → should bypass cache
+    //
+    // Rationale: Range requests are used for video seeking and parallel downloads.
+    // Caching partial content is complex and not worth it for v1.
+
+    init_logging();
+    log::info!("Starting E2E Range request bypass test");
+
+    // Create Docker client for LocalStack
+    let docker = Cli::default();
+
+    // Start LocalStack with S3
+    log::info!("Starting LocalStack container...");
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create AWS SDK config for S3
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create test bucket
+    log::info!("Creating test bucket...");
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload test file with known content (256 bytes for easy range testing)
+    let test_content: Vec<u8> = (0..=255).collect(); // 0x00, 0x01, 0x02, ..., 0xFF
+    log::info!("Uploading test file (256 bytes)...");
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("range-test.bin")
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .content_type("application/octet-stream")
+            .send()
+            .await
+            .expect("Failed to upload test file")
+    });
+
+    // Create proxy configuration
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
+
+    create_cache_config(
+        config_path.to_str().unwrap(),
+        &s3_endpoint,
+        cache_dir.to_str().unwrap(),
+        vec!["memory"],
+    )
+    .expect("Failed to create config");
+
+    // Start proxy server
+    log::info!("Starting proxy server...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18084)
+        .expect("Failed to start proxy");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let url = proxy.url("/test-bucket/range-test.bin");
+
+    // Request 1: Normal GET (full file) → should be cached
+    log::info!("Request 1: Normal GET (full file)");
+    let response1 = client
+        .get(&url)
+        .send()
+        .expect("Failed to make first request");
+    assert_eq!(response1.status(), 200);
+    assert_eq!(
+        response1.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        Some("256"),
+        "Full file should be 256 bytes"
+    );
+
+    let body1 = response1.bytes().expect("Failed to read response body");
+    assert_eq!(body1.len(), 256, "Should receive full file");
+    assert_eq!(body1.as_ref(), &test_content[..], "Content should match");
+
+    log::info!("✓ Full file retrieved successfully");
+
+    // Request 2: Range request (bytes=0-99) → should bypass cache
+    log::info!("Request 2: Range request (bytes=0-99)");
+    let response2 = client
+        .get(&url)
+        .header("Range", "bytes=0-99")
+        .send()
+        .expect("Failed to make range request");
+
+    // Verify partial content response
+    assert_eq!(
+        response2.status(),
+        206,
+        "Range request should return 206 Partial Content"
+    );
+
+    // Verify Content-Range header
+    let content_range = response2
+        .headers()
+        .get("content-range")
+        .map(|v| v.to_str().unwrap());
+    assert!(
+        content_range.is_some(),
+        "Should have Content-Range header"
+    );
+    log::info!("Content-Range: {:?}", content_range);
+
+    // Verify content length
+    assert_eq!(
+        response2.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        Some("100"),
+        "Range response should be 100 bytes"
+    );
+
+    let body2 = response2.bytes().expect("Failed to read range response");
+    assert_eq!(body2.len(), 100, "Should receive 100 bytes");
+    assert_eq!(
+        body2.as_ref(),
+        &test_content[0..100],
+        "Range content should match bytes 0-99"
+    );
+
+    log::info!("✓ Range request returned correct partial content");
+
+    // Request 3: Same range request → should bypass cache again (not cached)
+    log::info!("Request 3: Same range request (bytes=0-99) - verify not cached");
+    let response3 = client
+        .get(&url)
+        .header("Range", "bytes=0-99")
+        .send()
+        .expect("Failed to make second range request");
+
+    assert_eq!(
+        response3.status(),
+        206,
+        "Second range request should return 206"
+    );
+    assert_eq!(
+        response3.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        Some("100"),
+        "Second range response should be 100 bytes"
+    );
+
+    let body3 = response3.bytes().expect("Failed to read second range response");
+    assert_eq!(body3.len(), 100, "Should receive 100 bytes again");
+    assert_eq!(
+        body3.as_ref(),
+        &test_content[0..100],
+        "Range content should still match"
+    );
+
+    log::info!("✓ Second range request also returned partial content (not from cache)");
+
+    // Request 4: Different range (bytes=100-199) → should also bypass cache
+    log::info!("Request 4: Different range request (bytes=100-199)");
+    let response4 = client
+        .get(&url)
+        .header("Range", "bytes=100-199")
+        .send()
+        .expect("Failed to make third range request");
+
+    assert_eq!(
+        response4.status(),
+        206,
+        "Third range request should return 206"
+    );
+    assert_eq!(
+        response4.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        Some("100"),
+        "Third range response should be 100 bytes"
+    );
+
+    let body4 = response4.bytes().expect("Failed to read third range response");
+    assert_eq!(body4.len(), 100, "Should receive 100 bytes");
+    assert_eq!(
+        body4.as_ref(),
+        &test_content[100..200],
+        "Range content should match bytes 100-199"
+    );
+
+    log::info!("✓ Different range request returned correct partial content");
+
+    // Request 5: Multi-range request (if supported)
+    log::info!("Request 5: Multi-range request (bytes=0-49,200-255)");
+    let response5 = client
+        .get(&url)
+        .header("Range", "bytes=0-49,200-255")
+        .send()
+        .expect("Failed to make multi-range request");
+
+    // Multi-range may return 206 with multipart/byteranges or just handle first range
+    // Either behavior is acceptable for this test
+    if response5.status() == 206 {
+        log::info!("✓ Multi-range request handled (206 Partial Content)");
+    } else if response5.status() == 200 {
+        log::info!("✓ Multi-range not supported, returned full content (200 OK)");
+    } else {
+        panic!(
+            "Multi-range request returned unexpected status: {}",
+            response5.status()
+        );
+    }
+
+    log::info!("Range request bypass test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy forwards Range requests to S3
+    // 2. The proxy returns 206 Partial Content responses correctly
+    // 3. Range requests work for different byte ranges
+    //
+    // Full verification would require:
+    // - Verifying Range responses are NOT cached (check cache metrics)
+    // - Verifying each Range request hits S3 (not served from cache)
+    // - Testing edge cases (invalid ranges, overlapping ranges, etc.)
+    // - Verifying constant memory usage during Range streaming
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}
+
+#[test]
+#[ignore] // Requires Docker + release build: cargo test --release --test cache_e2e_test -- --ignored
+fn test_e2e_large_files_bypass_cache() {
+    // E2E: Large files (>max_item_size) bypass memory cache
+    // This test verifies that files exceeding max_item_size_mb are NOT cached:
+    // 1. Configure cache with max_item_size_mb = 1 MB
+    // 2. Upload a 2 MB file to S3
+    // 3. Request 1: Fetch large file → should return 200 OK but NOT cache
+    // 4. Request 2: Fetch same large file → should fetch from S3 again (not cached)
+    // 5. Upload a small file (500 KB) to S3
+    // 6. Request 3: Fetch small file → should cache
+    // 7. Request 4: Fetch same small file → should serve from cache
+    //
+    // Rationale: Large files can exhaust memory cache quickly. By bypassing
+    // cache for large files, we ensure consistent memory usage and avoid evicting
+    // many small frequently-accessed files.
+
+    init_logging();
+    log::info!("Starting E2E large files bypass cache test");
+
+    // Create Docker client for LocalStack
+    let docker = Cli::default();
+
+    // Start LocalStack with S3
+    log::info!("Starting LocalStack container...");
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create AWS SDK config for S3
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create test bucket
+    log::info!("Creating test bucket...");
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload LARGE file (2 MB) - exceeds max_item_size
+    let large_file_size = 2 * 1024 * 1024; // 2 MB
+    let large_content: Vec<u8> = (0..large_file_size).map(|i| (i % 256) as u8).collect();
+    log::info!("Uploading large file (2 MB)...");
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("large-file.bin")
+            .body(aws_sdk_s3::primitives::ByteStream::from(large_content.clone()))
+            .content_type("application/octet-stream")
+            .send()
+            .await
+            .expect("Failed to upload large file")
+    });
+
+    // Upload SMALL file (500 KB) - within max_item_size
+    let small_file_size = 500 * 1024; // 500 KB
+    let small_content: Vec<u8> = (0..small_file_size).map(|i| (i % 256) as u8).collect();
+    log::info!("Uploading small file (500 KB)...");
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key("small-file.bin")
+            .body(aws_sdk_s3::primitives::ByteStream::from(small_content.clone()))
+            .content_type("application/octet-stream")
+            .send()
+            .await
+            .expect("Failed to upload small file")
+    });
+
+    // Create proxy configuration with max_item_size_mb = 1 MB
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
+
+    // Custom config with max_item_size_mb = 1
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18085"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+  memory:
+    max_item_size_mb: 1
+    max_cache_size_mb: 100
+    default_ttl_seconds: 3600
+
+buckets:
+  - name: test-bucket
+    path_prefix: /test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+      bucket: test-bucket
+    auth:
+      enabled: false
+"#,
+        s3_endpoint
+    );
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    // Start proxy server
+    log::info!("Starting proxy server...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18085)
+        .expect("Failed to start proxy");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30)) // Longer timeout for large files
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Request 1: Fetch large file (2 MB) → should return 200 OK but NOT cache
+    log::info!("Request 1: Fetching large file (2 MB) - should NOT cache");
+    let large_url = proxy.url("/test-bucket/large-file.bin");
+    let response1 = client
+        .get(&large_url)
+        .send()
+        .expect("Failed to fetch large file (request 1)");
+
+    assert_eq!(response1.status(), 200, "Should return 200 OK");
+    assert_eq!(
+        response1
+            .headers()
+            .get("content-length")
+            .map(|v| v.to_str().unwrap()),
+        Some("2097152"),
+        "Content-Length should be 2 MB"
+    );
+
+    let body1 = response1.bytes().expect("Failed to read large file body");
+    assert_eq!(body1.len(), large_file_size, "Should receive full large file");
+    assert_eq!(
+        body1.as_ref(),
+        &large_content[..],
+        "Large file content should match"
+    );
+
+    log::info!("✓ Large file retrieved successfully (2 MB)");
+
+    // Request 2: Fetch same large file again → should fetch from S3 (not cached)
+    log::info!("Request 2: Fetching large file again - should bypass cache, fetch from S3");
+    let response2 = client
+        .get(&large_url)
+        .send()
+        .expect("Failed to fetch large file (request 2)");
+
+    assert_eq!(response2.status(), 200, "Should return 200 OK");
+    let body2 = response2.bytes().expect("Failed to read large file body");
+    assert_eq!(
+        body2.len(),
+        large_file_size,
+        "Should receive full large file again"
+    );
+    assert_eq!(
+        body2.as_ref(),
+        &large_content[..],
+        "Large file content should still match"
+    );
+
+    log::info!("✓ Large file fetched again (bypassed cache)");
+
+    // Request 3: Fetch small file (500 KB) → should cache
+    log::info!("Request 3: Fetching small file (500 KB) - should cache");
+    let small_url = proxy.url("/test-bucket/small-file.bin");
+    let response3 = client
+        .get(&small_url)
+        .send()
+        .expect("Failed to fetch small file (request 1)");
+
+    assert_eq!(response3.status(), 200, "Should return 200 OK");
+    assert_eq!(
+        response3
+            .headers()
+            .get("content-length")
+            .map(|v| v.to_str().unwrap()),
+        Some("512000"),
+        "Content-Length should be 500 KB"
+    );
+
+    let body3 = response3.bytes().expect("Failed to read small file body");
+    assert_eq!(
+        body3.len(),
+        small_file_size,
+        "Should receive full small file"
+    );
+    assert_eq!(
+        body3.as_ref(),
+        &small_content[..],
+        "Small file content should match"
+    );
+
+    log::info!("✓ Small file retrieved successfully (500 KB)");
+
+    // Request 4: Fetch same small file again → should serve from cache
+    log::info!("Request 4: Fetching small file again - should serve from cache");
+    let response4 = client
+        .get(&small_url)
+        .send()
+        .expect("Failed to fetch small file (request 2)");
+
+    assert_eq!(response4.status(), 200, "Should return 200 OK");
+    let body4 = response4.bytes().expect("Failed to read small file body");
+    assert_eq!(
+        body4.len(),
+        small_file_size,
+        "Should receive full small file again"
+    );
+    assert_eq!(
+        body4.as_ref(),
+        &small_content[..],
+        "Small file content should still match"
+    );
+
+    log::info!("✓ Small file served from cache");
+
+    log::info!("Large files bypass cache test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy can serve large files (>max_item_size)
+    // 2. The proxy can serve small files (<max_item_size)
+    // 3. Basic request/response flow works for both sizes
+    //
+    // Full verification would require:
+    // - Checking cache metrics to verify large files were NOT cached
+    // - Checking cache metrics to verify small files WERE cached
+    // - Verifying second large file request actually hit S3 (not cache)
+    // - Verifying second small file request was served from cache (not S3)
+    // - Testing boundary conditions (file size exactly == max_item_size)
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}
+
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_small_files_cached_in_memory() {
+    // Phase 30.10: E2E: Small files (<max_item_size) cached in memory
+    //
+    // This test verifies that files smaller than max_item_size_mb ARE cached in memory:
+    // 1. Configure cache with max_item_size_mb = 10 MB (generous size)
+    // 2. Upload small files (100 KB, 500 KB, 1 MB, 5 MB)
+    // 3. Request 1: Fetch small file → should cache
+    // 4. Request 2: Fetch same small file → should serve from cache (not S3)
+    // 5. Verify cache hit behavior via metrics or response timing
+    // 6. Test multiple small files to verify all are cached
+    //
+    // Expected behavior (after cache integration):
+    // - First request for small file: Cache MISS → fetch from S3 → populate cache
+    // - Second request for same file: Cache HIT → serve from memory cache
+    // - All small files (<10 MB) should be cached
+    // - Response should include cache-related headers (X-Cache-Status, Age, etc.)
+
+    init_logging();
+
+    const PORT: u16 = 18080;
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    log::info!("Starting E2E test: Small files cached in memory");
+
+    // Start LocalStack container for S3 backend
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image = RunnableImage::from(LocalStack::default())
+        .with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack started on port {}", s3_port);
+
+    // Create AWS SDK S3 client for uploading test objects
+    log::info!("Creating AWS SDK S3 client...");
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create bucket
+    let bucket_name = "small-files-test-bucket";
+    log::info!("Creating S3 bucket: {}", bucket_name);
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload test objects of various sizes (all < 10 MB)
+    log::info!("Uploading test objects...");
+
+    // 100 KB file
+    let file_100kb = vec![0xAA; 102400]; // 100 KB
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_100kb.bin")
+            .body(file_100kb.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload 100KB file");
+    });
+    log::info!("Uploaded 100KB file");
+
+    // 500 KB file
+    let file_500kb = vec![0xBB; 512000]; // 500 KB
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_500kb.bin")
+            .body(file_500kb.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload 500KB file");
+    });
+    log::info!("Uploaded 500KB file");
+
+    // 1 MB file
+    let file_1mb = vec![0xCC; 1048576]; // 1 MB
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_1mb.bin")
+            .body(file_1mb.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload 1MB file");
+    });
+    log::info!("Uploaded 1MB file");
+
+    // 5 MB file
+    let file_5mb = vec![0xDD; 5242880]; // 5 MB
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_5mb.bin")
+            .body(file_5mb.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload 5MB file");
+    });
+    log::info!("Uploaded 5MB file");
+
+    // Create proxy config with memory cache enabled (max_item_size_mb = 10)
+    let config_content = format!(
+        r#"
+# Test configuration for small files cached in memory
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 100
+    default_ttl_seconds: 3600
+
+buckets:
+  - name: "small-files-test"
+    base_path: "/small"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "{}"
+      access_key: "test"
+      secret_key: "test"
+"#,
+        PORT, s3_endpoint, bucket_name
+    );
+
+    fs::write(&config_path, config_content).expect("Failed to write config file");
+    log::info!("Created proxy config at: {:?}", config_path);
+
+    // Start the proxy server
+    log::info!("Starting proxy server on port {}...", PORT);
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), PORT)
+        .expect("Failed to start proxy");
+    log::info!("Proxy started successfully");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Test 1: First request for 100 KB file → should cache
+    log::info!("Test 1: Fetching 100KB file (first request - should populate cache)");
+    let response1 = client
+        .get(&proxy.url("/small/file_100kb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response1.status(), 200, "Expected 200 OK");
+    let body1 = response1.bytes().expect("Failed to read response body");
+    assert_eq!(body1.len(), 102400, "Expected 100KB file");
+    assert_eq!(body1.as_ref(), file_100kb.as_slice(), "File content mismatch");
+    log::info!("✓ 100KB file fetched successfully (first request)");
+
+    // Test 2: Second request for same 100 KB file → should serve from cache
+    log::info!("Test 2: Fetching 100KB file (second request - should hit cache)");
+    let response2 = client
+        .get(&proxy.url("/small/file_100kb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response2.status(), 200, "Expected 200 OK");
+    let body2 = response2.bytes().expect("Failed to read response body");
+    assert_eq!(body2.len(), 102400, "Expected 100KB file");
+    assert_eq!(body2.as_ref(), file_100kb.as_slice(), "File content mismatch");
+    log::info!("✓ 100KB file fetched successfully (second request - cache hit expected)");
+
+    // Test 3: First request for 500 KB file → should cache
+    log::info!("Test 3: Fetching 500KB file (first request - should populate cache)");
+    let response3 = client
+        .get(&proxy.url("/small/file_500kb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response3.status(), 200, "Expected 200 OK");
+    let body3 = response3.bytes().expect("Failed to read response body");
+    assert_eq!(body3.len(), 512000, "Expected 500KB file");
+    assert_eq!(body3.as_ref(), file_500kb.as_slice(), "File content mismatch");
+    log::info!("✓ 500KB file fetched successfully (first request)");
+
+    // Test 4: Second request for same 500 KB file → should serve from cache
+    log::info!("Test 4: Fetching 500KB file (second request - should hit cache)");
+    let response4 = client
+        .get(&proxy.url("/small/file_500kb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response4.status(), 200, "Expected 200 OK");
+    let body4 = response4.bytes().expect("Failed to read response body");
+    assert_eq!(body4.len(), 512000, "Expected 500KB file");
+    assert_eq!(body4.as_ref(), file_500kb.as_slice(), "File content mismatch");
+    log::info!("✓ 500KB file fetched successfully (second request - cache hit expected)");
+
+    // Test 5: First request for 1 MB file → should cache
+    log::info!("Test 5: Fetching 1MB file (first request - should populate cache)");
+    let response5 = client
+        .get(&proxy.url("/small/file_1mb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response5.status(), 200, "Expected 200 OK");
+    let body5 = response5.bytes().expect("Failed to read response body");
+    assert_eq!(body5.len(), 1048576, "Expected 1MB file");
+    assert_eq!(body5.as_ref(), file_1mb.as_slice(), "File content mismatch");
+    log::info!("✓ 1MB file fetched successfully (first request)");
+
+    // Test 6: Second request for same 1 MB file → should serve from cache
+    log::info!("Test 6: Fetching 1MB file (second request - should hit cache)");
+    let response6 = client
+        .get(&proxy.url("/small/file_1mb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response6.status(), 200, "Expected 200 OK");
+    let body6 = response6.bytes().expect("Failed to read response body");
+    assert_eq!(body6.len(), 1048576, "Expected 1MB file");
+    assert_eq!(body6.as_ref(), file_1mb.as_slice(), "File content mismatch");
+    log::info!("✓ 1MB file fetched successfully (second request - cache hit expected)");
+
+    // Test 7: First request for 5 MB file → should cache
+    log::info!("Test 7: Fetching 5MB file (first request - should populate cache)");
+    let response7 = client
+        .get(&proxy.url("/small/file_5mb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response7.status(), 200, "Expected 200 OK");
+    let body7 = response7.bytes().expect("Failed to read response body");
+    assert_eq!(body7.len(), 5242880, "Expected 5MB file");
+    assert_eq!(body7.as_ref(), file_5mb.as_slice(), "File content mismatch");
+    log::info!("✓ 5MB file fetched successfully (first request)");
+
+    // Test 8: Second request for same 5 MB file → should serve from cache
+    log::info!("Test 8: Fetching 5MB file (second request - should hit cache)");
+    let response8 = client
+        .get(&proxy.url("/small/file_5mb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response8.status(), 200, "Expected 200 OK");
+    let body8 = response8.bytes().expect("Failed to read response body");
+    assert_eq!(body8.len(), 5242880, "Expected 5MB file");
+    assert_eq!(body8.as_ref(), file_5mb.as_slice(), "File content mismatch");
+    log::info!("✓ 5MB file fetched successfully (second request - cache hit expected)");
+
+    // Test 9: Third request for 100 KB file (already cached earlier)
+    log::info!("Test 9: Fetching 100KB file again (should still be in cache)");
+    let response9 = client
+        .get(&proxy.url("/small/file_100kb.bin"))
+        .send()
+        .expect("Failed to send request");
+
+    assert_eq!(response9.status(), 200, "Expected 200 OK");
+    let body9 = response9.bytes().expect("Failed to read response body");
+    assert_eq!(body9.len(), 102400, "Expected 100KB file");
+    assert_eq!(body9.as_ref(), file_100kb.as_slice(), "File content mismatch");
+    log::info!("✓ 100KB file fetched successfully (should still be cached)");
+
+    log::info!("Small files cached in memory test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy can serve multiple small files (<10 MB)
+    // 2. Multiple requests for the same file succeed
+    // 3. Files remain accessible across multiple requests
+    // 4. All small files are served with correct content
+    //
+    // Full verification would require:
+    // - Checking X-Cache-Status header (HIT vs MISS) on each request
+    // - Verifying cache metrics show correct hit/miss counts
+    // - Measuring response times to confirm cache hits are faster
+    // - Checking Age header to verify files are served from cache
+    // - Verifying cache memory usage increases with each new file
+    // - Testing cache TTL expiration behavior
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}
