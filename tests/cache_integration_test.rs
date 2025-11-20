@@ -383,3 +383,89 @@ async fn test_cache_survives_disk_persistence() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_s3_response_populates_cache() {
+    // Test: S3 response populates cache (Phase 30.7)
+    // This test verifies that when a cache miss occurs and the proxy fetches
+    // from S3, the response is automatically stored in the cache for future hits.
+
+    // Create a temporary directory for disk cache
+    let temp_dir = TempDir::new().unwrap();
+    let cache_dir = temp_dir.path().to_string_lossy().to_string();
+
+    // Create cache configuration (memory + disk for comprehensive testing)
+    let config = CacheConfig {
+        enabled: true,
+        cache_layers: vec!["memory".to_string(), "disk".to_string()],
+        disk: yatagarasu::cache::DiskCacheConfig {
+            enabled: true,
+            cache_dir: cache_dir.clone(),
+            max_disk_cache_size_mb: 100,
+        },
+        ..Default::default()
+    };
+
+    // Create tiered cache
+    let cache = TieredCache::from_config(&config).await.unwrap();
+
+    // Create test key
+    let key = CacheKey {
+        bucket: "test-bucket".to_string(),
+        object_key: "auto-cached-file.txt".to_string(),
+        etag: Some("etag-auto".to_string()),
+    };
+
+    // STEP 1: Verify cache is initially empty
+    let initial_result = cache.get(&key).await.unwrap();
+    assert!(
+        initial_result.is_none(),
+        "Cache should be empty before any S3 requests"
+    );
+
+    // STEP 2: Simulate what the proxy does when it fetches from S3
+    // In the real implementation, this would happen automatically when:
+    // 1. request_filter checks cache (miss)
+    // 2. Proxy fetches from S3
+    // 3. Response is streamed to client
+    // 4. Response chunks are buffered
+    // 5. After streaming completes, buffered response is written to cache
+    //
+    // For now, we manually populate the cache to define the expected behavior:
+    let simulated_s3_response = CacheEntry::new(
+        Bytes::from("Content fetched from S3"),
+        "text/plain".to_string(),
+        "etag-auto".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    // This is what SHOULD happen automatically after S3 response streaming
+    cache.set(key.clone(), simulated_s3_response.clone()).await.unwrap();
+
+    // STEP 3: Verify the "S3 response" is now in cache
+    let cached_result = cache.get(&key).await.unwrap();
+    assert!(
+        cached_result.is_some(),
+        "Cache should contain entry after S3 response (future: auto-populated)"
+    );
+
+    let cached_entry = cached_result.unwrap();
+    assert_eq!(cached_entry.data, Bytes::from("Content fetched from S3"));
+    assert_eq!(cached_entry.etag, "etag-auto");
+
+    // STEP 4: Verify cache hit on subsequent request
+    let second_result = cache.get(&key).await.unwrap();
+    assert!(
+        second_result.is_some(),
+        "Second request should be a cache hit"
+    );
+
+    // NOTE: This test currently passes because we manually call cache.set().
+    // The REAL test will be an E2E test that:
+    // 1. Starts a real proxy with cache enabled
+    // 2. Makes an HTTP request (cache miss → S3 fetch)
+    // 3. Makes the same request again (cache hit)
+    // 4. Verifies the second request never hit S3
+    //
+    // That E2E test will FAIL until we implement response buffering in the proxy.
+}

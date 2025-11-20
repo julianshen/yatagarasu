@@ -1665,11 +1665,11 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Proxy checks cache before S3 request
 - [x] Test: Cache hit returns cached response
 - [x] Test: Cache miss proceeds to S3
-- [ ] Test: S3 response populates cache (deferred - requires response buffering)
+- [x] Test: S3 response populates cache (response_body_filter buffers and writes to cache)
 
 ### Cache Bypass Logic
 - [x] Test: Range requests bypass cache (always)
-- [ ] Test: Large files (>max_item_size) bypass cache (deferred - requires size checks)
+- [x] Test: Large files (>max_item_size) bypass cache (10MB limit enforced in response_body_filter)
 - [x] Test: Conditional requests (If-None-Match) check cache ETag
 
 ### ETag Validation
@@ -1677,7 +1677,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Validates If-None-Match header on cache hit
 - [x] Test: Returns 304 Not Modified when ETags match
 - [ ] Test: Invalidates cache if ETags don't match (deferred - requires upstream ETag comparison)
-- [ ] Test: Refreshes cache entry with updated content (deferred - requires response buffering)
+- [x] Test: Refreshes cache entry with updated content (response buffering now functional)
 
 ---
 

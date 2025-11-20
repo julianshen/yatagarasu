@@ -2181,6 +2181,7 @@ impl ProxyHttp for YatagarasuProxy {
     }
 
     /// Filter upstream responses to add custom headers (request correlation)
+    /// Phase 30: Also captures response headers for cache population
     fn upstream_response_filter(
         &self,
         _session: &mut Session,
@@ -2225,7 +2226,128 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
+        // Phase 30: Enable response buffering for cache population
+        // Only buffer successful (200) responses that are not range requests
+        if status == 200 && self.cache.is_some() {
+            // Capture response headers for cache entry
+            if let Some(content_type) = upstream_response.headers.get("content-type")
+                .or_else(|| upstream_response.headers.get("Content-Type"))
+            {
+                if let Ok(ct_str) = content_type.to_str() {
+                    ctx.set_response_content_type(ct_str.to_string());
+                }
+            }
+
+            if let Some(etag) = upstream_response.headers.get("etag")
+                .or_else(|| upstream_response.headers.get("ETag"))
+            {
+                if let Ok(etag_str) = etag.to_str() {
+                    // Remove quotes from ETag if present
+                    let etag_clean = etag_str.trim_matches('"').to_string();
+                    ctx.set_response_etag(etag_clean);
+                }
+            }
+
+            // Enable response buffering (will be used in response_body_filter)
+            ctx.enable_response_buffering();
+
+            tracing::debug!(
+                request_id = %ctx.request_id(),
+                "Enabled response buffering for cache population"
+            );
+        }
+
         Ok(())
+    }
+
+    /// Filter response body chunks for cache population (Phase 30)
+    /// Buffers response data while streaming to client
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<bytes::Bytes>,
+        end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> Result<Option<std::time::Duration>>
+    where
+        Self::CTX: Send + Sync,
+    {
+        // If buffering is enabled, accumulate chunks
+        if ctx.is_response_buffering_enabled() {
+            // Buffer the current chunk (if any)
+            if let Some(chunk) = body.as_ref() {
+                // Check if we'd exceed max cacheable size (10MB)
+                const MAX_CACHE_SIZE: usize = 10 * 1024 * 1024; // 10MB
+                if ctx.total_response_size() + chunk.len() <= MAX_CACHE_SIZE {
+                    ctx.append_response_chunk(chunk);
+                } else {
+                    // Response too large, disable buffering
+                    tracing::debug!(
+                        request_id = %ctx.request_id(),
+                        total_size = ctx.total_response_size() + chunk.len(),
+                        "Response too large for cache, disabling buffering"
+                    );
+                    ctx.disable_response_buffering();
+                }
+            }
+
+            // On end of stream, write buffered data to cache
+            if end_of_stream && ctx.should_cache_response() {
+                if let Some(buffered_data) = ctx.take_response_buffer() {
+                    // We need to populate the cache asynchronously
+                    // Get necessary data from context before spawning task
+                    if let (Some(bucket_config), Some(cache)) = (ctx.bucket_config(), &self.cache) {
+                        use crate::cache::{CacheEntry, CacheKey};
+
+                        let object_key = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
+                        let cache_key = CacheKey {
+                            bucket: bucket_config.name.clone(),
+                            object_key: object_key.to_string(),
+                            etag: ctx.response_etag().map(|s| s.to_string()),
+                        };
+
+                        let cache_entry = CacheEntry::new(
+                            bytes::Bytes::from(buffered_data),
+                            ctx.response_content_type()
+                                .unwrap_or("application/octet-stream")
+                                .to_string(),
+                            ctx.response_etag().unwrap_or("").to_string(),
+                            Some(std::time::Duration::from_secs(3600)), // 1 hour TTL
+                        );
+
+                        // Clone cache for async task
+                        let cache_clone = Arc::clone(cache);
+                        let request_id = ctx.request_id().to_string();
+
+                        // Spawn async task to populate cache (don't block response)
+                        tokio::spawn(async move {
+                            match cache_clone.set(cache_key.clone(), cache_entry).await {
+                                Ok(_) => {
+                                    tracing::info!(
+                                        request_id = %request_id,
+                                        bucket = %cache_key.bucket,
+                                        object_key = %cache_key.object_key,
+                                        "Successfully populated cache from S3 response"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        request_id = %request_id,
+                                        bucket = %cache_key.bucket,
+                                        object_key = %cache_key.object_key,
+                                        error = %e,
+                                        "Failed to populate cache from S3 response"
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Don't modify the body - let it pass through to client unchanged
+        Ok(None)
     }
 }
 

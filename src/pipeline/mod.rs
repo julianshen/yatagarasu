@@ -21,6 +21,17 @@ pub struct RequestContext {
     claims: Option<Claims>,
     /// Selected replica name for Phase 23 HA bucket replication
     replica_name: Option<String>,
+    /// Phase 30: Response buffering for cache population
+    /// Buffer for accumulating response chunks from S3
+    response_buffer: Option<Vec<u8>>,
+    /// Content-Type from S3 response headers
+    response_content_type: Option<String>,
+    /// ETag from S3 response headers
+    response_etag: Option<String>,
+    /// Whether to cache this response (based on size, range requests, etc.)
+    should_cache_response: bool,
+    /// Total response size accumulated so far
+    total_response_size: usize,
 }
 
 impl RequestContext {
@@ -40,6 +51,11 @@ impl RequestContext {
             bucket_config: None,
             claims: None,
             replica_name: None,
+            response_buffer: None,
+            response_content_type: None,
+            response_etag: None,
+            should_cache_response: false,
+            total_response_size: 0,
         }
     }
 
@@ -59,6 +75,11 @@ impl RequestContext {
             bucket_config: None,
             claims: None,
             replica_name: None,
+            response_buffer: None,
+            response_content_type: None,
+            response_etag: None,
+            should_cache_response: false,
+            total_response_size: 0,
         }
     }
 
@@ -82,6 +103,11 @@ impl RequestContext {
             bucket_config: None,
             claims: None,
             replica_name: None,
+            response_buffer: None,
+            response_content_type: None,
+            response_etag: None,
+            should_cache_response: false,
+            total_response_size: 0,
         }
     }
 
@@ -163,6 +189,67 @@ impl RequestContext {
     /// Get the replica name that is serving this request (Phase 23: HA bucket replication)
     pub fn replica_name(&self) -> Option<&str> {
         self.replica_name.as_deref()
+    }
+
+    /// Enable response buffering for cache population (Phase 30)
+    pub fn enable_response_buffering(&mut self) {
+        self.response_buffer = Some(Vec::new());
+        self.should_cache_response = true;
+        self.total_response_size = 0;
+    }
+
+    /// Disable response buffering (e.g., for range requests or large files)
+    pub fn disable_response_buffering(&mut self) {
+        self.response_buffer = None;
+        self.should_cache_response = false;
+    }
+
+    /// Check if response buffering is enabled
+    pub fn is_response_buffering_enabled(&self) -> bool {
+        self.response_buffer.is_some()
+    }
+
+    /// Append data to response buffer
+    pub fn append_response_chunk(&mut self, chunk: &[u8]) {
+        if let Some(buffer) = &mut self.response_buffer {
+            buffer.extend_from_slice(chunk);
+            self.total_response_size += chunk.len();
+        }
+    }
+
+    /// Get the buffered response data
+    pub fn take_response_buffer(&mut self) -> Option<Vec<u8>> {
+        self.response_buffer.take()
+    }
+
+    /// Set response Content-Type from upstream headers
+    pub fn set_response_content_type(&mut self, content_type: String) {
+        self.response_content_type = Some(content_type);
+    }
+
+    /// Get response Content-Type
+    pub fn response_content_type(&self) -> Option<&str> {
+        self.response_content_type.as_deref()
+    }
+
+    /// Set response ETag from upstream headers
+    pub fn set_response_etag(&mut self, etag: String) {
+        self.response_etag = Some(etag);
+    }
+
+    /// Get response ETag
+    pub fn response_etag(&self) -> Option<&str> {
+        self.response_etag.as_deref()
+    }
+
+    /// Check if this response should be cached
+    pub fn should_cache_response(&self) -> bool {
+        self.should_cache_response
+    }
+
+    /// Get total response size accumulated so far
+    pub fn total_response_size(&self) -> usize {
+        self.total_response_size
     }
 }
 
