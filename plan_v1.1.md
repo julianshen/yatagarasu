@@ -1683,13 +1683,13 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 30.8: Prometheus Metrics for Cache
 
 ### Cache Metrics
-- [ ] Test: Add cache_hits_total counter
-- [ ] Test: Add cache_misses_total counter
-- [ ] Test: Add cache_evictions_total counter
-- [ ] Test: Add cache_size_bytes gauge
-- [ ] Test: Add cache_items gauge
-- [ ] Test: Metrics include layer label (memory, disk, redis)
-- [ ] Test: Metrics include bucket label
+- [x] Test: Add cache_hits_total counter
+- [x] Test: Add cache_misses_total counter
+- [ ] Test: Add cache_evictions_total counter (deferred - not tracked in proxy yet)
+- [ ] Test: Add cache_size_bytes gauge (deferred - requires periodic stats collection)
+- [ ] Test: Add cache_items gauge (deferred - requires periodic stats collection)
+- [ ] Test: Metrics include layer label (memory, disk, redis) (deferred - requires per-layer tracking)
+- [ ] Test: Metrics include bucket label (deferred - requires per-bucket cache tracking)
 
 ### Histogram Metrics
 - [ ] Test: Add cache_get_duration_seconds histogram

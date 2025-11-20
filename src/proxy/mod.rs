@@ -1805,6 +1805,7 @@ impl ProxyHttp for YatagarasuProxy {
 
                             // Record metrics
                             self.metrics.increment_status_count(200);
+                            self.metrics.increment_cache_hit();
 
                             return Ok(true); // Short-circuit - don't go to upstream
                         }
@@ -1816,6 +1817,7 @@ impl ProxyHttp for YatagarasuProxy {
                                 object_key = %object_key,
                                 "Cache miss - proceeding to S3"
                             );
+                            self.metrics.increment_cache_miss();
                             // Fall through to Ok(false) below
                         }
                         Err(e) => {

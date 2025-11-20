@@ -96,6 +96,10 @@ pub struct Metrics {
     replica_health: Mutex<HashMap<String, bool>>,
     // Active replica gauge: which replica is currently serving for each bucket
     active_replica: Mutex<HashMap<String, String>>,
+
+    // Phase 30: Cache metrics
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
 }
 
 impl Metrics {
@@ -140,6 +144,8 @@ impl Metrics {
             replica_failovers: Mutex::new(HashMap::new()),
             replica_health: Mutex::new(HashMap::new()),
             active_replica: Mutex::new(HashMap::new()),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
         }
     }
 
@@ -180,6 +186,16 @@ impl Metrics {
         if let Ok(mut durations) = self.durations.lock() {
             durations.push(duration_us);
         }
+    }
+
+    /// Increment cache hit counter (Phase 30)
+    pub fn increment_cache_hit(&self) {
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment cache miss counter (Phase 30)
+    pub fn increment_cache_miss(&self) {
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get current request count (for testing)
@@ -338,6 +354,18 @@ impl Metrics {
             .ok()
             .and_then(|errors| errors.get(error_type).copied())
             .unwrap_or(0)
+    }
+
+    /// Get cache hit count (Phase 30)
+    #[cfg(test)]
+    pub fn get_cache_hit_count(&self) -> u64 {
+        self.cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Get cache miss count (Phase 30)
+    #[cfg(test)]
+    pub fn get_cache_miss_count(&self) -> u64 {
+        self.cache_misses.load(Ordering::Relaxed)
     }
 
     /// Increment counter for a specific S3 operation
