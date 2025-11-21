@@ -1744,7 +1744,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: LRU eviction works when disk space threshold reached (tests/integration/cache_e2e_test.rs::test_e2e_lru_eviction_when_disk_threshold_reached)
 - [x] E2E: Concurrent requests for same object coalesce correctly (tests/integration/cache_e2e_test.rs::test_e2e_concurrent_requests_coalesce_correctly)
 - [x] E2E: Disk cache metrics tracked correctly (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_metrics_tracked_correctly)
-- [ ] E2E: Purge API clears disk cache files
+- [x] E2E: Purge API clears disk cache files (tests/integration/cache_e2e_test.rs::test_e2e_purge_api_clears_disk_cache_files)
 - [ ] E2E: Stats API returns disk cache stats
 - [ ] E2E: Index persists and loads correctly on restart
 - [ ] E2E: Cleanup removes old files on startup
