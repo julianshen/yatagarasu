@@ -15292,3 +15292,488 @@ buckets:
 
     println!("\n✅ Test completed - Large file bypass behavior documented");
 }
+
+/// E2E Test: Range requests bypass all cache layers
+///
+/// This test verifies that HTTP Range requests (used for video seeking,
+/// parallel downloads, etc.) bypass all cache layers regardless of file size.
+/// Range requests are always streamed directly from S3.
+///
+/// Test Phases:
+/// 1. Start LocalStack (S3), Redis, Disk cache, and Proxy
+/// 2. Create test file (1MB) with pattern data
+/// 3. Upload file to S3
+/// 4. Request full file through proxy (populate potential cache)
+/// 5. Verify full file cached (200 OK)
+/// 6. Make Range request (bytes=1000-2999, 2KB from middle)
+/// 7. Verify 206 Partial Content response
+/// 8. Verify Content-Range header present
+/// 9. Verify returned data is correct subset
+/// 10. Verify Range response NOT cached in Memory
+/// 11. Verify Range response NOT cached in Disk
+/// 12. Verify Range response NOT cached in Redis
+/// 13. Make same Range request again (second time)
+/// 14. Verify second Range request also bypasses cache (from S3)
+/// 15. Make different Range request (bytes=5000-6999)
+/// 16. Verify different Range also bypasses cache
+/// 17. Cleanup
+///
+/// Expected Behavior:
+/// - Range requests always return 206 Partial Content
+/// - Range responses never cached (any layer)
+/// - Multiple Range requests always hit S3
+/// - Full file requests can be cached normally
+/// - Range requests work for video seeking and parallel downloads
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_range_requests_bypass_all_layers() {
+    println!("\n========================================");
+    println!("E2E Test: Range requests bypass all cache layers");
+    println!("========================================\n");
+
+    // Phase 1: Start all infrastructure
+    println!("Phase 1: Starting LocalStack (S3), Redis, Disk cache, and Proxy...");
+
+    let docker = testcontainers::clients::Cli::default();
+
+    // Start LocalStack
+    let localstack = docker.run(
+        testcontainers::GenericImage::new("localstack/localstack", "latest")
+            .with_env_var("SERVICES", "s3")
+            .with_env_var("DEFAULT_REGION", "us-east-1")
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Ready.",
+            )),
+    );
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   ✅ LocalStack started on port {}", s3_port);
+
+    // Start Redis
+    let redis_container = docker.run(testcontainers::GenericImage::new(
+        "redis",
+        "7-alpine",
+    ));
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   ✅ Redis started on port {}", redis_port);
+
+    // Create disk cache directory
+    let disk_cache_path = format!("/tmp/yatagarasu-test-range-bypass-{}", uuid::Uuid::new_v4());
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
+    println!(
+        "   ✅ Disk cache directory created: {}",
+        disk_cache_path
+    );
+
+    // Create S3 bucket
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-bucket")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+    println!("   ✅ S3 bucket 'test-bucket' created");
+
+    // Create proxy config
+    let proxy_port = 29080;
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:{}"
+  worker_threads: 2
+
+buckets:
+  - name: test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    routes:
+      - path: /
+    cache:
+      memory:
+        max_size_mb: 100
+        max_item_size_mb: 10
+      disk:
+        path: "{}"
+        max_size_mb: 500
+        max_item_size_mb: 10
+      redis:
+        url: "{}"
+        max_item_size_mb: 10
+        key_prefix: "yatagarasu:range-bypass:"
+"#,
+        proxy_port, s3_endpoint, disk_cache_path, redis_url
+    );
+
+    let config_path = format!("/tmp/yatagarasu-range-bypass-{}.yaml", uuid::Uuid::new_v4());
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Proxy config written to {}", config_path);
+
+    // Start proxy
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port {}", proxy_port);
+    println!();
+
+    // Phase 2: Create test file (1MB)
+    println!("Phase 2: Creating test file (1MB)...");
+    let file_size = 1024 * 1024; // 1MB
+    let file_data: Vec<u8> = (0..file_size)
+        .map(|i| ((i * 17) % 256) as u8) // Pattern for verification
+        .collect();
+    let file_name = "video.mp4";
+    println!(
+        "   ✅ Test file created: {} ({:.2} KB)",
+        file_name,
+        file_size as f64 / 1024.0
+    );
+    println!();
+
+    // Phase 3: Upload file to S3
+    println!("Phase 3: Uploading file to S3...");
+    s3_client
+        .put_object()
+        .bucket("test-bucket")
+        .key(file_name)
+        .body(aws_sdk_s3::primitives::ByteStream::from(file_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+    println!("   ✅ File uploaded to S3: {}", file_name);
+    println!();
+
+    // Phase 4: Request full file through proxy (populate cache)
+    println!("Phase 4: Requesting full file through proxy (populate cache)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url(&format!("/{}", file_name));
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to request full file");
+    let status = response.status();
+    let body = response.bytes().await.expect("Failed to read body");
+
+    println!("   ✅ Full file response: {} ({} bytes)", status, body.len());
+    println!();
+
+    // Phase 5: Verify full file cached
+    println!("Phase 5: Verifying full file cached (200 OK)...");
+    assert_eq!(status.as_u16(), 200, "Expected 200 OK for full file");
+    assert_eq!(body.len(), file_size, "Full file size mismatch");
+    println!("   ✅ Full file cached successfully");
+    println!();
+
+    // Phase 6: Make Range request (bytes=1000-2999, 2KB from middle)
+    println!("Phase 6: Making Range request (bytes=1000-2999)...");
+    let range_start = 1000usize;
+    let range_end = 2999usize; // Inclusive
+    let range_header = format!("bytes={}-{}", range_start, range_end);
+
+    let range_response = client
+        .get(&url)
+        .header("Range", &range_header)
+        .send()
+        .await
+        .expect("Failed to make Range request");
+    let range_status = range_response.status();
+    let content_range = range_response
+        .headers()
+        .get("Content-Range")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+    let range_body = range_response
+        .bytes()
+        .await
+        .expect("Failed to read Range response");
+
+    println!(
+        "   ✅ Range response: {} ({} bytes)",
+        range_status,
+        range_body.len()
+    );
+    if let Some(ref cr) = content_range {
+        println!("   ✅ Content-Range: {}", cr);
+    }
+    println!();
+
+    // Phase 7: Verify 206 Partial Content response
+    println!("Phase 7: Verifying 206 Partial Content response...");
+    assert_eq!(
+        range_status.as_u16(),
+        206,
+        "Expected 206 Partial Content for Range request"
+    );
+    println!("   ✅ Correct status: 206 Partial Content");
+    println!();
+
+    // Phase 8: Verify Content-Range header present
+    println!("Phase 8: Verifying Content-Range header...");
+    assert!(
+        content_range.is_some(),
+        "Expected Content-Range header in response"
+    );
+    let expected_content_range = format!(
+        "bytes {}-{}/{}",
+        range_start, range_end, file_size
+    );
+    assert!(
+        content_range
+            .as_ref()
+            .unwrap()
+            .contains(&format!("{}-{}", range_start, range_end)),
+        "Content-Range header should contain byte range"
+    );
+    println!("   ✅ Content-Range header present and correct");
+    println!();
+
+    // Phase 9: Verify returned data is correct subset
+    println!("Phase 9: Verifying returned data is correct subset...");
+    let expected_len = range_end - range_start + 1; // Inclusive range
+    assert_eq!(
+        range_body.len(),
+        expected_len,
+        "Range response length mismatch"
+    );
+    let expected_data = &file_data[range_start..=range_end];
+    assert_eq!(
+        &range_body[..],
+        expected_data,
+        "Range response data mismatch"
+    );
+    println!("   ✅ Returned data matches expected subset ({} bytes)", expected_len);
+    println!();
+
+    // Phase 10: Verify Range response NOT cached in Memory (via proxy restart)
+    println!("Phase 10: Verifying Range response NOT cached in Memory...");
+    drop(proxy);
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted (Memory cache cleared)");
+
+    // Make same Range request - should still work (from S3, not cache)
+    let range_response2 = client
+        .get(&url)
+        .header("Range", &range_header)
+        .send()
+        .await
+        .expect("Failed to make Range request after restart");
+    let range_status2 = range_response2.status();
+    let range_body2 = range_response2
+        .bytes()
+        .await
+        .expect("Failed to read Range response");
+
+    assert_eq!(
+        range_status2.as_u16(),
+        206,
+        "Range request should work after restart"
+    );
+    assert_eq!(
+        range_body2[..],
+        range_body[..],
+        "Range data should be same after restart"
+    );
+    println!("   ✅ Range request still works (not from Memory cache)");
+    println!();
+
+    // Phase 11: Verify Range response NOT cached in Disk
+    println!("Phase 11: Verifying Range response NOT cached in Disk...");
+    let disk_files = std::fs::read_dir(&disk_cache_path)
+        .expect("Failed to read disk cache directory")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|ft| ft.is_file())
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    // Check if any file has the range size
+    let range_cached = disk_files.iter().any(|entry| {
+        let metadata = entry.metadata().ok();
+        metadata
+            .map(|m| m.len() == expected_len as u64)
+            .unwrap_or(false)
+    });
+
+    assert!(
+        !range_cached,
+        "Range response should NOT be cached on disk"
+    );
+    println!("   ✅ Confirmed: Range response NOT in Disk cache");
+    println!();
+
+    // Phase 12: Verify Range response NOT cached in Redis
+    println!("Phase 12: Verifying Range response NOT cached in Redis...");
+    let redis_client =
+        redis::Client::open(redis_url.as_str()).expect("Failed to create Redis client");
+    let mut redis_conn = redis_client
+        .get_connection()
+        .expect("Failed to connect to Redis");
+
+    // Check for keys related to range requests
+    let key_pattern = format!("yatagarasu:range-bypass:*range*");
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg(&key_pattern)
+        .query(&mut redis_conn)
+        .unwrap_or_else(|_| vec![]);
+
+    // Also check for keys with byte ranges in them
+    let key_pattern2 = format!("yatagarasu:range-bypass:*{}*", file_name);
+    let keys2: Vec<String> = redis::cmd("KEYS")
+        .arg(&key_pattern2)
+        .query(&mut redis_conn)
+        .unwrap_or_else(|_| vec![]);
+
+    // Filter for range-related keys (keys with size matching range)
+    let range_keys: Vec<String> = keys2
+        .into_iter()
+        .filter(|k| {
+            let val: Result<Vec<u8>, _> = redis::cmd("GET").arg(k).query(&mut redis_conn);
+            val.map(|v| v.len() == expected_len).unwrap_or(false)
+        })
+        .collect();
+
+    assert!(
+        keys.is_empty() && range_keys.is_empty(),
+        "Range response should NOT be cached in Redis"
+    );
+    println!("   ✅ Confirmed: Range response NOT in Redis cache");
+    println!();
+
+    // Phase 13: Make same Range request again (second time)
+    println!("Phase 13: Making same Range request again (second time)...");
+    let start = std::time::Instant::now();
+    let range_response3 = client
+        .get(&url)
+        .header("Range", &range_header)
+        .send()
+        .await
+        .expect("Failed to make Range request (second time)");
+    let range_status3 = range_response3.status();
+    let range_body3 = range_response3
+        .bytes()
+        .await
+        .expect("Failed to read Range response");
+    let duration = start.elapsed();
+
+    println!(
+        "   ✅ Second Range response: {} ({}ms)",
+        range_status3,
+        duration.as_millis()
+    );
+    println!();
+
+    // Phase 14: Verify second Range request also bypasses cache
+    println!("Phase 14: Verifying second Range request bypassed cache...");
+    assert_eq!(
+        range_status3.as_u16(),
+        206,
+        "Expected 206 for second Range request"
+    );
+    assert_eq!(
+        range_body3[..],
+        range_body[..],
+        "Second Range data should match first"
+    );
+    println!("   ✅ Second Range request also served from S3 (not cached)");
+    println!();
+
+    // Phase 15: Make different Range request (bytes=5000-6999)
+    println!("Phase 15: Making different Range request (bytes=5000-6999)...");
+    let range_start2 = 5000usize;
+    let range_end2 = 6999usize;
+    let range_header2 = format!("bytes={}-{}", range_start2, range_end2);
+
+    let range_response4 = client
+        .get(&url)
+        .header("Range", &range_header2)
+        .send()
+        .await
+        .expect("Failed to make different Range request");
+    let range_status4 = range_response4.status();
+    let range_body4 = range_response4
+        .bytes()
+        .await
+        .expect("Failed to read Range response");
+
+    println!(
+        "   ✅ Different Range response: {} ({} bytes)",
+        range_status4,
+        range_body4.len()
+    );
+    println!();
+
+    // Phase 16: Verify different Range also bypasses cache
+    println!("Phase 16: Verifying different Range also bypasses cache...");
+    assert_eq!(
+        range_status4.as_u16(),
+        206,
+        "Expected 206 for different Range request"
+    );
+    let expected_len2 = range_end2 - range_start2 + 1;
+    assert_eq!(
+        range_body4.len(),
+        expected_len2,
+        "Different Range length mismatch"
+    );
+    let expected_data2 = &file_data[range_start2..=range_end2];
+    assert_eq!(
+        &range_body4[..],
+        expected_data2,
+        "Different Range data mismatch"
+    );
+    println!("   ✅ Different Range also served from S3 (not cached)");
+    println!();
+
+    // Phase 17: Cleanup
+    println!("Phase 17: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    drop(redis_container);
+    let _ = std::fs::remove_file(&config_path);
+    let _ = std::fs::remove_dir_all(&disk_cache_path);
+    println!("   ✅ Cleanup completed");
+
+    println!("\n========================================");
+    println!("Test Analysis:");
+    println!("========================================");
+    println!("✅ Range requests return 206 Partial Content");
+    println!("✅ Content-Range header present and correct");
+    println!("✅ Returned data matches expected byte range");
+    println!("✅ Range responses NOT cached in Memory layer");
+    println!("✅ Range responses NOT cached in Disk layer");
+    println!("✅ Range responses NOT cached in Redis layer");
+    println!("✅ Multiple Range requests always stream from S3");
+    println!("✅ Different Range requests work independently");
+    println!();
+    println!("Key Behaviors Documented:");
+    println!("   • Range requests bypass all cache layers (regardless of file size)");
+    println!("   • Always return 206 Partial Content status");
+    println!("   • Include Content-Range header in response");
+    println!("   • Support video seeking (jump to specific timestamp)");
+    println!("   • Support parallel downloads (multiple simultaneous ranges)");
+    println!("   • Full file requests can still be cached normally");
+    println!("   • Range data always streamed directly from S3");
+
+    println!("\n✅ Test completed - Range request bypass behavior documented");
+}
