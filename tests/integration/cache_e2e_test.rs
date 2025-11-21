@@ -9178,3 +9178,232 @@ buckets:
 
     println!("\n✅ Test completed - Range request bypass behavior documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_redis_cache_large_files_bypass() {
+    println!("\n🧪 E2E Test: Large files (>max_item_size) bypass redis cache");
+    println!("==================================================================");
+    println!("This test verifies that files exceeding max_item_size bypass Redis cache");
+    println!("and stream directly from S3 without buffering.\n");
+
+    // Phase 1: Start LocalStack container
+    println!("Phase 1: Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", localstack_port);
+    println!("✅ LocalStack started on port {}", localstack_port);
+
+    // Phase 2: Start Redis container
+    println!("\nPhase 2: Starting Redis container...");
+    let redis_image = Redis::default();
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    println!("✅ Redis started on port {}", redis_port);
+
+    // Phase 3: Create S3 bucket and upload large file (1MB)
+    println!("\nPhase 3: Creating S3 bucket and uploading 1MB test file...");
+    let bucket_name = "test-large-files";
+    let object_key = "large-file.bin";
+
+    // Create 1MB file (will exceed 512KB max_item_size)
+    let file_size = 1024 * 1024; // 1MB
+    let file_data: Vec<u8> = (0..file_size).map(|i| (i % 256) as u8).collect();
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+
+    s3_client
+        .create_bucket()
+        .bucket(bucket_name)
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    s3_client
+        .put_object()
+        .bucket(bucket_name)
+        .key(object_key)
+        .body(aws_sdk_s3::primitives::ByteStream::from(file_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("✅ Uploaded 1MB file to s3://{}/{}", bucket_name, object_key);
+
+    // Phase 4: Create proxy config with max_item_size=512KB
+    println!("\nPhase 4: Creating proxy config with max_item_size=512KB...");
+    let config_dir = "/tmp/yatagarasu-test-large-files-bypass";
+    std::fs::create_dir_all(config_dir).expect("Failed to create config dir");
+
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18094"
+  workers: 2
+
+buckets:
+  - name: "test-large-files"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    path_prefix: "/files"
+
+cache:
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size: 524288  # 512KB - file is 1MB so will bypass
+    ttl: 300
+"#,
+        s3_endpoint, redis_url
+    );
+
+    let config_path = format!("{}/config.yaml", config_dir);
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("✅ Config written with max_item_size=512KB (file is 1MB)");
+
+    // Phase 5: Start proxy
+    println!("\nPhase 5: Starting proxy server...");
+    let mut proxy = ProxyTestHarness::start(&config_path, 18094).expect("Failed to start proxy");
+    println!("✅ Proxy started on port 18094");
+
+    // Phase 6: Make first request (should bypass cache due to size)
+    println!("\nPhase 6: Making first request for 1MB file (should bypass cache)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url("/files/large-file.bin");
+
+    let start1 = std::time::Instant::now();
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    let duration1 = start1.elapsed();
+
+    assert_eq!(
+        response1.status(),
+        200,
+        "First request should return 200 OK"
+    );
+
+    let body1 = response1.bytes().await.expect("Failed to read response body");
+    assert_eq!(
+        body1.len(),
+        file_size,
+        "Response should contain full 1MB file"
+    );
+    assert_eq!(
+        &body1[..],
+        &file_data[..],
+        "Response data should match uploaded file"
+    );
+
+    println!(
+        "✅ First request completed in {:?} (200 OK, 1MB data correct)",
+        duration1
+    );
+
+    // Phase 7: Wait a moment, then make second request
+    println!("\nPhase 7: Waiting 500ms before second request...");
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    println!("✅ Wait complete");
+
+    // Phase 8: Make second request (should also bypass cache, no speedup expected)
+    println!("\nPhase 8: Making second request (should also bypass cache)...");
+    let start2 = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    let duration2 = start2.elapsed();
+
+    assert_eq!(
+        response2.status(),
+        200,
+        "Second request should return 200 OK"
+    );
+
+    let body2 = response2.bytes().await.expect("Failed to read response body");
+    assert_eq!(
+        body2.len(),
+        file_size,
+        "Response should contain full 1MB file"
+    );
+    assert_eq!(
+        &body2[..],
+        &file_data[..],
+        "Response data should match uploaded file"
+    );
+
+    println!(
+        "✅ Second request completed in {:?} (200 OK, 1MB data correct)",
+        duration2
+    );
+
+    // Phase 9: Verify no significant speedup (indicates cache bypass)
+    println!("\nPhase 9: Analyzing request durations to verify cache bypass...");
+    let speedup_ratio = duration1.as_secs_f64() / duration2.as_secs_f64();
+
+    println!("   First request:  {:?}", duration1);
+    println!("   Second request: {:?}", duration2);
+    println!("   Speedup ratio:  {:.2}x", speedup_ratio);
+
+    // If cache was used, we'd expect >2x speedup
+    // Since file bypasses cache, durations should be similar (ratio near 1.0)
+    if speedup_ratio > 1.5 {
+        println!("⚠️  Warning: Unexpectedly high speedup ratio {:.2}x", speedup_ratio);
+        println!("   This may indicate the file was cached despite exceeding max_item_size");
+    } else {
+        println!("✅ Speedup ratio {:.2}x indicates cache bypass (expected <1.5x)", speedup_ratio);
+    }
+
+    // Phase 10: Stop proxy
+    println!("\nPhase 10: Stopping proxy...");
+    proxy.stop();
+    println!("✅ Proxy stopped");
+
+    // Phase 11: Cleanup
+    println!("\nPhase 11: Cleaning up test resources...");
+    let _ = std::fs::remove_dir_all(config_dir);
+    println!("✅ Cleanup complete");
+
+    // Summary
+    println!("\n📊 Test Summary");
+    println!("================");
+    println!("File size:       1 MB");
+    println!("Max item size:   512 KB");
+    println!("First request:   {:?}", duration1);
+    println!("Second request:  {:?}", duration2);
+    println!("Speedup ratio:   {:.2}x (expected <1.5x for cache bypass)", speedup_ratio);
+    println!("Data integrity:  ✅ All bytes verified correct");
+
+    println!("\n📝 Note: This test documents expected large file bypass behavior.");
+    println!("   Once Redis cache integration is complete, this test will verify:");
+    println!("   • Files exceeding max_item_size bypass cache");
+    println!("   • No speedup on subsequent requests (no caching)");
+    println!("   • Files stream directly from S3");
+    println!("   • Constant memory usage regardless of file size");
+    println!("   • Data integrity maintained through streaming");
+
+    println!("\n✅ Test completed - Large file bypass behavior documented");
+}

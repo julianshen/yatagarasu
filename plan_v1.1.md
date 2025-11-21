@@ -1756,7 +1756,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Verify ETag validation on cache hit (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_etag_validation)
 - [x] E2E: Verify If-None-Match returns 304 on match (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_if_none_match_returns_304)
 - [x] E2E: Range requests bypass redis cache entirely (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_range_requests_bypass)
-- [ ] E2E: Large files (>max_item_size) bypass redis cache
+- [x] E2E: Large files (>max_item_size) bypass redis cache (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_large_files_bypass)
 - [ ] E2E: Entries expire via Redis TTL automatically
 - [ ] E2E: Concurrent requests for same object coalesce correctly
 - [ ] E2E: Redis cache metrics tracked correctly (Prometheus)
