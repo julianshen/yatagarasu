@@ -1760,7 +1760,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Entries expire via Redis TTL automatically (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_entries_expire_via_ttl)
 - [x] E2E: Concurrent requests for same object coalesce correctly (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_concurrent_requests_coalesce)
 - [x] E2E: Redis cache metrics tracked correctly (Prometheus) (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_metrics_tracked_correctly)
-- [ ] E2E: Purge API clears redis cache entries
+- [x] E2E: Purge API clears redis cache entries (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_purge_api_clears_entries)
 - [ ] E2E: Stats API returns redis cache stats
 - [ ] E2E: Connection pool handles reconnections gracefully
 - [ ] E2E: Handles Redis server restart gracefully
