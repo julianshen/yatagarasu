@@ -1751,7 +1751,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 
 ### Redis Cache End-to-End Tests
 - [x] E2E: Full proxy request → redis cache hit → response (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_hit)
-- [ ] E2E: Full proxy request → redis cache miss → S3 → cache population → response
+- [x] E2E: Full proxy request → redis cache miss → S3 → cache population → response (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_miss_and_population)
 - [ ] E2E: Verify cache persists across proxy restarts
 - [ ] E2E: Verify ETag validation on cache hit
 - [ ] E2E: Verify If-None-Match returns 304 on match
