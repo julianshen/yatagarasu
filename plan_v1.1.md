@@ -1549,7 +1549,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Initializes layers in correct order
 - [x] Test: Memory layer first (fastest)
 - [x] Test: Disk layer second
-- [ ] Test: Redis layer last (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Redis layer last (Unit test deferred - verified by E2E tests: test_e2e_redis_cache_* and test_e2e_tiered_cache_*)
 
 ---
 
@@ -1560,12 +1560,12 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Returns immediately on memory hit
 - [x] Test: Checks disk layer on memory miss
 - [x] Test: Returns immediately on disk hit
-- [ ] Test: Checks redis layer on disk miss (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Checks redis layer on disk miss (Unit test deferred - verified by E2E test: test_e2e_tiered_cache_memory_disk_miss_redis_hit_promotion)
 - [x] Test: Returns None if all layers miss
 
 ### Cache Promotion (Write-Back)
 - [x] Test: Disk hit promotes to memory
-- [ ] Test: Redis hit promotes to disk and memory (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Redis hit promotes to disk and memory (Unit test deferred - verified by E2E test: test_e2e_tiered_cache_memory_disk_miss_redis_hit_promotion)
 - [x] Test: Promotion is async (non-blocking) (NOTE: Currently synchronous, TODO for tokio::spawn)
 - [x] Test: Promotion failures logged but don't block get() (Errors ignored with `let _`)
 
@@ -1577,7 +1577,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: set() writes to all configured layers
 - [x] Test: Writes to memory layer first
 - [x] Test: Writes to disk layer (if enabled)
-- [ ] Test: Writes to redis layer (if enabled) (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Writes to redis layer (if enabled) (Unit test deferred - verified by E2E tests: test_e2e_redis_cache_miss_and_population, test_e2e_tiered_cache_write_through_strategy)
 - [x] Test: Partial write failure is logged (Returns first error, continues to other layers)
 
 ### Write-Behind Strategy (Alternative)
@@ -1594,14 +1594,14 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: delete() removes from all layers
 - [x] Test: Removes from memory layer
 - [x] Test: Removes from disk layer
-- [ ] Test: Removes from redis layer (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Removes from redis layer (Unit test deferred - verified by E2E tests: test_e2e_tiered_cache_delete_removes_from_all_layers)
 - [x] Test: Returns true if any layer had the key
 
 ### Clear All Layers
 - [x] Test: clear() clears all layers
 - [x] Test: Clears memory layer
 - [x] Test: Clears disk layer
-- [ ] Test: Clears redis layer (DEFERRED - Redis Cache trait integration needed)
+- [x] Test: Clears redis layer (Unit test deferred - verified by E2E tests: test_e2e_tiered_cache_clear_clears_all_layers, test_e2e_redis_cache_purge_api_clears_entries)
 
 ---
 
