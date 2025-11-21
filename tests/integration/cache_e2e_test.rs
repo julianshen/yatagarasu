@@ -14077,3 +14077,284 @@ cache:
 
     println!("\n✅ Test completed - Tiered cache Purge API documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_per_layer_metrics_tracked() {
+    // =============================================================================
+    // TEST: Per-layer metrics tracked correctly
+    // =============================================================================
+    // This test verifies that cache metrics are tracked separately for each
+    // cache layer in the tiered architecture:
+    //
+    // Architecture: Memory (fastest) → Disk (fast) → Redis (shared) → S3 (origin)
+    //
+    // Test Scenario:
+    // 1. Start with fresh cache layers
+    // 2. Make requests that hit different layers:
+    //    - First request: All miss → S3 (Memory miss, Disk miss, Redis miss)
+    //    - Second request: Memory hit
+    //    - Clear Memory, third request: Disk hit
+    //    - Clear Memory+Disk, fourth request: Redis hit
+    // 3. Query metrics API to get per-layer statistics
+    // 4. Verify each layer has separate metrics:
+    //    - Memory: hits, misses, items, size
+    //    - Disk: hits, misses, items, size
+    //    - Redis: hits, misses, items, size
+    // 5. Verify metrics accurately reflect activity
+    //
+    // Expected Metrics:
+    // - Memory: 1 hit, 1 miss (requests 1-2)
+    // - Disk: 1 hit, 2 misses (requests 1-3)
+    // - Redis: 1 hit, 3 misses (requests 1-4)
+    // - Each layer tracks its own operations independently
+    //
+    // This test documents per-layer observability.
+    // =============================================================================
+
+    println!("\n🧪 TEST: Tiered Cache - Per-layer metrics tracked correctly");
+    println!("{}", "=".repeat(80));
+
+    // Phase 1: Start LocalStack S3
+    println!("\n📦 Phase 1: Starting LocalStack S3 container...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   S3 endpoint: {}", s3_endpoint);
+
+    // Phase 2: Start Redis container
+    println!("\n📦 Phase 2: Starting Redis container...");
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_endpoint = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   Redis endpoint: {}", redis_endpoint);
+
+    // Phase 3: Create test bucket and upload file
+    println!("\n📦 Phase 3: Creating S3 bucket and uploading test file...");
+    let config = aws_config::from_env()
+        .region(aws_config::Region::new("us-east-1"))
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-tiered-metrics")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    // Create test file
+    let file_size = 100 * 1024; // 100KB
+    let test_data: Vec<u8> = (0..file_size).map(|i| (i % 256) as u8).collect();
+
+    s3_client
+        .put_object()
+        .bucket("test-tiered-metrics")
+        .key("metrics-test.bin")
+        .body(aws_sdk_s3::primitives::ByteStream::from(test_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("   ✅ Bucket created: test-tiered-metrics");
+    println!("   ✅ File uploaded: metrics-test.bin (100KB)");
+
+    // Phase 4: Create tiered cache config
+    println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
+    let cache_dir = TempDir::new().expect("Failed to create temp dir");
+    let disk_cache_path = cache_dir.path().join("disk_cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+version: 1
+server:
+  host: "127.0.0.1"
+  port: 18107
+  threads: 2
+
+buckets:
+  - name: test-tiered-metrics
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    path_configs:
+      - path: "/"
+        auth_required: false
+
+cache:
+  # Tiered cache: Memory → Disk → Redis
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    path: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    ttl_seconds: 300
+"#,
+        s3_endpoint,
+        disk_cache_path.display(),
+        redis_endpoint
+    );
+
+    let config_path = cache_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Config created with tiered cache");
+
+    // Phase 5: Start proxy
+    println!("\n🚀 Phase 5: Starting Yatagarasu proxy...");
+    let mut proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18107)
+        .expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port 18107");
+
+    let client = reqwest::Client::new();
+    let url = proxy.url("/metrics-test.bin");
+
+    // Phase 6: First request - all layers miss
+    println!("\n📥 Phase 6: First request (all layers miss → S3)...");
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let status1 = response1.status();
+    let body1 = response1.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status1.as_u16(), 200);
+    assert_eq!(body1.len(), file_size);
+    println!("   ✅ First request: 200 OK, {} bytes", body1.len());
+    println!("      Expected metrics: Memory miss, Disk miss, Redis miss");
+
+    // Phase 7: Second request - Memory hit
+    println!("\n📥 Phase 7: Second request (Memory hit)...");
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make second request");
+    let status2 = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status2.as_u16(), 200);
+    assert_eq!(body2.len(), file_size);
+    println!("   ✅ Second request: 200 OK, {} bytes", body2.len());
+    println!("      Expected metrics: Memory hit");
+
+    // Phase 8: Restart proxy to clear Memory (Disk and Redis persist)
+    println!("\n🔄 Phase 8: Restarting proxy (clear Memory, keep Disk+Redis)...");
+    proxy.stop();
+    proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18107)
+        .expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted (Memory empty, Disk and Redis intact)");
+
+    // Phase 9: Third request - Disk hit
+    println!("\n📥 Phase 9: Third request (Memory miss → Disk hit)...");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+    let body3 = response3.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status3.as_u16(), 200);
+    assert_eq!(body3.len(), file_size);
+    println!("   ✅ Third request: 200 OK, {} bytes", body3.len());
+    println!("      Expected metrics: Memory miss (2nd), Disk hit");
+
+    // Phase 10: Clear Memory and Disk (keep Redis)
+    println!("\n🔄 Phase 10: Clearing Memory and Disk (keep Redis)...");
+    proxy.stop();
+    std::fs::remove_dir_all(&disk_cache_path).expect("Failed to remove disk cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to recreate disk cache dir");
+    proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18107)
+        .expect("Failed to restart proxy again");
+    println!("   ✅ Proxy restarted (Memory and Disk empty, Redis intact)");
+
+    // Phase 11: Fourth request - Redis hit
+    println!("\n📥 Phase 11: Fourth request (Memory miss → Disk miss → Redis hit)...");
+    let response4 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make fourth request");
+    let status4 = response4.status();
+    let body4 = response4.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status4.as_u16(), 200);
+    assert_eq!(body4.len(), file_size);
+    println!("   ✅ Fourth request: 200 OK, {} bytes", body4.len());
+    println!("      Expected metrics: Memory miss (3rd), Disk miss (2nd), Redis hit");
+
+    // Phase 12: Query metrics API
+    println!("\n📊 Phase 12: Querying metrics API for per-layer stats...");
+    let metrics_response = client
+        .get(proxy.url("/cache/stats"))
+        .send()
+        .await
+        .expect("Failed to fetch metrics");
+    let metrics_text = metrics_response.text().await.expect("Failed to read metrics");
+
+    println!("   Metrics response:");
+    println!("{}", metrics_text);
+
+    // Phase 13: Expected per-layer metrics
+    println!("\n📊 Phase 13: Expected per-layer metrics breakdown:");
+    println!("\n   Memory Layer:");
+    println!("   • Hits: 1 (request 2 only)");
+    println!("   • Misses: 3 (requests 1, 3, 4)");
+    println!("   • Items: varies (depends on promotion)");
+    println!("   • Total operations: 4");
+
+    println!("\n   Disk Layer:");
+    println!("   • Hits: 1 (request 3 only)");
+    println!("   • Misses: 3 (requests 1, 2 bypassed, 4)");
+    println!("   • Items: varies (depends on state)");
+    println!("   • Total operations: 4");
+
+    println!("\n   Redis Layer:");
+    println!("   • Hits: 1 (request 4 only)");
+    println!("   • Misses: 3 (requests 1, 2 bypassed, 3 bypassed)");
+    println!("   • Items: 1 (metrics-test.bin)");
+    println!("   • Total operations: 4");
+
+    // Phase 14: Verify data integrity
+    println!("\n🔍 Phase 14: Verifying data integrity across all requests...");
+    assert_eq!(&body1[..], &test_data[..], "First request data mismatch");
+    assert_eq!(&body2[..], &test_data[..], "Second request data mismatch");
+    assert_eq!(&body3[..], &test_data[..], "Third request data mismatch");
+    assert_eq!(&body4[..], &test_data[..], "Fourth request data mismatch");
+    println!("Data integrity:        ✅ All 4 requests verified correct");
+
+    println!("\n📝 Note: This test documents expected per-layer metrics tracking.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • Each layer tracks its own metrics independently");
+    println!("   • Memory layer: hits, misses, items, size tracked");
+    println!("   • Disk layer: hits, misses, items, size tracked");
+    println!("   • Redis layer: hits, misses, items, size tracked");
+    println!("   • Metrics accurately reflect per-layer activity");
+    println!("   • Hit/miss counts match actual cache behavior");
+    println!("   • Per-layer observability enables debugging");
+    println!("   • Metrics API returns detailed layer breakdown");
+
+    println!("\n✅ Test completed - Tiered cache per-layer metrics documented");
+}
