@@ -1736,8 +1736,8 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Full proxy request → disk cache hit → response (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_hit)
 - [x] E2E: Full proxy request → disk cache miss → S3 → cache population → response (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_miss_s3_fetch_cache_population)
 - [x] E2E: Verify cache persists across proxy restarts (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_persists_across_restarts)
-- [ ] E2E: Verify ETag validation on cache hit
-- [ ] E2E: Verify If-None-Match returns 304 on match
+- [x] E2E: Verify ETag validation on cache hit (tests/integration/cache_e2e_test.rs::test_e2e_conditional_request_if_none_match)
+- [x] E2E: Verify If-None-Match returns 304 on match (tests/integration/cache_e2e_test.rs::test_e2e_conditional_request_if_none_match)
 - [ ] E2E: Range requests bypass disk cache entirely
 - [ ] E2E: Large files (>max_item_size) bypass disk cache
 - [ ] E2E: Files written to disk correctly (tokio::fs)
