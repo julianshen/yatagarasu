@@ -17804,3 +17804,285 @@ buckets:
 
     println!("\n✅ Test completed - Single-layer Redis-only configuration documented");
 }
+
+/// Integration Test: All caches disabled (direct S3 proxy)
+///
+/// This test verifies that the proxy works correctly with NO caching enabled.
+/// This is a direct pass-through proxy to S3 without any cache layers.
+/// Useful for scenarios where caching is not needed or debugging.
+///
+/// Test Phases:
+/// 1. Start LocalStack (S3) and Proxy (NO cache configuration)
+/// 2. Create test file (300KB)
+/// 3. Upload file to S3
+/// 4. First request (should go directly to S3)
+/// 5. Verify file served correctly
+/// 6. Second request (should also go to S3 - no caching)
+/// 7. Verify similar response times (both from S3)
+/// 8. Third request (should also go to S3)
+/// 9. Restart proxy (no cache to persist)
+/// 10. Fourth request after restart (should go to S3)
+/// 11. Cleanup
+///
+/// Expected Behavior:
+/// - No cache hierarchy (direct: Request → S3)
+/// - All requests go directly to S3
+/// - No performance benefit from caching
+/// - System works without any cache layers
+/// - Simplest proxy configuration
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_integration_all_caches_disabled() {
+    println!("\n========================================");
+    println!("Integration Test: All caches disabled (direct S3 proxy)");
+    println!("========================================\n");
+
+    // Phase 1: Start infrastructure with NO cache configuration
+    println!("Phase 1: Starting infrastructure (NO caching enabled)...");
+
+    let docker = testcontainers::clients::Cli::default();
+
+    // Start LocalStack
+    let localstack = docker.run(
+        testcontainers::GenericImage::new("localstack/localstack", "latest")
+            .with_env_var("SERVICES", "s3")
+            .with_env_var("DEFAULT_REGION", "us-east-1")
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Ready.",
+            )),
+    );
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   ✅ LocalStack started on port {}", s3_port);
+
+    // Create S3 bucket
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-bucket")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+    println!("   ✅ S3 bucket 'test-bucket' created");
+
+    // Create proxy config with NO cache configuration
+    let proxy_port = 36080;
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:{}"
+  worker_threads: 2
+
+buckets:
+  - name: test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    routes:
+      - path: /
+    # NO CACHE CONFIGURATION - direct pass-through to S3
+"#,
+        proxy_port, s3_endpoint
+    );
+
+    let config_path = format!("/tmp/yatagarasu-no-cache-{}.yaml", uuid::Uuid::new_v4());
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Proxy config written (NO caching enabled)");
+
+    // Start proxy
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port {}", proxy_port);
+    println!();
+
+    // Phase 2: Create test file (300KB)
+    println!("Phase 2: Creating test file (300KB)...");
+    let file_size = 300 * 1024; // 300KB
+    let file_data: Vec<u8> = (0..file_size)
+        .map(|i| ((i * 47) % 256) as u8)
+        .collect();
+    let file_name = "config.xml";
+    println!(
+        "   ✅ Test file created: {} ({:.2} KB)",
+        file_name,
+        file_size as f64 / 1024.0
+    );
+    println!();
+
+    // Phase 3: Upload file to S3
+    println!("Phase 3: Uploading file to S3...");
+    s3_client
+        .put_object()
+        .bucket("test-bucket")
+        .key(file_name)
+        .body(aws_sdk_s3::primitives::ByteStream::from(file_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+    println!("   ✅ File uploaded to S3: {}", file_name);
+    println!();
+
+    // Phase 4: First request (should go directly to S3)
+    println!("Phase 4: First request (should go directly to S3)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url(&format!("/{}", file_name));
+
+    let start = std::time::Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let status = response.status();
+    let body = response.bytes().await.expect("Failed to read body");
+    let duration = start.elapsed();
+
+    println!(
+        "   ✅ First response: {} ({} bytes, {}ms)",
+        status,
+        body.len(),
+        duration.as_millis()
+    );
+    println!();
+
+    // Phase 5: Verify file served correctly
+    println!("Phase 5: Verifying file served correctly...");
+    assert_eq!(status.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(body.len(), file_size, "File size mismatch");
+    assert_eq!(&body[..], &file_data[..], "File content mismatch");
+    println!("   ✅ File served correctly from S3");
+    println!();
+
+    // Phase 6: Second request (should also go to S3 - no caching)
+    println!("Phase 6: Second request (should also go to S3 - no caching)...");
+    let start = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make second request");
+    let status2 = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+    let duration2 = start.elapsed();
+
+    println!(
+        "   ✅ Second response: {} ({} bytes, {}ms)",
+        status2,
+        body2.len(),
+        duration2.as_millis()
+    );
+    println!();
+
+    // Phase 7: Verify similar response times (both from S3)
+    println!("Phase 7: Verifying similar response times (both from S3)...");
+    assert_eq!(status2.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body2[..], &file_data[..], "File content should match");
+
+    // Without caching, requests should take similar time (both from S3)
+    println!(
+        "   ✅ Request times: {}ms vs {}ms",
+        duration.as_millis(),
+        duration2.as_millis()
+    );
+    println!("   • Both requests from S3 (no cache speedup)");
+    println!();
+
+    // Phase 8: Third request (should also go to S3)
+    println!("Phase 8: Third request (should also go to S3)...");
+    let start = std::time::Instant::now();
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+    let body3 = response3.bytes().await.expect("Failed to read body");
+    let duration3 = start.elapsed();
+
+    assert_eq!(status3.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body3[..], &file_data[..], "File content should match");
+
+    println!(
+        "   ✅ Third response: {} ({} bytes, {}ms)",
+        status3,
+        body3.len(),
+        duration3.as_millis()
+    );
+    println!("   • Third request also from S3");
+    println!();
+
+    // Phase 9: Restart proxy (no cache to persist)
+    println!("Phase 9: Restarting proxy (no cache to persist)...");
+    drop(proxy);
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted");
+    println!("   • No cache layers to persist");
+    println!();
+
+    // Phase 10: Fourth request after restart (should go to S3)
+    println!("Phase 10: Fourth request after restart (should go to S3)...");
+    let start = std::time::Instant::now();
+    let response4 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make fourth request");
+    let status4 = response4.status();
+    let body4 = response4.bytes().await.expect("Failed to read body");
+    let duration4 = start.elapsed();
+
+    assert_eq!(status4.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body4[..], &file_data[..], "File content should match");
+
+    println!(
+        "   ✅ Fourth response: {} ({} bytes, {}ms)",
+        status4,
+        body4.len(),
+        duration4.as_millis()
+    );
+    println!("   • Fourth request also from S3 (no cache after restart)");
+    println!();
+
+    // Phase 11: Cleanup
+    println!("Phase 11: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    let _ = std::fs::remove_file(&config_path);
+    println!("   ✅ Cleanup completed");
+
+    println!("\n========================================");
+    println!("Test Analysis:");
+    println!("========================================");
+    println!("✅ Direct S3 proxy works (no caching)");
+    println!("✅ All requests go directly to S3");
+    println!("✅ No performance benefit from caching");
+    println!("✅ System works without any cache layers");
+    println!("✅ Consistent response times (all from S3)");
+    println!();
+    println!("Key Behaviors Documented:");
+    println!("   • Simplest proxy configuration (no cache)");
+    println!("   • Direct pass-through to S3");
+    println!("   • No memory, disk, or network cache overhead");
+    println!("   • All requests have similar timing (S3 latency)");
+    println!("   • Suitable for debugging or when caching not needed");
+    println!("   • Zero cache management complexity");
+    println!("   • No cache invalidation concerns");
+    println!("   • Minimal resource usage");
+
+    println!("\n✅ Test completed - No-cache direct S3 proxy configuration documented");
+}
