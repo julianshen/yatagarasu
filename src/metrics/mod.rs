@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 /// Histogram represents percentile statistics for latency measurements
 #[derive(Debug, Clone, Copy)]
@@ -100,9 +100,15 @@ pub struct Metrics {
     // Phase 30: Cache metrics
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
+    cache_evictions: AtomicU64,          // Phase 30.8: eviction counter
+    cache_size_bytes: AtomicU64,          // Phase 30.8: current cache size gauge
+    cache_items: AtomicU64,               // Phase 30.8: current cached items gauge
     cache_get_durations: Mutex<Vec<u64>>, // microseconds
     cache_set_durations: Mutex<Vec<u64>>, // microseconds
 }
+
+/// Global singleton instance of metrics
+static METRICS: OnceLock<Metrics> = OnceLock::new();
 
 impl Metrics {
     /// Create a new Metrics instance
@@ -148,9 +154,17 @@ impl Metrics {
             active_replica: Mutex::new(HashMap::new()),
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
+            cache_evictions: AtomicU64::new(0),
+            cache_size_bytes: AtomicU64::new(0),
+            cache_items: AtomicU64::new(0),
             cache_get_durations: Mutex::new(Vec::new()),
             cache_set_durations: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Get the global singleton instance of Metrics
+    pub fn global() -> &'static Self {
+        METRICS.get_or_init(|| Metrics::new())
     }
 
     /// Check if metrics struct is valid (for testing)
@@ -216,6 +230,21 @@ impl Metrics {
         if let Ok(mut durations) = self.cache_set_durations.lock() {
             durations.push(duration_us);
         }
+    }
+
+    /// Increment cache eviction counter (Phase 30.8)
+    pub fn increment_cache_eviction(&self) {
+        self.cache_evictions.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Update cache size gauge in bytes (Phase 30.8)
+    pub fn set_cache_size_bytes(&self, size_bytes: u64) {
+        self.cache_size_bytes.store(size_bytes, Ordering::Relaxed);
+    }
+
+    /// Update cache items gauge (Phase 30.8)
+    pub fn set_cache_items(&self, item_count: u64) {
+        self.cache_items.store(item_count, Ordering::Relaxed);
     }
 
     /// Get current request count (for testing)
@@ -377,15 +406,28 @@ impl Metrics {
     }
 
     /// Get cache hit count (Phase 30)
-    #[cfg(test)]
     pub fn get_cache_hit_count(&self) -> u64 {
         self.cache_hits.load(Ordering::Relaxed)
     }
 
     /// Get cache miss count (Phase 30)
-    #[cfg(test)]
     pub fn get_cache_miss_count(&self) -> u64 {
         self.cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Get cache eviction count (Phase 30.8)
+    pub fn get_cache_eviction_count(&self) -> u64 {
+        self.cache_evictions.load(Ordering::Relaxed)
+    }
+
+    /// Get cache size in bytes (Phase 30.8)
+    pub fn get_cache_size_bytes(&self) -> u64 {
+        self.cache_size_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Get cache item count (Phase 30.8)
+    pub fn get_cache_items(&self) -> u64 {
+        self.cache_items.load(Ordering::Relaxed)
     }
 
     /// Get cache get durations in microseconds (Phase 30)

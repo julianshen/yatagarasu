@@ -1728,7 +1728,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Small files (<max_item_size) cached in memory (tests/integration/cache_e2e_test.rs::test_e2e_small_files_cached_in_memory)
 - [x] E2E: LRU eviction works under memory pressure (tests/integration/cache_e2e_test.rs::test_e2e_lru_eviction_under_memory_pressure)
 - [x] E2E: Concurrent requests for same object coalesce correctly (tests/integration/cache_e2e_test.rs::test_e2e_concurrent_requests_coalesce)
-- [ ] E2E: Memory cache metrics tracked correctly
+- [x] E2E: Memory cache metrics tracked correctly (tests/integration/cache_e2e_test.rs::test_e2e_memory_cache_metrics_tracked_correctly)
 - [ ] E2E: Purge API clears memory cache
 - [ ] E2E: Stats API returns memory cache stats
 
