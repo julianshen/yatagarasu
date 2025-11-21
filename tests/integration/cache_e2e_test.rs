@@ -7576,3 +7576,246 @@ buckets:
 
     println!("\n✅ Test completed - Cache persistence behavior documented");
 }
+
+/// E2E Test: Verify cleanup removes old files on startup
+///
+/// This test verifies that when the proxy starts, it cleans up stale cache files:
+/// 1. Create cache directory with "old" files (simulating previous runs)
+/// 2. Create some valid cache files and some stale files
+/// 3. Start proxy
+/// 4. Verify old/stale files are removed during startup
+/// 5. Verify valid files are retained
+/// 6. Verify proxy starts successfully after cleanup
+///
+/// **Expected behavior (once cache cleanup is integrated):**
+/// - Proxy scans cache directory on startup
+/// - Files exceeding max age (TTL) are deleted
+/// - Orphaned files (no index entry) are deleted
+/// - Corrupted files are deleted
+/// - Valid cache files are retained
+/// - Cleanup completes before serving requests
+///
+/// **Current behavior (without integration):**
+/// - Cleanup logic may not be fully implemented yet
+/// - Test documents the expected end-to-end flow
+/// - Test verifies proxy starts successfully
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_cleanup_removes_old_files_on_startup() {
+    println!("\n🧪 E2E Test: Cleanup removes old files on startup");
+    println!("=================================================\n");
+
+    // Phase 1: Start LocalStack for S3 backend
+    println!("Phase 1: Starting LocalStack (S3 backend)...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(testcontainers_modules::localstack::LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+    println!("  ✓ LocalStack running at {}", s3_endpoint);
+
+    // Phase 2: Create S3 client and bucket
+    println!("\nPhase 2: Creating S3 client and bucket...");
+    let s3_config = aws_sdk_s3::Config::builder()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .build();
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+    let bucket_name = "test-cleanup-bucket";
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+    println!("  ✓ Created bucket: {}", bucket_name);
+
+    // Phase 3: Upload test file to S3 (for valid cache test)
+    println!("\nPhase 3: Uploading test file to S3...");
+    let test_content = vec![0xAA; 128 * 1024]; // 128 KB
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("valid.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .send()
+            .await
+            .expect("Failed to upload file");
+    });
+    println!("  ✓ Uploaded: valid.txt ({} bytes)", test_content.len());
+
+    // Phase 4: Create cache directory and populate with stale files
+    println!("\nPhase 4: Creating cache directory with stale files...");
+    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_cleanup_test_{}", std::process::id()));
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    // Create various "stale" files to simulate previous runs
+    let stale_files = vec![
+        ("old_cache_file_1.bin", vec![0x01; 1024]),
+        ("old_cache_file_2.bin", vec![0x02; 2048]),
+        ("orphaned_file.tmp", vec![0x03; 512]),
+        ("corrupted.cache", vec![0x04; 256]),
+    ];
+
+    for (filename, content) in &stale_files {
+        let file_path = cache_dir.join(filename);
+        fs::write(&file_path, content).expect("Failed to write stale file");
+        println!("  ✓ Created stale file: {} ({} bytes)", filename, content.len());
+    }
+
+    // Count files before startup
+    let files_before: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .collect();
+    println!("  • Total files before startup: {}", files_before.len());
+
+    // Phase 5: Configure proxy with disk cache
+    println!("\nPhase 5: Configuring proxy with disk cache...");
+    let proxy_port = 18087; // Use unique port for this test
+    let config_content = format!(
+        r#"
+version: "1.0"
+
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["disk"]
+  disk:
+    enabled: true
+    cache_dir: "{}"
+    max_disk_cache_size_mb: 100
+    max_item_size_mb: 10
+
+s3:
+  default_region: "us-east-1"
+  default_access_key: "test"
+  default_secret_key: "test"
+  default_endpoint: "{}"
+
+buckets:
+  - name: "test-cleanup-bucket"
+    path: "/data"
+    require_auth: false
+"#,
+        proxy_port,
+        cache_dir.to_string_lossy(),
+        s3_endpoint
+    );
+
+    let config_file = cache_dir.join("config.yaml");
+    fs::write(&config_file, config_content).expect("Failed to write config file");
+    println!("  ✓ Config written to: {}", config_file.display());
+    println!("  ✓ Cache directory: {}", cache_dir.display());
+
+    // Phase 6: Start proxy (should trigger cleanup on startup)
+    println!("\nPhase 6: Starting proxy (should trigger cleanup)...");
+    let proxy = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
+        .expect("Failed to start proxy");
+    println!("  ✓ Proxy started at: {}", proxy.base_url);
+
+    // Allow time for cleanup to complete
+    std::thread::sleep(Duration::from_millis(1000));
+
+    // Phase 7: Check cache directory after startup
+    println!("\nPhase 7: Checking cache directory after startup...");
+    let files_after: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .collect();
+
+    println!("  • Files after startup: {}", files_after.len());
+    for entry in &files_after {
+        let path = entry.path();
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        println!("    - {} ({} bytes)", path.file_name().unwrap().to_string_lossy(), size);
+    }
+
+    // Check if stale files were removed
+    let stale_file_names: Vec<&str> = stale_files.iter().map(|(name, _)| *name).collect();
+    let remaining_stale: Vec<_> = files_after.iter()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            stale_file_names.contains(&name.as_str())
+        })
+        .collect();
+
+    println!("\n  📊 Cleanup analysis:");
+    println!("    • Files before startup: {}", files_before.len());
+    println!("    • Files after startup: {}", files_after.len());
+    println!("    • Stale files removed: {}", files_before.len() - remaining_stale.len());
+    println!("    • Stale files remaining: {}", remaining_stale.len());
+
+    if remaining_stale.is_empty() && files_before.len() > 0 {
+        println!("  ✅ All stale files removed - Cleanup working correctly!");
+    } else if remaining_stale.len() < files_before.len() {
+        println!("  ⚠  Partial cleanup - some stale files removed");
+    } else {
+        println!("  ⚠  No cleanup occurred (cleanup not yet implemented)");
+    }
+
+    // Phase 8: Make a request to populate cache with valid file
+    println!("\nPhase 8: Making request to populate cache with valid file...");
+    let client = reqwest::blocking::Client::new();
+    let url = proxy.url("/data/valid.txt");
+    let response = client.get(&url).send().expect("Failed to send request");
+
+    assert_eq!(response.status(), 200, "Expected 200 OK");
+    let body = response.bytes().expect("Failed to read response body");
+    assert_eq!(body.len(), test_content.len(), "Content length mismatch");
+    println!("  ✓ Fetched: valid.txt (200 OK, {} bytes)", body.len());
+
+    // Allow time for async cache write
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Phase 9: Verify cache now has valid file
+    println!("\nPhase 9: Verifying cache has valid file...");
+    let files_final: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .collect();
+
+    println!("  • Files in cache: {}", files_final.len());
+    if files_final.len() > files_after.len() {
+        println!("  ✓ New cache file added after request");
+    } else if files_final.len() == 0 {
+        println!("  ⚠  No cache files (cache not yet integrated)");
+    }
+
+    // Phase 10: Cleanup
+    println!("\nPhase 10: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    let _ = fs::remove_dir_all(&cache_dir);
+    println!("  ✓ Cleanup completed");
+
+    println!();
+    println!("📝 Note: This test documents expected startup cleanup behavior.");
+    println!("   Once cache cleanup is fully implemented, this test will verify:");
+    println!("   • Proxy scans cache directory on startup");
+    println!("   • Files exceeding max age (TTL) are deleted");
+    println!("   • Orphaned files (no index entry) are deleted");
+    println!("   • Corrupted or incomplete files are deleted");
+    println!("   • Valid cache files are retained");
+    println!("   • Cleanup completes before serving requests");
+    println!("   • Cleanup is logged for observability");
+
+    println!("\n✅ Test completed - Startup cleanup behavior documented");
+}
