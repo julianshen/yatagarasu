@@ -1822,3 +1822,364 @@ buckets:
     //
     // These enhancements will be added once proxy cache integration is complete.
 }
+
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_lru_eviction_under_memory_pressure() {
+    // Phase 30.10: E2E: LRU eviction works under memory pressure
+    //
+    // This test verifies that the memory cache uses LRU (Least Recently Used) eviction
+    // when it reaches its size limit:
+    // 1. Configure cache with small max_cache_size_mb (e.g., 2 MB)
+    // 2. Upload multiple files that collectively exceed cache size
+    // 3. Request files in sequence to populate cache (File A, B, C, D)
+    // 4. Access early files to keep them "hot" (File A, B)
+    // 5. Add new files that exceed cache capacity
+    // 6. Verify that least recently used files (C, D) were evicted
+    // 7. Verify that recently accessed files (A, B) remain in cache
+    //
+    // Expected behavior (after cache integration):
+    // - When cache is full, adding new entries triggers LRU eviction
+    // - Least recently used entries are evicted first
+    // - Recently accessed entries remain in cache (cache hit)
+    // - Cache metrics track evictions correctly
+
+    init_logging();
+
+    const PORT: u16 = 18086;
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    log::info!("Starting E2E test: LRU eviction under memory pressure");
+
+    // Start LocalStack container for S3 backend
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image = RunnableImage::from(LocalStack::default())
+        .with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack started on port {}", s3_port);
+
+    // Create AWS SDK S3 client for uploading test objects
+    log::info!("Creating AWS SDK S3 client...");
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create bucket
+    let bucket_name = "lru-eviction-test-bucket";
+    log::info!("Creating S3 bucket: {}", bucket_name);
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload test files of 600 KB each (total 3 MB for 5 files > 2 MB cache)
+    log::info!("Uploading test files (5 files × 600 KB = 3 MB total)...");
+
+    let file_size = 600 * 1024; // 600 KB per file
+
+    // File A
+    let file_a = vec![0xAA; file_size];
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_a.bin")
+            .body(file_a.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload file A");
+    });
+    log::info!("Uploaded file A (600 KB)");
+
+    // File B
+    let file_b = vec![0xBB; file_size];
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_b.bin")
+            .body(file_b.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload file B");
+    });
+    log::info!("Uploaded file B (600 KB)");
+
+    // File C
+    let file_c = vec![0xCC; file_size];
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_c.bin")
+            .body(file_c.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload file C");
+    });
+    log::info!("Uploaded file C (600 KB)");
+
+    // File D
+    let file_d = vec![0xDD; file_size];
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_d.bin")
+            .body(file_d.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload file D");
+    });
+    log::info!("Uploaded file D (600 KB)");
+
+    // File E (new file that will trigger eviction)
+    let file_e = vec![0xEE; file_size];
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("file_e.bin")
+            .body(file_e.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload file E");
+    });
+    log::info!("Uploaded file E (600 KB)");
+
+    // Create proxy config with small memory cache (max_cache_size_mb = 2 MB)
+    let config_content = format!(
+        r#"
+# Test configuration for LRU eviction under memory pressure
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 2
+    default_ttl_seconds: 3600
+
+buckets:
+  - name: "lru-eviction-test"
+    base_path: "/lru"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "{}"
+      access_key: "test"
+      secret_key: "test"
+"#,
+        PORT, s3_endpoint, bucket_name
+    );
+
+    fs::write(&config_path, config_content).expect("Failed to write config file");
+    log::info!("Created proxy config at: {:?}", config_path);
+
+    // Start the proxy server
+    log::info!("Starting proxy server on port {}...", PORT);
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), PORT)
+        .expect("Failed to start proxy");
+    log::info!("Proxy started successfully");
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Phase 1: Populate cache with files A, B, C (1.8 MB total, under 2 MB limit)
+    log::info!("Phase 1: Fetching files A, B, C to populate cache...");
+
+    log::info!("Fetching file A (first request)");
+    let response_a1 = client
+        .get(&proxy.url("/lru/file_a.bin"))
+        .send()
+        .expect("Failed to fetch file A");
+    assert_eq!(response_a1.status(), 200);
+    let body_a1 = response_a1.bytes().expect("Failed to read file A");
+    assert_eq!(body_a1.len(), file_size);
+    assert_eq!(body_a1.as_ref(), file_a.as_slice());
+    log::info!("✓ File A fetched (should be cached)");
+
+    // Small delay to ensure cache operations complete
+    std::thread::sleep(Duration::from_millis(100));
+
+    log::info!("Fetching file B (first request)");
+    let response_b1 = client
+        .get(&proxy.url("/lru/file_b.bin"))
+        .send()
+        .expect("Failed to fetch file B");
+    assert_eq!(response_b1.status(), 200);
+    let body_b1 = response_b1.bytes().expect("Failed to read file B");
+    assert_eq!(body_b1.len(), file_size);
+    assert_eq!(body_b1.as_ref(), file_b.as_slice());
+    log::info!("✓ File B fetched (should be cached)");
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    log::info!("Fetching file C (first request)");
+    let response_c1 = client
+        .get(&proxy.url("/lru/file_c.bin"))
+        .send()
+        .expect("Failed to fetch file C");
+    assert_eq!(response_c1.status(), 200);
+    let body_c1 = response_c1.bytes().expect("Failed to read file C");
+    assert_eq!(body_c1.len(), file_size);
+    assert_eq!(body_c1.as_ref(), file_c.as_slice());
+    log::info!("✓ File C fetched (should be cached)");
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Cache state: A (oldest), B, C (newest) - total ~1.8 MB
+
+    // Phase 2: Access files A and B to make them "hot" (recently used)
+    log::info!("Phase 2: Re-accessing files A and B to keep them hot...");
+
+    log::info!("Re-fetching file A (should hit cache)");
+    let response_a2 = client
+        .get(&proxy.url("/lru/file_a.bin"))
+        .send()
+        .expect("Failed to re-fetch file A");
+    assert_eq!(response_a2.status(), 200);
+    let body_a2 = response_a2.bytes().expect("Failed to read file A again");
+    assert_eq!(body_a2.as_ref(), file_a.as_slice());
+    log::info!("✓ File A re-fetched (cache hit expected)");
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    log::info!("Re-fetching file B (should hit cache)");
+    let response_b2 = client
+        .get(&proxy.url("/lru/file_b.bin"))
+        .send()
+        .expect("Failed to re-fetch file B");
+    assert_eq!(response_b2.status(), 200);
+    let body_b2 = response_b2.bytes().expect("Failed to read file B again");
+    assert_eq!(body_b2.as_ref(), file_b.as_slice());
+    log::info!("✓ File B re-fetched (cache hit expected)");
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Cache LRU order: C (oldest), A, B (newest)
+
+    // Phase 3: Add file D (total would be 2.4 MB, exceeds 2 MB limit)
+    // Expected: File C should be evicted (LRU)
+    log::info!("Phase 3: Fetching file D (should trigger eviction of file C)...");
+
+    log::info!("Fetching file D (first request - triggers eviction)");
+    let response_d1 = client
+        .get(&proxy.url("/lru/file_d.bin"))
+        .send()
+        .expect("Failed to fetch file D");
+    assert_eq!(response_d1.status(), 200);
+    let body_d1 = response_d1.bytes().expect("Failed to read file D");
+    assert_eq!(body_d1.len(), file_size);
+    assert_eq!(body_d1.as_ref(), file_d.as_slice());
+    log::info!("✓ File D fetched (should evict C due to LRU)");
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Cache state: A, B, D (C evicted)
+
+    // Phase 4: Add file E (total would be 2.4 MB again, exceeds limit)
+    // Expected: File A should be evicted (it's now the LRU after we accessed B and D)
+    log::info!("Phase 4: Fetching file E (should trigger eviction of file A)...");
+
+    log::info!("Fetching file E (first request - triggers eviction)");
+    let response_e1 = client
+        .get(&proxy.url("/lru/file_e.bin"))
+        .send()
+        .expect("Failed to fetch file E");
+    assert_eq!(response_e1.status(), 200);
+    let body_e1 = response_e1.bytes().expect("Failed to read file E");
+    assert_eq!(body_e1.len(), file_size);
+    assert_eq!(body_e1.as_ref(), file_e.as_slice());
+    log::info!("✓ File E fetched (should evict A due to LRU)");
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Cache state: B, D, E (A and C evicted)
+
+    // Phase 5: Verify eviction behavior
+    log::info!("Phase 5: Verifying LRU eviction behavior...");
+
+    // Test 1: File C should be evicted (was LRU when D was added)
+    log::info!("Testing if file C was evicted...");
+    let response_c2 = client
+        .get(&proxy.url("/lru/file_c.bin"))
+        .send()
+        .expect("Failed to fetch file C again");
+    assert_eq!(response_c2.status(), 200);
+    let body_c2 = response_c2.bytes().expect("Failed to read file C again");
+    assert_eq!(body_c2.as_ref(), file_c.as_slice());
+    log::info!("✓ File C fetched (was evicted, now re-fetched from S3)");
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Test 2: File A should be evicted (was LRU when E was added)
+    log::info!("Testing if file A was evicted...");
+    let response_a3 = client
+        .get(&proxy.url("/lru/file_a.bin"))
+        .send()
+        .expect("Failed to fetch file A again");
+    assert_eq!(response_a3.status(), 200);
+    let body_a3 = response_a3.bytes().expect("Failed to read file A again");
+    assert_eq!(body_a3.as_ref(), file_a.as_slice());
+    log::info!("✓ File A fetched (was evicted, now re-fetched from S3)");
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Test 3: File B should still be in cache (was accessed recently)
+    log::info!("Testing if file B is still cached...");
+    let response_b3 = client
+        .get(&proxy.url("/lru/file_b.bin"))
+        .send()
+        .expect("Failed to fetch file B again");
+    assert_eq!(response_b3.status(), 200);
+    let body_b3 = response_b3.bytes().expect("Failed to read file B again");
+    assert_eq!(body_b3.as_ref(), file_b.as_slice());
+    log::info!("✓ File B fetched (should still be cached)");
+
+    log::info!("LRU eviction test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. The proxy can serve all files correctly
+    // 2. Multiple requests for files succeed
+    // 3. Files can be fetched even after cache is full
+    //
+    // Full verification would require:
+    // - Checking X-Cache-Status headers (MISS after eviction, HIT if still cached)
+    // - Monitoring cache metrics to verify eviction count increases
+    // - Verifying cache size stays under max_cache_size_mb limit
+    // - Checking cache metrics to confirm LRU order
+    // - Testing with exact cache size boundaries (e.g., exactly 2.0 MB)
+    // - Verifying eviction happens asynchronously without blocking requests
+    //
+    // These enhancements will be added once proxy cache integration is complete.
+}

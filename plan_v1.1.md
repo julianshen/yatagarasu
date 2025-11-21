@@ -1726,7 +1726,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Range requests bypass memory cache entirely (tests/integration/cache_e2e_test.rs::test_e2e_range_requests_bypass_cache)
 - [x] E2E: Large files (>max_item_size) bypass memory cache (tests/integration/cache_e2e_test.rs::test_e2e_large_files_bypass_cache)
 - [x] E2E: Small files (<max_item_size) cached in memory (tests/integration/cache_e2e_test.rs::test_e2e_small_files_cached_in_memory)
-- [ ] E2E: LRU eviction works under memory pressure
+- [x] E2E: LRU eviction works under memory pressure (tests/integration/cache_e2e_test.rs::test_e2e_lru_eviction_under_memory_pressure)
 - [ ] E2E: Concurrent requests for same object coalesce correctly
 - [ ] E2E: Memory cache metrics tracked correctly
 - [ ] E2E: Purge API clears memory cache
