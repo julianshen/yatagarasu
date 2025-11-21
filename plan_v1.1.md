@@ -1750,7 +1750,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Cleanup removes old files on startup (tests/integration/cache_e2e_test.rs::test_e2e_cleanup_removes_old_files_on_startup)
 
 ### Redis Cache End-to-End Tests
-- [ ] E2E: Full proxy request → redis cache hit → response
+- [x] E2E: Full proxy request → redis cache hit → response (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_hit)
 - [ ] E2E: Full proxy request → redis cache miss → S3 → cache population → response
 - [ ] E2E: Verify cache persists across proxy restarts
 - [ ] E2E: Verify ETag validation on cache hit
