@@ -1770,7 +1770,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Memory hit → immediate response (fastest path) (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_memory_hit_fastest_path)
 - [x] E2E: Memory miss → disk hit → promote to memory → response (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_memory_miss_disk_hit_promotion)
 - [x] E2E: Memory miss → disk miss → redis hit → promote to disk+memory → response (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_memory_disk_miss_redis_hit_promotion)
-- [ ] E2E: All layers miss → S3 → populate all layers → response
+- [x] E2E: All layers miss → S3 → populate all layers → response (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_all_layers_miss_s3_populate)
 - [ ] E2E: Verify promotion is async (doesn't block response)
 - [ ] E2E: Verify promotion failures logged but don't fail request
 - [ ] E2E: delete() removes from all layers
