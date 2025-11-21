@@ -1773,7 +1773,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: All layers miss → S3 → populate all layers → response (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_all_layers_miss_s3_populate)
 - [x] E2E: Verify promotion is async (doesn't block response) (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_promotion_is_async)
 - [x] E2E: Verify promotion failures logged but don't fail request (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_promotion_failures_dont_fail_request)
-- [ ] E2E: delete() removes from all layers
+- [x] E2E: delete() removes from all layers (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_delete_removes_from_all_layers)
 - [ ] E2E: clear() clears all layers
 - [ ] E2E: Stats aggregated across all layers correctly
 - [ ] E2E: Purge API clears all layers

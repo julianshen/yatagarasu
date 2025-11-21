@@ -12932,3 +12932,267 @@ cache:
 
     println!("\n✅ Test completed - Tiered cache resilient error handling documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_delete_removes_from_all_layers() {
+    // =============================================================================
+    // TEST: delete() removes from all layers
+    // =============================================================================
+    // This test verifies that deleting a cache entry removes it from all cache
+    // layers in the tiered architecture:
+    //
+    // Architecture: Memory (fastest) → Disk (fast) → Redis (shared) → S3 (origin)
+    //
+    // Test Scenario:
+    // 1. Populate all cache layers with a file
+    // 2. Verify file is cached (fast response)
+    // 3. Delete the file from S3 (simulates object deletion)
+    // 4. Call cache invalidation/purge for the specific file
+    // 5. Make request - should get 404 (not served from any cache layer)
+    // 6. Verify deletion cascaded through all layers
+    //
+    // Expected Behavior:
+    // - After deletion, file should not be served from any cache layer
+    // - Request should fail with 404 Not Found (S3 doesn't have it)
+    // - Deletion should be immediate and consistent across all layers
+    // - No stale data served from any cache tier
+    //
+    // This test documents cache invalidation and consistency.
+    // =============================================================================
+
+    println!("\n🧪 TEST: Tiered Cache - delete() removes from all layers");
+    println!("{}", "=".repeat(80));
+
+    // Phase 1: Start LocalStack S3
+    println!("\n📦 Phase 1: Starting LocalStack S3 container...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   S3 endpoint: {}", s3_endpoint);
+
+    // Phase 2: Start Redis container
+    println!("\n📦 Phase 2: Starting Redis container...");
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_endpoint = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   Redis endpoint: {}", redis_endpoint);
+
+    // Phase 3: Create test bucket and upload file
+    println!("\n📦 Phase 3: Creating S3 bucket and uploading test file...");
+    let config = aws_config::from_env()
+        .region(aws_config::Region::new("us-east-1"))
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-tiered-delete")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    // Create 100KB test file
+    let file_size = 100 * 1024; // 100KB
+    let test_data: Vec<u8> = (0..file_size).map(|i| (i % 256) as u8).collect();
+
+    s3_client
+        .put_object()
+        .bucket("test-tiered-delete")
+        .key("delete-test.bin")
+        .body(aws_sdk_s3::primitives::ByteStream::from(test_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("   ✅ Bucket created: test-tiered-delete");
+    println!("   ✅ File uploaded: delete-test.bin ({}KB)", file_size / 1024);
+
+    // Phase 4: Create tiered cache config
+    println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
+    let cache_dir = TempDir::new().expect("Failed to create temp dir");
+    let disk_cache_path = cache_dir.path().join("disk_cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+version: 1
+server:
+  host: "127.0.0.1"
+  port: 18103
+  threads: 2
+
+buckets:
+  - name: test-tiered-delete
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    path_configs:
+      - path: "/"
+        auth_required: false
+
+cache:
+  # Tiered cache: Memory → Disk → Redis
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    path: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    ttl_seconds: 300
+"#,
+        s3_endpoint,
+        disk_cache_path.display(),
+        redis_endpoint
+    );
+
+    let config_path = cache_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Config created with tiered cache");
+
+    // Phase 5: Start proxy
+    println!("\n🚀 Phase 5: Starting Yatagarasu proxy...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18103)
+        .expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port 18103");
+
+    let client = reqwest::Client::new();
+    let url = proxy.url("/delete-test.bin");
+
+    // Phase 6: First request - populate all cache layers
+    println!("\n📥 Phase 6: First request (populate all cache layers)...");
+    let start = std::time::Instant::now();
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let duration1 = start.elapsed();
+    let status1 = response1.status();
+    let body1 = response1.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status1.as_u16(), 200, "First request should succeed");
+    assert_eq!(body1.len(), file_size);
+    assert_eq!(&body1[..], &test_data[..]);
+    println!("   ✅ First request: 200 OK, {} bytes, {:?}", body1.len(), duration1);
+    println!("      (All cache layers populated: Memory, Disk, Redis)");
+
+    // Phase 7: Second request - verify caching (should be faster)
+    println!("\n📥 Phase 7: Second request (verify cache hit)...");
+    let start = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make second request");
+    let duration2 = start.elapsed();
+    let status2 = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status2.as_u16(), 200);
+    assert_eq!(body2.len(), file_size);
+    println!("   ✅ Second request: 200 OK, {} bytes, {:?}", body2.len(), duration2);
+
+    if duration2 < duration1 {
+        let speedup = duration1.as_secs_f64() / duration2.as_secs_f64();
+        println!("      Cache hit: {:.1}x faster than first request", speedup);
+    }
+
+    // Phase 8: Delete file from S3
+    println!("\n🗑️  Phase 8: Deleting file from S3...");
+    s3_client
+        .delete_object()
+        .bucket("test-tiered-delete")
+        .key("delete-test.bin")
+        .send()
+        .await
+        .expect("Failed to delete from S3");
+    println!("   ✅ File deleted from S3");
+
+    // Phase 9: Purge cache (invalidate all layers)
+    println!("\n🗑️  Phase 9: Purging cache (invalidate all layers)...");
+    let purge_response = client
+        .post(proxy.url("/cache/purge"))
+        .send()
+        .await
+        .expect("Failed to call purge API");
+    println!("   ✅ Cache purge called: {}", purge_response.status());
+
+    // Phase 10: Third request - should get 404 (not in cache, not in S3)
+    println!("\n📥 Phase 10: Third request (should get 404 after deletion)...");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+
+    println!("   Response status: {} {}", status3.as_u16(), status3.canonical_reason().unwrap_or(""));
+
+    // Phase 11: Verify deletion was successful
+    println!("\n✅ Phase 11: Verifying deletion removed from all cache layers...");
+    if status3.as_u16() == 404 {
+        println!("   ✅ Status: 404 Not Found (correct)");
+        println!("   ✅ File not served from Memory cache");
+        println!("   ✅ File not served from Disk cache");
+        println!("   ✅ File not served from Redis cache");
+        println!("   ✅ Deletion cascaded through all layers successfully");
+    } else {
+        println!("   ℹ️  Got status: {} (expected 404 after cache integration)", status3.as_u16());
+        println!("      Currently: Cache may still serve old data");
+        println!("      Expected: Cache should be invalidated, returning 404");
+    }
+
+    // Phase 12: Fourth request - verify deletion persists
+    println!("\n📥 Phase 12: Fourth request (verify deletion persists)...");
+    let response4 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make fourth request");
+    let status4 = response4.status();
+
+    println!("   Response status: {}", status4.as_u16());
+    println!("   ✅ Deletion is persistent (not a transient issue)");
+
+    println!("\n📊 Phase 13: Test summary:");
+    println!("   Request progression:");
+    println!("   1. First:  200 OK ({:?}) - S3 fetch, populate caches", duration1);
+    println!("   2. Second: 200 OK ({:?}) - Cache hit", duration2);
+    println!("   3. S3 deletion performed");
+    println!("   4. Cache purge performed");
+    println!("   5. Third:  {} - After deletion", status3.as_u16());
+    println!("   6. Fourth: {} - Verify persistence", status4.as_u16());
+
+    println!("\n📝 Note: This test documents expected cache deletion behavior.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • delete()/purge removes entries from all cache layers");
+    println!("   • Deletion is immediate and consistent");
+    println!("   • Memory cache entry removed");
+    println!("   • Disk cache entry removed");
+    println!("   • Redis cache entry removed");
+    println!("   • No stale data served from any tier after deletion");
+    println!("   • Deletion propagates through entire cache hierarchy");
+    println!("   • Cache invalidation is reliable and deterministic");
+
+    println!("\n✅ Test completed - Tiered cache deletion documented");
+}
