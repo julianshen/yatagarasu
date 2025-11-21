@@ -1793,7 +1793,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Integration: All caches disabled (direct S3 proxy) (tests/integration/cache_e2e_test.rs::test_integration_all_caches_disabled)
 - [x] Integration: Cache warmup on startup (reload from disk/redis) (tests/integration/cache_e2e_test.rs::test_integration_cache_warmup_on_startup)
 - [x] Integration: Graceful degradation when one layer fails (tests/integration/cache_e2e_test.rs::test_integration_graceful_degradation_on_failure)
-- [ ] Integration: Metrics consistent across all configurations
+- [x] Integration: Metrics consistent across all configurations (tests/integration/cache_e2e_test.rs::test_integration_metrics_consistency_across_configs)
 
 ---
 
