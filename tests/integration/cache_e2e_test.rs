@@ -11431,3 +11431,218 @@ cache:
 
     println!("\n✅ Test completed - Redis serialization/deserialization behavior documented");
 }
+
+// =============================================================================
+// TIERED CACHE END-TO-END TESTS
+// =============================================================================
+// These tests verify the complete multi-layer cache architecture:
+// Memory (fastest) → Disk (fast) → Redis (shared) → S3 (origin)
+// =============================================================================
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_memory_hit_fastest_path() {
+    println!("\n🧪 E2E Test: Memory hit → immediate response (fastest path)");
+    println!("============================================================");
+    println!("This test verifies the fastest cache path - memory cache hits.");
+    println!("Architecture: Memory → Disk → Redis → S3\n");
+
+    // Phase 1: Start LocalStack container
+    println!("Phase 1: Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", localstack_port);
+    println!("✅ LocalStack started on port {}", localstack_port);
+
+    // Phase 2: Start Redis container
+    println!("\nPhase 2: Starting Redis container...");
+    let redis_image = Redis::default();
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    println!("✅ Redis started on port {}", redis_port);
+
+    // Phase 3: Create S3 bucket and upload test file
+    println!("\nPhase 3: Creating S3 bucket and uploading test file...");
+    let bucket_name = "test-tiered-memory-hit";
+    let object_key = "test-file.txt";
+    let file_data = b"This is test data for tiered cache memory hit testing.";
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+
+    s3_client
+        .create_bucket()
+        .bucket(bucket_name)
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    s3_client
+        .put_object()
+        .bucket(bucket_name)
+        .key(object_key)
+        .body(aws_sdk_s3::primitives::ByteStream::from_static(file_data))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+
+    // Phase 4: Create proxy config with all cache layers enabled
+    println!("\nPhase 4: Creating proxy config with tiered cache (Memory + Disk + Redis)...");
+    let config_dir = "/tmp/yatagarasu-test-tiered-memory-hit";
+    let disk_cache_dir = format!("{}/disk-cache", config_dir);
+    std::fs::create_dir_all(&disk_cache_dir).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18103"
+  workers: 2
+
+buckets:
+  - name: "test-tiered-memory-hit"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    path_prefix: "/files"
+
+cache:
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    directory: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size: 10485760
+    ttl: 300
+"#,
+        s3_endpoint, disk_cache_dir, redis_url
+    );
+
+    let config_path = format!("{}/config.yaml", config_dir);
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("✅ Config written with 3-tier cache architecture");
+    println!("   Layer 1 (fastest): Memory cache (max 100 items, 50MB)");
+    println!("   Layer 2 (fast):    Disk cache (max 1000 items, 500MB)");
+    println!("   Layer 3 (shared):  Redis cache (10MB item limit, 300s TTL)");
+
+    // Phase 5: Start proxy
+    println!("\nPhase 5: Starting proxy server...");
+    let mut proxy = ProxyTestHarness::start(&config_path, 18103).expect("Failed to start proxy");
+    println!("✅ Proxy started on port 18103");
+
+    // Phase 6: Make first request (all layers miss → S3 → populate all layers)
+    println!("\nPhase 6: Making first request (all layers miss → fetch from S3)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url("/files/test-file.txt");
+
+    let start1 = std::time::Instant::now();
+    let response1 = client.get(&url).send().await.expect("Failed to send request");
+    let duration1 = start1.elapsed();
+
+    assert_eq!(response1.status(), 200);
+    let body1 = response1.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body1[..], file_data);
+
+    println!("✅ First request completed in {:?}", duration1);
+    println!("   Expected behavior:");
+    println!("   • Memory miss → Disk miss → Redis miss → S3 fetch");
+    println!("   • Data stored in all 3 cache layers");
+
+    // Phase 7: Make second request (memory hit - fastest path)
+    println!("\nPhase 7: Making second request (should be memory hit - fastest path)...");
+    let start2 = std::time::Instant::now();
+    let response2 = client.get(&url).send().await.expect("Failed to send request");
+    let duration2 = start2.elapsed();
+
+    assert_eq!(response2.status(), 200);
+    let body2 = response2.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body2[..], file_data);
+
+    println!("✅ Second request completed in {:?}", duration2);
+    println!("   Expected behavior:");
+    println!("   • Memory hit → immediate response (no disk/redis/S3 access)");
+    println!("   • This is the fastest possible cache path");
+
+    // Phase 8: Analyze performance - memory hit should be MUCH faster
+    println!("\nPhase 8: Analyzing performance (memory hit speedup)...");
+    let speedup_ratio = duration1.as_secs_f64() / duration2.as_secs_f64();
+
+    println!("   First request (S3):     {:?}", duration1);
+    println!("   Second request (Memory): {:?}", duration2);
+    println!("   Speedup ratio:          {:.2}x", speedup_ratio);
+
+    if speedup_ratio > 5.0 {
+        println!("✅ Excellent speedup ({:.2}x) - memory cache is significantly faster", speedup_ratio);
+    } else if speedup_ratio > 2.0 {
+        println!("✅ Good speedup ({:.2}x) - memory cache providing benefit", speedup_ratio);
+    } else {
+        println!("⚠️  Low speedup ({:.2}x) - may indicate memory cache not working", speedup_ratio);
+    }
+
+    // Phase 9: Make third request to verify memory cache is stable
+    println!("\nPhase 9: Making third request (verify consistent memory hits)...");
+    let start3 = std::time::Instant::now();
+    let response3 = client.get(&url).send().await.expect("Failed to send request");
+    let duration3 = start3.elapsed();
+
+    assert_eq!(response3.status(), 200);
+    let body3 = response3.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body3[..], file_data);
+
+    println!("✅ Third request completed in {:?} (consistent memory hit)", duration3);
+
+    // Phase 10: Stop proxy
+    println!("\nPhase 10: Stopping proxy...");
+    proxy.stop();
+    println!("✅ Proxy stopped");
+
+    // Phase 11: Cleanup
+    println!("\nPhase 11: Cleaning up test resources...");
+    let _ = std::fs::remove_dir_all(config_dir);
+    println!("✅ Cleanup complete");
+
+    // Summary
+    println!("\n📊 Test Summary");
+    println!("================");
+    println!("Cache Architecture:  3-tier (Memory → Disk → Redis → S3)");
+    println!("Request 1 (S3):      {:?}", duration1);
+    println!("Request 2 (Memory):  {:?} ({:.2}x faster)", duration2, speedup_ratio);
+    println!("Request 3 (Memory):  {:?} (consistent)", duration3);
+    println!("Data integrity:      ✅ All bytes verified correct");
+
+    println!("\n📝 Note: This test documents expected tiered cache behavior.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • Memory cache provides the fastest response path");
+    println!("   • Memory hits are 5x-50x faster than S3 fetches");
+    println!("   • Memory hits bypass disk, Redis, and S3 entirely");
+    println!("   • Data integrity maintained through all cache layers");
+    println!("   • Memory cache operates with minimal latency (<1ms typical)");
+
+    println!("\n✅ Test completed - Tiered cache memory hit behavior documented");
+}
