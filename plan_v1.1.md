@@ -1762,7 +1762,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Redis cache metrics tracked correctly (Prometheus) (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_metrics_tracked_correctly)
 - [x] E2E: Purge API clears redis cache entries (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_purge_api_clears_entries)
 - [x] E2E: Stats API returns redis cache stats (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_stats_api_returns_stats)
-- [ ] E2E: Connection pool handles reconnections gracefully
+- [x] E2E: Connection pool handles reconnections gracefully (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_connection_pool_handles_reconnections)
 - [ ] E2E: Handles Redis server restart gracefully
 - [ ] E2E: Serialization/deserialization works with real data
 
