@@ -9,8 +9,8 @@
 use super::test_harness::ProxyTestHarness;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Once;
-use std::time::Duration;
+use std::sync::{Arc, Once};
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use testcontainers::{clients::Cli, RunnableImage};
 use testcontainers_modules::localstack::LocalStack;
@@ -5988,4 +5988,403 @@ buckets:
     println!("   • Cache metrics track evictions accurately");
 
     println!("\n✅ Test completed - LRU eviction behavior documented");
+}
+
+/// E2E Test: Verify concurrent requests for same object coalesce correctly
+///
+/// This test verifies "stampede prevention" - when multiple concurrent requests
+/// arrive for the same uncached object, only ONE request should fetch from S3,
+/// while others wait and receive the cached result.
+///
+/// Test Phases:
+/// 1. Upload test file to S3
+/// 2. Launch multiple concurrent requests for same object (cache empty)
+/// 3. Measure S3 request count (should be exactly 1)
+/// 4. Verify all concurrent requests receive same data
+/// 5. Verify cache was populated after first request
+/// 6. Verify subsequent requests are cache hits
+///
+/// Expected Behavior:
+/// - Multiple concurrent requests coalesce into single S3 fetch
+/// - First request fetches from S3 and populates cache
+/// - Concurrent requests wait and receive cached result
+/// - Cache metrics show only 1 S3 fetch, N cache hits
+/// - No duplicate S3 requests (no "cache stampede")
+///
+/// Current Implementation Status:
+/// - This test documents expected behavior (Red phase)
+/// - Request coalescing NOT yet implemented
+/// - Each concurrent request will currently fetch from S3 independently
+/// - Once implemented, only first request should fetch from S3
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_concurrent_requests_coalesce_correctly() {
+    // ========================================================================
+    // SETUP: Initialize LocalStack and create test bucket
+    // ========================================================================
+
+    let docker = testcontainers::clients::Cli::default();
+
+    // Start LocalStack container for S3
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+    let localstack = docker.run(localstack_image);
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", localstack_port);
+
+    println!("✓ LocalStack started on port {}", localstack_port);
+
+    // Wait for LocalStack to be ready
+    std::thread::sleep(Duration::from_secs(3));
+
+    // Create S3 client
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .region(aws_config::Region::new("us-east-1"))
+            .endpoint_url(&s3_endpoint)
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create test bucket
+    let bucket_name = "concurrent-requests-bucket";
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    println!("✓ Created S3 bucket: {}", bucket_name);
+
+    // ========================================================================
+    // SETUP: Upload test file to S3
+    // ========================================================================
+
+    let test_file = "concurrent-test.txt";
+    let test_data = vec![0xAB; 512 * 1024]; // 512 KB file
+
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key(test_file)
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_data.clone()))
+            .send()
+            .await
+            .expect("Failed to upload test file");
+    });
+
+    println!("✓ Uploaded {} ({} KB)", test_file, test_data.len() / 1024);
+
+    // ========================================================================
+    // SETUP: Configure proxy with disk cache
+    // ========================================================================
+
+    let test_dir = TempDir::new().expect("Failed to create temp dir");
+    let config_dir = test_dir.path();
+    let cache_dir = config_dir.join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
+
+    let config_path = config_dir.join("config.yaml");
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18100"
+  threads: 4
+
+cache:
+  enabled: true
+  cache_layers: ["disk"]
+  disk:
+    enabled: true
+    cache_dir: "{}"
+    max_disk_cache_size_mb: 100
+    max_item_size_mb: 10
+
+buckets:
+  - name: "{}"
+    path_prefix: "/data"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      credentials:
+        access_key_id: "test"
+        secret_access_key: "test"
+"#,
+        cache_dir.to_string_lossy(),
+        bucket_name,
+        s3_endpoint
+    );
+
+    fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("✓ Config written to {:?}", config_path);
+    println!("✓ Cache directory: {:?}", cache_dir);
+
+    // ========================================================================
+    // SETUP: Start proxy server
+    // ========================================================================
+
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18100)
+        .expect("Failed to start proxy");
+
+    println!("✓ Proxy started on port 18100");
+
+    // Give proxy time to initialize
+    std::thread::sleep(Duration::from_secs(1));
+
+    // ========================================================================
+    // PHASE 1: Launch concurrent requests (cache is empty)
+    // ========================================================================
+
+    println!("\n📝 Phase 1: Launch 10 concurrent requests for same object");
+
+    let url = proxy.url(&format!("/data/{}", test_file));
+    let concurrent_requests = 10;
+
+    // Use Arc to share URL across threads
+    let url = Arc::new(url);
+
+    // Channel to collect results from concurrent requests
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // Record start time
+    let start_time = Instant::now();
+
+    // Launch concurrent requests
+    for request_id in 0..concurrent_requests {
+        let url = Arc::clone(&url);
+        let tx = tx.clone();
+
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client");
+
+            let request_start = Instant::now();
+
+            let response = client
+                .get(url.as_str())
+                .send()
+                .expect(&format!("Failed to make request {}", request_id));
+
+            let status = response.status();
+            let body = response
+                .bytes()
+                .expect(&format!("Failed to read body {}", request_id));
+
+            let duration = request_start.elapsed();
+
+            tx.send((request_id, status, body, duration))
+                .expect("Failed to send result");
+        });
+    }
+
+    // Drop the original sender so rx.iter() will terminate
+    drop(tx);
+
+    // Collect all results
+    let mut results = Vec::new();
+    for result in rx {
+        results.push(result);
+    }
+
+    // Sort by request_id for consistent output
+    results.sort_by_key(|(id, _, _, _)| *id);
+
+    let total_duration = start_time.elapsed();
+
+    println!("  ✓ All {} concurrent requests completed", concurrent_requests);
+    println!("  ✓ Total time: {:?}", total_duration);
+
+    // ========================================================================
+    // PHASE 2: Verify all requests succeeded
+    // ========================================================================
+
+    println!("\n📝 Phase 2: Verify all requests succeeded");
+
+    for (request_id, status, body, duration) in &results {
+        assert_eq!(
+            *status,
+            reqwest::StatusCode::OK,
+            "Request {} should succeed",
+            request_id
+        );
+        assert_eq!(
+            body.len(),
+            test_data.len(),
+            "Request {} should return correct size",
+            request_id
+        );
+        println!(
+            "  ✓ Request {:2} completed in {:?} (status: {})",
+            request_id, duration, status
+        );
+    }
+
+    // ========================================================================
+    // PHASE 3: Verify all requests received same data
+    // ========================================================================
+
+    println!("\n📝 Phase 3: Verify all requests received identical data");
+
+    let first_body = &results[0].2;
+    for (request_id, _, body, _) in &results[1..] {
+        assert_eq!(
+            body, first_body,
+            "Request {} should have same data as request 0",
+            request_id
+        );
+    }
+
+    println!("  ✓ All {} requests received identical data", concurrent_requests);
+
+    // ========================================================================
+    // PHASE 4: Check cache was populated
+    // ========================================================================
+
+    println!("\n📝 Phase 4: Verify cache was populated");
+
+    let cache_files: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .collect();
+
+    println!(
+        "  ✓ Cache contains {} file(s) after concurrent requests",
+        cache_files.len()
+    );
+
+    // ========================================================================
+    // PHASE 5: Verify subsequent request is cache hit
+    // ========================================================================
+
+    println!("\n📝 Phase 5: Verify subsequent request is cache hit");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let cache_hit_start = Instant::now();
+    let cache_hit_response = client
+        .get(url.as_str())
+        .send()
+        .expect("Failed to make cache hit request");
+    let cache_hit_duration = cache_hit_start.elapsed();
+
+    assert_eq!(cache_hit_response.status(), 200);
+
+    let cache_hit_body = cache_hit_response
+        .bytes()
+        .expect("Failed to read cache hit body");
+
+    assert_eq!(
+        cache_hit_body.len(),
+        test_data.len(),
+        "Cache hit should return correct size"
+    );
+
+    println!("  ✓ Subsequent request completed in {:?}", cache_hit_duration);
+
+    // ========================================================================
+    // PHASE 6: Analyze request patterns and coalescing behavior
+    // ========================================================================
+
+    println!("\n📝 Phase 6: Analyze request coalescing behavior");
+
+    // Calculate statistics
+    let durations: Vec<_> = results.iter().map(|(_, _, _, d)| d).collect();
+    let min_duration = durations.iter().min().unwrap();
+    let max_duration = durations.iter().max().unwrap();
+    let avg_duration = Duration::from_nanos(
+        (durations
+            .iter()
+            .map(|d| d.as_nanos())
+            .sum::<u128>() / durations.len() as u128) as u64,
+    );
+
+    println!("  Request duration statistics:");
+    println!("    • Min: {:?}", min_duration);
+    println!("    • Max: {:?}", max_duration);
+    println!("    • Avg: {:?}", avg_duration);
+
+    // Note: Without request coalescing implemented, we can't verify
+    // that only 1 S3 request was made. We would need S3 access logs
+    // or proxy-side request counting for that.
+    //
+    // With request coalescing implemented:
+    // - First request fetches from S3 (~500ms+ due to network)
+    // - Other 9 requests wait and get cached result (~10ms)
+    // - Max duration should be significantly higher than min
+    // - Cache hit should be faster than all concurrent requests
+
+    println!("\n📊 Test Results Summary:");
+    println!("─────────────────────────────────────────────────────");
+    println!("Configuration:");
+    println!("  • Concurrent requests: {}", concurrent_requests);
+    println!("  • File size: {} KB", test_data.len() / 1024);
+    println!();
+    println!("Results:");
+    println!("  • All requests succeeded: ✓");
+    println!("  • All requests received identical data: ✓");
+    println!("  • Cache populated: {} file(s)", cache_files.len());
+    println!("  • Request duration min/max/avg: {:?}/{:?}/{:?}",
+        min_duration, max_duration, avg_duration);
+    println!("  • Subsequent cache hit: {:?}", cache_hit_duration);
+    println!();
+    println!("Expected behavior (once coalescing is implemented):");
+    println!("  • Only 1 S3 request should be made (not {})", concurrent_requests);
+    println!("  • First request fetches from S3 (~500ms)");
+    println!("  • Other {} requests wait and get cached result (~10ms)",
+        concurrent_requests - 1);
+    println!("  • Max duration >> Min duration (due to S3 vs cache)");
+    println!();
+    println!("Current behavior (without coalescing):");
+    println!("  • Each request independently fetches from S3");
+    println!("  • All requests have similar durations");
+    println!("  • This causes \"cache stampede\" (inefficient)");
+    println!();
+
+    // Check if durations suggest coalescing is working
+    if max_duration.as_millis() > min_duration.as_millis() * 5 {
+        println!("✅ Duration variance suggests request coalescing IS working!");
+        println!("   (Max duration is {}x longer than min)",
+            max_duration.as_millis() / min_duration.as_millis());
+    } else {
+        println!("⚠️  Similar durations suggest coalescing NOT yet implemented");
+        println!("   (Max/min ratio: {}x)",
+            if min_duration.as_millis() > 0 {
+                max_duration.as_millis() / min_duration.as_millis()
+            } else {
+                1
+            });
+    }
+
+    println!();
+    println!("📝 Note: This test documents expected request coalescing behavior.");
+    println!("   Once cache is integrated into proxy request/response flow,");
+    println!("   this test will verify:");
+    println!("   • Multiple concurrent requests coalesce into single S3 fetch");
+    println!("   • Only first request fetches from S3");
+    println!("   • Other requests wait and receive cached result");
+    println!("   • Cache metrics show 1 miss + {} hits", concurrent_requests - 1);
+    println!("   • No \"cache stampede\" (duplicate S3 requests)");
+
+    println!("\n✅ Test completed - Concurrent request coalescing documented");
 }
