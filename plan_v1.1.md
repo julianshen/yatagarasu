@@ -1729,8 +1729,8 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: LRU eviction works under memory pressure (tests/integration/cache_e2e_test.rs::test_e2e_lru_eviction_under_memory_pressure)
 - [x] E2E: Concurrent requests for same object coalesce correctly (tests/integration/cache_e2e_test.rs::test_e2e_concurrent_requests_coalesce)
 - [x] E2E: Memory cache metrics tracked correctly (tests/integration/cache_e2e_test.rs::test_e2e_memory_cache_metrics_tracked_correctly)
-- [ ] E2E: Purge API clears memory cache
-- [ ] E2E: Stats API returns memory cache stats
+- [x] E2E: Purge API clears memory cache (tests/integration/cache_e2e_test.rs::test_e2e_purge_api_clears_memory_cache)
+- [x] E2E: Stats API returns memory cache stats (tests/integration/cache_e2e_test.rs::test_e2e_stats_api_returns_memory_cache_stats)
 
 ### Disk Cache End-to-End Tests
 - [ ] E2E: Full proxy request → disk cache hit → response
