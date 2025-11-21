@@ -1786,7 +1786,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ### Cross-Cache Integration Tests
 - [x] Integration: Memory → Disk fallback (memory disabled/full) (tests/integration/cache_e2e_test.rs::test_integration_memory_to_disk_fallback)
 - [x] Integration: Disk → Redis fallback (disk disabled/full) (tests/integration/cache_e2e_test.rs::test_integration_disk_to_redis_fallback)
-- [ ] Integration: Mixed configuration (memory+redis, no disk)
+- [x] Integration: Mixed configuration (memory+redis, no disk) (tests/integration/cache_e2e_test.rs::test_integration_mixed_memory_redis_no_disk)
 - [ ] Integration: Single-layer configuration (memory only)
 - [ ] Integration: Single-layer configuration (disk only)
 - [ ] Integration: Single-layer configuration (redis only)
