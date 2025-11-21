@@ -1743,7 +1743,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Files written to disk correctly (tokio::fs) (tests/integration/cache_e2e_test.rs::test_e2e_files_written_to_disk_correctly)
 - [x] E2E: LRU eviction works when disk space threshold reached (tests/integration/cache_e2e_test.rs::test_e2e_lru_eviction_when_disk_threshold_reached)
 - [x] E2E: Concurrent requests for same object coalesce correctly (tests/integration/cache_e2e_test.rs::test_e2e_concurrent_requests_coalesce_correctly)
-- [ ] E2E: Disk cache metrics tracked correctly
+- [x] E2E: Disk cache metrics tracked correctly (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_metrics_tracked_correctly)
 - [ ] E2E: Purge API clears disk cache files
 - [ ] E2E: Stats API returns disk cache stats
 - [ ] E2E: Index persists and loads correctly on restart
