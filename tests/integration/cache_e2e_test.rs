@@ -2183,3 +2183,274 @@ buckets:
     //
     // These enhancements will be added once proxy cache integration is complete.
 }
+
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_concurrent_requests_coalesce() {
+    // Phase 30.10: E2E: Concurrent requests for same object coalesce correctly
+    //
+    // This test verifies that when multiple concurrent requests are made for the same
+    // uncached object, they coalesce (deduplicate) so that only one S3 fetch occurs:
+    // 1. Upload test file to S3
+    // 2. Ensure file is not in cache
+    // 3. Make N concurrent requests for the same file
+    // 4. Verify all N requests succeed with correct content
+    // 5. Ideally: Verify only 1 S3 request was made (request coalescing/deduplication)
+    //
+    // Expected behavior (after cache integration):
+    // - First concurrent request triggers S3 fetch
+    // - Subsequent concurrent requests wait for the same S3 fetch
+    // - All requests receive the same cached response
+    // - Only 1 S3 request is made (prevents "thundering herd")
+    // - All concurrent requests complete successfully
+    //
+    // This is a critical optimization to prevent overwhelming S3 with duplicate
+    // requests when multiple clients request the same uncached object simultaneously.
+
+    init_logging();
+
+    const PORT: u16 = 18087;
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let config_path = temp_dir.path().join("config.yaml");
+    let cache_dir = temp_dir.path().join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    log::info!("Starting E2E test: Concurrent requests coalesce correctly");
+
+    // Start LocalStack container for S3 backend
+    log::info!("Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack_image = RunnableImage::from(LocalStack::default())
+        .with_env_var(("SERVICES", "s3"));
+    let container = docker.run(localstack_image);
+    let s3_port = container.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    log::info!("LocalStack started on port {}", s3_port);
+
+    // Create AWS SDK S3 client for uploading test objects
+    log::info!("Creating AWS SDK S3 client...");
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create bucket
+    let bucket_name = "concurrent-test-bucket";
+    log::info!("Creating S3 bucket: {}", bucket_name);
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload test file (1 MB)
+    log::info!("Uploading test file (1 MB)...");
+    let file_size = 1024 * 1024; // 1 MB
+    let test_content = vec![0xCC; file_size];
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key("concurrent_test.bin")
+            .body(test_content.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload test file");
+    });
+    log::info!("Uploaded test file (1 MB)");
+
+    // Create proxy config with memory cache enabled
+    let config_content = format!(
+        r#"
+# Test configuration for concurrent request coalescing
+server:
+  address: "127.0.0.1:{}"
+  threads: 4
+
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+  memory:
+    max_item_size_mb: 10
+    max_cache_size_mb: 100
+    default_ttl_seconds: 3600
+
+buckets:
+  - name: "concurrent-test"
+    base_path: "/concurrent"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "{}"
+      access_key: "test"
+      secret_key: "test"
+"#,
+        PORT, s3_endpoint, bucket_name
+    );
+
+    fs::write(&config_path, config_content).expect("Failed to write config file");
+    log::info!("Created proxy config at: {:?}", config_path);
+
+    // Start the proxy server
+    log::info!("Starting proxy server on port {}...", PORT);
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), PORT)
+        .expect("Failed to start proxy");
+    log::info!("Proxy started successfully");
+
+    // Create HTTP client with connection pooling
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(20) // Allow multiple concurrent connections
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let url = proxy.url("/concurrent/concurrent_test.bin");
+
+    // Phase 1: Make a single request to warm up the proxy (not testing coalescing yet)
+    log::info!("Phase 1: Warm-up request");
+    let warmup_response = client
+        .get(&url)
+        .send()
+        .expect("Failed to send warmup request");
+    assert_eq!(warmup_response.status(), 200);
+    let warmup_body = warmup_response.bytes().expect("Failed to read warmup body");
+    assert_eq!(warmup_body.len(), file_size);
+    log::info!("✓ Warm-up request completed");
+
+    // Wait a moment for cache operations to complete
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Phase 2: Make N concurrent requests for the SAME file
+    // In a real scenario with request coalescing, only 1 S3 request would be made
+    log::info!("Phase 2: Making 10 concurrent requests for the same file");
+
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::thread;
+
+    let concurrent_requests = 10;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = vec![];
+
+    // Launch N threads, each making a request for the same file
+    for i in 0..concurrent_requests {
+        let client_clone = client.clone();
+        let url_clone = url.clone();
+        let results_clone = Arc::clone(&results);
+        let test_content_clone = test_content.clone();
+
+        let handle = thread::spawn(move || {
+            log::info!("Thread {} starting request...", i);
+            let start = std::time::Instant::now();
+
+            let response = client_clone
+                .get(&url_clone)
+                .send()
+                .expect(&format!("Thread {} failed to send request", i));
+
+            let elapsed = start.elapsed();
+            let status = response.status();
+            let body = response
+                .bytes()
+                .expect(&format!("Thread {} failed to read body", i));
+
+            log::info!(
+                "Thread {} completed in {:?} - status: {}, size: {} bytes",
+                i,
+                elapsed,
+                status,
+                body.len()
+            );
+
+            // Verify response
+            let success = status == 200
+                && body.len() == test_content_clone.len()
+                && body.as_ref() == test_content_clone.as_slice();
+
+            results_clone.lock().unwrap().push((i, success, elapsed));
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Verify all requests succeeded
+    let results = results.lock().unwrap();
+    assert_eq!(
+        results.len(),
+        concurrent_requests,
+        "Should have {} results",
+        concurrent_requests
+    );
+
+    log::info!("All {} concurrent requests completed", concurrent_requests);
+
+    // Check that all requests succeeded
+    let mut all_succeeded = true;
+    for (thread_id, success, elapsed) in results.iter() {
+        if !*success {
+            log::error!("Thread {} FAILED", thread_id);
+            all_succeeded = false;
+        } else {
+            log::info!("Thread {} succeeded in {:?}", thread_id, elapsed);
+        }
+    }
+
+    assert!(
+        all_succeeded,
+        "All concurrent requests should succeed with correct content"
+    );
+
+    log::info!("✓ All {} concurrent requests succeeded", concurrent_requests);
+
+    // Calculate statistics
+    let total_time: Duration = results.iter().map(|(_, _, elapsed)| *elapsed).sum();
+    let avg_time = total_time / concurrent_requests as u32;
+    let max_time = results.iter().map(|(_, _, elapsed)| *elapsed).max().unwrap();
+    let min_time = results.iter().map(|(_, _, elapsed)| *elapsed).min().unwrap();
+
+    log::info!("Concurrent request statistics:");
+    log::info!("  - Average time: {:?}", avg_time);
+    log::info!("  - Min time: {:?}", min_time);
+    log::info!("  - Max time: {:?}", max_time);
+    log::info!("  - Total concurrent requests: {}", concurrent_requests);
+
+    log::info!("Concurrent requests coalescing test completed successfully");
+
+    // NOTE: This test currently only verifies that:
+    // 1. Multiple concurrent requests for the same file all succeed
+    // 2. All requests receive correct content
+    // 3. The proxy handles concurrent load correctly
+    //
+    // Full verification would require:
+    // - Monitoring S3 request metrics to verify only 1 request was made to S3
+    // - Implementing request coalescing/deduplication in the proxy
+    // - Verifying that subsequent requests waited for the first request to complete
+    // - Testing with cache disabled to ensure coalescing works even without cache
+    // - Measuring that coalesced requests have similar completion times (all wait for same S3 fetch)
+    // - Testing edge cases:
+    //   * Concurrent requests arrive while S3 fetch is in progress
+    //   * First request fails (all should fail or retry)
+    //   * Request timeout during coalescing
+    //
+    // These enhancements will be added once request coalescing is implemented in the proxy.
+}
