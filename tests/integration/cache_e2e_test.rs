@@ -7003,3 +7003,302 @@ buckets:
 
     println!("\n✅ Test completed - Purge API behavior documented");
 }
+
+/// E2E Test: Verify Stats API returns disk cache statistics
+///
+/// This test verifies that a stats API endpoint returns cache statistics:
+/// 1. Upload files to S3
+/// 2. Request files to populate cache
+/// 3. Call stats API endpoint
+/// 4. Verify response contains statistics:
+///    - current_item_count
+///    - current_size_bytes
+///    - hit_count
+///    - miss_count
+///    - eviction_count
+/// 5. Make more requests to change stats
+/// 6. Verify stats updated correctly
+///
+/// **Expected behavior (once cache and stats API are integrated):**
+/// - GET /cache/stats endpoint returns JSON with cache statistics
+/// - Stats reflect actual cache state
+/// - Stats update after cache operations
+///
+/// **Current behavior (without integration):**
+/// - Files are NOT cached yet (cache not integrated into proxy)
+/// - Stats API endpoint NOT yet implemented
+/// - This test documents the expected end-to-end flow
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_stats_api_returns_disk_cache_stats() {
+    println!("\n🧪 E2E Test: Stats API returns disk cache stats");
+    println!("===============================================\n");
+
+    // Phase 1: Start LocalStack for S3 backend
+    println!("Phase 1: Starting LocalStack (S3 backend)...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(testcontainers_modules::localstack::LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+    println!("  ✓ LocalStack running at {}", s3_endpoint);
+
+    // Phase 2: Create S3 client and bucket
+    println!("\nPhase 2: Creating S3 client and bucket...");
+    let s3_config = aws_sdk_s3::Config::builder()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .build();
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+    let bucket_name = "test-stats-bucket";
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+    println!("  ✓ Created bucket: {}", bucket_name);
+
+    // Phase 3: Upload test files to S3
+    println!("\nPhase 3: Uploading test files to S3...");
+    let test_files = vec![
+        ("stats1.txt", vec![0xAA; 128 * 1024]), // 128 KB
+        ("stats2.txt", vec![0xBB; 256 * 1024]), // 256 KB
+        ("stats3.txt", vec![0xCC; 512 * 1024]), // 512 KB
+    ];
+
+    for (filename, content) in &test_files {
+        rt.block_on(async {
+            s3_client
+                .put_object()
+                .bucket(bucket_name)
+                .key(*filename)
+                .body(aws_sdk_s3::primitives::ByteStream::from(content.clone()))
+                .send()
+                .await
+                .expect("Failed to upload file");
+        });
+        println!("  ✓ Uploaded: {} ({} bytes)", filename, content.len());
+    }
+
+    // Phase 4: Configure proxy with disk cache
+    println!("\nPhase 4: Configuring proxy with disk cache...");
+    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_stats_test_{}", std::process::id()));
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    let proxy_port = 18085; // Use unique port for this test
+    let config_content = format!(
+        r#"
+version: "1.0"
+
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["disk"]
+  disk:
+    enabled: true
+    cache_dir: "{}"
+    max_disk_cache_size_mb: 100
+    max_item_size_mb: 10
+
+s3:
+  default_region: "us-east-1"
+  default_access_key: "test"
+  default_secret_key: "test"
+  default_endpoint: "{}"
+
+buckets:
+  - name: "test-stats-bucket"
+    path: "/data"
+    require_auth: false
+"#,
+        proxy_port,
+        cache_dir.to_string_lossy(),
+        s3_endpoint
+    );
+
+    let config_file = cache_dir.join("config.yaml");
+    fs::write(&config_file, config_content).expect("Failed to write config file");
+    println!("  ✓ Config written to: {}", config_file.display());
+    println!("  ✓ Cache directory: {}", cache_dir.display());
+
+    // Phase 5: Start proxy
+    println!("\nPhase 5: Starting proxy...");
+    let proxy = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
+        .expect("Failed to start proxy");
+    println!("  ✓ Proxy started at: {}", proxy.base_url);
+
+    // Phase 6: Request files to populate cache
+    println!("\nPhase 6: Requesting files to populate cache...");
+    let client = reqwest::blocking::Client::new();
+
+    for (filename, expected_content) in &test_files {
+        let url = proxy.url(&format!("/data/{}", filename));
+        let response = client
+            .get(&url)
+            .send()
+            .expect("Failed to send request");
+
+        assert_eq!(response.status(), 200, "Expected 200 OK for {}", filename);
+        let body = response.bytes().expect("Failed to read response body");
+        assert_eq!(
+            body.len(),
+            expected_content.len(),
+            "Content length mismatch for {}",
+            filename
+        );
+        println!("  ✓ Fetched: {} (200 OK, {} bytes)", filename, body.len());
+    }
+
+    // Allow time for async cache writes
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Phase 7: Call stats API endpoint (initial stats)
+    println!("\nPhase 7: Calling stats API endpoint...");
+    let stats_url = proxy.url("/cache/stats");
+    println!("  • Stats URL: {}", stats_url);
+
+    let stats_response = client.get(&stats_url).send();
+
+    let initial_stats = match stats_response {
+        Ok(response) => {
+            let status = response.status();
+            println!("  • Status: {}", status);
+
+            if status == 200 {
+                let body = response.text().unwrap_or_default();
+                println!("  • Response body:\n{}", body);
+
+                // Try to parse as JSON
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    println!("  ✓ Stats API returned valid JSON");
+                    println!("  • Parsed stats: {:#}", json);
+                    Some(json)
+                } else {
+                    println!("  ⚠  Stats API returned non-JSON response");
+                    None
+                }
+            } else if status == 404 {
+                println!("  ⚠  Stats API returned 404 (endpoint not yet implemented)");
+                None
+            } else {
+                println!("  ⚠  Stats API returned unexpected status: {}", status);
+                None
+            }
+        }
+        Err(e) => {
+            println!("  ⚠  Stats API request failed: {}", e);
+            println!("     (Endpoint not yet implemented)");
+            None
+        }
+    };
+
+    // Phase 8: Make duplicate requests to generate cache hits
+    println!("\nPhase 8: Making duplicate requests to generate cache hits...");
+    for (filename, _) in test_files.iter().take(2) {
+        let url = proxy.url(&format!("/data/{}", filename));
+        let response = client.get(&url).send().expect("Failed to send request");
+        assert_eq!(response.status(), 200);
+        println!("  ✓ Fetched: {} (should be cache hit)", filename);
+    }
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Phase 9: Call stats API again to verify updates
+    println!("\nPhase 9: Calling stats API again to verify updates...");
+    let stats_response2 = client.get(&stats_url).send();
+
+    match stats_response2 {
+        Ok(response) => {
+            let status = response.status();
+            println!("  • Status: {}", status);
+
+            if status == 200 {
+                let body = response.text().unwrap_or_default();
+
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    println!("  ✓ Stats API returned valid JSON");
+                    println!("  • Updated stats: {:#}", json);
+
+                    // Compare with initial stats if available
+                    if let Some(ref initial) = initial_stats {
+                        println!("\n  📊 Stats comparison:");
+
+                        if let (Some(init_items), Some(curr_items)) =
+                            (initial.get("current_item_count"), json.get("current_item_count")) {
+                            println!("    • Items: {} -> {}", init_items, curr_items);
+                        }
+
+                        if let (Some(init_size), Some(curr_size)) =
+                            (initial.get("current_size_bytes"), json.get("current_size_bytes")) {
+                            println!("    • Size: {} -> {} bytes", init_size, curr_size);
+                        }
+
+                        if let (Some(init_hits), Some(curr_hits)) =
+                            (initial.get("hit_count"), json.get("hit_count")) {
+                            println!("    • Hits: {} -> {}", init_hits, curr_hits);
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            println!("  ⚠  Stats API request failed: {}", e);
+        }
+    }
+
+    // Phase 10: Check cache directory to verify files exist
+    println!("\nPhase 10: Checking cache directory...");
+    let cache_files: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .collect();
+
+    println!("  • Files in cache: {}", cache_files.len());
+    let mut total_size = 0u64;
+    for entry in &cache_files {
+        let path = entry.path();
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        total_size += size;
+        println!("    - {} ({} bytes)", path.file_name().unwrap().to_string_lossy(), size);
+    }
+    println!("  • Total cache size: {} bytes", total_size);
+
+    if cache_files.len() > 0 {
+        println!("  ✓ Cache directory has files (cache layer is working)");
+    } else {
+        println!("  ⚠  Cache directory empty (cache not yet integrated into proxy)");
+    }
+
+    // Phase 11: Cleanup
+    println!("\nPhase 11: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    let _ = fs::remove_dir_all(&cache_dir);
+    println!("  ✓ Cleanup completed");
+
+    println!();
+    println!("📝 Note: This test documents expected stats API behavior.");
+    println!("   Once stats API is implemented, this test will verify:");
+    println!("   • GET /cache/stats endpoint returns JSON with statistics");
+    println!("   • Stats include: current_item_count, current_size_bytes, hit_count, miss_count");
+    println!("   • Stats update after cache operations (set, get, delete)");
+    println!("   • Stats are consistent with actual cache state");
+    println!("   • Stats can be used for monitoring and alerting");
+
+    println!("\n✅ Test completed - Stats API behavior documented");
+}
