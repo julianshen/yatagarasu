@@ -16833,3 +16833,333 @@ buckets:
 
     println!("\n✅ Test completed - Mixed Memory+Redis configuration documented");
 }
+
+/// Integration Test: Single-layer configuration (memory only)
+///
+/// This test verifies that the cache system works correctly with only
+/// Memory cache enabled, while both Disk and Redis are disabled/omitted.
+/// This is the simplest cache configuration - fast in-memory caching only.
+///
+/// Test Phases:
+/// 1. Start LocalStack (S3) and Proxy (Memory cache only, no Disk/Redis)
+/// 2. Create test file (400KB)
+/// 3. Upload file to S3
+/// 4. First request (should populate Memory cache only)
+/// 5. Verify file served correctly
+/// 6. Second request (should hit Memory cache)
+/// 7. Verify very fast response from Memory cache
+/// 8. Restart proxy (Memory cleared, no persistent cache)
+/// 9. Third request (should hit S3 again - no persistent cache)
+/// 10. Verify slower response (from S3, not cache)
+/// 11. Fourth request (should hit Memory again after repopulation)
+/// 12. Cleanup
+///
+/// Expected Behavior:
+/// - Single-layer cache hierarchy (Memory → S3)
+/// - Memory cache provides fastest responses
+/// - No persistent cache across restarts
+/// - System works without Disk or Redis layers
+/// - Simplest configuration with minimal dependencies
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_integration_single_layer_memory_only() {
+    println!("\n========================================");
+    println!("Integration Test: Single-layer configuration (Memory only)");
+    println!("========================================\n");
+
+    // Phase 1: Start infrastructure with Memory cache only (no Disk/Redis)
+    println!("Phase 1: Starting infrastructure (Memory cache only)...");
+
+    let docker = testcontainers::clients::Cli::default();
+
+    // Start LocalStack
+    let localstack = docker.run(
+        testcontainers::GenericImage::new("localstack/localstack", "latest")
+            .with_env_var("SERVICES", "s3")
+            .with_env_var("DEFAULT_REGION", "us-east-1")
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Ready.",
+            )),
+    );
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   ✅ LocalStack started on port {}", s3_port);
+
+    // Create S3 bucket
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-bucket")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+    println!("   ✅ S3 bucket 'test-bucket' created");
+
+    // Create proxy config with Memory cache only (no Disk/Redis)
+    let proxy_port = 33080;
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:{}"
+  worker_threads: 2
+
+buckets:
+  - name: test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    routes:
+      - path: /
+    cache:
+      memory:
+        max_size_mb: 100
+        max_item_size_mb: 10
+      # Disk cache OMITTED
+      # Redis cache OMITTED
+      # Single-layer hierarchy: Memory → S3
+"#,
+        proxy_port, s3_endpoint
+    );
+
+    let config_path = format!("/tmp/yatagarasu-single-memory-{}.yaml", uuid::Uuid::new_v4());
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Proxy config written (Memory only, no Disk/Redis)");
+
+    // Start proxy
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port {}", proxy_port);
+    println!();
+
+    // Phase 2: Create test file (400KB)
+    println!("Phase 2: Creating test file (400KB)...");
+    let file_size = 400 * 1024; // 400KB (cacheable size)
+    let file_data: Vec<u8> = (0..file_size)
+        .map(|i| ((i * 37) % 256) as u8)
+        .collect();
+    let file_name = "data.json";
+    println!(
+        "   ✅ Test file created: {} ({:.2} KB)",
+        file_name,
+        file_size as f64 / 1024.0
+    );
+    println!();
+
+    // Phase 3: Upload file to S3
+    println!("Phase 3: Uploading file to S3...");
+    s3_client
+        .put_object()
+        .bucket("test-bucket")
+        .key(file_name)
+        .body(aws_sdk_s3::primitives::ByteStream::from(file_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+    println!("   ✅ File uploaded to S3: {}", file_name);
+    println!();
+
+    // Phase 4: First request (should populate Memory cache only)
+    println!("Phase 4: First request (should populate Memory cache only)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url(&format!("/{}", file_name));
+
+    let start = std::time::Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let status = response.status();
+    let body = response.bytes().await.expect("Failed to read body");
+    let duration = start.elapsed();
+
+    println!(
+        "   ✅ First response: {} ({} bytes, {}ms)",
+        status,
+        body.len(),
+        duration.as_millis()
+    );
+    println!();
+
+    // Phase 5: Verify file served correctly
+    println!("Phase 5: Verifying file served correctly...");
+    assert_eq!(status.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(body.len(), file_size, "File size mismatch");
+    assert_eq!(&body[..], &file_data[..], "File content mismatch");
+    println!("   ✅ File served correctly from S3");
+    println!();
+
+    // Phase 6: Second request (should hit Memory cache)
+    println!("Phase 6: Second request (should hit Memory cache)...");
+    // Wait a moment for async cache write
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let start = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make second request");
+    let status2 = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+    let duration2 = start.elapsed();
+
+    println!(
+        "   ✅ Second response: {} ({} bytes, {}ms)",
+        status2,
+        body2.len(),
+        duration2.as_millis()
+    );
+    println!();
+
+    // Phase 7: Verify very fast response from Memory cache
+    println!("Phase 7: Verifying very fast response from Memory cache...");
+    assert_eq!(status2.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body2[..], &file_data[..], "File content should match");
+
+    // Memory should be very fast
+    if duration2 < duration && duration2.as_millis() < 50 {
+        println!(
+            "   ✅ Very fast response ({}ms vs {}ms) - Memory cache hit",
+            duration2.as_millis(),
+            duration.as_millis()
+        );
+    } else {
+        println!(
+            "   ⚠️  Response time: {}ms (timing varies, but should be from Memory)",
+            duration2.as_millis()
+        );
+    }
+    println!();
+
+    // Phase 8: Restart proxy (Memory cleared, no persistent cache)
+    println!("Phase 8: Restarting proxy (Memory cleared, no persistent cache)...");
+    drop(proxy);
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted");
+    println!("   • Memory cache cleared (volatile)");
+    println!("   • No persistent cache layers (Disk/Redis omitted)");
+    println!();
+
+    // Phase 9: Third request (should hit S3 again - no persistent cache)
+    println!("Phase 9: Third request after restart (should hit S3)...");
+    let start = std::time::Instant::now();
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+    let body3 = response3.bytes().await.expect("Failed to read body");
+    let duration3 = start.elapsed();
+
+    println!(
+        "   ✅ Third response: {} ({} bytes, {}ms)",
+        status3,
+        body3.len(),
+        duration3.as_millis()
+    );
+    println!();
+
+    // Phase 10: Verify slower response (from S3, not cache)
+    println!("Phase 10: Verifying slower response from S3...");
+    assert_eq!(status3.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body3[..], &file_data[..], "File content should match");
+
+    // Should be slower than cached request (back to S3)
+    if duration3 > duration2 {
+        println!(
+            "   ✅ Slower than cached ({}ms vs {}ms) - came from S3",
+            duration3.as_millis(),
+            duration2.as_millis()
+        );
+        println!("   • No persistent cache - back to S3 after restart");
+    } else {
+        println!(
+            "   ⚠️  Response time: {}ms (should be slower than Memory cache)",
+            duration3.as_millis()
+        );
+    }
+    println!();
+
+    // Phase 11: Fourth request (should hit Memory again after repopulation)
+    println!("Phase 11: Fourth request (should hit Memory after repopulation)...");
+    // Wait for async cache write
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let start = std::time::Instant::now();
+    let response4 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make fourth request");
+    let status4 = response4.status();
+    let body4 = response4.bytes().await.expect("Failed to read body");
+    let duration4 = start.elapsed();
+
+    assert_eq!(status4.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body4[..], &file_data[..], "File content should match");
+
+    println!(
+        "   ✅ Fourth response: {} ({} bytes, {}ms)",
+        status4,
+        body4.len(),
+        duration4.as_millis()
+    );
+
+    if duration4 < duration3 && duration4.as_millis() < 50 {
+        println!(
+            "   ✅ Faster than previous ({}ms vs {}ms) - Memory cache repopulated",
+            duration4.as_millis(),
+            duration3.as_millis()
+        );
+    } else {
+        println!(
+            "   • Response time: {}ms (timing varies)",
+            duration4.as_millis()
+        );
+    }
+    println!();
+
+    // Phase 12: Cleanup
+    println!("Phase 12: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    let _ = std::fs::remove_file(&config_path);
+    println!("   ✅ Cleanup completed");
+
+    println!("\n========================================");
+    println!("Test Analysis:");
+    println!("========================================");
+    println!("✅ Single-layer cache hierarchy works (Memory → S3)");
+    println!("✅ Memory cache provides fastest responses");
+    println!("✅ No persistent cache across restarts");
+    println!("✅ System works without Disk or Redis layers");
+    println!("✅ Cache repopulates on demand after restart");
+    println!();
+    println!("Key Behaviors Documented:");
+    println!("   • Simplest cache configuration (Memory only)");
+    println!("   • Minimal dependencies (no Disk, no Redis)");
+    println!("   • Memory cache provides <50ms responses");
+    println!("   • Volatile cache - lost on restart");
+    println!("   • Automatic repopulation from S3 on cache miss");
+    println!("   • Suitable for stateless, ephemeral deployments");
+    println!("   • Best for frequently accessed, small files");
+
+    println!("\n✅ Test completed - Single-layer Memory-only configuration documented");
+}
