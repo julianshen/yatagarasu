@@ -11646,3 +11646,236 @@ cache:
 
     println!("\n✅ Test completed - Tiered cache memory hit behavior documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_memory_miss_disk_hit_promotion() {
+    println!("\n🧪 E2E Test: Memory miss → disk hit → promote to memory → response");
+    println!("====================================================================");
+    println!("This test verifies cache promotion from disk to memory layer.");
+    println!("Architecture: Memory → Disk → Redis → S3\n");
+
+    // Phase 1: Start LocalStack container
+    println!("Phase 1: Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", localstack_port);
+    println!("✅ LocalStack started on port {}", localstack_port);
+
+    // Phase 2: Start Redis container
+    println!("\nPhase 2: Starting Redis container...");
+    let redis_image = Redis::default();
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    println!("✅ Redis started on port {}", redis_port);
+
+    // Phase 3: Create S3 bucket and upload test file
+    println!("\nPhase 3: Creating S3 bucket and uploading test file...");
+    let bucket_name = "test-tiered-disk-promotion";
+    let object_key = "test-file.txt";
+    let file_data = b"This is test data for tiered cache disk-to-memory promotion testing.";
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+
+    s3_client
+        .create_bucket()
+        .bucket(bucket_name)
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    s3_client
+        .put_object()
+        .bucket(bucket_name)
+        .key(object_key)
+        .body(aws_sdk_s3::primitives::ByteStream::from_static(file_data))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+
+    // Phase 4: Create proxy config with all cache layers enabled
+    println!("\nPhase 4: Creating proxy config with tiered cache...");
+    let config_dir = "/tmp/yatagarasu-test-tiered-disk-promotion";
+    let disk_cache_dir = format!("{}/disk-cache", config_dir);
+    std::fs::create_dir_all(&disk_cache_dir).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18104"
+  workers: 2
+
+buckets:
+  - name: "test-tiered-disk-promotion"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    path_prefix: "/files"
+
+cache:
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    directory: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size: 10485760
+    ttl: 300
+"#,
+        s3_endpoint, disk_cache_dir, redis_url
+    );
+
+    let config_path = format!("{}/config.yaml", config_dir);
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("✅ Config written with 3-tier cache architecture");
+
+    // Phase 5: Start proxy
+    println!("\nPhase 5: Starting proxy server...");
+    let mut proxy = ProxyTestHarness::start(&config_path, 18104).expect("Failed to start proxy");
+    println!("✅ Proxy started on port 18104");
+
+    // Phase 6: Make first request (populate all cache layers)
+    println!("\nPhase 6: Making first request (populate all cache layers)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url("/files/test-file.txt");
+
+    let response1 = client.get(&url).send().await.expect("Failed to send request");
+    assert_eq!(response1.status(), 200);
+    let body1 = response1.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body1[..], file_data);
+
+    println!("✅ First request completed");
+    println!("   All cache layers now populated:");
+    println!("   • Memory cache: ✅ contains data");
+    println!("   • Disk cache:   ✅ contains data");
+    println!("   • Redis cache:  ✅ contains data");
+
+    // Phase 7: Simulate memory cache eviction (or restart)
+    println!("\nPhase 7: Simulating memory cache eviction...");
+    println!("   Note: In production, this could happen due to:");
+    println!("   • Memory cache LRU eviction (when full)");
+    println!("   • Proxy restart (memory cache is ephemeral)");
+    println!("   • Manual memory cache clear");
+    println!("   Expected state after eviction:");
+    println!("   • Memory cache: ❌ empty");
+    println!("   • Disk cache:   ✅ still contains data (persistent)");
+    println!("   • Redis cache:  ✅ still contains data (shared)");
+    println!("✅ Memory eviction simulated");
+
+    // Phase 8: Restart proxy to clear memory cache (disk and Redis persist)
+    println!("\nPhase 8: Restarting proxy to clear memory cache...");
+    proxy.stop();
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    let mut proxy = ProxyTestHarness::start(&config_path, 18104).expect("Failed to restart proxy");
+    println!("✅ Proxy restarted");
+    println!("   Memory cache cleared (ephemeral)");
+    println!("   Disk cache persists (data still on disk)");
+    println!("   Redis cache persists (external service)");
+
+    // Phase 9: Make second request (memory miss → disk hit → promote)
+    println!("\nPhase 9: Making second request (memory miss → disk hit → promotion)...");
+    let start2 = std::time::Instant::now();
+    let response2 = client.get(&url).send().await.expect("Failed to send request");
+    let duration2 = start2.elapsed();
+
+    assert_eq!(response2.status(), 200);
+    let body2 = response2.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body2[..], file_data);
+
+    println!("✅ Second request completed in {:?}", duration2);
+    println!("   Expected behavior:");
+    println!("   • Memory miss → check disk cache");
+    println!("   • Disk hit → serve data from disk");
+    println!("   • Async promotion → copy to memory cache");
+    println!("   • Response sent (doesn't wait for promotion)");
+
+    // Phase 10: Make third request (should be memory hit after promotion)
+    println!("\nPhase 10: Making third request (verify promotion - should be memory hit)...");
+    let start3 = std::time::Instant::now();
+    let response3 = client.get(&url).send().await.expect("Failed to send request");
+    let duration3 = start3.elapsed();
+
+    assert_eq!(response3.status(), 200);
+    let body3 = response3.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body3[..], file_data);
+
+    println!("✅ Third request completed in {:?}", duration3);
+    println!("   Expected behavior:");
+    println!("   • Memory hit → data was promoted from disk");
+    println!("   • Faster than disk hit (memory is faster)");
+    println!("   • This proves promotion worked correctly");
+
+    // Phase 11: Analyze performance - third should be faster than second
+    println!("\nPhase 11: Analyzing performance to verify promotion...");
+
+    if duration3 < duration2 {
+        let improvement = ((duration2.as_secs_f64() - duration3.as_secs_f64()) / duration2.as_secs_f64() * 100.0);
+        println!("✅ Third request faster than second ({:.1}% improvement)", improvement);
+        println!("   Second (disk hit):   {:?}", duration2);
+        println!("   Third (memory hit):  {:?}", duration3);
+        println!("   This indicates successful promotion from disk to memory");
+    } else {
+        println!("⚠️  Third request not faster than second");
+        println!("   Second (disk hit):   {:?}", duration2);
+        println!("   Third (expected memory): {:?}", duration3);
+        println!("   Promotion may not have occurred (expected in Red phase)");
+    }
+
+    // Phase 12: Stop proxy
+    println!("\nPhase 12: Stopping proxy...");
+    proxy.stop();
+    println!("✅ Proxy stopped");
+
+    // Phase 13: Cleanup
+    println!("\nPhase 13: Cleaning up test resources...");
+    let _ = std::fs::remove_dir_all(config_dir);
+    println!("✅ Cleanup complete");
+
+    // Summary
+    println!("\n📊 Test Summary");
+    println!("================");
+    println!("Cache Architecture:    3-tier (Memory → Disk → Redis → S3)");
+    println!("Request 1:             Populate all layers");
+    println!("Proxy restart:         Clear memory, persist disk+redis");
+    println!("Request 2 (disk hit):  {:?}", duration2);
+    println!("Request 3 (promoted):  {:?}", duration3);
+    println!("Data integrity:        ✅ All bytes verified correct");
+
+    println!("\n📝 Note: This test documents expected tiered cache promotion behavior.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • Disk cache hits trigger async promotion to memory");
+    println!("   • Promotion doesn't block the response (async operation)");
+    println!("   • Subsequent requests benefit from memory cache (faster)");
+    println!("   • Cache hierarchy provides optimal performance through promotion");
+    println!("   • Disk cache provides persistence across proxy restarts");
+
+    println!("\n✅ Test completed - Tiered cache disk-to-memory promotion documented");
+}

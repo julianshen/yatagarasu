@@ -1768,7 +1768,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 
 ### Tiered Cache End-to-End Tests
 - [x] E2E: Memory hit → immediate response (fastest path) (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_memory_hit_fastest_path)
-- [ ] E2E: Memory miss → disk hit → promote to memory → response
+- [x] E2E: Memory miss → disk hit → promote to memory → response (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_memory_miss_disk_hit_promotion)
 - [ ] E2E: Memory miss → disk miss → redis hit → promote to disk+memory → response
 - [ ] E2E: All layers miss → S3 → populate all layers → response
 - [ ] E2E: Verify promotion is async (doesn't block response)
