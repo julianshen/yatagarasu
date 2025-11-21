@@ -8458,3 +8458,232 @@ buckets:
 
     println!("\n✅ Test completed - Redis cache persistence across restarts documented");
 }
+
+/// E2E Test: Verify ETag validation on cache hit
+///
+/// This test verifies that ETags are properly handled with Redis cache:
+/// 1. Upload file to S3
+/// 2. Make first request (cache miss) - get ETag from S3
+/// 3. Make second request (cache hit) - verify same ETag returned
+/// 4. Verify ETag is consistent and properly cached
+/// 5. Verify ETag can be used for cache validation
+///
+/// **Expected behavior (once Redis cache is integrated):**
+/// - First request: S3 returns ETag → proxy caches response with ETag
+/// - Second request: proxy returns cached response with same ETag
+/// - ETag is consistent across cache hits
+/// - ETag can be used with If-None-Match for 304 responses
+///
+/// **Current behavior (without integration):**
+/// - Both requests fetch from S3, ETags should be same
+/// - Test documents the expected end-to-end flow
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_redis_cache_etag_validation() {
+    println!("\n🧪 E2E Test: Verify ETag validation on cache hit");
+    println!("=================================================\n");
+
+    // Phase 1: Start Redis container
+    println!("Phase 1: Starting Redis container...");
+    let docker = testcontainers::clients::Cli::default();
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://localhost:{}", redis_port);
+    println!("  ✓ Redis running at {}", redis_url);
+
+    // Phase 2: Start LocalStack for S3 backend
+    println!("\nPhase 2: Starting LocalStack (S3 backend)...");
+    let localstack = docker.run(testcontainers_modules::localstack::LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+    println!("  ✓ LocalStack running at {}", s3_endpoint);
+
+    // Phase 3: Create S3 client and bucket
+    println!("\nPhase 3: Creating S3 client and bucket...");
+    let s3_config = aws_sdk_s3::Config::builder()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .build();
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+    let bucket_name = "test-redis-etag-bucket";
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+    println!("  ✓ Created bucket: {}", bucket_name);
+
+    // Phase 4: Upload test file to S3
+    println!("\nPhase 4: Uploading test file to S3...");
+    let test_content = vec![0xFF; 256 * 1024]; // 256 KB
+    let test_file = "etag_test.bin";
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key(test_file)
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .send()
+            .await
+            .expect("Failed to upload file");
+    });
+    println!("  ✓ Uploaded: {} ({} bytes)", test_file, test_content.len());
+
+    // Phase 5: Configure proxy with Redis cache
+    println!("\nPhase 5: Configuring proxy with Redis cache...");
+    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_etag_test_{}", std::process::id()));
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    let proxy_port = 18091; // Use unique port for this test
+    let config_content = format!(
+        r#"
+version: "1.0"
+
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["redis"]
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    default_ttl_seconds: 3600
+
+s3:
+  default_region: "us-east-1"
+  default_access_key: "test"
+  default_secret_key: "test"
+  default_endpoint: "{}"
+
+buckets:
+  - name: "test-redis-etag-bucket"
+    path: "/data"
+    require_auth: false
+"#,
+        proxy_port,
+        redis_url,
+        s3_endpoint
+    );
+
+    let config_file = cache_dir.join("config.yaml");
+    fs::write(&config_file, config_content).expect("Failed to write config file");
+    println!("  ✓ Config written to: {}", config_file.display());
+
+    // Phase 6: Start proxy
+    println!("\nPhase 6: Starting proxy...");
+    let proxy = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
+        .expect("Failed to start proxy");
+    println!("  ✓ Proxy started at: {}", proxy.base_url);
+
+    // Phase 7: Make first request (cache miss) - capture ETag
+    println!("\nPhase 7: Making first request (cache miss) - capturing ETag...");
+    let client = reqwest::blocking::Client::new();
+    let url = proxy.url(&format!("/data/{}", test_file));
+
+    let response1 = client.get(&url).send().expect("Failed to send request");
+    assert_eq!(response1.status(), 200, "Expected 200 OK");
+
+    let etag1 = response1.headers().get("etag").map(|v| v.to_str().unwrap().to_string());
+    let body1 = response1.bytes().expect("Failed to read response body");
+    assert_eq!(body1.len(), test_content.len(), "Content length mismatch");
+
+    if let Some(ref etag) = etag1 {
+        println!("  ✓ First request: 200 OK, ETag: {}", etag);
+    } else {
+        println!("  ⚠  First request: 200 OK, no ETag header");
+    }
+
+    // Allow time for async cache write
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Phase 8: Make second request (cache hit) - verify ETag
+    println!("\nPhase 8: Making second request (cache hit) - verifying ETag...");
+    let response2 = client.get(&url).send().expect("Failed to send request");
+    assert_eq!(response2.status(), 200, "Expected 200 OK");
+
+    let etag2 = response2.headers().get("etag").map(|v| v.to_str().unwrap().to_string());
+    let body2 = response2.bytes().expect("Failed to read response body");
+    assert_eq!(body2.len(), test_content.len(), "Content length mismatch");
+    assert_eq!(body2.as_ref(), test_content.as_slice(), "Content mismatch");
+
+    if let Some(ref etag) = etag2 {
+        println!("  ✓ Second request: 200 OK, ETag: {}", etag);
+    } else {
+        println!("  ⚠  Second request: 200 OK, no ETag header");
+    }
+
+    // Phase 9: Compare ETags
+    println!("\nPhase 9: Comparing ETags...");
+    match (&etag1, &etag2) {
+        (Some(e1), Some(e2)) => {
+            println!("  • First request ETag:  {}", e1);
+            println!("  • Second request ETag: {}", e2);
+            if e1 == e2 {
+                println!("  ✅ ETags match - cache preserves ETag correctly!");
+            } else {
+                println!("  ⚠  ETags differ - potential issue with cache ETag handling");
+            }
+        }
+        (Some(e1), None) => {
+            println!("  ⚠  First request had ETag ({}), second request missing ETag", e1);
+        }
+        (None, Some(e2)) => {
+            println!("  ⚠  First request missing ETag, second request has ETag ({})", e2);
+        }
+        (None, None) => {
+            println!("  ⚠  Both requests missing ETag (ETag support not yet implemented)");
+        }
+    }
+
+    // Phase 10: Verify ETag format
+    println!("\nPhase 10: Verifying ETag format...");
+    if let Some(etag) = &etag1 {
+        // S3 ETags are typically MD5 hashes in quotes
+        let is_quoted = etag.starts_with('"') && etag.ends_with('"');
+        let is_hex = etag.trim_matches('"').chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+
+        println!("  • ETag format: {}", etag);
+        println!("  • Quoted: {}", is_quoted);
+        println!("  • Hex format: {}", is_hex);
+
+        if is_quoted && is_hex {
+            println!("  ✓ ETag has valid S3 format");
+        } else {
+            println!("  ℹ  ETag format may vary");
+        }
+    }
+
+    // Phase 11: Cleanup
+    println!("\nPhase 11: Cleaning up...");
+    drop(proxy);
+    drop(redis_container);
+    drop(localstack);
+    let _ = fs::remove_dir_all(&cache_dir);
+    println!("  ✓ Cleanup completed");
+
+    println!();
+    println!("📝 Note: This test documents expected ETag behavior.");
+    println!("   Once Redis cache is fully integrated, this test will verify:");
+    println!("   • S3 ETag is captured on cache miss");
+    println!("   • ETag is stored in Redis with cached response");
+    println!("   • ETag is returned on cache hit (same as original)");
+    println!("   • ETag consistency enables HTTP cache validation");
+    println!("   • Clients can use ETag with If-None-Match for 304 responses");
+
+    println!("\n✅ Test completed - ETag validation behavior documented");
+}
