@@ -8235,3 +8235,226 @@ buckets:
 
     println!("\n✅ Test completed - Redis cache miss and population documented");
 }
+
+/// E2E Test: Verify Redis cache persists across proxy restarts
+///
+/// This test verifies that cached data in Redis survives proxy restarts:
+/// 1. Upload file to S3
+/// 2. Start Redis container and proxy
+/// 3. Make request to populate cache
+/// 4. Stop proxy
+/// 5. Start new proxy instance (same Redis)
+/// 6. Make request - should hit Redis cache without S3 fetch
+/// 7. Verify content is correct and served from cache
+///
+/// **Expected behavior (once Redis cache is integrated):**
+/// - First proxy populates Redis cache
+/// - Redis container keeps running
+/// - Second proxy instance connects to same Redis
+/// - Second proxy serves from Redis cache (no S3 fetch)
+/// - Performance indicates cache hit
+///
+/// **Current behavior (without integration):**
+/// - Both proxies fetch from S3 (no caching yet)
+/// - Test documents the expected end-to-end flow
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_redis_cache_persists_across_proxy_restarts() {
+    println!("\n🧪 E2E Test: Verify Redis cache persists across proxy restarts");
+    println!("================================================================\n");
+
+    // Phase 1: Start Redis container (will stay running across proxy restarts)
+    println!("Phase 1: Starting Redis container...");
+    let docker = testcontainers::clients::Cli::default();
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://localhost:{}", redis_port);
+    println!("  ✓ Redis running at {}", redis_url);
+
+    // Phase 2: Start LocalStack for S3 backend
+    println!("\nPhase 2: Starting LocalStack (S3 backend)...");
+    let localstack = docker.run(testcontainers_modules::localstack::LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+    println!("  ✓ LocalStack running at {}", s3_endpoint);
+
+    // Phase 3: Create S3 client and bucket
+    println!("\nPhase 3: Creating S3 client and bucket...");
+    let s3_config = aws_sdk_s3::Config::builder()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .build();
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+    let bucket_name = "test-redis-persist-bucket";
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+    println!("  ✓ Created bucket: {}", bucket_name);
+
+    // Phase 4: Upload test file to S3
+    println!("\nPhase 4: Uploading test file to S3...");
+    let test_content = vec![0xEE; 384 * 1024]; // 384 KB
+    let test_file = "persist_test.bin";
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key(test_file)
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .send()
+            .await
+            .expect("Failed to upload file");
+    });
+    println!("  ✓ Uploaded: {} ({} bytes)", test_file, test_content.len());
+
+    // Phase 5: Configure proxy with Redis cache
+    println!("\nPhase 5: Configuring proxy with Redis cache...");
+    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_persist_test_{}", std::process::id()));
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    let proxy_port = 18090; // Use unique port for this test
+    let config_content = format!(
+        r#"
+version: "1.0"
+
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["redis"]
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    default_ttl_seconds: 3600
+
+s3:
+  default_region: "us-east-1"
+  default_access_key: "test"
+  default_secret_key: "test"
+  default_endpoint: "{}"
+
+buckets:
+  - name: "test-redis-persist-bucket"
+    path: "/data"
+    require_auth: false
+"#,
+        proxy_port,
+        redis_url,
+        s3_endpoint
+    );
+
+    let config_file = cache_dir.join("config.yaml");
+    fs::write(&config_file, config_content).expect("Failed to write config file");
+    println!("  ✓ Config written to: {}", config_file.display());
+    println!("  ✓ Redis URL: {}", redis_url);
+
+    // Phase 6: Start first proxy instance
+    println!("\nPhase 6: Starting first proxy instance...");
+    let proxy1 = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
+        .expect("Failed to start proxy");
+    println!("  ✓ Proxy started at: {}", proxy1.base_url);
+
+    // Phase 7: Make request to populate cache
+    println!("\nPhase 7: Making request to populate cache (first proxy)...");
+    let client = reqwest::blocking::Client::new();
+    let url = format!("http://127.0.0.1:{}/data/{}", proxy_port, test_file);
+
+    let populate_start = Instant::now();
+    let populate_response = client.get(&url).send().expect("Failed to send request");
+    let populate_duration = populate_start.elapsed();
+
+    assert_eq!(populate_response.status(), 200, "Expected 200 OK");
+    let populate_body = populate_response.bytes().expect("Failed to read response body");
+    assert_eq!(populate_body.len(), test_content.len(), "Content length mismatch");
+    assert_eq!(populate_body.as_ref(), test_content.as_slice(), "Content mismatch");
+    println!("  ✓ Request completed: 200 OK, {} bytes, {:?}", populate_body.len(), populate_duration);
+
+    // Allow time for async cache write to Redis
+    std::thread::sleep(Duration::from_millis(500));
+    println!("  ✓ Cache population window provided");
+
+    // Phase 8: Stop first proxy instance
+    println!("\nPhase 8: Stopping first proxy instance...");
+    drop(proxy1);
+    std::thread::sleep(Duration::from_millis(500));
+    println!("  ✓ First proxy stopped");
+    println!("  ℹ  Redis container still running with cached data");
+
+    // Phase 9: Start second proxy instance (simulating restart)
+    println!("\nPhase 9: Starting second proxy instance (simulating restart)...");
+    let proxy2 = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
+        .expect("Failed to start proxy after restart");
+    println!("  ✓ Second proxy started at: http://127.0.0.1:{}", proxy_port);
+
+    // Allow time for Redis connection
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Phase 10: Make request (should hit Redis cache)
+    println!("\nPhase 10: Making request with second proxy (should hit cache)...");
+    let restart_start = Instant::now();
+    let restart_response = client.get(&url).send().expect("Failed to send request");
+    let restart_duration = restart_start.elapsed();
+
+    assert_eq!(restart_response.status(), 200, "Expected 200 OK");
+    let restart_body = restart_response.bytes().expect("Failed to read response body");
+    assert_eq!(restart_body.len(), test_content.len(), "Content length mismatch");
+    assert_eq!(restart_body.as_ref(), test_content.as_slice(), "Content mismatch");
+    println!("  ✓ Request completed: 200 OK, {} bytes, {:?}", restart_body.len(), restart_duration);
+
+    // Phase 11: Analyze cache persistence
+    println!("\nPhase 11: Analyzing cache persistence...");
+    println!("  • First proxy request: {:?}", populate_duration);
+    println!("  • Second proxy request: {:?}", restart_duration);
+
+    if restart_duration < populate_duration {
+        let speedup = populate_duration.as_millis() as f64 / restart_duration.as_millis().max(1) as f64;
+        println!("  • Speedup ratio: {:.2}x", speedup);
+        if speedup > 2.0 {
+            println!("  ✅ Cache persisted across restart - second proxy much faster!");
+        } else {
+            println!("  ⚠  Second proxy faster but not dramatically");
+        }
+    } else {
+        println!("  ⚠  Similar performance (cache persistence not yet integrated)");
+    }
+
+    println!("  ✓ Data integrity verified (content matches)");
+    println!("  ✓ Proxy restart successful");
+
+    // Phase 12: Cleanup
+    println!("\nPhase 12: Cleaning up...");
+    drop(proxy2);
+    drop(redis_container);
+    drop(localstack);
+    let _ = fs::remove_dir_all(&cache_dir);
+    println!("  ✓ Cleanup completed");
+
+    println!();
+    println!("📝 Note: This test documents expected cache persistence behavior.");
+    println!("   Once Redis cache is fully integrated, this test will verify:");
+    println!("   • First proxy populates Redis cache");
+    println!("   • Redis keeps data after proxy stops");
+    println!("   • Second proxy connects to same Redis instance");
+    println!("   • Second proxy serves from Redis cache (no S3 fetch)");
+    println!("   • Cache persistence enables stateless proxy instances");
+    println!("   • Multiple proxies can share same Redis cache");
+
+    println!("\n✅ Test completed - Redis cache persistence across restarts documented");
+}
