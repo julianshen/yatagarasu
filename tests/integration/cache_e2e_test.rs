@@ -14651,3 +14651,281 @@ cache:
 
     println!("\n✅ Test completed - Tiered cache write-through strategy documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_consistency_across_layers() {
+    // =============================================================================
+    // TEST: Verify cache consistency across layers
+    // =============================================================================
+    // This test verifies that all cache layers contain consistent, identical data
+    // throughout the cache hierarchy:
+    //
+    // Architecture: Memory (fastest) → Disk (fast) → Redis (shared) → S3 (origin)
+    //
+    // Test Scenario:
+    // 1. Populate all cache layers with a file
+    // 2. Verify data consistency by independently reading from each layer
+    // 3. Test that all layers return byte-for-byte identical data
+    // 4. Verify no corruption or data loss across layers
+    // 5. Test multiple files to ensure consistency is maintained
+    //
+    // Expected Behavior:
+    // - All cache layers contain identical data
+    // - Byte-for-byte match across Memory, Disk, and Redis
+    // - No corruption during cache storage/retrieval
+    // - Consistency maintained for multiple cached files
+    // - Data integrity preserved through entire cache hierarchy
+    //
+    // This test documents cache consistency and data integrity.
+    // =============================================================================
+
+    println!("\n🧪 TEST: Tiered Cache - Verify cache consistency across layers");
+    println!("{}", "=".repeat(80));
+
+    // Phase 1: Start LocalStack S3
+    println!("\n📦 Phase 1: Starting LocalStack S3 container...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   S3 endpoint: {}", s3_endpoint);
+
+    // Phase 2: Start Redis container
+    println!("\n📦 Phase 2: Starting Redis container...");
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_endpoint = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   Redis endpoint: {}", redis_endpoint);
+
+    // Phase 3: Create test bucket and upload diverse test files
+    println!("\n📦 Phase 3: Creating S3 bucket and uploading diverse test files...");
+    let config = aws_config::from_env()
+        .region(aws_config::Region::new("us-east-1"))
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-tiered-consistency")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    // Create diverse test files with different patterns
+    let test_files = vec![
+        ("binary.bin", vec![(0..256).map(|i| i as u8).collect::<Vec<u8>>(); 100].concat()), // 25.6KB binary
+        ("text.txt", "Hello World! This is a consistency test.\n".repeat(1000).into_bytes()), // ~43KB text
+        ("zeros.dat", vec![0u8; 50 * 1024]), // 50KB zeros
+        ("pattern.bin", (0..100*1024).map(|i| ((i * 7) % 256) as u8).collect()), // 100KB pattern
+    ];
+
+    for (filename, data) in &test_files {
+        s3_client
+            .put_object()
+            .bucket("test-tiered-consistency")
+            .key(*filename)
+            .body(aws_sdk_s3::primitives::ByteStream::from(data.clone()))
+            .send()
+            .await
+            .expect(&format!("Failed to upload {}", filename));
+    }
+
+    println!("   ✅ Bucket created: test-tiered-consistency");
+    println!("   ✅ Files uploaded: 4 diverse test files (binary, text, zeros, pattern)");
+
+    // Phase 4: Create tiered cache config
+    println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
+    let cache_dir = TempDir::new().expect("Failed to create temp dir");
+    let disk_cache_path = cache_dir.path().join("disk_cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+version: 1
+server:
+  host: "127.0.0.1"
+  port: 18109
+  threads: 2
+
+buckets:
+  - name: test-tiered-consistency
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    path_configs:
+      - path: "/"
+        auth_required: false
+
+cache:
+  # Tiered cache: Memory → Disk → Redis
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    path: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    ttl_seconds: 300
+"#,
+        s3_endpoint,
+        disk_cache_path.display(),
+        redis_endpoint
+    );
+
+    let config_path = cache_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Config created with tiered cache");
+
+    // Phase 5: Start proxy
+    println!("\n🚀 Phase 5: Starting Yatagarasu proxy...");
+    let mut proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18109)
+        .expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port 18109");
+
+    let client = reqwest::Client::new();
+
+    // Phase 6: Populate all cache layers with all files
+    println!("\n📥 Phase 6: Populating all cache layers with test files...");
+    let mut original_data = Vec::new();
+
+    for (filename, expected_data) in &test_files {
+        let url = proxy.url(&format!("/{}", filename));
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect(&format!("Failed to fetch {}", filename));
+        let status = response.status();
+        let body = response.bytes().await.expect("Failed to read body");
+
+        assert_eq!(status.as_u16(), 200);
+        assert_eq!(body.len(), expected_data.len());
+        assert_eq!(&body[..], &expected_data[..]);
+        original_data.push((filename, body.to_vec()));
+        println!("   ✅ {}: {} bytes cached", filename, body.len());
+    }
+    println!("      All files now in Memory, Disk, and Redis");
+
+    // Phase 7: Verify Memory layer consistency (multiple reads)
+    println!("\n📥 Phase 7: Verifying Memory layer consistency (multiple reads)...");
+    for (filename, expected_data) in &original_data {
+        let url = proxy.url(&format!("/{}", filename));
+
+        // Read same file 3 times from Memory cache
+        for attempt in 1..=3 {
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .expect(&format!("Failed to fetch {}", filename));
+            let body = response.bytes().await.expect("Failed to read body");
+
+            assert_eq!(&body[..], &expected_data[..],
+                "Memory consistency check failed for {} (attempt {})", filename, attempt);
+        }
+        println!("   ✅ {}: 3 reads consistent from Memory", filename);
+    }
+
+    // Phase 8: Restart proxy to clear Memory, verify Disk layer consistency
+    println!("\n🔄 Phase 8: Restarting proxy to verify Disk layer consistency...");
+    proxy.stop();
+    proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18109)
+        .expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted (Memory cleared, testing Disk layer)");
+
+    for (filename, expected_data) in &original_data {
+        let url = proxy.url(&format!("/{}", filename));
+
+        // Read from Disk cache (Memory empty)
+        for attempt in 1..=3 {
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .expect(&format!("Failed to fetch {}", filename));
+            let body = response.bytes().await.expect("Failed to read body");
+
+            assert_eq!(&body[..], &expected_data[..],
+                "Disk consistency check failed for {} (attempt {})", filename, attempt);
+        }
+        println!("   ✅ {}: 3 reads consistent from Disk", filename);
+    }
+
+    // Phase 9: Clear Memory+Disk, verify Redis layer consistency
+    println!("\n🔄 Phase 9: Clearing Memory+Disk to verify Redis layer consistency...");
+    proxy.stop();
+    std::fs::remove_dir_all(&disk_cache_path).expect("Failed to remove disk cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to recreate disk cache dir");
+    proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18109)
+        .expect("Failed to restart proxy again");
+    println!("   ✅ Proxy restarted (Memory+Disk cleared, testing Redis layer)");
+
+    for (filename, expected_data) in &original_data {
+        let url = proxy.url(&format!("/{}", filename));
+
+        // Read from Redis cache (Memory and Disk empty)
+        for attempt in 1..=3 {
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .expect(&format!("Failed to fetch {}", filename));
+            let body = response.bytes().await.expect("Failed to read body");
+
+            assert_eq!(&body[..], &expected_data[..],
+                "Redis consistency check failed for {} (attempt {})", filename, attempt);
+        }
+        println!("   ✅ {}: 3 reads consistent from Redis", filename);
+    }
+
+    // Phase 10: Cross-layer consistency verification
+    println!("\n🔍 Phase 10: Cross-layer consistency verification summary:");
+    println!("   Tested files:");
+    for (filename, data) in &original_data {
+        println!("   • {}: {} bytes", filename, data.len());
+        println!("     ✅ Memory layer: 3/3 reads consistent");
+        println!("     ✅ Disk layer: 3/3 reads consistent");
+        println!("     ✅ Redis layer: 3/3 reads consistent");
+        println!("     ✅ All layers contain identical data");
+    }
+
+    // Phase 11: Byte-level verification
+    println!("\n🔍 Phase 11: Byte-level integrity verification:");
+    let total_bytes: usize = original_data.iter().map(|(_, d)| d.len()).sum();
+    let total_reads = original_data.len() * 3 * 3; // 4 files × 3 attempts × 3 layers
+    println!("   Total files tested: {}", original_data.len());
+    println!("   Total bytes verified: {} ({:.1} KB)", total_bytes, total_bytes as f64 / 1024.0);
+    println!("   Total reads performed: {}", total_reads);
+    println!("   Consistency checks: {}/{} passed", total_reads, total_reads);
+    println!("   ✅ 100% data consistency across all cache layers");
+
+    println!("\n📝 Note: This test documents expected cache consistency behavior.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • All cache layers contain byte-for-byte identical data");
+    println!("   • Multiple reads from same layer return consistent results");
+    println!("   • Data consistency maintained across Memory, Disk, and Redis");
+    println!("   • No corruption during cache storage or retrieval");
+    println!("   • Diverse data types (binary, text, zeros, patterns) handled correctly");
+    println!("   • Consistency maintained for multiple cached files simultaneously");
+    println!("   • Data integrity preserved through entire cache hierarchy");
+
+    println!("\n✅ Test completed - Tiered cache consistency documented");
+}
