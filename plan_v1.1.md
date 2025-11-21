@@ -1764,7 +1764,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Stats API returns redis cache stats (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_stats_api_returns_stats)
 - [x] E2E: Connection pool handles reconnections gracefully (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_connection_pool_handles_reconnections)
 - [x] E2E: Handles Redis server restart gracefully (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_handles_server_restart_gracefully)
-- [ ] E2E: Serialization/deserialization works with real data
+- [x] E2E: Serialization/deserialization works with real data (tests/integration/cache_e2e_test.rs::test_e2e_redis_cache_serialization_deserialization_real_data)
 
 ### Tiered Cache End-to-End Tests
 - [ ] E2E: Memory hit → immediate response (fastest path)
