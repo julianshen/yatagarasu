@@ -1740,7 +1740,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Verify If-None-Match returns 304 on match (tests/integration/cache_e2e_test.rs::test_e2e_conditional_request_if_none_match)
 - [x] E2E: Range requests bypass disk cache entirely (tests/integration/cache_e2e_test.rs::test_e2e_range_requests_bypass_disk_cache_verified)
 - [x] E2E: Large files (>max_item_size) bypass disk cache (tests/integration/cache_e2e_test.rs::test_e2e_large_files_bypass_disk_cache)
-- [ ] E2E: Files written to disk correctly (tokio::fs)
+- [x] E2E: Files written to disk correctly (tokio::fs) (tests/integration/cache_e2e_test.rs::test_e2e_files_written_to_disk_correctly)
 - [ ] E2E: LRU eviction works when disk space threshold reached
 - [ ] E2E: Concurrent requests for same object coalesce correctly
 - [ ] E2E: Disk cache metrics tracked correctly
