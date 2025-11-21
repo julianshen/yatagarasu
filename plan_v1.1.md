@@ -1780,7 +1780,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Per-layer metrics tracked correctly (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_per_layer_metrics_tracked)
 - [x] E2E: Verify write-through strategy (all layers updated on set) (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_write_through_strategy)
 - [x] E2E: Verify cache consistency across layers (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_consistency_across_layers)
-- [ ] E2E: Large files bypass all cache layers
+- [x] E2E: Large files bypass all cache layers (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_large_files_bypass_all_layers)
 - [ ] E2E: Range requests bypass all cache layers
 
 ### Cross-Cache Integration Tests
