@@ -727,6 +727,12 @@ pub trait Cache: Send + Sync {
 
     /// Get cache statistics
     async fn stats(&self) -> Result<CacheStats, CacheError>;
+
+    /// Run pending async tasks (for caches that use async backends like moka)
+    /// Default implementation is a no-op
+    async fn run_pending_tasks(&self) {
+        // No-op by default
+    }
 }
 
 // ============================================================
@@ -932,6 +938,10 @@ impl Cache for MemoryCache {
 
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(self.get_stats())
+    }
+
+    async fn run_pending_tasks(&self) {
+        self.cache.run_pending_tasks().await;
     }
 }
 

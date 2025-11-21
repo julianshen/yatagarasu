@@ -5,6 +5,7 @@
 
 use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats, MemoryCache};
 use crate::cache::disk::DiskCache;
+use crate::metrics::Metrics;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -176,6 +177,19 @@ impl Cache for TieredCache {
             return Err(error);
         }
 
+        // Flush pending async tasks (for moka cache size tracking)
+        for layer in &self.layers {
+            layer.run_pending_tasks().await;
+        }
+
+        // Update metrics (Phase 30.8)
+        // Update size and item count gauges after successful set
+        if let Ok(stats) = self.stats().await {
+            let metrics = Metrics::global();
+            metrics.set_cache_size_bytes(stats.current_size_bytes);
+            metrics.set_cache_items(stats.current_item_count);
+        }
+
         Ok(())
     }
 
@@ -207,6 +221,23 @@ impl Cache for TieredCache {
             return Err(error);
         }
 
+        // Update metrics (Phase 30.8)
+        if any_deleted {
+            // Flush pending async tasks
+            for layer in &self.layers {
+                layer.run_pending_tasks().await;
+            }
+
+            let metrics = Metrics::global();
+            metrics.increment_cache_eviction();
+
+            // Update size and item count gauges
+            if let Ok(stats) = self.stats().await {
+                metrics.set_cache_size_bytes(stats.current_size_bytes);
+                metrics.set_cache_items(stats.current_item_count);
+            }
+        }
+
         Ok(any_deleted)
     }
 
@@ -233,6 +264,11 @@ impl Cache for TieredCache {
         // If any layer failed, return the first error
         if let Some(error) = first_error {
             return Err(error);
+        }
+
+        // Flush pending async tasks after clear
+        for layer in &self.layers {
+            layer.run_pending_tasks().await;
         }
 
         Ok(())

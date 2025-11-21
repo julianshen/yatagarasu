@@ -670,3 +670,166 @@ async fn test_promotion_is_async_and_does_not_slow_response() {
     // this test should verify that get() returns immediately (<1ms)
     // without waiting for promotion to complete.
 }
+
+// ============================================================================
+// Phase 30.8: Cache Metrics Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_metrics_track_cache_evictions() {
+    // Test: Metrics track cache evictions correctly
+    use yatagarasu::metrics::Metrics;
+    use yatagarasu::cache::MemoryCacheConfig;
+
+    let config = CacheConfig {
+        enabled: true,
+        cache_layers: vec!["memory".to_string()],
+        memory: MemoryCacheConfig {
+            max_cache_size_mb: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let cache = TieredCache::from_config(&config).await.unwrap();
+    let metrics = Metrics::global();
+
+    // Record initial eviction count
+    let evictions_before = metrics.get_cache_eviction_count();
+
+    // Set an entry
+    let entry = CacheEntry::new(
+        Bytes::from("test data"),
+        "text/plain".to_string(),
+        "etag123".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "file.txt".to_string(),
+        etag: None,
+    };
+
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Delete the entry (should increment evictions)
+    cache.delete(&key).await.unwrap();
+
+    // Verify evictions incremented
+    let evictions_after = metrics.get_cache_eviction_count();
+    assert!(
+        evictions_after > evictions_before,
+        "Evictions should increment after cache delete"
+    );
+}
+
+#[tokio::test]
+async fn test_metrics_track_cache_size_bytes() {
+    // Test: Metrics track cache size in bytes correctly
+    use yatagarasu::metrics::Metrics;
+    use yatagarasu::cache::MemoryCacheConfig;
+
+    let config = CacheConfig {
+        enabled: true,
+        cache_layers: vec!["memory".to_string()],
+        memory: MemoryCacheConfig {
+            max_cache_size_mb: 10,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let cache = TieredCache::from_config(&config).await.unwrap();
+    let metrics = Metrics::global();
+
+    // Initially, size should be 0 or very small
+    let size_before = metrics.get_cache_size_bytes();
+
+    // Set a large entry
+    let large_data = vec![0u8; 100_000]; // 100KB
+    let entry = CacheEntry::new(
+        Bytes::from(large_data),
+        "application/octet-stream".to_string(),
+        "etag456".to_string(),
+        Some(Duration::from_secs(3600)),
+    );
+
+    let key = CacheKey {
+        bucket: "bucket1".to_string(),
+        object_key: "largefile.bin".to_string(),
+        etag: None,
+    };
+
+    cache.set(key, entry).await.unwrap();
+
+    // Verify size increased
+    let size_after = metrics.get_cache_size_bytes();
+    assert!(
+        size_after > size_before,
+        "Cache size should increase after adding entry, before={}, after={}",
+        size_before,
+        size_after
+    );
+}
+
+#[tokio::test]
+async fn test_metrics_track_cache_items_count() {
+    // Test: Metrics track cache item count correctly
+    use yatagarasu::metrics::Metrics;
+    use yatagarasu::cache::MemoryCacheConfig;
+
+    let config = CacheConfig {
+        enabled: true,
+        cache_layers: vec!["memory".to_string()],
+        memory: MemoryCacheConfig {
+            max_cache_size_mb: 10,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let cache = TieredCache::from_config(&config).await.unwrap();
+    let metrics = Metrics::global();
+
+    // Record initial item count
+    let items_before = metrics.get_cache_items();
+
+    // Set multiple entries
+    for i in 0..5 {
+        let entry = CacheEntry::new(
+            Bytes::from(format!("data {}", i)),
+            "text/plain".to_string(),
+            format!("etag{}", i),
+            Some(Duration::from_secs(3600)),
+        );
+
+        let key = CacheKey {
+            bucket: "bucket1".to_string(),
+            object_key: format!("file{}.txt", i),
+            etag: None,
+        };
+
+        cache.set(key, entry).await.unwrap();
+    }
+
+    // Give a moment for async metrics update
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    // Verify item count increased
+    let items_after = metrics.get_cache_items();
+    assert!(
+        items_after > items_before,
+        "Cache items should increase after adding entries, before={}, after={}",
+        items_before,
+        items_after
+    );
+
+    // Verify we have at least 5 items (could be more from other tests)
+    assert!(
+        items_after >= items_before + 5,
+        "Should have added at least 5 items, before={}, after={}",
+        items_before,
+        items_after
+    );
+}

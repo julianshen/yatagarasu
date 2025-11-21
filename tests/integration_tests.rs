@@ -5,6 +5,7 @@
 #[allow(unused)]
 #[allow(clippy::all)]
 mod integration {
+    mod cache_e2e_test;
     mod circuit_breaker_test;
     mod concurrency_test;
     mod e2e_localstack_test;

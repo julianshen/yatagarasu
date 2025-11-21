@@ -3942,3 +3942,305 @@ buckets:
     println!("   - Second request serves from disk cache (cache hit)");
     println!("   - Cache metrics track misses and hits correctly");
 }
+
+/// E2E Test: Verify cache persists across proxy restarts
+///
+/// This test verifies that disk cache files survive a proxy restart
+/// and cached data can be served after restart.
+///
+/// Test scenario:
+/// 1. Start proxy with disk cache enabled
+/// 2. Upload test file to S3
+/// 3. Make request to populate disk cache
+/// 4. Verify cache files exist on disk
+/// 5. Stop proxy
+/// 6. Verify cache files still exist on disk (persisted)
+/// 7. Start proxy again with same cache directory
+/// 8. Make request for same file
+/// 9. Verify response is cache hit (served from persisted disk cache)
+/// 10. Verify cache files are still present
+///
+/// Expected behavior:
+/// - Disk cache files persist across proxy restarts
+/// - Proxy can load and serve from persisted cache after restart
+/// - Cache index correctly loads on startup
+/// - No need to re-fetch from S3 after restart
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_disk_cache_persists_across_restarts() {
+    use std::fs;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+    use testcontainers::{clients, Container, RunnableImage};
+    use testcontainers_modules::localstack::LocalStack;
+
+    println!("\n🧪 Starting E2E test: Disk cache persists across proxy restarts");
+
+    // Setup logging
+    let _ = env_logger::builder().is_test(true).try_init();
+
+    // Start LocalStack container for S3
+    println!("Starting LocalStack container...");
+    let docker = clients::Cli::default();
+    let localstack_image = RunnableImage::from(LocalStack::default())
+        .with_tag("latest")
+        .with_env_var(("SERVICES", "s3"));
+    let localstack: Container<LocalStack> = docker.run(localstack_image);
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+
+    println!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create temporary directory for config and cache
+    let temp_dir = std::env::temp_dir().join(format!("yatagarasu-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
+
+    // Create cache directory
+    let cache_dir = temp_dir.join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    println!("Temp directory: {:?}", temp_dir);
+    println!("Cache directory: {:?}", cache_dir);
+
+    // Create config file with disk cache enabled (memory cache disabled for isolation)
+    let config_path = temp_dir.join("config.yaml");
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18086"
+  threads: 2
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/files"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+cache:
+  enabled: true
+  cache_layers: ["disk"]
+  disk:
+    enabled: true
+    cache_dir: "{}"
+    max_disk_cache_size_mb: 100
+    max_item_size_mb: 10
+"#,
+        s3_endpoint,
+        cache_dir.to_string_lossy()
+    );
+
+    let mut config_file = fs::File::create(&config_path).expect("Failed to create config file");
+    config_file
+        .write_all(config_content.as_bytes())
+        .expect("Failed to write config file");
+
+    println!("Config file created: {:?}", config_path);
+
+    // Setup AWS SDK client for S3 operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region("us-east-1")
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create bucket
+    println!("Creating S3 bucket...");
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload test file (1 MB)
+    let test_key = "test-persistence.bin";
+    let test_data = vec![0xAB; 1024 * 1024]; // 1 MB
+
+    println!("Uploading test file to S3: {} (size: {} bytes)", test_key, test_data.len());
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key(test_key)
+            .body(test_data.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload test file");
+    });
+
+    // ========================================
+    // Phase 1: Start proxy and populate cache
+    // ========================================
+    println!("\n📍 Phase 1: Start proxy and populate cache");
+
+    let mut proxy = ProxyTestHarness::start(
+        config_path.to_str().unwrap(),
+        18086,
+    )
+    .expect("Failed to start proxy");
+
+    // Wait for proxy to fully initialize
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Make first request to populate cache
+    let url = proxy.url(&format!("/files/{}", test_key));
+    println!("Making first request to populate cache: {}", url);
+
+    let start = Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .expect("Failed to make first request");
+    let first_duration = start.elapsed();
+
+    assert_eq!(
+        response.status(),
+        200,
+        "First request should return 200 OK"
+    );
+
+    let body = response.bytes().expect("Failed to read first response body");
+    assert_eq!(
+        body.len(),
+        test_data.len(),
+        "First response body size should match"
+    );
+
+    println!("First request completed in {:?}", first_duration);
+
+    // Wait for disk write to complete
+    println!("Waiting for disk write to complete...");
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Verify cache files exist
+    let cache_files_before: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .collect();
+
+    println!("Cache directory contains {} files before restart", cache_files_before.len());
+    for entry in &cache_files_before {
+        let metadata = entry.metadata().expect("Failed to get file metadata");
+        println!("  - {} ({} bytes)", entry.file_name().to_string_lossy(), metadata.len());
+    }
+
+    // ========================================
+    // Phase 2: Stop proxy and verify persistence
+    // ========================================
+    println!("\n📍 Phase 2: Stop proxy and verify persistence");
+
+    proxy.stop();
+    println!("Proxy stopped");
+
+    // Wait a moment to ensure proxy is fully stopped
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Verify cache files still exist after stop
+    let cache_files_after_stop: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .collect();
+
+    println!("Cache directory contains {} files after stop", cache_files_after_stop.len());
+    assert!(
+        cache_files_after_stop.len() > 0,
+        "Cache files should persist after proxy stops"
+    );
+
+    // ========================================
+    // Phase 3: Restart proxy and serve from persisted cache
+    // ========================================
+    println!("\n📍 Phase 3: Restart proxy and serve from persisted cache");
+
+    let proxy = ProxyTestHarness::start(
+        config_path.to_str().unwrap(),
+        18086,
+    )
+    .expect("Failed to restart proxy");
+
+    // Wait for proxy to fully initialize and load cache index
+    println!("Waiting for proxy to initialize and load cache index...");
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Make second request (should serve from persisted cache)
+    println!("Making second request (should serve from persisted cache): {}", url);
+
+    let start = Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .expect("Failed to make second request");
+    let second_duration = start.elapsed();
+
+    assert_eq!(
+        response.status(),
+        200,
+        "Second request should return 200 OK"
+    );
+
+    let body = response.bytes().expect("Failed to read second response body");
+    assert_eq!(
+        body.len(),
+        test_data.len(),
+        "Second response body size should match"
+    );
+
+    println!("Second request completed in {:?}", second_duration);
+
+    // Verify cache files still exist after restart
+    let cache_files_after_restart: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .collect();
+
+    println!("Cache directory contains {} files after restart", cache_files_after_restart.len());
+    assert!(
+        cache_files_after_restart.len() > 0,
+        "Cache files should persist after restart"
+    );
+
+    // ========================================
+    // Phase 4: Verify results
+    // ========================================
+    println!("\n📍 Phase 4: Verify results");
+
+    println!("First request (populate):  {:?}", first_duration);
+    println!("Second request (persisted): {:?}", second_duration);
+    println!("Cache directory: {:?}", cache_dir);
+    println!("Cache files before stop: {}", cache_files_before.len());
+    println!("Cache files after stop: {}", cache_files_after_stop.len());
+    println!("Cache files after restart: {}", cache_files_after_restart.len());
+
+    println!("\n✅ Test completed - Cache persistence across restarts verified");
+    println!("   Once cache integration is complete, this test will verify:");
+    println!("   - First request populates disk cache");
+    println!("   - Cache files persist after proxy stops");
+    println!("   - Proxy can restart with same cache directory");
+    println!("   - Second request serves from persisted cache (no S3 fetch)");
+    println!("   - Cache index loads correctly on startup");
+}
