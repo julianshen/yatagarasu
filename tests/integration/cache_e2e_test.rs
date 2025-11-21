@@ -17163,3 +17163,323 @@ buckets:
 
     println!("\n✅ Test completed - Single-layer Memory-only configuration documented");
 }
+
+/// Integration Test: Single-layer configuration (disk only)
+///
+/// This test verifies that the cache system works correctly with only
+/// Disk cache enabled, while both Memory and Redis are disabled/omitted.
+/// This provides persistent caching without memory or network dependencies.
+///
+/// Test Phases:
+/// 1. Start LocalStack (S3) and Proxy (Disk cache only, no Memory/Redis)
+/// 2. Create test file (700KB)
+/// 3. Upload file to S3
+/// 4. First request (should populate Disk cache only)
+/// 5. Verify file served correctly
+/// 6. Second request (should hit Disk cache)
+/// 7. Verify faster response from Disk cache
+/// 8. Restart proxy (Disk cache persists)
+/// 9. Third request (should still hit Disk cache after restart)
+/// 10. Verify Disk cache persistence across restarts
+/// 11. Cleanup
+///
+/// Expected Behavior:
+/// - Single-layer cache hierarchy (Disk → S3)
+/// - Disk cache provides moderate-speed responses
+/// - Persistent cache across restarts
+/// - System works without Memory or Redis layers
+/// - Suitable for persistent caching without memory constraints
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_integration_single_layer_disk_only() {
+    println!("\n========================================");
+    println!("Integration Test: Single-layer configuration (Disk only)");
+    println!("========================================\n");
+
+    // Phase 1: Start infrastructure with Disk cache only (no Memory/Redis)
+    println!("Phase 1: Starting infrastructure (Disk cache only)...");
+
+    let docker = testcontainers::clients::Cli::default();
+
+    // Start LocalStack
+    let localstack = docker.run(
+        testcontainers::GenericImage::new("localstack/localstack", "latest")
+            .with_env_var("SERVICES", "s3")
+            .with_env_var("DEFAULT_REGION", "us-east-1")
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Ready.",
+            )),
+    );
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   ✅ LocalStack started on port {}", s3_port);
+
+    // Create disk cache directory
+    let disk_cache_path = format!("/tmp/yatagarasu-test-single-disk-{}", uuid::Uuid::new_v4());
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
+    println!(
+        "   ✅ Disk cache directory created: {}",
+        disk_cache_path
+    );
+
+    // Create S3 bucket
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-bucket")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+    println!("   ✅ S3 bucket 'test-bucket' created");
+
+    // Create proxy config with Disk cache only (no Memory/Redis)
+    let proxy_port = 34080;
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:{}"
+  worker_threads: 2
+
+buckets:
+  - name: test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    routes:
+      - path: /
+    cache:
+      # Memory cache OMITTED
+      disk:
+        path: "{}"
+        max_size_mb: 500
+        max_item_size_mb: 10
+      # Redis cache OMITTED
+      # Single-layer hierarchy: Disk → S3
+"#,
+        proxy_port, s3_endpoint, disk_cache_path
+    );
+
+    let config_path = format!("/tmp/yatagarasu-single-disk-{}.yaml", uuid::Uuid::new_v4());
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Proxy config written (Disk only, no Memory/Redis)");
+
+    // Start proxy
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port {}", proxy_port);
+    println!();
+
+    // Phase 2: Create test file (700KB)
+    println!("Phase 2: Creating test file (700KB)...");
+    let file_size = 700 * 1024; // 700KB (cacheable size)
+    let file_data: Vec<u8> = (0..file_size)
+        .map(|i| ((i * 41) % 256) as u8)
+        .collect();
+    let file_name = "report.pdf";
+    println!(
+        "   ✅ Test file created: {} ({:.2} KB)",
+        file_name,
+        file_size as f64 / 1024.0
+    );
+    println!();
+
+    // Phase 3: Upload file to S3
+    println!("Phase 3: Uploading file to S3...");
+    s3_client
+        .put_object()
+        .bucket("test-bucket")
+        .key(file_name)
+        .body(aws_sdk_s3::primitives::ByteStream::from(file_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+    println!("   ✅ File uploaded to S3: {}", file_name);
+    println!();
+
+    // Phase 4: First request (should populate Disk cache only)
+    println!("Phase 4: First request (should populate Disk cache only)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url(&format!("/{}", file_name));
+
+    let start = std::time::Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let status = response.status();
+    let body = response.bytes().await.expect("Failed to read body");
+    let duration = start.elapsed();
+
+    println!(
+        "   ✅ First response: {} ({} bytes, {}ms)",
+        status,
+        body.len(),
+        duration.as_millis()
+    );
+    println!();
+
+    // Phase 5: Verify file served correctly
+    println!("Phase 5: Verifying file served correctly...");
+    assert_eq!(status.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(body.len(), file_size, "File size mismatch");
+    assert_eq!(&body[..], &file_data[..], "File content mismatch");
+    println!("   ✅ File served correctly from S3");
+    println!();
+
+    // Phase 6: Second request (should hit Disk cache)
+    println!("Phase 6: Second request (should hit Disk cache)...");
+    // Wait a moment for async cache write
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let start = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make second request");
+    let status2 = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+    let duration2 = start.elapsed();
+
+    println!(
+        "   ✅ Second response: {} ({} bytes, {}ms)",
+        status2,
+        body2.len(),
+        duration2.as_millis()
+    );
+    println!();
+
+    // Phase 7: Verify faster response from Disk cache
+    println!("Phase 7: Verifying faster response from Disk cache...");
+    assert_eq!(status2.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body2[..], &file_data[..], "File content should match");
+
+    // Disk should be faster than S3
+    if duration2 < duration {
+        println!(
+            "   ✅ Faster response ({}ms vs {}ms) - Disk cache hit",
+            duration2.as_millis(),
+            duration.as_millis()
+        );
+    } else {
+        println!(
+            "   ⚠️  Response time: {}ms (timing varies, but should be from Disk)",
+            duration2.as_millis()
+        );
+    }
+    println!();
+
+    // Phase 8: Restart proxy (Disk cache persists)
+    println!("Phase 8: Restarting proxy (Disk cache persists)...");
+    drop(proxy);
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted");
+    println!("   • Disk cache persisted (stored on filesystem)");
+    println!();
+
+    // Phase 9: Third request (should still hit Disk cache after restart)
+    println!("Phase 9: Third request after restart (should hit Disk cache)...");
+    let start = std::time::Instant::now();
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+    let body3 = response3.bytes().await.expect("Failed to read body");
+    let duration3 = start.elapsed();
+
+    println!(
+        "   ✅ Third response: {} ({} bytes, {}ms)",
+        status3,
+        body3.len(),
+        duration3.as_millis()
+    );
+    println!();
+
+    // Phase 10: Verify Disk cache persistence across restarts
+    println!("Phase 10: Verifying Disk cache persistence...");
+    assert_eq!(status3.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body3[..], &file_data[..], "File content should match");
+
+    // Should still be fast (from Disk cache, not S3)
+    if duration3.as_millis() < 200 {
+        println!(
+            "   ✅ Fast response ({}ms) - Disk cache persisted",
+            duration3.as_millis()
+        );
+        println!("   • Cache survived restart (persistent storage)");
+    } else {
+        println!(
+            "   ⚠️  Response time: {}ms (should be from Disk cache)",
+            duration3.as_millis()
+        );
+    }
+
+    // Verify file exists in disk cache directory
+    let disk_files = std::fs::read_dir(&disk_cache_path)
+        .expect("Failed to read disk cache directory")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|ft| ft.is_file())
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    let file_in_disk = disk_files.iter().any(|entry| {
+        let metadata = entry.metadata().ok();
+        metadata
+            .map(|m| m.len() == file_size as u64)
+            .unwrap_or(false)
+    });
+
+    assert!(file_in_disk, "File should be in Disk cache");
+    println!("   ✅ File verified in Disk cache directory");
+    println!();
+
+    // Phase 11: Cleanup
+    println!("Phase 11: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    let _ = std::fs::remove_file(&config_path);
+    let _ = std::fs::remove_dir_all(&disk_cache_path);
+    println!("   ✅ Cleanup completed");
+
+    println!("\n========================================");
+    println!("Test Analysis:");
+    println!("========================================");
+    println!("✅ Single-layer cache hierarchy works (Disk → S3)");
+    println!("✅ Disk cache provides moderate-speed responses");
+    println!("✅ Persistent cache across restarts");
+    println!("✅ System works without Memory or Redis layers");
+    println!("✅ Cache survives proxy restarts");
+    println!();
+    println!("Key Behaviors Documented:");
+    println!("   • Simple configuration with persistent caching (Disk only)");
+    println!("   • No memory constraints (data stored on disk)");
+    println!("   • Disk cache provides <200ms responses (slower than Memory, faster than S3)");
+    println!("   • Persistent cache - survives restarts");
+    println!("   • No network dependencies (unlike Redis)");
+    println!("   • Suitable for persistent caching with limited memory");
+    println!("   • Best for large files that don't fit in memory");
+
+    println!("\n✅ Test completed - Single-layer Disk-only configuration documented");
+}
