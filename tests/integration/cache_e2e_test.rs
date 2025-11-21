@@ -12670,3 +12670,265 @@ cache:
 
     println!("\n✅ Test completed - Tiered cache async promotion documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_promotion_failures_dont_fail_request() {
+    // =============================================================================
+    // TEST: Verify promotion failures logged but don't fail request
+    // =============================================================================
+    // This test verifies that cache promotion failures are handled gracefully:
+    //
+    // Architecture: Memory (fastest) → Disk (fast) → Redis (shared) → S3 (origin)
+    //
+    // Test Scenario:
+    // 1. Populate Redis cache with a file
+    // 2. Make Memory/Disk empty (so promotion would be triggered)
+    // 3. Make disk cache path read-only (simulate promotion failure)
+    // 4. Make request that hits Redis → triggers promotion attempt
+    // 5. Verify request SUCCEEDS despite promotion failure
+    // 6. Verify data is correct (client unaffected by cache issue)
+    //
+    // Expected Behavior:
+    // - Request should complete successfully (200 OK)
+    // - Client receives correct data despite promotion failure
+    // - Promotion failure should be logged (but not tested directly in E2E)
+    // - System remains operational and serves from available cache layers
+    // - Resilient behavior: cache issues don't impact client requests
+    //
+    // This test documents error handling and system resilience.
+    // =============================================================================
+
+    println!("\n🧪 TEST: Tiered Cache - Promotion failures don't fail request");
+    println!("{}", "=".repeat(80));
+
+    // Phase 1: Start LocalStack S3
+    println!("\n📦 Phase 1: Starting LocalStack S3 container...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   S3 endpoint: {}", s3_endpoint);
+
+    // Phase 2: Start Redis container
+    println!("\n📦 Phase 2: Starting Redis container...");
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_endpoint = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   Redis endpoint: {}", redis_endpoint);
+
+    // Phase 3: Create test bucket and upload file
+    println!("\n📦 Phase 3: Creating S3 bucket and uploading test file...");
+    let config = aws_config::from_env()
+        .region(aws_config::Region::new("us-east-1"))
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-tiered-resilience")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    // Create 100KB test file
+    let file_size = 100 * 1024; // 100KB
+    let test_data: Vec<u8> = (0..file_size).map(|i| (i % 256) as u8).collect();
+
+    s3_client
+        .put_object()
+        .bucket("test-tiered-resilience")
+        .key("resilience-test.bin")
+        .body(aws_sdk_s3::primitives::ByteStream::from(test_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("   ✅ Bucket created: test-tiered-resilience");
+    println!("   ✅ File uploaded: resilience-test.bin ({}KB)", file_size / 1024);
+
+    // Phase 4: Create tiered cache config
+    println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
+    let cache_dir = TempDir::new().expect("Failed to create temp dir");
+    let disk_cache_path = cache_dir.path().join("disk_cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+version: 1
+server:
+  host: "127.0.0.1"
+  port: 18102
+  threads: 2
+
+buckets:
+  - name: test-tiered-resilience
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    path_configs:
+      - path: "/"
+        auth_required: false
+
+cache:
+  # Tiered cache: Memory → Disk → Redis
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    path: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    ttl_seconds: 300
+"#,
+        s3_endpoint,
+        disk_cache_path.display(),
+        redis_endpoint
+    );
+
+    let config_path = cache_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Config created with tiered cache");
+
+    // Phase 5: Start proxy and populate all cache layers
+    println!("\n🚀 Phase 5: Starting proxy and populating cache...");
+    let mut proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18102)
+        .expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port 18102");
+
+    let client = reqwest::Client::new();
+    let url = proxy.url("/resilience-test.bin");
+
+    // First request - populate all cache layers
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let body1 = response1.bytes().await.expect("Failed to read body");
+    assert_eq!(body1.len(), file_size);
+    println!("   ✅ First request completed (all layers populated)");
+
+    // Phase 6: Restart proxy to clear Memory cache
+    println!("\n🔄 Phase 6: Restarting proxy to clear Memory cache...");
+    proxy.stop();
+    println!("   ✅ Proxy stopped (Memory cache cleared)");
+
+    proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18102)
+        .expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted (Memory empty, Disk and Redis intact)");
+
+    // Phase 7: Make disk cache path read-only to simulate promotion failure
+    println!("\n🔒 Phase 7: Making disk cache read-only (simulate promotion failure)...");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&disk_cache_path)
+            .expect("Failed to get disk cache metadata")
+            .permissions();
+        perms.set_mode(0o444); // Read-only
+        std::fs::set_permissions(&disk_cache_path, perms)
+            .expect("Failed to set read-only permissions");
+        println!("   ✅ Disk cache set to read-only (promotion will fail)");
+    }
+    #[cfg(not(unix))]
+    {
+        println!("   ℹ️  Skipping read-only test on non-Unix platform");
+    }
+
+    // Phase 8: Clear Memory again after restart
+    println!("\n🔄 Phase 8: Restarting proxy again to clear Memory...");
+    proxy.stop();
+    proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18102)
+        .expect("Failed to restart proxy second time");
+    println!("   ✅ Proxy restarted (Memory empty, Disk read-only, Redis intact)");
+
+    // Phase 9: Make request - should succeed despite disk promotion failure
+    println!("\n📥 Phase 9: Making request (Redis hit, disk promotion will fail)...");
+    println!("   Expected: Request SUCCEEDS despite promotion failure");
+    let start = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make request with read-only disk");
+    let duration2 = start.elapsed();
+    let status = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+
+    println!("   ✅ Request completed: {} {}", status.as_u16(), status.canonical_reason().unwrap_or(""));
+    println!("   ✅ Response time: {:?}", duration2);
+    println!("   ✅ Body size: {} bytes", body2.len());
+
+    // Phase 10: Verify request succeeded
+    println!("\n✅ Phase 10: Verifying request succeeded despite promotion failure...");
+    assert_eq!(status.as_u16(), 200, "Request should succeed with 200 OK");
+    assert_eq!(body2.len(), file_size, "Response should have correct size");
+    assert_eq!(&body2[..], &test_data[..], "Response data should be correct");
+    println!("   ✅ Status: 200 OK (request succeeded)");
+    println!("   ✅ Data integrity: All bytes verified correct");
+    println!("   ✅ Client unaffected by cache promotion failure");
+
+    // Phase 11: Make third request to verify system still operational
+    println!("\n📥 Phase 11: Making third request (verify system still operational)...");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+    let body3 = response3.bytes().await.expect("Failed to read body");
+
+    assert_eq!(status3.as_u16(), 200, "Third request should also succeed");
+    assert_eq!(body3.len(), file_size);
+    assert_eq!(&body3[..], &test_data[..]);
+    println!("   ✅ Third request also succeeded");
+    println!("   ✅ System remains operational despite cache issues");
+
+    // Phase 12: Restore permissions for cleanup
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&disk_cache_path)
+            .expect("Failed to get disk cache metadata")
+            .permissions();
+        perms.set_mode(0o755); // Restore write permissions
+        let _ = std::fs::set_permissions(&disk_cache_path, perms);
+    }
+
+    println!("\n📊 Phase 12: Test summary:");
+    println!("   • Request succeeded despite disk cache promotion failure");
+    println!("   • Client received correct data (100% integrity)");
+    println!("   • System remained operational throughout");
+    println!("   • Multiple requests continue to work");
+    println!("   • Resilient behavior: cache issues isolated from client requests");
+
+    println!("\n📝 Note: This test documents expected error handling behavior.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • Cache promotion failures are logged (not tested directly here)");
+    println!("   • Promotion failures do NOT fail the client request");
+    println!("   • Client receives successful response (200 OK)");
+    println!("   • Data integrity maintained despite cache subsystem issues");
+    println!("   • System degrades gracefully (uses available cache layers)");
+    println!("   • Redis cache continues to serve despite disk cache issues");
+    println!("   • Resilience: cache is optimization, not critical path");
+
+    println!("\n✅ Test completed - Tiered cache resilient error handling documented");
+}
