@@ -1789,7 +1789,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Integration: Mixed configuration (memory+redis, no disk) (tests/integration/cache_e2e_test.rs::test_integration_mixed_memory_redis_no_disk)
 - [x] Integration: Single-layer configuration (memory only) (tests/integration/cache_e2e_test.rs::test_integration_single_layer_memory_only)
 - [x] Integration: Single-layer configuration (disk only) (tests/integration/cache_e2e_test.rs::test_integration_single_layer_disk_only)
-- [ ] Integration: Single-layer configuration (redis only)
+- [x] Integration: Single-layer configuration (redis only) (tests/integration/cache_e2e_test.rs::test_integration_single_layer_redis_only)
 - [ ] Integration: All caches disabled (direct S3 proxy)
 - [ ] Integration: Cache warmup on startup (reload from disk/redis)
 - [ ] Integration: Graceful degradation when one layer fails

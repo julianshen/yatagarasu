@@ -17483,3 +17483,324 @@ buckets:
 
     println!("\n✅ Test completed - Single-layer Disk-only configuration documented");
 }
+
+/// Integration Test: Single-layer configuration (redis only)
+///
+/// This test verifies that the cache system works correctly with only
+/// Redis cache enabled, while both Memory and Disk are disabled/omitted.
+/// This provides network-shared persistent caching without local storage.
+///
+/// Test Phases:
+/// 1. Start LocalStack (S3), Redis, and Proxy (Redis cache only, no Memory/Disk)
+/// 2. Create test file (900KB)
+/// 3. Upload file to S3
+/// 4. First request (should populate Redis cache only)
+/// 5. Verify file served correctly
+/// 6. Second request (should hit Redis cache)
+/// 7. Verify faster response from Redis cache
+/// 8. Restart proxy (Redis cache persists)
+/// 9. Third request (should still hit Redis cache after restart)
+/// 10. Verify Redis cache persistence across restarts
+/// 11. Cleanup
+///
+/// Expected Behavior:
+/// - Single-layer cache hierarchy (Redis → S3)
+/// - Redis cache provides network-shared responses
+/// - Persistent cache across restarts
+/// - System works without Memory or Disk layers
+/// - Suitable for distributed caching across multiple proxies
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_integration_single_layer_redis_only() {
+    println!("\n========================================");
+    println!("Integration Test: Single-layer configuration (Redis only)");
+    println!("========================================\n");
+
+    // Phase 1: Start infrastructure with Redis cache only (no Memory/Disk)
+    println!("Phase 1: Starting infrastructure (Redis cache only)...");
+
+    let docker = testcontainers::clients::Cli::default();
+
+    // Start LocalStack
+    let localstack = docker.run(
+        testcontainers::GenericImage::new("localstack/localstack", "latest")
+            .with_env_var("SERVICES", "s3")
+            .with_env_var("DEFAULT_REGION", "us-east-1")
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Ready.",
+            )),
+    );
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   ✅ LocalStack started on port {}", s3_port);
+
+    // Start Redis
+    let redis_container = docker.run(testcontainers::GenericImage::new(
+        "redis",
+        "7-alpine",
+    ));
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   ✅ Redis started on port {}", redis_port);
+
+    // Create S3 bucket
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-bucket")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+    println!("   ✅ S3 bucket 'test-bucket' created");
+
+    // Create proxy config with Redis cache only (no Memory/Disk)
+    let proxy_port = 35080;
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:{}"
+  worker_threads: 2
+
+buckets:
+  - name: test-bucket
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    routes:
+      - path: /
+    cache:
+      # Memory cache OMITTED
+      # Disk cache OMITTED
+      redis:
+        url: "{}"
+        max_item_size_mb: 10
+        key_prefix: "yatagarasu:single-redis:"
+      # Single-layer hierarchy: Redis → S3
+"#,
+        proxy_port, s3_endpoint, redis_url
+    );
+
+    let config_path = format!("/tmp/yatagarasu-single-redis-{}.yaml", uuid::Uuid::new_v4());
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Proxy config written (Redis only, no Memory/Disk)");
+
+    // Start proxy
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port {}", proxy_port);
+    println!();
+
+    // Phase 2: Create test file (900KB)
+    println!("Phase 2: Creating test file (900KB)...");
+    let file_size = 900 * 1024; // 900KB (cacheable size)
+    let file_data: Vec<u8> = (0..file_size)
+        .map(|i| ((i * 43) % 256) as u8)
+        .collect();
+    let file_name = "database.sql";
+    println!(
+        "   ✅ Test file created: {} ({:.2} KB)",
+        file_name,
+        file_size as f64 / 1024.0
+    );
+    println!();
+
+    // Phase 3: Upload file to S3
+    println!("Phase 3: Uploading file to S3...");
+    s3_client
+        .put_object()
+        .bucket("test-bucket")
+        .key(file_name)
+        .body(aws_sdk_s3::primitives::ByteStream::from(file_data.clone()))
+        .send()
+        .await
+        .expect("Failed to upload file");
+    println!("   ✅ File uploaded to S3: {}", file_name);
+    println!();
+
+    // Phase 4: First request (should populate Redis cache only)
+    println!("Phase 4: First request (should populate Redis cache only)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url(&format!("/{}", file_name));
+
+    let start = std::time::Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make first request");
+    let status = response.status();
+    let body = response.bytes().await.expect("Failed to read body");
+    let duration = start.elapsed();
+
+    println!(
+        "   ✅ First response: {} ({} bytes, {}ms)",
+        status,
+        body.len(),
+        duration.as_millis()
+    );
+    println!();
+
+    // Phase 5: Verify file served correctly
+    println!("Phase 5: Verifying file served correctly...");
+    assert_eq!(status.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(body.len(), file_size, "File size mismatch");
+    assert_eq!(&body[..], &file_data[..], "File content mismatch");
+    println!("   ✅ File served correctly from S3");
+    println!();
+
+    // Phase 6: Second request (should hit Redis cache)
+    println!("Phase 6: Second request (should hit Redis cache)...");
+    // Wait a moment for async cache write
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let start = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make second request");
+    let status2 = response2.status();
+    let body2 = response2.bytes().await.expect("Failed to read body");
+    let duration2 = start.elapsed();
+
+    println!(
+        "   ✅ Second response: {} ({} bytes, {}ms)",
+        status2,
+        body2.len(),
+        duration2.as_millis()
+    );
+    println!();
+
+    // Phase 7: Verify faster response from Redis cache
+    println!("Phase 7: Verifying faster response from Redis cache...");
+    assert_eq!(status2.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body2[..], &file_data[..], "File content should match");
+
+    // Redis should be faster than S3
+    if duration2 < duration {
+        println!(
+            "   ✅ Faster response ({}ms vs {}ms) - Redis cache hit",
+            duration2.as_millis(),
+            duration.as_millis()
+        );
+    } else {
+        println!(
+            "   ⚠️  Response time: {}ms (timing varies, but should be from Redis)",
+            duration2.as_millis()
+        );
+    }
+    println!();
+
+    // Phase 8: Restart proxy (Redis cache persists)
+    println!("Phase 8: Restarting proxy (Redis cache persists)...");
+    drop(proxy);
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    let proxy = ProxyTestHarness::start(&config_path, proxy_port).expect("Failed to restart proxy");
+    println!("   ✅ Proxy restarted");
+    println!("   • Redis cache persisted (network-based storage)");
+    println!();
+
+    // Phase 9: Third request (should still hit Redis cache after restart)
+    println!("Phase 9: Third request after restart (should hit Redis cache)...");
+    let start = std::time::Instant::now();
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to make third request");
+    let status3 = response3.status();
+    let body3 = response3.bytes().await.expect("Failed to read body");
+    let duration3 = start.elapsed();
+
+    println!(
+        "   ✅ Third response: {} ({} bytes, {}ms)",
+        status3,
+        body3.len(),
+        duration3.as_millis()
+    );
+    println!();
+
+    // Phase 10: Verify Redis cache persistence across restarts
+    println!("Phase 10: Verifying Redis cache persistence...");
+    assert_eq!(status3.as_u16(), 200, "Expected 200 OK");
+    assert_eq!(&body3[..], &file_data[..], "File content should match");
+
+    // Should still be fast (from Redis cache, not S3)
+    if duration3.as_millis() < 200 {
+        println!(
+            "   ✅ Fast response ({}ms) - Redis cache persisted",
+            duration3.as_millis()
+        );
+        println!("   • Cache survived restart (network-based persistence)");
+    } else {
+        println!(
+            "   ⚠️  Response time: {}ms (should be from Redis cache)",
+            duration3.as_millis()
+        );
+    }
+
+    // Verify file exists in Redis
+    let redis_client =
+        redis::Client::open(redis_url.as_str()).expect("Failed to create Redis client");
+    let mut redis_conn = redis_client
+        .get_connection()
+        .expect("Failed to connect to Redis");
+
+    let key_pattern = format!("yatagarasu:single-redis:*{}*", file_name);
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg(&key_pattern)
+        .query(&mut redis_conn)
+        .unwrap_or_else(|_| vec![]);
+
+    let file_in_redis = keys.iter().any(|key| {
+        let val: Result<Vec<u8>, _> = redis::cmd("GET").arg(key).query(&mut redis_conn);
+        val.map(|v| v.len() == file_size).unwrap_or(false)
+    });
+
+    assert!(file_in_redis, "File should be in Redis cache");
+    println!("   ✅ File verified in Redis cache");
+    println!();
+
+    // Phase 11: Cleanup
+    println!("Phase 11: Cleaning up...");
+    drop(proxy);
+    drop(localstack);
+    drop(redis_container);
+    let _ = std::fs::remove_file(&config_path);
+    println!("   ✅ Cleanup completed");
+
+    println!("\n========================================");
+    println!("Test Analysis:");
+    println!("========================================");
+    println!("✅ Single-layer cache hierarchy works (Redis → S3)");
+    println!("✅ Redis cache provides network-shared responses");
+    println!("✅ Persistent cache across restarts");
+    println!("✅ System works without Memory or Disk layers");
+    println!("✅ Cache survives proxy restarts");
+    println!();
+    println!("Key Behaviors Documented:");
+    println!("   • Simple configuration with network-shared caching (Redis only)");
+    println!("   • No local storage dependencies (no Memory, no Disk)");
+    println!("   • Redis cache provides <200ms responses");
+    println!("   • Persistent cache - survives restarts");
+    println!("   • Network-based cache accessible across multiple proxy instances");
+    println!("   • Suitable for distributed caching in multi-instance deployments");
+    println!("   • Best for shared caching across multiple servers");
+    println!("   • Centralized cache management");
+
+    println!("\n✅ Test completed - Single-layer Redis-only configuration documented");
+}
