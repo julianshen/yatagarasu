@@ -1784,7 +1784,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Range requests bypass all cache layers (tests/integration/cache_e2e_test.rs::test_e2e_tiered_cache_range_requests_bypass_all_layers)
 
 ### Cross-Cache Integration Tests
-- [ ] Integration: Memory → Disk fallback (memory disabled/full)
+- [x] Integration: Memory → Disk fallback (memory disabled/full) (tests/integration/cache_e2e_test.rs::test_integration_memory_to_disk_fallback)
 - [ ] Integration: Disk → Redis fallback (disk disabled/full)
 - [ ] Integration: Mixed configuration (memory+redis, no disk)
 - [ ] Integration: Single-layer configuration (memory only)
