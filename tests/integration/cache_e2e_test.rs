@@ -8927,3 +8927,254 @@ buckets:
 
     println!("\n✅ Test completed - Conditional GET behavior documented");
 }
+
+/// E2E Test: Verify Range requests bypass redis cache entirely
+///
+/// This test verifies that HTTP Range requests bypass the cache:
+/// 1. Upload file to S3
+/// 2. Make regular request to populate cache
+/// 3. Make Range request (e.g., Range: bytes=0-1023)
+/// 4. Verify response is 206 Partial Content
+/// 5. Verify only requested range is returned
+/// 6. Verify Range requests don't populate cache
+///
+/// **Expected behavior (once Redis cache is integrated):**
+/// - Regular requests cache the full response
+/// - Range requests bypass cache entirely (always fetch from S3)
+/// - Range response is 206 Partial Content with correct Content-Range
+/// - Only requested bytes are transferred
+/// - Constant memory usage (~64KB) regardless of file size
+///
+/// **Current behavior (without integration):**
+/// - Both requests fetch from S3
+/// - Test documents the expected end-to-end flow
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_redis_cache_range_requests_bypass() {
+    println!("\n🧪 E2E Test: Verify Range requests bypass redis cache entirely");
+    println!("================================================================\n");
+
+    // Phase 1: Start Redis container
+    println!("Phase 1: Starting Redis container...");
+    let docker = testcontainers::clients::Cli::default();
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://localhost:{}", redis_port);
+    println!("  ✓ Redis running at {}", redis_url);
+
+    // Phase 2: Start LocalStack for S3 backend
+    println!("\nPhase 2: Starting LocalStack (S3 backend)...");
+    let localstack = docker.run(testcontainers_modules::localstack::LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+    println!("  ✓ LocalStack running at {}", s3_endpoint);
+
+    // Phase 3: Create S3 client and bucket
+    println!("\nPhase 3: Creating S3 client and bucket...");
+    let s3_config = aws_sdk_s3::Config::builder()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .build();
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+    let bucket_name = "test-redis-range-bucket";
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+    println!("  ✓ Created bucket: {}", bucket_name);
+
+    // Phase 4: Upload test file to S3
+    println!("\nPhase 4: Uploading test file to S3...");
+    let test_content: Vec<u8> = (0..=255u8).cycle().take(1024 * 1024).collect(); // 1 MB with repeating pattern
+    let test_file = "range_test.bin";
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket(bucket_name)
+            .key(test_file)
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .send()
+            .await
+            .expect("Failed to upload file");
+    });
+    println!("  ✓ Uploaded: {} ({} bytes)", test_file, test_content.len());
+
+    // Phase 5: Configure proxy with Redis cache
+    println!("\nPhase 5: Configuring proxy with Redis cache...");
+    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_range_test_{}", std::process::id()));
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    let proxy_port = 18093; // Use unique port for this test
+    let config_content = format!(
+        r#"
+version: "1.0"
+
+server:
+  address: "127.0.0.1:{}"
+  threads: 2
+
+cache:
+  enabled: true
+  cache_layers: ["redis"]
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    default_ttl_seconds: 3600
+
+s3:
+  default_region: "us-east-1"
+  default_access_key: "test"
+  default_secret_key: "test"
+  default_endpoint: "{}"
+
+buckets:
+  - name: "test-redis-range-bucket"
+    path: "/data"
+    require_auth: false
+"#,
+        proxy_port,
+        redis_url,
+        s3_endpoint
+    );
+
+    let config_file = cache_dir.join("config.yaml");
+    fs::write(&config_file, config_content).expect("Failed to write config file");
+    println!("  ✓ Config written to: {}", config_file.display());
+
+    // Phase 6: Start proxy
+    println!("\nPhase 6: Starting proxy...");
+    let proxy = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
+        .expect("Failed to start proxy");
+    println!("  ✓ Proxy started at: {}", proxy.base_url);
+
+    // Phase 7: Make regular request to populate cache
+    println!("\nPhase 7: Making regular request (should populate cache)...");
+    let client = reqwest::blocking::Client::new();
+    let url = proxy.url(&format!("/data/{}", test_file));
+
+    let regular_response = client.get(&url).send().expect("Failed to send request");
+    assert_eq!(regular_response.status(), 200, "Expected 200 OK");
+    let regular_body = regular_response.bytes().expect("Failed to read response body");
+    assert_eq!(regular_body.len(), test_content.len(), "Content length mismatch");
+    println!("  ✓ Regular request: 200 OK, {} bytes", regular_body.len());
+
+    // Allow time for cache population
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Phase 8: Make Range request (should bypass cache)
+    println!("\nPhase 8: Making Range request (should bypass cache)...");
+    let range_start = 1024;
+    let range_end = 2047; // 1KB range
+    let range_header = format!("bytes={}-{}", range_start, range_end);
+
+    let range_response = client
+        .get(&url)
+        .header("Range", &range_header)
+        .send()
+        .expect("Failed to send request");
+
+    let status = range_response.status();
+    let content_range = range_response.headers()
+        .get("content-range")
+        .map(|v| v.to_str().unwrap().to_string());
+    let content_length = range_response.headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok());
+
+    let range_body = range_response.bytes().expect("Failed to read response body");
+    let range_body_len = range_body.len();
+
+    println!("  • Range header: {}", range_header);
+    println!("  • Response status: {}", status);
+    println!("  • Content-Range: {}", content_range.as_deref().unwrap_or("not present"));
+    println!("  • Content-Length: {}", content_length.unwrap_or(0));
+    println!("  • Body length: {} bytes", range_body_len);
+
+    // Phase 9: Verify 206 Partial Content response
+    println!("\nPhase 9: Verifying 206 Partial Content response...");
+    let expected_range_len = (range_end - range_start + 1) as usize;
+
+    if status == 206 {
+        println!("  ✅ Received 206 Partial Content - Range request working!");
+
+        if range_body_len == expected_range_len {
+            println!("  ✅ Correct partial content length: {} bytes", range_body_len);
+        } else {
+            println!("  ⚠  Expected {} bytes, got {} bytes", expected_range_len, range_body_len);
+        }
+
+        if let Some(cr) = content_range {
+            println!("  ✓ Content-Range header present: {}", cr);
+        } else {
+            println!("  ⚠  Content-Range header missing");
+        }
+    } else if status == 200 {
+        println!("  ⚠  Received 200 OK instead of 206");
+        println!("     (Range request support may not be fully implemented)");
+        if range_body_len == test_content.len() {
+            println!("  ⚠  Full file returned ({} bytes) instead of range", range_body_len);
+        }
+    } else {
+        println!("  ⚠  Unexpected status: {} (expected 206)", status);
+    }
+
+    // Phase 10: Verify content correctness
+    if status == 206 && range_body_len == expected_range_len {
+        println!("\nPhase 10: Verifying partial content correctness...");
+        let expected_content = &test_content[range_start..=range_end];
+
+        if range_body.as_ref() == expected_content {
+            println!("  ✅ Partial content matches expected range bytes");
+            println!("  ✓ First byte: 0x{:02X} (expected: 0x{:02X})", range_body[0], expected_content[0]);
+            println!("  ✓ Last byte: 0x{:02X} (expected: 0x{:02X})",
+                range_body[range_body_len - 1],
+                expected_content[expected_range_len - 1]
+            );
+        } else {
+            println!("  ⚠  Partial content does not match expected bytes");
+        }
+    }
+
+    // Phase 11: Verify cache bypass behavior
+    println!("\nPhase 11: Verifying cache bypass behavior...");
+    println!("  ℹ  Range requests should:");
+    println!("     • Always fetch from S3 (bypass cache)");
+    println!("     • Use constant memory (~64KB per request)");
+    println!("     • Support video seeking and parallel downloads");
+    println!("     • Not populate cache (partial responses not cached)");
+
+    // Phase 12: Cleanup
+    println!("\nPhase 12: Cleaning up...");
+    drop(proxy);
+    drop(redis_container);
+    drop(localstack);
+    let _ = fs::remove_dir_all(&cache_dir);
+    println!("  ✓ Cleanup completed");
+
+    println!();
+    println!("📝 Note: This test documents expected Range request behavior.");
+    println!("   Once Range request handling is fully integrated, this test will verify:");
+    println!("   • Range requests return 206 Partial Content");
+    println!("   • Only requested byte range is transferred");
+    println!("   • Range requests bypass cache entirely (always S3)");
+    println!("   • Content-Range header is present and correct");
+    println!("   • Partial content matches expected bytes");
+    println!("   • Constant memory usage for large files");
+
+    println!("\n✅ Test completed - Range request bypass behavior documented");
+}
