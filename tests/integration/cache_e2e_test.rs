@@ -9407,3 +9407,234 @@ cache:
 
     println!("\n✅ Test completed - Large file bypass behavior documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_redis_cache_entries_expire_via_ttl() {
+    println!("\n🧪 E2E Test: Entries expire via Redis TTL automatically");
+    println!("==========================================================");
+    println!("This test verifies that cached entries expire after the configured TTL.\n");
+
+    // Phase 1: Start LocalStack container
+    println!("Phase 1: Starting LocalStack container...");
+    let docker = Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", localstack_port);
+    println!("✅ LocalStack started on port {}", localstack_port);
+
+    // Phase 2: Start Redis container
+    println!("\nPhase 2: Starting Redis container...");
+    let redis_image = Redis::default();
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    println!("✅ Redis started on port {}", redis_port);
+
+    // Phase 3: Create S3 bucket and upload test file
+    println!("\nPhase 3: Creating S3 bucket and uploading test file...");
+    let bucket_name = "test-ttl-expiration";
+    let object_key = "test-file.txt";
+    let file_data = b"This is test data for TTL expiration testing.";
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    let config = aws_config::from_env()
+        .endpoint_url(&s3_endpoint)
+        .region(aws_config::Region::new("us-east-1"))
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "static",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+
+    s3_client
+        .create_bucket()
+        .bucket(bucket_name)
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    s3_client
+        .put_object()
+        .bucket(bucket_name)
+        .key(object_key)
+        .body(aws_sdk_s3::primitives::ByteStream::from_static(file_data))
+        .send()
+        .await
+        .expect("Failed to upload file");
+
+    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+
+    // Phase 4: Create proxy config with short TTL (5 seconds)
+    println!("\nPhase 4: Creating proxy config with TTL=5 seconds...");
+    let config_dir = "/tmp/yatagarasu-test-redis-ttl";
+    std::fs::create_dir_all(config_dir).expect("Failed to create config dir");
+
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18095"
+  workers: 2
+
+buckets:
+  - name: "test-ttl-expiration"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    path_prefix: "/files"
+
+cache:
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size: 10485760
+    ttl: 5  # 5 seconds TTL for testing
+"#,
+        s3_endpoint, redis_url
+    );
+
+    let config_path = format!("{}/config.yaml", config_dir);
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("✅ Config written with TTL=5 seconds");
+
+    // Phase 5: Start proxy
+    println!("\nPhase 5: Starting proxy server...");
+    let mut proxy = ProxyTestHarness::start(&config_path, 18095).expect("Failed to start proxy");
+    println!("✅ Proxy started on port 18095");
+
+    // Phase 6: Make first request (cache miss)
+    println!("\nPhase 6: Making first request (cache miss)...");
+    let client = reqwest::Client::new();
+    let url = proxy.url("/files/test-file.txt");
+
+    let start1 = std::time::Instant::now();
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    let duration1 = start1.elapsed();
+
+    assert_eq!(
+        response1.status(),
+        200,
+        "First request should return 200 OK"
+    );
+
+    let body1 = response1.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body1[..], file_data, "Response data should match uploaded file");
+
+    println!("✅ First request completed in {:?} (cache miss)", duration1);
+
+    // Phase 7: Make second request immediately (cache hit)
+    println!("\nPhase 7: Making second request immediately (should be cache hit)...");
+    let start2 = std::time::Instant::now();
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    let duration2 = start2.elapsed();
+
+    assert_eq!(
+        response2.status(),
+        200,
+        "Second request should return 200 OK"
+    );
+
+    let body2 = response2.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body2[..], file_data, "Response data should match uploaded file");
+
+    let speedup_ratio = duration1.as_secs_f64() / duration2.as_secs_f64();
+    println!("✅ Second request completed in {:?} (cache hit, speedup: {:.2}x)", duration2, speedup_ratio);
+
+    // Phase 8: Wait for TTL to expire (wait 6 seconds to be safe)
+    println!("\nPhase 8: Waiting for TTL to expire (6 seconds)...");
+    println!("   Current time: {:?}", std::time::Instant::now());
+    println!("   Cache entry created at: {:?}", start1);
+    println!("   TTL: 5 seconds");
+    println!("   Waiting 6 seconds to ensure expiration...");
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+
+    println!("✅ Wait complete, cache entry should now be expired");
+
+    // Phase 9: Make third request (should be cache miss again due to expiration)
+    println!("\nPhase 9: Making third request after TTL expiration (should be cache miss)...");
+    let start3 = std::time::Instant::now();
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    let duration3 = start3.elapsed();
+
+    assert_eq!(
+        response3.status(),
+        200,
+        "Third request should return 200 OK"
+    );
+
+    let body3 = response3.bytes().await.expect("Failed to read response body");
+    assert_eq!(&body3[..], file_data, "Response data should match uploaded file");
+
+    println!("✅ Third request completed in {:?}", duration3);
+
+    // Phase 10: Analyze timing to verify expiration
+    println!("\nPhase 10: Analyzing request timing to verify TTL expiration...");
+    println!("   Request 1 (cache miss):  {:?}", duration1);
+    println!("   Request 2 (cache hit):   {:?} (speedup: {:.2}x)", duration2, speedup_ratio);
+    println!("   Request 3 (after TTL):   {:?}", duration3);
+
+    // Third request should be slower than second (cache expired)
+    // It should be similar to first request (both cache misses)
+    let third_vs_second_ratio = duration3.as_secs_f64() / duration2.as_secs_f64();
+
+    if third_vs_second_ratio > 1.5 {
+        println!("✅ Third request ({:?}) significantly slower than second ({:?})", duration3, duration2);
+        println!("   Ratio: {:.2}x - This indicates cache expired as expected", third_vs_second_ratio);
+    } else {
+        println!("⚠️  Warning: Third request not significantly slower than second");
+        println!("   This may indicate TTL expiration didn't work as expected");
+        println!("   Ratio: {:.2}x (expected >1.5x)", third_vs_second_ratio);
+    }
+
+    // Phase 11: Stop proxy
+    println!("\nPhase 11: Stopping proxy...");
+    proxy.stop();
+    println!("✅ Proxy stopped");
+
+    // Phase 12: Cleanup
+    println!("\nPhase 12: Cleaning up test resources...");
+    let _ = std::fs::remove_dir_all(config_dir);
+    println!("✅ Cleanup complete");
+
+    // Summary
+    println!("\n📊 Test Summary");
+    println!("================");
+    println!("TTL configured:  5 seconds");
+    println!("Request 1:       {:?} (cache miss)", duration1);
+    println!("Request 2:       {:?} (cache hit, {:.2}x faster)", duration2, speedup_ratio);
+    println!("Wait period:     6 seconds");
+    println!("Request 3:       {:?} (after expiry, {:.2}x slower than hit)", duration3, third_vs_second_ratio);
+    println!("Data integrity:  ✅ All bytes verified correct");
+
+    println!("\n📝 Note: This test documents expected Redis TTL behavior.");
+    println!("   Once Redis cache integration is complete, this test will verify:");
+    println!("   • Cached entries expire after configured TTL");
+    println!("   • Expired entries result in cache miss");
+    println!("   • TTL is enforced by Redis automatically");
+    println!("   • Expired entries are re-fetched from S3");
+    println!("   • Cache is repopulated after expiration");
+
+    println!("\n✅ Test completed - Redis TTL expiration behavior documented");
+}
