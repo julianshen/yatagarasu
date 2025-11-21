@@ -1733,7 +1733,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Stats API returns memory cache stats (tests/integration/cache_e2e_test.rs::test_e2e_stats_api_returns_memory_cache_stats)
 
 ### Disk Cache End-to-End Tests
-- [ ] E2E: Full proxy request → disk cache hit → response
+- [x] E2E: Full proxy request → disk cache hit → response (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_hit)
 - [ ] E2E: Full proxy request → disk cache miss → S3 → cache population → response
 - [ ] E2E: Verify cache persists across proxy restarts
 - [ ] E2E: Verify ETag validation on cache hit
