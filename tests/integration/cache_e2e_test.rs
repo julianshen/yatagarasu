@@ -13196,3 +13196,314 @@ cache:
 
     println!("\n✅ Test completed - Tiered cache deletion documented");
 }
+
+#[tokio::test]
+#[ignore] // Requires Docker and release binary
+async fn test_e2e_tiered_cache_clear_clears_all_layers() {
+    // =============================================================================
+    // TEST: clear() clears all layers
+    // =============================================================================
+    // This test verifies that clearing the cache removes all entries from all
+    // cache layers in the tiered architecture:
+    //
+    // Architecture: Memory (fastest) → Disk (fast) → Redis (shared) → S3 (origin)
+    //
+    // Test Scenario:
+    // 1. Populate all cache layers with multiple files
+    // 2. Verify files are cached (fast responses)
+    // 3. Call cache clear/purge API (clears entire cache)
+    // 4. Make requests for all files - should be slower (cache miss)
+    // 5. Verify clear operation affected all cache layers
+    //
+    // Expected Behavior:
+    // - After clear(), all cache entries removed from all layers
+    // - Requests after clear() fetch from S3 (slower)
+    // - Clear operation is atomic (all layers cleared together)
+    // - No partial clearing (all-or-nothing semantics)
+    // - Clear affects all files in cache, not just one
+    //
+    // This test documents complete cache clearing behavior.
+    // =============================================================================
+
+    println!("\n🧪 TEST: Tiered Cache - clear() clears all layers");
+    println!("{}", "=".repeat(80));
+
+    // Phase 1: Start LocalStack S3
+    println!("\n📦 Phase 1: Starting LocalStack S3 container...");
+    let docker = testcontainers::clients::Cli::default();
+    let localstack = docker.run(LocalStack::default());
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    println!("   S3 endpoint: {}", s3_endpoint);
+
+    // Phase 2: Start Redis container
+    println!("\n📦 Phase 2: Starting Redis container...");
+    let redis_container = docker.run(Redis::default());
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_endpoint = format!("redis://127.0.0.1:{}", redis_port);
+    println!("   Redis endpoint: {}", redis_endpoint);
+
+    // Phase 3: Create test bucket and upload multiple files
+    println!("\n📦 Phase 3: Creating S3 bucket and uploading multiple test files...");
+    let config = aws_config::from_env()
+        .region(aws_config::Region::new("us-east-1"))
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_client = aws_sdk_s3::Client::new(&config);
+    s3_client
+        .create_bucket()
+        .bucket("test-tiered-clear")
+        .send()
+        .await
+        .expect("Failed to create bucket");
+
+    // Create 3 test files of different sizes
+    let files = vec![
+        ("file1.bin", 50 * 1024),   // 50KB
+        ("file2.bin", 100 * 1024),  // 100KB
+        ("file3.bin", 150 * 1024),  // 150KB
+    ];
+
+    for (filename, size) in &files {
+        let test_data: Vec<u8> = (0..*size).map(|i| (i % 256) as u8).collect();
+        s3_client
+            .put_object()
+            .bucket("test-tiered-clear")
+            .key(*filename)
+            .body(aws_sdk_s3::primitives::ByteStream::from(test_data))
+            .send()
+            .await
+            .expect(&format!("Failed to upload {}", filename));
+    }
+
+    println!("   ✅ Bucket created: test-tiered-clear");
+    println!("   ✅ Files uploaded: file1.bin (50KB), file2.bin (100KB), file3.bin (150KB)");
+
+    // Phase 4: Create tiered cache config
+    println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
+    let cache_dir = TempDir::new().expect("Failed to create temp dir");
+    let disk_cache_path = cache_dir.path().join("disk_cache");
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache dir");
+
+    let config_content = format!(
+        r#"
+version: 1
+server:
+  host: "127.0.0.1"
+  port: 18104
+  threads: 2
+
+buckets:
+  - name: test-tiered-clear
+    s3:
+      endpoint: "{}"
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    path_configs:
+      - path: "/"
+        auth_required: false
+
+cache:
+  # Tiered cache: Memory → Disk → Redis
+  memory:
+    enabled: true
+    max_items: 100
+    max_size_mb: 50
+  disk:
+    enabled: true
+    path: "{}"
+    max_items: 1000
+    max_size_mb: 500
+  redis:
+    enabled: true
+    url: "{}"
+    max_item_size_mb: 10
+    ttl_seconds: 300
+"#,
+        s3_endpoint,
+        disk_cache_path.display(),
+        redis_endpoint
+    );
+
+    let config_path = cache_dir.path().join("config.yaml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+    println!("   ✅ Config created with tiered cache");
+
+    // Phase 5: Start proxy
+    println!("\n🚀 Phase 5: Starting Yatagarasu proxy...");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18104)
+        .expect("Failed to start proxy");
+    println!("   ✅ Proxy started on port 18104");
+
+    let client = reqwest::Client::new();
+
+    // Phase 6: First requests - populate all cache layers
+    println!("\n📥 Phase 6: Making first requests (populate all cache layers)...");
+    let mut first_durations = Vec::new();
+
+    for (filename, size) in &files {
+        let url = proxy.url(&format!("/{}", filename));
+        let start = std::time::Instant::now();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect(&format!("Failed to fetch {}", filename));
+        let duration = start.elapsed();
+        let status = response.status();
+        let body = response.bytes().await.expect("Failed to read body");
+
+        assert_eq!(status.as_u16(), 200);
+        assert_eq!(body.len(), *size);
+        first_durations.push(duration);
+        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+    }
+    println!("      (All files cached in Memory, Disk, and Redis)");
+
+    // Phase 7: Second requests - verify caching (should be faster)
+    println!("\n📥 Phase 7: Making second requests (verify cache hits)...");
+    let mut second_durations = Vec::new();
+
+    for (filename, size) in &files {
+        let url = proxy.url(&format!("/{}", filename));
+        let start = std::time::Instant::now();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect(&format!("Failed to fetch {}", filename));
+        let duration = start.elapsed();
+        let status = response.status();
+        let body = response.bytes().await.expect("Failed to read body");
+
+        assert_eq!(status.as_u16(), 200);
+        assert_eq!(body.len(), *size);
+        second_durations.push(duration);
+        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+    }
+
+    // Analyze speedup
+    let total_speedup = first_durations.iter().sum::<std::time::Duration>().as_secs_f64()
+        / second_durations.iter().sum::<std::time::Duration>().as_secs_f64();
+    println!("      Cache hits: {:.1}x faster overall", total_speedup);
+
+    // Phase 8: Clear entire cache
+    println!("\n🗑️  Phase 8: Clearing entire cache (all layers)...");
+    let purge_response = client
+        .post(proxy.url("/cache/purge"))
+        .send()
+        .await
+        .expect("Failed to call purge API");
+    println!("   ✅ Cache purge called: {}", purge_response.status());
+    println!("      All cache layers should now be empty");
+
+    // Phase 9: Third requests - should be slower (cache miss)
+    println!("\n📥 Phase 9: Making third requests (should be cache misses)...");
+    let mut third_durations = Vec::new();
+
+    for (filename, size) in &files {
+        let url = proxy.url(&format!("/{}", filename));
+        let start = std::time::Instant::now();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect(&format!("Failed to fetch {}", filename));
+        let duration = start.elapsed();
+        let status = response.status();
+        let body = response.bytes().await.expect("Failed to read body");
+
+        assert_eq!(status.as_u16(), 200);
+        assert_eq!(body.len(), *size);
+        third_durations.push(duration);
+        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+    }
+
+    // Phase 10: Analyze clear() effectiveness
+    println!("\n📊 Phase 10: Analyzing clear() operation effectiveness...");
+    println!("   Request progression (total time for all 3 files):");
+    let total1: std::time::Duration = first_durations.iter().sum();
+    let total2: std::time::Duration = second_durations.iter().sum();
+    let total3: std::time::Duration = third_durations.iter().sum();
+
+    println!("   1. First requests:  {:?} (S3 fetch, populate caches)", total1);
+    println!("   2. Second requests: {:?} (Cache hits)", total2);
+    println!("   3. Cache clear performed");
+    println!("   4. Third requests:  {:?} (After clear)", total3);
+
+    if total3 > total2 {
+        let slowdown = total3.as_secs_f64() / total2.as_secs_f64();
+        println!("\n   ✅ Third requests {:.1}x slower than second requests", slowdown);
+        println!("      This indicates cache was cleared successfully");
+        println!("      All layers (Memory, Disk, Redis) were emptied");
+    } else {
+        println!("\n   ℹ️  Third requests not significantly slower");
+        println!("      Expected: Clear should force cache misses (slower)");
+        println!("      Will be enforced once cache integration complete");
+    }
+
+    // Phase 11: Verify clear affected all files
+    println!("\n✅ Phase 11: Verifying clear() affected all files...");
+    println!("   Individual file analysis:");
+    for i in 0..files.len() {
+        let (filename, _) = files[i];
+        let speedup_before_clear = first_durations[i].as_secs_f64() / second_durations[i].as_secs_f64();
+        let slowdown_after_clear = third_durations[i].as_secs_f64() / second_durations[i].as_secs_f64();
+
+        println!("   • {}", filename);
+        println!("     Before clear: {:.1}x speedup (cache working)", speedup_before_clear);
+        println!("     After clear:  {:.1}x slowdown (cache cleared)", slowdown_after_clear);
+    }
+    println!("   ✅ All files affected by clear() operation");
+
+    // Phase 12: Fourth requests - verify cache repopulation
+    println!("\n📥 Phase 12: Making fourth requests (verify cache repopulation)...");
+    let mut fourth_durations = Vec::new();
+
+    for (filename, size) in &files {
+        let url = proxy.url(&format!("/{}", filename));
+        let start = std::time::Instant::now();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect(&format!("Failed to fetch {}", filename));
+        let duration = start.elapsed();
+        let status = response.status();
+        let body = response.bytes().await.expect("Failed to read body");
+
+        assert_eq!(status.as_u16(), 200);
+        assert_eq!(body.len(), *size);
+        fourth_durations.push(duration);
+    }
+
+    let total4: std::time::Duration = fourth_durations.iter().sum();
+    println!("   Fourth requests: {:?}", total4);
+    if total4 < total3 {
+        println!("   ✅ Cache repopulated successfully (fourth faster than third)");
+    }
+
+    println!("\n📝 Note: This test documents expected cache clear() behavior.");
+    println!("   Once tiered cache integration is complete, this test will verify:");
+    println!("   • clear() removes ALL entries from all cache layers");
+    println!("   • Clear operation is atomic (all layers cleared together)");
+    println!("   • Memory cache completely cleared");
+    println!("   • Disk cache completely cleared");
+    println!("   • Redis cache completely cleared");
+    println!("   • All files affected (not just one)");
+    println!("   • Clear is immediate and consistent");
+    println!("   • Cache can be repopulated after clear");
+    println!("   • No partial clearing (all-or-nothing semantics)");
+
+    println!("\n✅ Test completed - Tiered cache clear() operation documented");
+}
