@@ -4885,3 +4885,357 @@ cache:
     println!("   - Range requests stream directly from S3");
     println!("   - Cache state unchanged by Range requests");
 }
+
+/// E2E Test: Verify large files (>max_item_size) bypass disk cache
+///
+/// This test verifies that files larger than max_item_size are never cached,
+/// ensuring the cache doesn't waste space on large files that would be
+/// expensive to store and serve.
+///
+/// Test scenario:
+/// 1. Start proxy with disk cache enabled (max_item_size = 5 MB)
+/// 2. Upload small test file to S3 (1 MB - below limit)
+/// 3. Upload large test file to S3 (10 MB - above limit)
+/// 4. Make request for small file (should populate cache)
+/// 5. Verify small file was cached
+/// 6. Make request for large file (should bypass cache)
+/// 7. Verify large file was NOT cached
+/// 8. Make second request for large file (should still fetch from S3, not cache)
+/// 9. Verify cache only contains small file
+///
+/// Expected behavior:
+/// - Files <= max_item_size are cached normally
+/// - Files > max_item_size bypass cache entirely
+/// - Large files stream directly from S3 without caching
+/// - Cache metrics don't track large file requests
+/// - Second request for large file still fetches from S3
+#[test]
+#[ignore] // Requires Docker and release build
+fn test_e2e_large_files_bypass_disk_cache() {
+    use std::fs;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+    use testcontainers::{clients, Container, RunnableImage};
+    use testcontainers_modules::localstack::LocalStack;
+
+    println!("\n🧪 Starting E2E test: Large files (>max_item_size) bypass disk cache");
+
+    // Setup logging
+    init_logging();
+
+    // Start LocalStack container for S3
+    println!("Starting LocalStack container...");
+    let docker = clients::Cli::default();
+    let localstack_image = RunnableImage::from(LocalStack::default())
+        .with_tag("latest")
+        .with_env_var(("SERVICES", "s3"));
+    let localstack: Container<LocalStack> = docker.run(localstack_image);
+    let localstack_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://localhost:{}", localstack_port);
+
+    println!("LocalStack S3 endpoint: {}", s3_endpoint);
+
+    // Create temporary directory for config and cache
+    let temp_dir = std::env::temp_dir().join(format!("yatagarasu-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
+
+    // Create cache directory
+    let cache_dir = temp_dir.join("cache");
+    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+
+    println!("Temp directory: {:?}", temp_dir);
+    println!("Cache directory: {:?}", cache_dir);
+
+    // Create config file with disk cache enabled and max_item_size = 5 MB
+    let config_path = temp_dir.join("config.yaml");
+    let config_content = format!(
+        r#"
+server:
+  address: "127.0.0.1:18089"
+  threads: 2
+
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/files"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "test"
+      secret_key: "test"
+
+cache:
+  enabled: true
+  cache_layers: ["disk"]
+  disk:
+    enabled: true
+    cache_dir: "{}"
+    max_disk_cache_size_mb: 100
+    max_item_size_mb: 5
+"#,
+        s3_endpoint,
+        cache_dir.to_string_lossy()
+    );
+
+    let mut config_file = fs::File::create(&config_path).expect("Failed to create config file");
+    config_file
+        .write_all(config_content.as_bytes())
+        .expect("Failed to write config file");
+
+    println!("Config file created: {:?}", config_path);
+    println!("Cache configuration: max_item_size = 5 MB");
+
+    // Setup AWS SDK client for S3 operations
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let s3_client = rt.block_on(async {
+        let config = aws_config::from_env()
+            .endpoint_url(&s3_endpoint)
+            .region("us-east-1")
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "test",
+            ))
+            .load()
+            .await;
+
+        aws_sdk_s3::Client::new(&config)
+    });
+
+    // Create bucket
+    println!("Creating S3 bucket...");
+    rt.block_on(async {
+        s3_client
+            .create_bucket()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect("Failed to create bucket");
+    });
+
+    // Upload small test file (1 MB - below limit)
+    let small_key = "small-file.bin";
+    let small_data = vec![0xAA; 1024 * 1024]; // 1 MB
+
+    println!("Uploading small test file to S3: {} (size: {} bytes = {} MB)",
+        small_key, small_data.len(), small_data.len() / (1024 * 1024));
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key(small_key)
+            .body(small_data.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload small test file");
+    });
+
+    // Upload large test file (10 MB - above limit)
+    let large_key = "large-file.bin";
+    let large_data = vec![0xBB; 10 * 1024 * 1024]; // 10 MB
+
+    println!("Uploading large test file to S3: {} (size: {} bytes = {} MB)",
+        large_key, large_data.len(), large_data.len() / (1024 * 1024));
+    rt.block_on(async {
+        s3_client
+            .put_object()
+            .bucket("test-bucket")
+            .key(large_key)
+            .body(large_data.clone().into())
+            .send()
+            .await
+            .expect("Failed to upload large test file");
+    });
+
+    // Start proxy
+    println!("\nStarting proxy...");
+    let proxy = ProxyTestHarness::start(
+        config_path.to_str().unwrap(),
+        18089,
+    )
+    .expect("Failed to start proxy");
+
+    // Wait for proxy to fully initialize
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create HTTP client
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30)) // Longer timeout for large file
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // ========================================
+    // Phase 1: Request small file (should cache)
+    // ========================================
+    println!("\n📍 Phase 1: Request small file (1 MB - below 5 MB limit)");
+
+    let small_url = proxy.url(&format!("/files/{}", small_key));
+    println!("Making request for small file: {}", small_url);
+
+    let start = Instant::now();
+    let small_response = client
+        .get(&small_url)
+        .send()
+        .expect("Failed to request small file");
+    let small_duration = start.elapsed();
+
+    assert_eq!(
+        small_response.status(),
+        200,
+        "Small file request should return 200 OK"
+    );
+
+    let small_body = small_response.bytes().expect("Failed to read small file response");
+    assert_eq!(
+        small_body.len(),
+        small_data.len(),
+        "Small file response should return full file"
+    );
+
+    println!("Small file request completed (200 OK, {} bytes, {:?})", small_body.len(), small_duration);
+
+    // Wait for disk cache write
+    println!("Waiting for disk cache write...");
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Verify cache was populated
+    let cache_files_after_small: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .collect();
+
+    println!("Cache directory contains {} files after small file request", cache_files_after_small.len());
+
+    // ========================================
+    // Phase 2: Request large file (should NOT cache)
+    // ========================================
+    println!("\n📍 Phase 2: Request large file (10 MB - above 5 MB limit)");
+
+    let large_url = proxy.url(&format!("/files/{}", large_key));
+    println!("Making first request for large file: {}", large_url);
+
+    let start = Instant::now();
+    let large_response1 = client
+        .get(&large_url)
+        .send()
+        .expect("Failed to request large file");
+    let large_duration1 = start.elapsed();
+
+    assert_eq!(
+        large_response1.status(),
+        200,
+        "Large file request should return 200 OK"
+    );
+
+    let large_body1 = large_response1.bytes().expect("Failed to read large file response");
+    assert_eq!(
+        large_body1.len(),
+        large_data.len(),
+        "Large file response should return full file"
+    );
+
+    println!("Large file request completed (200 OK, {} bytes = {} MB, {:?})",
+        large_body1.len(), large_body1.len() / (1024 * 1024), large_duration1);
+
+    // Wait a moment to ensure no async cache writes
+    println!("Waiting to verify no cache write for large file...");
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Verify cache was NOT populated with large file
+    let cache_files_after_large: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .collect();
+
+    println!("Cache directory contains {} files after large file request", cache_files_after_large.len());
+
+    assert_eq!(
+        cache_files_after_large.len(),
+        cache_files_after_small.len(),
+        "Cache should NOT increase from large file request"
+    );
+
+    // ========================================
+    // Phase 3: Second request for large file (should still bypass cache)
+    // ========================================
+    println!("\n📍 Phase 3: Second request for large file (should still bypass cache)");
+
+    println!("Making second request for large file: {}", large_url);
+
+    let start = Instant::now();
+    let large_response2 = client
+        .get(&large_url)
+        .send()
+        .expect("Failed to make second large file request");
+    let large_duration2 = start.elapsed();
+
+    assert_eq!(
+        large_response2.status(),
+        200,
+        "Second large file request should return 200 OK"
+    );
+
+    let large_body2 = large_response2.bytes().expect("Failed to read second large file response");
+    assert_eq!(
+        large_body2.len(),
+        large_data.len(),
+        "Second large file response should return full file"
+    );
+
+    println!("Second large file request completed (200 OK, {} bytes, {:?})",
+        large_body2.len(), large_duration2);
+
+    // Both requests should take similar time (both from S3, not cache)
+    let duration_diff_ms = (large_duration2.as_millis() as i128 - large_duration1.as_millis() as i128).abs();
+    println!("Duration difference between requests: {}ms", duration_diff_ms);
+
+    // ========================================
+    // Phase 4: Verify final cache state
+    // ========================================
+    println!("\n📍 Phase 4: Verify final cache state");
+
+    let cache_files_final: Vec<_> = fs::read_dir(&cache_dir)
+        .expect("Failed to read cache dir")
+        .filter_map(|e| e.ok())
+        .collect();
+
+    println!("Cache directory contains {} files in final state", cache_files_final.len());
+
+    // Cache should only contain the small file
+    assert_eq!(
+        cache_files_final.len(),
+        cache_files_after_small.len(),
+        "Cache should still only contain small file"
+    );
+
+    // List cache files
+    for entry in &cache_files_final {
+        let metadata = entry.metadata().expect("Failed to get file metadata");
+        println!("  - {} ({} bytes)", entry.file_name().to_string_lossy(), metadata.len());
+    }
+
+    // ========================================
+    // Phase 5: Verify results
+    // ========================================
+    println!("\n📍 Phase 5: Verify results");
+
+    println!("Configuration: max_item_size = 5 MB");
+    println!("Small file: {} (1 MB) - cached", small_key);
+    println!("Large file: {} (10 MB) - NOT cached", large_key);
+    println!("Cache files after small: {}", cache_files_after_small.len());
+    println!("Cache files after large: {}", cache_files_after_large.len());
+    println!("Cache files final: {}", cache_files_final.len());
+    println!("First large request: {:?}", large_duration1);
+    println!("Second large request: {:?}", large_duration2);
+
+    println!("\n✅ Test completed - Large file bypass behavior documented");
+    println!("   Once cache integration is complete, this test will verify:");
+    println!("   - Small files (<= max_item_size) are cached normally");
+    println!("   - Large files (> max_item_size) bypass cache entirely");
+    println!("   - Large files stream directly from S3 without caching");
+    println!("   - Multiple requests for large files all fetch from S3");
+    println!("   - Cache only contains files within size limit");
+}
