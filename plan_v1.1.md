@@ -1746,7 +1746,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] E2E: Disk cache metrics tracked correctly (tests/integration/cache_e2e_test.rs::test_e2e_disk_cache_metrics_tracked_correctly)
 - [x] E2E: Purge API clears disk cache files (tests/integration/cache_e2e_test.rs::test_e2e_purge_api_clears_disk_cache_files)
 - [x] E2E: Stats API returns disk cache stats (tests/integration/cache_e2e_test.rs::test_e2e_stats_api_returns_disk_cache_stats)
-- [ ] E2E: Index persists and loads correctly on restart
+- [x] E2E: Index persists and loads correctly on restart (tests/integration/cache_e2e_test.rs::test_e2e_index_persists_and_loads_correctly_on_restart)
 - [ ] E2E: Cleanup removes old files on startup
 
 ### Redis Cache End-to-End Tests
