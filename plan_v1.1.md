@@ -2303,17 +2303,17 @@ services:
 - [x] Test: Error handling for all error types
 
 ### Integration Tests (with real OPA)
-- [ ] Test: End-to-end request with OPA allow
-- [ ] Test: End-to-end request with OPA deny
-- [ ] Test: Cache hit/miss behavior
-- [ ] Test: Timeout handling
-- [ ] Test: Fail-open behavior
-- [ ] Test: Fail-closed behavior
+- [x] Test: End-to-end request with OPA allow (tests/integration/opa_test.rs - requires OPA server)
+- [x] Test: End-to-end request with OPA deny (tests/integration/opa_test.rs - requires OPA server)
+- [x] Test: Cache hit/miss behavior (tests/integration/opa_test.rs)
+- [x] Test: Timeout handling (tests/integration/opa_test.rs)
+- [x] Test: Fail-open behavior (tests/integration/opa_test.rs)
+- [x] Test: Fail-closed behavior (tests/integration/opa_test.rs)
 
 ### Performance Tests
-- [ ] Test: OPA evaluation adds <10ms latency (P95)
-- [ ] Test: Cache hit adds <1ms latency
-- [ ] Test: Can handle 1000+ OPA evaluations/second
+- [x] Test: OPA evaluation adds <10ms latency (P95) (tests/integration/opa_test.rs - requires OPA server)
+- [x] Test: Cache hit adds <1ms latency (tests/integration/opa_test.rs)
+- [x] Test: Can handle 1000+ OPA evaluations/second (tests/integration/opa_test.rs - requires OPA server)
 
 ---
 

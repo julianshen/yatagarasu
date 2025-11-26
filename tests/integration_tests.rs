@@ -16,6 +16,7 @@ mod integration {
     // mod logging_test; // TODO: Fix API mismatch with test_harness
     mod metrics_test;
     mod multibucket_test;
+    mod opa_test; // Phase 32: OPA Integration
     mod range_requests_test;
     mod rate_limit_test;
     mod replica_set_test;
