@@ -4514,3 +4514,89 @@ fn test_jwk_jwt_algorithm_returns_correct_algorithm() {
     };
     assert_eq!(ec_p384.jwt_algorithm().unwrap(), Algorithm::ES384);
 }
+
+// ============================================================================
+// Phase 31.5: JWKS Client - Fetching and Caching
+// ============================================================================
+
+#[test]
+fn test_jwks_client_config_defaults() {
+    use yatagarasu::auth::jwks_client::JwksClientConfig;
+
+    let config = JwksClientConfig::default();
+    assert!(config.url.is_empty());
+    assert_eq!(config.refresh_interval_secs, 3600); // 1 hour
+    assert_eq!(config.timeout_secs, 30);
+}
+
+#[test]
+fn test_jwks_client_from_url() {
+    use yatagarasu::auth::jwks_client::JwksClient;
+
+    let url = "http://example.com/.well-known/jwks.json";
+    let client = JwksClient::from_url(url);
+
+    // Cache should be invalid initially
+    assert!(!client.is_cache_valid());
+    assert!(client.get_cached_jwks().is_none());
+}
+
+#[test]
+fn test_jwks_client_find_key_not_in_cache() {
+    use yatagarasu::auth::jwks_client::JwksClient;
+
+    let client = JwksClient::from_url("http://example.com/.well-known/jwks.json");
+
+    // Finding a key should fail when cache is empty
+    assert!(client.find_key("test-key").is_none());
+}
+
+#[test]
+fn test_jwks_client_get_decoding_key_not_found() {
+    use yatagarasu::auth::jwks_client::{JwksClient, JwksClientError};
+
+    let client = JwksClient::from_url("http://example.com/.well-known/jwks.json");
+
+    let result = client.get_decoding_key("nonexistent-key");
+    assert!(result.is_err());
+
+    match result.unwrap_err() {
+        JwksClientError::KeyNotFound(kid) => {
+            assert_eq!(kid, "nonexistent-key");
+        }
+        other => panic!("Expected KeyNotFound error, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_jwks_client_not_configured_error() {
+    use yatagarasu::auth::jwks_client::{JwksClient, JwksClientConfig, JwksClientError};
+
+    let client = JwksClient::new(JwksClientConfig::default());
+
+    let result = client.fetch_and_cache().await;
+    assert!(result.is_err());
+
+    match result.unwrap_err() {
+        JwksClientError::NotConfigured => {}
+        other => panic!("Expected NotConfigured error, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_jwks_client_invalid_url_error() {
+    use yatagarasu::auth::jwks_client::{JwksClient, JwksClientError};
+
+    let client = JwksClient::from_url("not-a-valid-url");
+
+    let result = client.fetch_and_cache().await;
+    assert!(result.is_err());
+
+    // The error could be about invalid URL format or missing scheme
+    match result.unwrap_err() {
+        JwksClientError::FetchError(_) => {
+            // Any fetch error is acceptable for an invalid URL
+        }
+        other => panic!("Expected FetchError, got: {:?}", other),
+    }
+}

@@ -9,6 +9,7 @@ use std::path::Path;
 use crate::config::{ClaimRule, JwtConfig};
 
 pub mod jwks;
+pub mod jwks_client;
 
 /// Error type for key loading operations
 #[derive(Debug)]
