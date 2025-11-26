@@ -59,10 +59,10 @@
 **Verification**: Can validate RSA/ECDSA signed JWTs, fetch keys from JWKS
 **Status**: ✅ RS256/ES256 complete (31.1-31.4), JWKS client implemented (31.5 partial). HTTPS support and doc examples pending.
 
-### 🟢 Milestone 5: OPA Integration (Phase 32) - HIGH ⭐ CORE COMPLETE
+### 🟢 Milestone 5: OPA Integration (Phase 32) - HIGH ⭐ COMPLETE
 **Deliverable**: Open Policy Agent integration for flexible authorization
 **Verification**: Can evaluate Rego policies, replaces limited built-in operators
-**Status**: ✅ Core implementation complete (32.1-32.5, 32.8 unit tests). Documentation & integration tests pending.
+**Status**: ✅ COMPLETE - All implementation (32.1-32.5), documentation (32.6-32.7), and tests (32.8) done.
 
 ### 🟡 Milestone 6: Audit Logging (Phase 33) - HIGH
 **Deliverable**: Comprehensive audit logging operational
@@ -3226,7 +3226,7 @@ services:
 **Target Release**: When it's right, not when it's fast
 
 **Last Updated**: 2025-11-26
-**Status**: Phase 31 PARTIAL (RS256/ES256 done, JWKS client done), Phase 32 CORE COMPLETE
+**Status**: Phase 31 PARTIAL (RS256/ES256 done, JWKS client done), Phase 32 COMPLETE
 
 ---
 
