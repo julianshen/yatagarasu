@@ -1572,3 +1572,315 @@ jwt:
     let jwt = config.jwt.as_ref().expect("JWT config should be present");
     assert_eq!(jwt.jwks_refresh_interval_secs, Some(3600));
 }
+
+// ============================================================================
+// Phase 32: OPA Integration - Configuration Tests
+// ============================================================================
+
+#[test]
+fn test_bucket_can_have_authorization_section() {
+    // Test: Add `authorization` section to bucket config
+    use yatagarasu::config::AuthorizationConfig;
+
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to parse config with authorization section");
+    let bucket = &config.buckets[0];
+    assert!(
+        bucket.authorization.is_some(),
+        "Bucket should have authorization section"
+    );
+}
+
+#[test]
+fn test_authorization_type_opa() {
+    // Test: Can parse `type: opa` authorization type
+    use yatagarasu::config::AuthorizationConfig;
+
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse authorization type");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(authz.auth_type, "opa");
+}
+
+#[test]
+fn test_authorization_opa_url() {
+    // Test: Can parse `opa_url` (OPA REST API endpoint)
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://opa.example.com:8181
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse opa_url");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(
+        authz.opa_url.as_deref(),
+        Some("http://opa.example.com:8181")
+    );
+}
+
+#[test]
+fn test_authorization_opa_policy_path() {
+    // Test: Can parse `opa_policy_path` (e.g., "yatagarasu/authz/allow")
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+      opa_policy_path: yatagarasu/authz/allow
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse opa_policy_path");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(
+        authz.opa_policy_path.as_deref(),
+        Some("yatagarasu/authz/allow")
+    );
+}
+
+#[test]
+fn test_authorization_opa_timeout_ms() {
+    // Test: Can parse `opa_timeout_ms` (default: 100ms)
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+      opa_timeout_ms: 200
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse opa_timeout_ms");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(authz.opa_timeout_ms, 200);
+}
+
+#[test]
+fn test_authorization_opa_timeout_default() {
+    // Test: Default opa_timeout_ms is 100ms
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(authz.opa_timeout_ms, 100, "Default timeout should be 100ms");
+}
+
+#[test]
+fn test_authorization_opa_cache_ttl() {
+    // Test: Can parse `opa_cache_ttl_seconds` (default: 60)
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+      opa_cache_ttl_seconds: 120
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse opa_cache_ttl_seconds");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(authz.opa_cache_ttl_seconds, 120);
+}
+
+#[test]
+fn test_authorization_opa_cache_ttl_default() {
+    // Test: Default opa_cache_ttl_seconds is 60
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(
+        authz.opa_cache_ttl_seconds, 60,
+        "Default cache TTL should be 60 seconds"
+    );
+}
+
+#[test]
+fn test_authorization_opa_fail_mode() {
+    // Test: Can parse `opa_fail_mode` (open or closed)
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+      opa_fail_mode: open
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse opa_fail_mode");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+    assert_eq!(authz.opa_fail_mode.as_deref(), Some("open"));
+}
+
+#[test]
+fn test_authorization_opa_complete_config() {
+    // Test: Can parse complete OPA config example
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+      opa_policy_path: yatagarasu/authz/allow
+      opa_timeout_ms: 100
+      opa_cache_ttl_seconds: 60
+      opa_fail_mode: closed
+"#;
+    let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse complete OPA config");
+    let bucket = &config.buckets[0];
+    let authz = bucket.authorization.as_ref().expect("Should have authz");
+
+    assert_eq!(authz.auth_type, "opa");
+    assert_eq!(authz.opa_url.as_deref(), Some("http://localhost:8181"));
+    assert_eq!(
+        authz.opa_policy_path.as_deref(),
+        Some("yatagarasu/authz/allow")
+    );
+    assert_eq!(authz.opa_timeout_ms, 100);
+    assert_eq!(authz.opa_cache_ttl_seconds, 60);
+    assert_eq!(authz.opa_fail_mode.as_deref(), Some("closed"));
+}
+
+#[test]
+fn test_authorization_section_is_optional() {
+    // Test: Authorization section is optional (existing buckets without it should work)
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: products
+    path_prefix: /products
+    s3:
+      bucket: products-bucket
+      region: us-east-1
+      access_key: test
+      secret_key: test
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to parse config without authorization");
+    let bucket = &config.buckets[0];
+    assert!(
+        bucket.authorization.is_none(),
+        "Authorization should be None when not configured"
+    );
+}

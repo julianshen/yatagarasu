@@ -347,6 +347,8 @@ pub struct BucketConfig {
     pub auth: Option<AuthConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<BucketCacheOverride>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<AuthorizationConfig>,
 }
 
 /// S3 Replica configuration (for HA bucket replication)
@@ -396,6 +398,44 @@ pub struct S3Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     pub enabled: bool,
+}
+
+/// Default OPA timeout in milliseconds
+fn default_opa_timeout_ms() -> u64 {
+    100
+}
+
+/// Default OPA cache TTL in seconds
+fn default_opa_cache_ttl_seconds() -> u64 {
+    60
+}
+
+/// Authorization configuration for bucket-level access control
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthorizationConfig {
+    /// Authorization type (e.g., "opa" for Open Policy Agent)
+    #[serde(rename = "type")]
+    pub auth_type: String,
+
+    /// OPA REST API endpoint URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opa_url: Option<String>,
+
+    /// OPA policy path (e.g., "yatagarasu/authz/allow")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opa_policy_path: Option<String>,
+
+    /// Timeout for OPA requests in milliseconds (default: 100ms)
+    #[serde(default = "default_opa_timeout_ms")]
+    pub opa_timeout_ms: u64,
+
+    /// Cache TTL for OPA decisions in seconds (default: 60s)
+    #[serde(default = "default_opa_cache_ttl_seconds")]
+    pub opa_cache_ttl_seconds: u64,
+
+    /// Fail mode: "open" (allow on OPA failure) or "closed" (deny on failure, default)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opa_fail_mode: Option<String>,
 }
 
 /// Individual JWT key configuration for multi-key support

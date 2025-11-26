@@ -241,6 +241,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
             },
             auth: None,
             cache: None,
+            authorization: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -260,6 +261,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
             },
             auth: None,
             cache: None,
+            authorization: None,
         },
     ];
 
@@ -302,6 +304,7 @@ fn test_requests_to_products_route_to_products_bucket() {
         },
         auth: None,
         cache: None,
+        authorization: None,
     }];
 
     let router = Router::new(buckets);
@@ -351,6 +354,7 @@ fn test_requests_to_private_route_to_private_bucket() {
         },
         auth: None,
         cache: None,
+        authorization: None,
     }];
 
     let router = Router::new(buckets);
@@ -401,6 +405,7 @@ fn test_longest_prefix_matching_works() {
             },
             auth: None,
             cache: None,
+            authorization: None,
         },
         BucketConfig {
             name: "products".to_string(),
@@ -420,6 +425,7 @@ fn test_longest_prefix_matching_works() {
             },
             auth: None,
             cache: None,
+            authorization: None,
         },
     ];
 
@@ -474,6 +480,7 @@ fn test_unmapped_paths_return_none() {
         },
         auth: None,
         cache: None,
+        authorization: None,
     }];
 
     let router = Router::new(buckets);
@@ -523,6 +530,7 @@ fn test_s3_key_is_extracted_from_path() {
         },
         auth: None,
         cache: None,
+        authorization: None,
     }];
 
     let router = Router::new(buckets);
@@ -580,6 +588,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
         },
         auth: None,
         cache: None,
+        authorization: None,
     };
 
     // Add the bucket config to the context
@@ -625,6 +634,7 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
         },
         auth: Some(AuthConfig { enabled: false }),
         cache: None,
+        authorization: None,
     };
 
     // Create a request context without any JWT token
@@ -680,6 +690,7 @@ fn test_auth_middleware_validates_jwt_for_private_buckets() {
         },
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
+        authorization: None,
     };
 
     // Create a request context with a JWT token in Authorization header
@@ -1145,6 +1156,7 @@ fn test_missing_jwt_on_private_bucket_returns_401() {
         },
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
+        authorization: None,
     };
 
     // Create a request context WITHOUT any JWT token
@@ -1549,6 +1561,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
         },
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
+        authorization: None,
     }];
 
     let secret = "test_secret_key_123";
@@ -1687,6 +1700,7 @@ fn test_middleware_can_short_circuit_request() {
         },
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
+        authorization: None,
     }];
 
     // Create request WITHOUT JWT token (will fail auth)
@@ -1785,6 +1799,7 @@ fn test_short_circuit_prevents_handler_execution() {
         },
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
+        authorization: None,
     }];
 
     let router = Router::new(buckets);
@@ -1856,6 +1871,7 @@ fn test_middleware_can_modify_request_context() {
         },
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
+        authorization: None,
     }];
 
     // Create JWT token
@@ -2018,6 +2034,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
             },
             auth: None, // Public bucket
             cache: None,
+            authorization: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -2037,6 +2054,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
             },
             auth: Some(AuthConfig { enabled: true }),
             cache: None,
+            authorization: None,
         },
     ];
 
