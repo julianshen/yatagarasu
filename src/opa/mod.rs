@@ -6,7 +6,60 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::fmt;
 use std::sync::Arc;
+
+/// Default timeout for OPA requests in milliseconds
+const DEFAULT_OPA_TIMEOUT_MS: u64 = 100;
+
+/// Error type for OPA operations
+#[derive(Debug)]
+pub enum OpaError {
+    /// Request to OPA timed out
+    Timeout {
+        /// The policy path that was being evaluated
+        policy_path: String,
+        /// The configured timeout in milliseconds
+        timeout_ms: u64,
+    },
+    /// Failed to connect to OPA server
+    ConnectionFailed(String),
+    /// OPA returned an error (policy evaluation failed)
+    PolicyError {
+        /// Error message from OPA
+        message: String,
+    },
+    /// OPA response could not be parsed
+    InvalidResponse(String),
+}
+
+impl fmt::Display for OpaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OpaError::Timeout {
+                policy_path,
+                timeout_ms,
+            } => {
+                write!(
+                    f,
+                    "OPA request timed out after {}ms for policy '{}'",
+                    timeout_ms, policy_path
+                )
+            }
+            OpaError::ConnectionFailed(msg) => {
+                write!(f, "Failed to connect to OPA: {}", msg)
+            }
+            OpaError::PolicyError { message } => {
+                write!(f, "OPA policy error: {}", message)
+            }
+            OpaError::InvalidResponse(msg) => {
+                write!(f, "Invalid OPA response: {}", msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for OpaError {}
 
 /// OPA Client configuration
 #[derive(Debug, Clone)]
@@ -19,6 +72,15 @@ pub struct OpaClientConfig {
     pub timeout_ms: u64,
     /// Cache TTL in seconds for authorization decisions
     pub cache_ttl_seconds: u64,
+}
+
+impl OpaClientConfig {
+    /// Get the default timeout value in milliseconds
+    ///
+    /// Default is 100ms for fast fail behavior in authorization paths
+    pub fn default_timeout() -> u64 {
+        DEFAULT_OPA_TIMEOUT_MS
+    }
 }
 
 /// OPA HTTP Client for policy evaluation
@@ -39,6 +101,13 @@ impl OpaClient {
     /// Get the client configuration
     pub fn config(&self) -> &OpaClientConfig {
         &self.config
+    }
+
+    /// Get the full URL for the policy evaluation endpoint
+    ///
+    /// Returns: `{base_url}/v1/data/{policy_path}`
+    pub fn policy_endpoint(&self) -> String {
+        format!("{}/v1/data/{}", self.config.url, self.config.policy_path)
     }
 }
 

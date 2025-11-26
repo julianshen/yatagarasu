@@ -331,3 +331,181 @@ fn test_opa_request_format_matches_api_spec() {
     assert_eq!(serialized["input"]["method"], "GET");
     assert_eq!(serialized["input"]["client_ip"], "192.168.1.100");
 }
+
+// ============================================================================
+// Phase 32.3: OPA Policy Evaluation Tests
+// ============================================================================
+
+#[test]
+fn test_opa_error_variants_exist() {
+    use yatagarasu::opa::OpaError;
+
+    // Test: OpaError has all required variants
+    let timeout = OpaError::Timeout {
+        policy_path: "authz/allow".to_string(),
+        timeout_ms: 100,
+    };
+    let connection_failed = OpaError::ConnectionFailed("connection refused".to_string());
+    let policy_error = OpaError::PolicyError {
+        message: "undefined decision".to_string(),
+    };
+    let invalid_response = OpaError::InvalidResponse("malformed JSON".to_string());
+
+    // Verify each variant can be created
+    assert!(matches!(timeout, OpaError::Timeout { .. }));
+    assert!(matches!(connection_failed, OpaError::ConnectionFailed(_)));
+    assert!(matches!(policy_error, OpaError::PolicyError { .. }));
+    assert!(matches!(invalid_response, OpaError::InvalidResponse(_)));
+}
+
+#[test]
+fn test_opa_error_display_timeout() {
+    use yatagarasu::opa::OpaError;
+
+    // Test: Timeout error includes policy path for debugging
+    let error = OpaError::Timeout {
+        policy_path: "authz/allow".to_string(),
+        timeout_ms: 100,
+    };
+
+    let display = format!("{}", error);
+    assert!(
+        display.contains("authz/allow"),
+        "Display should include policy path"
+    );
+    assert!(
+        display.contains("100"),
+        "Display should include timeout value"
+    );
+}
+
+#[test]
+fn test_opa_error_display_connection_failed() {
+    use yatagarasu::opa::OpaError;
+
+    // Test: Connection failed error displays message
+    let error = OpaError::ConnectionFailed("connection refused".to_string());
+    let display = format!("{}", error);
+    assert!(
+        display.contains("connection refused"),
+        "Display should include error message"
+    );
+}
+
+#[test]
+fn test_opa_error_display_policy_error() {
+    use yatagarasu::opa::OpaError;
+
+    // Test: Policy error displays OPA error message
+    let error = OpaError::PolicyError {
+        message: "undefined decision".to_string(),
+    };
+    let display = format!("{}", error);
+    assert!(
+        display.contains("undefined decision"),
+        "Display should include OPA message"
+    );
+}
+
+#[test]
+fn test_opa_error_display_invalid_response() {
+    use yatagarasu::opa::OpaError;
+
+    // Test: Invalid response error displays details
+    let error = OpaError::InvalidResponse("malformed JSON".to_string());
+    let display = format!("{}", error);
+    assert!(
+        display.contains("malformed JSON"),
+        "Display should include error details"
+    );
+}
+
+#[test]
+fn test_opa_client_builds_correct_endpoint_url() {
+    use yatagarasu::opa::{OpaClient, OpaClientConfig};
+
+    // Test: OPA client builds correct endpoint URL
+    let config = OpaClientConfig {
+        url: "http://localhost:8181".to_string(),
+        policy_path: "authz/allow".to_string(),
+        timeout_ms: 100,
+        cache_ttl_seconds: 60,
+    };
+
+    let client = OpaClient::new(config);
+    let endpoint = client.policy_endpoint();
+
+    // Should be: {base_url}/v1/data/{policy_path}
+    assert_eq!(endpoint, "http://localhost:8181/v1/data/authz/allow");
+}
+
+#[test]
+fn test_opa_client_builds_endpoint_with_nested_policy_path() {
+    use yatagarasu::opa::{OpaClient, OpaClientConfig};
+
+    // Test: OPA client handles nested policy paths correctly
+    let config = OpaClientConfig {
+        url: "http://opa.example.com:8181".to_string(),
+        policy_path: "myapp/authz/s3/allow".to_string(),
+        timeout_ms: 100,
+        cache_ttl_seconds: 60,
+    };
+
+    let client = OpaClient::new(config);
+    let endpoint = client.policy_endpoint();
+
+    assert_eq!(
+        endpoint,
+        "http://opa.example.com:8181/v1/data/myapp/authz/s3/allow"
+    );
+}
+
+#[test]
+fn test_opa_client_default_timeout_is_100ms() {
+    use yatagarasu::opa::OpaClientConfig;
+
+    // Test: Default timeout is 100ms
+    let config = OpaClientConfig::default_timeout();
+    assert_eq!(
+        config, 100,
+        "Default OPA timeout should be 100ms for fast fail"
+    );
+}
+
+#[test]
+fn test_opa_evaluation_result_from_response() {
+    use yatagarasu::opa::OpaResponse;
+
+    // Test: Can extract evaluation result from OPA response
+
+    // Test allow=true
+    let allow_json = r#"{"result": true}"#;
+    let allow_response: OpaResponse = serde_json::from_str(allow_json).unwrap();
+    assert!(allow_response.is_allowed());
+
+    // Test allow=false
+    let deny_json = r#"{"result": false}"#;
+    let deny_response: OpaResponse = serde_json::from_str(deny_json).unwrap();
+    assert!(!deny_response.is_allowed());
+
+    // Test undefined (null) - should default to deny
+    let undefined_json = r#"{"result": null}"#;
+    let undefined_response: OpaResponse = serde_json::from_str(undefined_json).unwrap();
+    assert!(!undefined_response.is_allowed());
+}
+
+#[test]
+fn test_opa_response_handles_empty_result() {
+    use yatagarasu::opa::OpaResponse;
+
+    // Test: Returns false when OPA returns empty result (undefined)
+    // When policy doesn't match, OPA returns: {}
+    let empty_json = r#"{}"#;
+    let result = serde_json::from_str::<OpaResponse>(empty_json);
+
+    // Empty result should either be an error or default to deny
+    match result {
+        Ok(response) => assert!(!response.is_allowed(), "Empty result should deny"),
+        Err(_) => {} // Parse error is also acceptable for invalid response
+    }
+}
