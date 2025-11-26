@@ -4,10 +4,13 @@
 //! authorization decisions. It includes an HTTP client for communicating
 //! with OPA and types for request/response handling.
 
+use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Default timeout for OPA requests in milliseconds
 const DEFAULT_OPA_TIMEOUT_MS: u64 = 100;
@@ -177,6 +180,73 @@ impl OpaInput {
     /// Get the client IP address
     pub fn client_ip(&self) -> Option<&str> {
         self.client_ip.as_deref()
+    }
+
+    /// Generate a deterministic cache key based on input content
+    ///
+    /// The cache key is a SHA-256 hash of the serialized input, ensuring:
+    /// - Same inputs always produce the same key
+    /// - Different inputs produce different keys
+    /// - The key is a fixed-length hex string
+    pub fn cache_key(&self) -> String {
+        // Serialize to canonical JSON for deterministic hashing
+        let json = serde_json::to_string(self).unwrap_or_default();
+
+        // Hash the JSON content
+        let mut hasher = Sha256::new();
+        hasher.update(json.as_bytes());
+        let hash = hasher.finalize();
+
+        // Convert to hex string
+        hex::encode(hash)
+    }
+}
+
+/// Cache for OPA authorization decisions
+///
+/// This cache stores authorization decisions (allow/deny) keyed by
+/// a hash of the OpaInput. It uses moka for efficient concurrent access
+/// with automatic TTL-based expiration.
+pub struct OpaCache {
+    cache: Cache<String, bool>,
+}
+
+impl OpaCache {
+    /// Create a new OPA cache with the specified TTL in seconds
+    pub fn new(ttl_seconds: u64) -> Self {
+        let cache = Cache::builder()
+            .time_to_live(Duration::from_secs(ttl_seconds))
+            .max_capacity(10_000) // Default max entries
+            .build();
+
+        Self { cache }
+    }
+
+    /// Get a cached authorization decision (async)
+    ///
+    /// Returns Some(true) if allowed, Some(false) if denied, None if not cached
+    pub async fn get(&self, key: &str) -> Option<bool> {
+        self.cache.get(key).await
+    }
+
+    /// Store an authorization decision in the cache (async)
+    pub async fn put(&self, key: String, allowed: bool) {
+        self.cache.insert(key, allowed).await;
+    }
+
+    /// Check if a key exists in the cache
+    pub fn contains(&self, key: &str) -> bool {
+        self.cache.contains_key(key)
+    }
+
+    /// Get the number of entries in the cache
+    pub fn len(&self) -> u64 {
+        self.cache.entry_count()
+    }
+
+    /// Check if the cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.cache.entry_count() == 0
     }
 }
 

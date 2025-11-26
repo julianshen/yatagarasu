@@ -509,3 +509,231 @@ fn test_opa_response_handles_empty_result() {
         Err(_) => {} // Parse error is also acceptable for invalid response
     }
 }
+
+// ============================================================================
+// Phase 32.4: OPA Response Caching Tests
+// ============================================================================
+
+#[test]
+fn test_opa_input_cache_key_generation() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Cache key based on hash of OpaInput
+    let input = OpaInput::new(
+        json!({"sub": "user123", "roles": ["admin"]}),
+        "products".to_string(),
+        "/products/file.txt".to_string(),
+        "GET".to_string(),
+        Some("192.168.1.1".to_string()),
+    );
+
+    let cache_key = input.cache_key();
+    assert!(!cache_key.is_empty(), "Cache key should not be empty");
+}
+
+#[test]
+fn test_same_input_produces_same_cache_key() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Same input produces same cache key
+    let input1 = OpaInput::new(
+        json!({"sub": "user123", "roles": ["admin"]}),
+        "products".to_string(),
+        "/products/file.txt".to_string(),
+        "GET".to_string(),
+        Some("192.168.1.1".to_string()),
+    );
+
+    let input2 = OpaInput::new(
+        json!({"sub": "user123", "roles": ["admin"]}),
+        "products".to_string(),
+        "/products/file.txt".to_string(),
+        "GET".to_string(),
+        Some("192.168.1.1".to_string()),
+    );
+
+    assert_eq!(
+        input1.cache_key(),
+        input2.cache_key(),
+        "Same inputs should produce same cache key"
+    );
+}
+
+#[test]
+fn test_different_inputs_produce_different_cache_keys() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Different inputs produce different cache keys
+    let input1 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "products".to_string(),
+        "/products/file.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    let input2 = OpaInput::new(
+        json!({"sub": "user456"}), // Different user
+        "products".to_string(),
+        "/products/file.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    assert_ne!(
+        input1.cache_key(),
+        input2.cache_key(),
+        "Different inputs should produce different cache keys"
+    );
+}
+
+#[test]
+fn test_cache_key_differs_by_bucket() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Cache key differs when bucket differs
+    let input1 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "products".to_string(),
+        "/file.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    let input2 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "private".to_string(), // Different bucket
+        "/file.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    assert_ne!(
+        input1.cache_key(),
+        input2.cache_key(),
+        "Different buckets should produce different cache keys"
+    );
+}
+
+#[test]
+fn test_cache_key_differs_by_path() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Cache key differs when path differs
+    let input1 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "products".to_string(),
+        "/products/file1.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    let input2 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "products".to_string(),
+        "/products/file2.txt".to_string(), // Different path
+        "GET".to_string(),
+        None,
+    );
+
+    assert_ne!(
+        input1.cache_key(),
+        input2.cache_key(),
+        "Different paths should produce different cache keys"
+    );
+}
+
+#[test]
+fn test_cache_key_differs_by_method() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Cache key differs when method differs
+    let input1 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "products".to_string(),
+        "/file.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    let input2 = OpaInput::new(
+        json!({"sub": "user123"}),
+        "products".to_string(),
+        "/file.txt".to_string(),
+        "HEAD".to_string(), // Different method
+        None,
+    );
+
+    assert_ne!(
+        input1.cache_key(),
+        input2.cache_key(),
+        "Different methods should produce different cache keys"
+    );
+}
+
+#[test]
+fn test_cache_key_is_deterministic() {
+    use serde_json::json;
+    use yatagarasu::opa::OpaInput;
+
+    // Test: Cache key is deterministic (same input always produces same key)
+    let input = OpaInput::new(
+        json!({"sub": "user123", "roles": ["admin"], "department": "engineering"}),
+        "products".to_string(),
+        "/products/secret/file.txt".to_string(),
+        "GET".to_string(),
+        Some("10.0.0.1".to_string()),
+    );
+
+    let key1 = input.cache_key();
+    let key2 = input.cache_key();
+    let key3 = input.cache_key();
+
+    assert_eq!(key1, key2, "Cache key should be deterministic");
+    assert_eq!(key2, key3, "Cache key should be deterministic");
+}
+
+#[tokio::test]
+async fn test_opa_cache_can_store_and_retrieve() {
+    use yatagarasu::opa::OpaCache;
+
+    // Test: OPA cache can store and retrieve decisions
+    let cache = OpaCache::new(60); // 60 second TTL
+
+    let key = "test_key_123".to_string();
+    cache.put(key.clone(), true).await;
+
+    let result = cache.get(&key).await;
+    assert_eq!(result, Some(true), "Should retrieve cached allow decision");
+}
+
+#[tokio::test]
+async fn test_opa_cache_returns_none_for_missing_key() {
+    use yatagarasu::opa::OpaCache;
+
+    // Test: Cache miss returns None
+    let cache = OpaCache::new(60);
+
+    let result = cache.get("nonexistent_key").await;
+    assert!(result.is_none(), "Cache miss should return None");
+}
+
+#[tokio::test]
+async fn test_opa_cache_stores_deny_decisions() {
+    use yatagarasu::opa::OpaCache;
+
+    // Test: Cache can store deny (false) decisions
+    let cache = OpaCache::new(60);
+
+    let key = "deny_key".to_string();
+    cache.put(key.clone(), false).await;
+
+    let result = cache.get(&key).await;
+    assert_eq!(result, Some(false), "Should retrieve cached deny decision");
+}
