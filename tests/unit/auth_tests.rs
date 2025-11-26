@@ -4065,3 +4065,452 @@ fn test_returns_error_if_kid_doesnt_match_any_configured_key() {
         "Should fail when kid doesn't match any configured key"
     );
 }
+
+// =============================================================================
+// Phase 31.5: JWKS (JSON Web Key Set) Parsing Tests
+// =============================================================================
+
+#[test]
+fn test_can_parse_jwks_json_format() {
+    use yatagarasu::auth::jwks::{JwkKey, Jwks};
+
+    // Standard JWKS JSON format
+    let jwks_json = r#"{
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": "rsa-key-1",
+                "use": "sig",
+                "alg": "RS256",
+                "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                "e": "AQAB"
+            }
+        ]
+    }"#;
+
+    let jwks: Jwks = serde_json::from_str(jwks_json).expect("Failed to parse JWKS");
+    assert_eq!(jwks.keys.len(), 1);
+
+    let key = &jwks.keys[0];
+    assert_eq!(key.kty, "RSA");
+    assert_eq!(key.kid, Some("rsa-key-1".to_string()));
+    assert_eq!(key.alg, Some("RS256".to_string()));
+}
+
+#[test]
+fn test_can_parse_jwks_with_multiple_keys() {
+    use yatagarasu::auth::jwks::Jwks;
+
+    let jwks_json = r#"{
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": "rsa-key-1",
+                "use": "sig",
+                "alg": "RS256",
+                "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                "e": "AQAB"
+            },
+            {
+                "kty": "EC",
+                "kid": "ec-key-1",
+                "use": "sig",
+                "alg": "ES256",
+                "crv": "P-256",
+                "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+                "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+            }
+        ]
+    }"#;
+
+    let jwks: Jwks = serde_json::from_str(jwks_json).expect("Failed to parse JWKS");
+    assert_eq!(jwks.keys.len(), 2);
+
+    // Verify RSA key
+    let rsa_key = &jwks.keys[0];
+    assert_eq!(rsa_key.kty, "RSA");
+    assert_eq!(rsa_key.kid, Some("rsa-key-1".to_string()));
+
+    // Verify EC key
+    let ec_key = &jwks.keys[1];
+    assert_eq!(ec_key.kty, "EC");
+    assert_eq!(ec_key.kid, Some("ec-key-1".to_string()));
+    assert_eq!(ec_key.crv, Some("P-256".to_string()));
+}
+
+#[test]
+fn test_jwks_find_key_by_kid() {
+    use yatagarasu::auth::jwks::Jwks;
+
+    let jwks_json = r#"{
+        "keys": [
+            {"kty": "RSA", "kid": "key-1", "n": "test", "e": "AQAB"},
+            {"kty": "RSA", "kid": "key-2", "n": "test", "e": "AQAB"},
+            {"kty": "EC", "kid": "key-3", "crv": "P-256", "x": "test", "y": "test"}
+        ]
+    }"#;
+
+    let jwks: Jwks = serde_json::from_str(jwks_json).expect("Failed to parse JWKS");
+
+    // Find existing keys
+    let key1 = jwks.find_key_by_kid("key-1");
+    assert!(key1.is_some(), "Should find key-1");
+    assert_eq!(key1.unwrap().kty, "RSA");
+
+    let key3 = jwks.find_key_by_kid("key-3");
+    assert!(key3.is_some(), "Should find key-3");
+    assert_eq!(key3.unwrap().kty, "EC");
+
+    // Non-existent key
+    let missing = jwks.find_key_by_kid("nonexistent");
+    assert!(missing.is_none(), "Should not find nonexistent key");
+}
+
+#[test]
+fn test_jwks_extracts_rsa_parameters() {
+    use yatagarasu::auth::jwks::Jwks;
+
+    let jwks_json = r#"{
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": "rsa-test",
+                "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                "e": "AQAB"
+            }
+        ]
+    }"#;
+
+    let jwks: Jwks = serde_json::from_str(jwks_json).expect("Failed to parse JWKS");
+    let key = &jwks.keys[0];
+
+    // RSA keys should have n and e
+    assert!(key.n.is_some(), "RSA key should have modulus (n)");
+    assert!(key.e.is_some(), "RSA key should have exponent (e)");
+    assert_eq!(key.e.as_ref().unwrap(), "AQAB");
+}
+
+#[test]
+fn test_jwks_extracts_ec_parameters() {
+    use yatagarasu::auth::jwks::Jwks;
+
+    let jwks_json = r#"{
+        "keys": [
+            {
+                "kty": "EC",
+                "kid": "ec-test",
+                "crv": "P-256",
+                "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+                "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+            }
+        ]
+    }"#;
+
+    let jwks: Jwks = serde_json::from_str(jwks_json).expect("Failed to parse JWKS");
+    let key = &jwks.keys[0];
+
+    // EC keys should have crv, x, and y
+    assert_eq!(
+        key.crv,
+        Some("P-256".to_string()),
+        "EC key should have curve"
+    );
+    assert!(key.x.is_some(), "EC key should have x coordinate");
+    assert!(key.y.is_some(), "EC key should have y coordinate");
+}
+
+// ============================================================================
+// Phase 31.5: JWKS Key Extraction - Convert JWK to DecodingKey
+// ============================================================================
+
+#[test]
+fn test_jwk_to_decoding_key_rsa_validates_jwt() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use jsonwebtoken::{decode, encode, Algorithm, EncodingKey, Header, Validation};
+    use rsa::pkcs8::EncodePrivateKey;
+    use rsa::traits::PublicKeyParts;
+    use rsa::RsaPrivateKey;
+    use yatagarasu::auth::jwks::JwkKey;
+    use yatagarasu::auth::Claims;
+
+    // Generate RSA key pair
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate RSA key");
+    let public_key = private_key.to_public_key();
+
+    // Get the RSA components (n and e) in base64url format
+    let n_bytes = public_key.n().to_bytes_be();
+    let e_bytes = public_key.e().to_bytes_be();
+
+    let n_b64 = URL_SAFE_NO_PAD.encode(&n_bytes);
+    let e_b64 = URL_SAFE_NO_PAD.encode(&e_bytes);
+
+    // Create JwkKey with RSA components
+    let jwk = JwkKey {
+        kty: "RSA".to_string(),
+        kid: Some("rsa-test-key".to_string()),
+        key_use: Some("sig".to_string()),
+        alg: Some("RS256".to_string()),
+        n: Some(n_b64),
+        e: Some(e_b64),
+        crv: None,
+        x: None,
+        y: None,
+    };
+
+    // Convert to DecodingKey
+    let decoding_key = jwk
+        .to_decoding_key()
+        .expect("Failed to create DecodingKey from JWK");
+
+    // Create a JWT using the private key
+    let claims = Claims {
+        sub: Some("user123".to_string()),
+        exp: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+        iat: Some(chrono::Utc::now().timestamp() as u64),
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Encode to PEM for jsonwebtoken
+    let private_pem = private_key
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .expect("Failed to encode private key");
+    let encoding_key =
+        EncodingKey::from_rsa_pem(private_pem.as_bytes()).expect("Failed to create encoding key");
+
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some("rsa-test-key".to_string());
+    let token = encode(&header, &claims, &encoding_key).expect("Failed to encode JWT");
+
+    // Validate JWT using the DecodingKey from JWK
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_exp = true;
+    validation.required_spec_claims.clear();
+
+    let decoded = decode::<Claims>(&token, &decoding_key, &validation);
+    assert!(
+        decoded.is_ok(),
+        "JWT validation should succeed with JWK-derived key"
+    );
+    assert_eq!(decoded.unwrap().claims.sub, Some("user123".to_string()));
+}
+
+#[test]
+fn test_jwk_to_decoding_key_ec_validates_jwt() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use jsonwebtoken::{decode, encode, Algorithm, EncodingKey, Header, Validation};
+    use p256::ecdsa::SigningKey;
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    use p256::pkcs8::EncodePrivateKey;
+    use yatagarasu::auth::jwks::JwkKey;
+    use yatagarasu::auth::Claims;
+
+    // Generate EC P-256 key pair
+    let mut rng = rand::thread_rng();
+    let signing_key = SigningKey::random(&mut rng);
+    let verifying_key = signing_key.verifying_key();
+
+    // Get the public key coordinates (x and y) in base64url format
+    let public_point = verifying_key.to_encoded_point(false);
+    let x_bytes = public_point.x().expect("Failed to get x coordinate");
+    let y_bytes = public_point.y().expect("Failed to get y coordinate");
+
+    let x_b64 = URL_SAFE_NO_PAD.encode(x_bytes);
+    let y_b64 = URL_SAFE_NO_PAD.encode(y_bytes);
+
+    // Create JwkKey with EC components
+    let jwk = JwkKey {
+        kty: "EC".to_string(),
+        kid: Some("ec-test-key".to_string()),
+        key_use: Some("sig".to_string()),
+        alg: Some("ES256".to_string()),
+        n: None,
+        e: None,
+        crv: Some("P-256".to_string()),
+        x: Some(x_b64),
+        y: Some(y_b64),
+    };
+
+    // Convert to DecodingKey
+    let decoding_key = jwk
+        .to_decoding_key()
+        .expect("Failed to create DecodingKey from JWK");
+
+    // Create a JWT using the private key
+    let claims = Claims {
+        sub: Some("user456".to_string()),
+        exp: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+        iat: Some(chrono::Utc::now().timestamp() as u64),
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Encode private key to PEM for jsonwebtoken
+    let private_pem = signing_key
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .expect("Failed to encode private key");
+    let encoding_key =
+        EncodingKey::from_ec_pem(private_pem.as_bytes()).expect("Failed to create encoding key");
+
+    let mut header = Header::new(Algorithm::ES256);
+    header.kid = Some("ec-test-key".to_string());
+    let token = encode(&header, &claims, &encoding_key).expect("Failed to encode JWT");
+
+    // Validate JWT using the DecodingKey from JWK
+    let mut validation = Validation::new(Algorithm::ES256);
+    validation.validate_exp = true;
+    validation.required_spec_claims.clear();
+
+    let decoded = decode::<Claims>(&token, &decoding_key, &validation);
+    assert!(
+        decoded.is_ok(),
+        "JWT validation should succeed with JWK-derived EC key"
+    );
+    assert_eq!(decoded.unwrap().claims.sub, Some("user456".to_string()));
+}
+
+#[test]
+fn test_jwk_to_decoding_key_missing_rsa_parameters() {
+    use yatagarasu::auth::jwks::{JwkError, JwkKey};
+
+    // Missing modulus (n)
+    let jwk = JwkKey {
+        kty: "RSA".to_string(),
+        kid: Some("test".to_string()),
+        key_use: None,
+        alg: None,
+        n: None,
+        e: Some("AQAB".to_string()),
+        crv: None,
+        x: None,
+        y: None,
+    };
+
+    let result = jwk.to_decoding_key();
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        JwkError::MissingParameter(param) => {
+            assert!(param.contains("modulus") || param.contains("n"));
+        }
+        other => panic!("Expected MissingParameter error, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_jwk_to_decoding_key_missing_ec_parameters() {
+    use yatagarasu::auth::jwks::{JwkError, JwkKey};
+
+    // Missing x coordinate
+    let jwk = JwkKey {
+        kty: "EC".to_string(),
+        kid: Some("test".to_string()),
+        key_use: None,
+        alg: None,
+        n: None,
+        e: None,
+        crv: Some("P-256".to_string()),
+        x: None,
+        y: Some("test".to_string()),
+    };
+
+    let result = jwk.to_decoding_key();
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        JwkError::MissingParameter(param) => {
+            assert!(param.contains("x"));
+        }
+        other => panic!("Expected MissingParameter error, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_jwk_to_decoding_key_unsupported_key_type() {
+    use yatagarasu::auth::jwks::{JwkError, JwkKey};
+
+    // Unsupported key type (oct = symmetric key)
+    let jwk = JwkKey {
+        kty: "oct".to_string(),
+        kid: Some("test".to_string()),
+        key_use: None,
+        alg: None,
+        n: None,
+        e: None,
+        crv: None,
+        x: None,
+        y: None,
+    };
+
+    let result = jwk.to_decoding_key();
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        JwkError::UnsupportedKeyType(kty) => {
+            assert_eq!(kty, "oct");
+        }
+        other => panic!("Expected UnsupportedKeyType error, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_jwk_jwt_algorithm_returns_correct_algorithm() {
+    use jsonwebtoken::Algorithm;
+    use yatagarasu::auth::jwks::JwkKey;
+
+    // RS256
+    let rsa_key = JwkKey {
+        kty: "RSA".to_string(),
+        kid: None,
+        key_use: None,
+        alg: Some("RS256".to_string()),
+        n: None,
+        e: None,
+        crv: None,
+        x: None,
+        y: None,
+    };
+    assert_eq!(rsa_key.jwt_algorithm().unwrap(), Algorithm::RS256);
+
+    // ES256
+    let ec_key = JwkKey {
+        kty: "EC".to_string(),
+        kid: None,
+        key_use: None,
+        alg: Some("ES256".to_string()),
+        n: None,
+        e: None,
+        crv: Some("P-256".to_string()),
+        x: None,
+        y: None,
+    };
+    assert_eq!(ec_key.jwt_algorithm().unwrap(), Algorithm::ES256);
+
+    // Default algorithm for RSA (no alg specified)
+    let rsa_default = JwkKey {
+        kty: "RSA".to_string(),
+        kid: None,
+        key_use: None,
+        alg: None,
+        n: None,
+        e: None,
+        crv: None,
+        x: None,
+        y: None,
+    };
+    assert_eq!(rsa_default.jwt_algorithm().unwrap(), Algorithm::RS256);
+
+    // Default algorithm for EC P-384
+    let ec_p384 = JwkKey {
+        kty: "EC".to_string(),
+        kid: None,
+        key_use: None,
+        alg: None,
+        n: None,
+        e: None,
+        crv: Some("P-384".to_string()),
+        x: None,
+        y: None,
+    };
+    assert_eq!(ec_p384.jwt_algorithm().unwrap(), Algorithm::ES384);
+}

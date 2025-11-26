@@ -8,6 +8,8 @@ use std::path::Path;
 
 use crate::config::{ClaimRule, JwtConfig};
 
+pub mod jwks;
+
 /// Error type for key loading operations
 #[derive(Debug)]
 pub enum KeyLoadError {
