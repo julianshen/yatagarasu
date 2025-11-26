@@ -2550,6 +2550,8 @@ fn test_passes_request_through_when_auth_disabled() {
         enabled: false,
         secret: "test_secret".to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![],
         claims: vec![],
     });
@@ -2574,6 +2576,8 @@ fn test_passes_request_through_when_auth_disabled() {
         enabled: true,
         secret: "test_secret".to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "header".to_string(),
             name: Some("Authorization".to_string()),
@@ -2630,6 +2634,8 @@ fn test_extracts_and_validates_jwt_when_auth_enabled() {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "header".to_string(),
             name: Some("Authorization".to_string()),
@@ -2686,6 +2692,8 @@ fn test_returns_missing_token_error_when_jwt_missing_and_auth_required() {
         enabled: true,
         secret: "test_secret".to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
@@ -2724,6 +2732,8 @@ fn test_returns_invalid_token_error_when_jwt_invalid_and_auth_required() {
         enabled: true,
         secret: "test_secret".to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
@@ -2799,6 +2809,8 @@ fn test_returns_claims_verification_failed_when_jwt_valid_but_claims_dont_match(
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
@@ -2886,6 +2898,8 @@ fn test_attaches_validated_claims_to_request_context() {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
@@ -2980,6 +2994,8 @@ fn test_error_response_includes_clear_error_message() {
         enabled: true,
         secret: "test_secret".to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
@@ -3065,6 +3081,8 @@ fn test_error_response_includes_clear_error_message() {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,

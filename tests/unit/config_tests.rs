@@ -1331,3 +1331,49 @@ jwt:
         "Expected deserialization to fail when algorithm is missing"
     );
 }
+
+#[test]
+fn test_can_parse_jwt_rsa_public_key_path() {
+    // Test that rsa_public_key_path can be configured for RS256
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "RS256"
+  rsa_public_key_path: "/etc/yatagarasu/rsa_public.pem"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT RS256 config");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.algorithm, "RS256");
+    assert_eq!(
+        jwt.rsa_public_key_path,
+        Some("/etc/yatagarasu/rsa_public.pem".to_string())
+    );
+}
+
+#[test]
+fn test_can_parse_jwt_ecdsa_public_key_path() {
+    // Test that ecdsa_public_key_path can be configured for ES256
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "ES256"
+  ecdsa_public_key_path: "/etc/yatagarasu/ecdsa_public.pem"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT ES256 config");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.algorithm, "ES256");
+    assert_eq!(
+        jwt.ecdsa_public_key_path,
+        Some("/etc/yatagarasu/ecdsa_public.pem".to_string())
+    );
+}

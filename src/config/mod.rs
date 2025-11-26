@@ -401,8 +401,16 @@ pub struct AuthConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtConfig {
     pub enabled: bool,
+    /// Secret for HS256/HS384/HS512 algorithms
+    #[serde(default)]
     pub secret: String,
     pub algorithm: String,
+    /// Path to RSA public key PEM file for RS256/RS384/RS512 algorithms
+    #[serde(default)]
+    pub rsa_public_key_path: Option<String>,
+    /// Path to ECDSA public key PEM file for ES256/ES384 algorithms
+    #[serde(default)]
+    pub ecdsa_public_key_path: Option<String>,
     #[serde(default)]
     pub token_sources: Vec<TokenSource>,
     #[serde(default)]

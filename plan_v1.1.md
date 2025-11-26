@@ -1848,7 +1848,7 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 31.2: RS256 (RSA) Support
 
 ### RSA Public Key Configuration
-- [ ] Test: Add rsa_public_key_path to JWT config
+- [x] Test: Add rsa_public_key_path to JWT config (tests/unit/config_tests.rs::test_can_parse_jwt_rsa_public_key_path)
 - [ ] Test: Can load RSA public key from PEM file
 - [ ] Test: Can parse RSA public key format
 - [ ] Test: Rejects invalid RSA key format
