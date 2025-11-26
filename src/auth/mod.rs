@@ -230,6 +230,208 @@ pub fn validate_jwt_with_key(
     Ok(token_data.claims)
 }
 
+/// Extract kid (Key ID) from JWT header without validating
+pub fn extract_kid_from_token(token: &str) -> Option<String> {
+    use jsonwebtoken::decode_header;
+
+    match decode_header(token) {
+        Ok(header) => header.kid,
+        Err(e) => {
+            tracing::debug!("Failed to decode JWT header: {}", e);
+            None
+        }
+    }
+}
+
+/// Validate JWT against multiple configured keys
+/// Tries each key in order until one successfully validates the token.
+/// Returns the validated claims and the key ID that succeeded.
+pub fn validate_jwt_with_keys(
+    token: &str,
+    keys: &[crate::config::JwtKey],
+) -> Result<(Claims, String), AuthError> {
+    if keys.is_empty() {
+        return Err(AuthError::InvalidToken(
+            "No validation keys configured".to_string(),
+        ));
+    }
+
+    let mut last_error = None;
+
+    for key_config in keys {
+        let result = match key_config.algorithm.as_str() {
+            "HS256" | "HS384" | "HS512" => {
+                if let Some(ref secret) = key_config.secret {
+                    validate_jwt(token, secret, &key_config.algorithm)
+                } else {
+                    tracing::debug!(
+                        "Key '{}' has no secret configured for HMAC algorithm",
+                        key_config.id
+                    );
+                    continue;
+                }
+            }
+            "RS256" | "RS384" | "RS512" => {
+                if let Some(ref path) = key_config.path {
+                    match load_rsa_public_key(path) {
+                        Ok(decoding_key) => {
+                            validate_jwt_with_key(token, &decoding_key, &key_config.algorithm)
+                        }
+                        Err(e) => {
+                            tracing::debug!("Failed to load RSA key '{}': {}", key_config.id, e);
+                            continue;
+                        }
+                    }
+                } else {
+                    tracing::debug!(
+                        "Key '{}' has no path configured for RSA algorithm",
+                        key_config.id
+                    );
+                    continue;
+                }
+            }
+            "ES256" | "ES384" => {
+                if let Some(ref path) = key_config.path {
+                    match load_ecdsa_public_key(path) {
+                        Ok(decoding_key) => {
+                            validate_jwt_with_key(token, &decoding_key, &key_config.algorithm)
+                        }
+                        Err(e) => {
+                            tracing::debug!("Failed to load ECDSA key '{}': {}", key_config.id, e);
+                            continue;
+                        }
+                    }
+                } else {
+                    tracing::debug!(
+                        "Key '{}' has no path configured for ECDSA algorithm",
+                        key_config.id
+                    );
+                    continue;
+                }
+            }
+            _ => {
+                tracing::debug!(
+                    "Unsupported algorithm '{}' for key '{}'",
+                    key_config.algorithm,
+                    key_config.id
+                );
+                continue;
+            }
+        };
+
+        match result {
+            Ok(claims) => {
+                tracing::debug!("JWT validated successfully with key '{}'", key_config.id);
+                return Ok((claims, key_config.id.clone()));
+            }
+            Err(e) => {
+                tracing::debug!("Key '{}' failed to validate: {}", key_config.id, e);
+                last_error = Some(e);
+            }
+        }
+    }
+
+    Err(AuthError::InvalidToken(format!(
+        "Token validation failed with all {} configured keys: {}",
+        keys.len(),
+        last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "No keys could be used".to_string())
+    )))
+}
+
+/// Validate JWT with kid (Key ID) header support
+/// First tries to find a key matching the kid header, if present.
+/// If no kid header or no matching key, falls back to trying all keys.
+pub fn validate_jwt_with_keys_and_kid(
+    token: &str,
+    keys: &[crate::config::JwtKey],
+) -> Result<(Claims, String), AuthError> {
+    if keys.is_empty() {
+        return Err(AuthError::InvalidToken(
+            "No validation keys configured".to_string(),
+        ));
+    }
+
+    // Try to extract kid from token header
+    if let Some(kid) = extract_kid_from_token(token) {
+        tracing::debug!("JWT has kid header: {}", kid);
+
+        // Find key matching the kid
+        if let Some(key_config) = keys.iter().find(|k| k.id == kid) {
+            tracing::debug!("Found key matching kid '{}'", kid);
+
+            // Validate with the matching key
+            let result = validate_single_key(token, key_config);
+            return match result {
+                Ok(claims) => Ok((claims, kid)),
+                Err(e) => Err(AuthError::InvalidToken(format!(
+                    "Token validation failed with key '{}': {}",
+                    kid, e
+                ))),
+            };
+        } else {
+            tracing::debug!("No key found matching kid '{}', returning error", kid);
+            return Err(AuthError::InvalidToken(format!(
+                "No key configured with id '{}'",
+                kid
+            )));
+        }
+    }
+
+    tracing::debug!("No kid header in JWT, falling back to trying all keys");
+    validate_jwt_with_keys(token, keys)
+}
+
+/// Validate a token with a single key configuration
+fn validate_single_key(
+    token: &str,
+    key_config: &crate::config::JwtKey,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
+    match key_config.algorithm.as_str() {
+        "HS256" | "HS384" | "HS512" => {
+            if let Some(ref secret) = key_config.secret {
+                validate_jwt(token, secret, &key_config.algorithm)
+            } else {
+                Err(jsonwebtoken::errors::Error::from(
+                    jsonwebtoken::errors::ErrorKind::InvalidSignature,
+                ))
+            }
+        }
+        "RS256" | "RS384" | "RS512" => {
+            if let Some(ref path) = key_config.path {
+                let decoding_key = load_rsa_public_key(path).map_err(|_| {
+                    jsonwebtoken::errors::Error::from(
+                        jsonwebtoken::errors::ErrorKind::InvalidRsaKey("Failed to load key".into()),
+                    )
+                })?;
+                validate_jwt_with_key(token, &decoding_key, &key_config.algorithm)
+            } else {
+                Err(jsonwebtoken::errors::Error::from(
+                    jsonwebtoken::errors::ErrorKind::InvalidSignature,
+                ))
+            }
+        }
+        "ES256" | "ES384" => {
+            if let Some(ref path) = key_config.path {
+                let decoding_key = load_ecdsa_public_key(path).map_err(|_| {
+                    jsonwebtoken::errors::Error::from(
+                        jsonwebtoken::errors::ErrorKind::InvalidEcdsaKey,
+                    )
+                })?;
+                validate_jwt_with_key(token, &decoding_key, &key_config.algorithm)
+            } else {
+                Err(jsonwebtoken::errors::Error::from(
+                    jsonwebtoken::errors::ErrorKind::InvalidSignature,
+                ))
+            }
+        }
+        _ => Err(jsonwebtoken::errors::Error::from(
+            jsonwebtoken::errors::ErrorKind::InvalidAlgorithm,
+        )),
+    }
+}
+
 pub fn verify_claims(claims: &Claims, rules: &[ClaimRule]) -> bool {
     for rule in rules {
         let claim_value = claims.custom.get(&rule.claim);

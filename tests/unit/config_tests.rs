@@ -1377,3 +1377,133 @@ jwt:
         Some("/etc/yatagarasu/ecdsa_public.pem".to_string())
     );
 }
+
+// =============================================================================
+// Phase 31.4: Multiple Key Support (Key Rotation)
+// =============================================================================
+
+#[test]
+fn test_jwt_config_can_have_keys_array() {
+    // Test that JWT config supports a keys array for multiple key rotation
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "HS256"
+  secret: "default-secret"
+  keys: []
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with keys array");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert!(jwt.keys.is_empty());
+}
+
+#[test]
+fn test_jwt_key_has_id_algorithm_and_path() {
+    // Test that each key entry has id, algorithm, and path fields
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "HS256"
+  keys:
+    - id: "key-1"
+      algorithm: "RS256"
+      path: "/etc/keys/rsa_public.pem"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with key entry");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.keys.len(), 1);
+    let key = &jwt.keys[0];
+    assert_eq!(key.id, "key-1");
+    assert_eq!(key.algorithm, "RS256");
+    assert_eq!(key.path, Some("/etc/keys/rsa_public.pem".to_string()));
+}
+
+#[test]
+fn test_can_load_multiple_keys_in_config() {
+    // Test that multiple keys can be configured
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "HS256"
+  keys:
+    - id: "key-rsa-1"
+      algorithm: "RS256"
+      path: "/etc/keys/rsa1_public.pem"
+    - id: "key-rsa-2"
+      algorithm: "RS256"
+      path: "/etc/keys/rsa2_public.pem"
+    - id: "key-ecdsa-1"
+      algorithm: "ES256"
+      path: "/etc/keys/ecdsa_public.pem"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with multiple keys");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.keys.len(), 3);
+    assert_eq!(jwt.keys[0].id, "key-rsa-1");
+    assert_eq!(jwt.keys[1].id, "key-rsa-2");
+    assert_eq!(jwt.keys[2].id, "key-ecdsa-1");
+}
+
+#[test]
+fn test_can_mix_hs256_rs256_es256_keys() {
+    // Test that different algorithm types can be mixed in keys array
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "HS256"
+  keys:
+    - id: "hmac-key"
+      algorithm: "HS256"
+      secret: "shared-secret-for-hs256"
+    - id: "rsa-key"
+      algorithm: "RS256"
+      path: "/etc/keys/rsa_public.pem"
+    - id: "ecdsa-key"
+      algorithm: "ES256"
+      path: "/etc/keys/ecdsa_public.pem"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with mixed algorithms");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.keys.len(), 3);
+
+    // HS256 key has secret
+    assert_eq!(jwt.keys[0].algorithm, "HS256");
+    assert_eq!(
+        jwt.keys[0].secret,
+        Some("shared-secret-for-hs256".to_string())
+    );
+
+    // RS256 key has path
+    assert_eq!(jwt.keys[1].algorithm, "RS256");
+    assert_eq!(
+        jwt.keys[1].path,
+        Some("/etc/keys/rsa_public.pem".to_string())
+    );
+
+    // ES256 key has path
+    assert_eq!(jwt.keys[2].algorithm, "ES256");
+    assert_eq!(
+        jwt.keys[2].path,
+        Some("/etc/keys/ecdsa_public.pem".to_string())
+    );
+}

@@ -2554,6 +2554,7 @@ fn test_passes_request_through_when_auth_disabled() {
         ecdsa_public_key_path: None,
         token_sources: vec![],
         claims: vec![],
+        keys: vec![],
     });
 
     let auth_required = is_auth_required(&jwt_config);
@@ -2584,6 +2585,7 @@ fn test_passes_request_through_when_auth_disabled() {
             prefix: Some("Bearer ".to_string()),
         }],
         claims: vec![],
+        keys: vec![],
     });
 
     let auth_required = is_auth_required(&jwt_config_enabled);
@@ -2646,6 +2648,7 @@ fn test_extracts_and_validates_jwt_when_auth_enabled() {
             operator: "equals".to_string(),
             value: serde_json::Value::String("admin".to_string()),
         }],
+        keys: vec![],
     };
 
     // Create headers with the JWT
@@ -2700,6 +2703,7 @@ fn test_returns_missing_token_error_when_jwt_missing_and_auth_required() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     // Create empty headers and query params (no token provided)
@@ -2740,6 +2744,7 @@ fn test_returns_invalid_token_error_when_jwt_invalid_and_auth_required() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     // Create headers with an invalid JWT (malformed, wrong signature, expired, etc.)
@@ -2821,6 +2826,7 @@ fn test_returns_claims_verification_failed_when_jwt_valid_but_claims_dont_match(
             operator: "equals".to_string(),
             value: serde_json::Value::String("admin".to_string()),
         }],
+        keys: vec![],
     };
 
     // Create headers with the valid JWT
@@ -2906,6 +2912,7 @@ fn test_attaches_validated_claims_to_request_context() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     // Create headers with the JWT
@@ -3002,6 +3009,7 @@ fn test_error_response_includes_clear_error_message() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     let headers = HashMap::new();
@@ -3093,6 +3101,7 @@ fn test_error_response_includes_clear_error_message() {
             operator: "equals".to_string(),
             value: serde_json::Value::String("admin".to_string()),
         }],
+        keys: vec![],
     };
 
     let mut headers3 = HashMap::new();
@@ -3555,6 +3564,7 @@ fn test_rs256_authenticate_request_with_config() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     let mut headers = HashMap::new();
@@ -3613,6 +3623,7 @@ fn test_es256_authenticate_request_with_config() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     let mut headers = HashMap::new();
@@ -3675,6 +3686,7 @@ fn test_rs256_rejects_token_signed_with_wrong_key() {
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
     };
 
     let mut headers = HashMap::new();
@@ -3683,4 +3695,349 @@ fn test_rs256_rejects_token_signed_with_wrong_key() {
 
     let result = authenticate_request(&headers, &query_params, &jwt_config);
     assert!(result.is_err(), "Should reject token signed with wrong key");
+}
+
+// =============================================================================
+// Phase 31.4: Multi-Key Validation Logic Tests
+// =============================================================================
+
+#[test]
+fn test_multi_key_tries_each_key_until_one_validates() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt_with_keys;
+    use yatagarasu::config::JwtKey;
+
+    // Create a valid token signed with HS256
+    let secret1 = "wrong-secret-key-1";
+    let secret2 = "correct-secret-key";
+    let secret3 = "wrong-secret-key-3";
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Sign with secret2 (the correct one)
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret2.as_ref()),
+    )
+    .expect("Failed to encode JWT");
+
+    // Configure multiple keys - the correct one is in the middle
+    let keys = vec![
+        JwtKey {
+            id: "key-1".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(secret1.to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "key-2".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(secret2.to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "key-3".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(secret3.to_string()),
+            path: None,
+        },
+    ];
+
+    let result = validate_jwt_with_keys(&token, &keys);
+    assert!(
+        result.is_ok(),
+        "Should validate with one of the configured keys: {:?}",
+        result.err()
+    );
+
+    let (validated_claims, key_id) = result.unwrap();
+    assert_eq!(validated_claims.sub, Some("test-user".to_string()));
+    assert_eq!(key_id, "key-2"); // Should match the second key
+}
+
+#[test]
+fn test_multi_key_returns_first_successful_validation() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt_with_keys;
+    use yatagarasu::config::JwtKey;
+
+    // Create a token that validates with multiple keys (same secret)
+    let shared_secret = "shared-secret";
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(shared_secret.as_ref()),
+    )
+    .expect("Failed to encode JWT");
+
+    // Configure multiple keys with the same secret
+    let keys = vec![
+        JwtKey {
+            id: "first-key".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(shared_secret.to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "second-key".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(shared_secret.to_string()),
+            path: None,
+        },
+    ];
+
+    let result = validate_jwt_with_keys(&token, &keys);
+    assert!(result.is_ok());
+
+    let (_, key_id) = result.unwrap();
+    // Should return the FIRST key that validates
+    assert_eq!(key_id, "first-key");
+}
+
+#[test]
+fn test_multi_key_returns_error_if_all_keys_fail() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt_with_keys;
+    use yatagarasu::config::JwtKey;
+
+    // Create a token signed with a secret not in our key list
+    let different_secret = "completely-different-secret";
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(different_secret.as_ref()),
+    )
+    .expect("Failed to encode JWT");
+
+    // Configure keys that won't match
+    let keys = vec![
+        JwtKey {
+            id: "key-1".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some("wrong-secret-1".to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "key-2".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some("wrong-secret-2".to_string()),
+            path: None,
+        },
+    ];
+
+    let result = validate_jwt_with_keys(&token, &keys);
+    assert!(result.is_err(), "Should fail when no key validates");
+}
+
+// =============================================================================
+// Phase 31.4: Key ID (kid) Header Support Tests
+// =============================================================================
+
+#[test]
+fn test_extracts_kid_from_jwt_header() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::extract_kid_from_token;
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Create a JWT with kid in header
+    let mut header = Header::new(Algorithm::HS256);
+    header.kid = Some("my-key-id".to_string());
+
+    let token = encode(
+        &header,
+        &claims,
+        &EncodingKey::from_secret("test-secret".as_ref()),
+    )
+    .expect("Failed to encode JWT");
+
+    let kid = extract_kid_from_token(&token);
+    assert_eq!(kid, Some("my-key-id".to_string()));
+}
+
+#[test]
+fn test_selects_validation_key_by_kid() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt_with_keys_and_kid;
+    use yatagarasu::config::JwtKey;
+
+    let secret = "correct-secret";
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Create a JWT with kid header
+    let mut header = Header::new(Algorithm::HS256);
+    header.kid = Some("target-key".to_string());
+
+    let token = encode(&header, &claims, &EncodingKey::from_secret(secret.as_ref()))
+        .expect("Failed to encode JWT");
+
+    // Configure multiple keys
+    let keys = vec![
+        JwtKey {
+            id: "other-key".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some("wrong-secret".to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "target-key".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(secret.to_string()),
+            path: None,
+        },
+    ];
+
+    // Should select by kid and validate
+    let result = validate_jwt_with_keys_and_kid(&token, &keys);
+    assert!(
+        result.is_ok(),
+        "Should validate with key matching kid: {:?}",
+        result.err()
+    );
+
+    let (_, key_id) = result.unwrap();
+    assert_eq!(key_id, "target-key");
+}
+
+#[test]
+fn test_falls_back_to_trying_all_keys_if_kid_missing() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt_with_keys_and_kid;
+    use yatagarasu::config::JwtKey;
+
+    let secret = "correct-secret";
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Create a JWT WITHOUT kid header
+    let header = Header::new(Algorithm::HS256);
+
+    let token = encode(&header, &claims, &EncodingKey::from_secret(secret.as_ref()))
+        .expect("Failed to encode JWT");
+
+    // Configure multiple keys
+    let keys = vec![
+        JwtKey {
+            id: "first-key".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some("wrong-secret".to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "second-key".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some(secret.to_string()),
+            path: None,
+        },
+    ];
+
+    // Should fall back to trying all keys
+    let result = validate_jwt_with_keys_and_kid(&token, &keys);
+    assert!(
+        result.is_ok(),
+        "Should validate by trying all keys when no kid: {:?}",
+        result.err()
+    );
+
+    let (_, key_id) = result.unwrap();
+    assert_eq!(key_id, "second-key"); // Found on second try
+}
+
+#[test]
+fn test_returns_error_if_kid_doesnt_match_any_configured_key() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt_with_keys_and_kid;
+    use yatagarasu::config::JwtKey;
+
+    let claims = Claims {
+        sub: Some("test-user".to_string()),
+        exp: Some((chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64),
+        iat: None,
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Create a JWT with a kid that doesn't exist in our keys
+    let mut header = Header::new(Algorithm::HS256);
+    header.kid = Some("nonexistent-key".to_string());
+
+    let token = encode(
+        &header,
+        &claims,
+        &EncodingKey::from_secret("some-secret".as_ref()),
+    )
+    .expect("Failed to encode JWT");
+
+    // Configure keys that don't match the kid
+    let keys = vec![
+        JwtKey {
+            id: "key-1".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some("secret-1".to_string()),
+            path: None,
+        },
+        JwtKey {
+            id: "key-2".to_string(),
+            algorithm: "HS256".to_string(),
+            secret: Some("secret-2".to_string()),
+            path: None,
+        },
+    ];
+
+    let result = validate_jwt_with_keys_and_kid(&token, &keys);
+    assert!(
+        result.is_err(),
+        "Should fail when kid doesn't match any configured key"
+    );
 }

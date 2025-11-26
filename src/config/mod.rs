@@ -398,12 +398,28 @@ pub struct AuthConfig {
     pub enabled: bool,
 }
 
+/// Individual JWT key configuration for multi-key support
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwtKey {
+    /// Key identifier (kid) - used for key selection
+    pub id: String,
+    /// Algorithm for this key (HS256, RS256, ES256, etc.)
+    pub algorithm: String,
+    /// Secret for HS256/HS384/HS512 algorithms
+    #[serde(default)]
+    pub secret: Option<String>,
+    /// Path to public key PEM file for RS256/RS384/RS512/ES256/ES384 algorithms
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtConfig {
     pub enabled: bool,
-    /// Secret for HS256/HS384/HS512 algorithms
+    /// Secret for HS256/HS384/HS512 algorithms (default key)
     #[serde(default)]
     pub secret: String,
+    /// Default algorithm for single-key configuration
     pub algorithm: String,
     /// Path to RSA public key PEM file for RS256/RS384/RS512 algorithms
     #[serde(default)]
@@ -415,6 +431,9 @@ pub struct JwtConfig {
     pub token_sources: Vec<TokenSource>,
     #[serde(default)]
     pub claims: Vec<ClaimRule>,
+    /// Multiple keys for key rotation support
+    #[serde(default)]
+    pub keys: Vec<JwtKey>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

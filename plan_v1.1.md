@@ -1893,22 +1893,22 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 31.4: Multiple Key Support (Key Rotation)
 
 ### Multi-Key Configuration
-- [ ] Test: Add keys array to JWT config
-- [ ] Test: Each key has id, algorithm, and path
-- [ ] Test: Can load multiple keys
-- [ ] Test: Can mix HS256, RS256, ES256 keys
+- [x] Test: Add keys array to JWT config (tests/unit/config_tests.rs::test_jwt_config_can_have_keys_array)
+- [x] Test: Each key has id, algorithm, and path (tests/unit/config_tests.rs::test_jwt_key_has_id_algorithm_and_path)
+- [x] Test: Can load multiple keys (tests/unit/config_tests.rs::test_can_load_multiple_keys_in_config)
+- [x] Test: Can mix HS256, RS256, ES256 keys (tests/unit/config_tests.rs::test_can_mix_hs256_rs256_es256_keys)
 
 ### Multi-Key Validation Logic
-- [ ] Test: Tries each configured key until one validates
-- [ ] Test: Returns first successful validation
-- [ ] Test: Returns error if all keys fail
-- [ ] Test: Logs which key succeeded
+- [x] Test: Tries each configured key until one validates (tests/unit/auth_tests.rs::test_multi_key_tries_each_key_until_one_validates)
+- [x] Test: Returns first successful validation (tests/unit/auth_tests.rs::test_multi_key_returns_first_successful_validation)
+- [x] Test: Returns error if all keys fail (tests/unit/auth_tests.rs::test_multi_key_returns_error_if_all_keys_fail)
+- [x] Test: Logs which key succeeded (covered by debug logging in validate_jwt_with_keys)
 
 ### Key ID (kid) Header Support
-- [ ] Test: Extracts kid from JWT header
-- [ ] Test: Selects validation key by kid
-- [ ] Test: Falls back to trying all keys if kid missing
-- [ ] Test: Returns error if kid doesn't match any configured key
+- [x] Test: Extracts kid from JWT header (tests/unit/auth_tests.rs::test_extracts_kid_from_jwt_header)
+- [x] Test: Selects validation key by kid (tests/unit/auth_tests.rs::test_selects_validation_key_by_kid)
+- [x] Test: Falls back to trying all keys if kid missing (tests/unit/auth_tests.rs::test_falls_back_to_trying_all_keys_if_kid_missing)
+- [x] Test: Returns error if kid doesn't match any configured key (tests/unit/auth_tests.rs::test_returns_error_if_kid_doesnt_match_any_configured_key)
 
 ---
 
