@@ -1836,12 +1836,12 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Supports multiple validation keys (tests/unit/auth_tests.rs::test_jsonwebtoken_supports_multiple_validation_keys)
 
 ### JWT Algorithm Configuration
-- [ ] Test: Add algorithm field to JWT config
-- [ ] Test: Can parse algorithm: HS256
-- [ ] Test: Can parse algorithm: RS256
-- [ ] Test: Can parse algorithm: ES256
-- [ ] Test: Rejects unknown algorithm
-- [ ] Test: Algorithm is required in config
+- [x] Test: Add algorithm field to JWT config (already exists in JwtConfig)
+- [x] Test: Can parse algorithm: HS256 (tests/unit/config_tests.rs::test_can_parse_jwt_algorithm_hs256)
+- [x] Test: Can parse algorithm: RS256 (tests/unit/config_tests.rs::test_can_parse_jwt_algorithm_rs256)
+- [x] Test: Can parse algorithm: ES256 (tests/unit/config_tests.rs::test_can_parse_jwt_algorithm_es256)
+- [x] Test: Rejects unknown algorithm (tests/unit/config_tests.rs::test_rejects_jwt_config_with_invalid_algorithm)
+- [x] Test: Algorithm is required in config (tests/unit/config_tests.rs::test_jwt_algorithm_is_required_when_jwt_enabled)
 
 ---
 

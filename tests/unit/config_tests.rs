@@ -1268,3 +1268,66 @@ buckets
         "Error message should not be empty for malformed YAML"
     );
 }
+
+// ============================================================================
+// Phase 31.1: JWT Algorithm Configuration Tests (RS256/ES256)
+// ============================================================================
+
+#[test]
+fn test_can_parse_jwt_algorithm_rs256() {
+    // Test that RS256 algorithm is recognized as a valid algorithm
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "placeholder-for-rsa-key-path"
+  algorithm: "RS256"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT algorithm RS256");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.algorithm, "RS256");
+}
+
+#[test]
+fn test_can_parse_jwt_algorithm_es256() {
+    // Test that ES256 algorithm is recognized as a valid algorithm
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "placeholder-for-ecdsa-key-path"
+  algorithm: "ES256"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT algorithm ES256");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.algorithm, "ES256");
+}
+
+#[test]
+fn test_jwt_algorithm_is_required_when_jwt_enabled() {
+    // Test that algorithm field is required when JWT is enabled
+    // Note: Currently algorithm has no default value and will fail to parse if missing
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  secret: "my-jwt-secret"
+"#;
+    // Without algorithm field, deserialization should fail
+    let result: Result<Config, _> = serde_yaml::from_str(yaml);
+    assert!(
+        result.is_err(),
+        "Expected deserialization to fail when algorithm is missing"
+    );
+}
