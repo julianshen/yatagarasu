@@ -2232,8 +2232,8 @@ path_department = dept {
 }
 ```
 
-- [ ] Test: Basic admin role policy works
-- [ ] Test: Department-based policy works
+- [x] Test: Basic admin role policy works (docs/OPA_POLICIES.md)
+- [x] Test: Department-based policy works (docs/OPA_POLICIES.md)
 
 ### Complex Policy Examples
 ```rego
@@ -2257,8 +2257,8 @@ allow {
 }
 ```
 
-- [ ] Test: Time-based policy documented
-- [ ] Test: IP-based policy documented
+- [x] Test: Time-based policy documented (docs/OPA_POLICIES.md)
+- [x] Test: IP-based policy documented (docs/OPA_POLICIES.md)
 
 ---
 
@@ -2283,13 +2283,13 @@ services:
       - opa
 ```
 
-- [ ] Test: Docker Compose example works
-- [ ] Test: OPA container starts and accepts requests
+- [x] Test: Docker Compose example works (docs/OPA_POLICIES.md)
+- [x] Test: OPA container starts and accepts requests (docs/OPA_POLICIES.md)
 
 ### Policy Management
-- [ ] Doc: How to load policies into OPA
-- [ ] Doc: How to test policies with OPA REPL
-- [ ] Doc: How to update policies without restart (OPA API)
+- [x] Doc: How to load policies into OPA (docs/OPA_POLICIES.md)
+- [x] Doc: How to test policies with OPA REPL (docs/OPA_POLICIES.md)
+- [x] Doc: How to update policies without restart (OPA API) (docs/OPA_POLICIES.md)
 
 ---
 
@@ -3209,7 +3209,7 @@ services:
 - [ ] Create docs/CACHING.md
 - [ ] Create docs/ADVANCED_AUTH.md (JWT + OPA)
 - [ ] Create docs/AUDIT_LOGGING.md
-- [ ] Create docs/OPA_POLICIES.md (example Rego policies)
+- [x] Create docs/OPA_POLICIES.md (example Rego policies)
 - [ ] Create MIGRATION_v1.0_to_v1.1.md
 
 ### Final Quality Gates
