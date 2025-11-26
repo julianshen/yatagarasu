@@ -78,6 +78,9 @@ moka = { version = "0.12", features = ["future"] }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 rmp-serde = "1.1"
 
+# HTTP Client (for OPA integration)
+reqwest = { version = "0.11", features = ["json"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Using low-level io-uring instead of tokio-uring
 # tokio-uring has !Send futures (uses Rc<T>) which conflicts with async_trait

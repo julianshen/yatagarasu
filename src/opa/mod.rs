@@ -189,16 +189,26 @@ impl OpaClientConfig {
 /// OPA HTTP Client for policy evaluation
 ///
 /// This client is Send + Sync and can be safely shared across threads.
+/// It uses reqwest for async HTTP calls with configurable timeouts.
 pub struct OpaClient {
     config: OpaClientConfig,
-    // HTTP client will be added when we implement actual HTTP calls
-    // For now, we just store the config
+    http_client: reqwest::Client,
 }
 
 impl OpaClient {
     /// Create a new OPA client with the given configuration
+    ///
+    /// Configures the HTTP client with the specified timeout.
     pub fn new(config: OpaClientConfig) -> Self {
-        Self { config }
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(config.timeout_ms))
+            .build()
+            .expect("Failed to create HTTP client");
+
+        Self {
+            config,
+            http_client,
+        }
     }
 
     /// Get the client configuration
@@ -212,11 +222,46 @@ impl OpaClient {
     pub fn policy_endpoint(&self) -> String {
         format!("{}/v1/data/{}", self.config.url, self.config.policy_path)
     }
-}
 
-// Ensure OpaClient is Send + Sync
-unsafe impl Send for OpaClient {}
-unsafe impl Sync for OpaClient {}
+    /// Evaluate a policy with the given input
+    ///
+    /// Sends a POST request to OPA and returns the authorization decision.
+    /// Returns `Ok(true)` if allowed, `Ok(false)` if denied.
+    /// Returns `Err(OpaError)` if the request fails.
+    pub async fn evaluate(&self, input: &OpaInput) -> Result<bool, OpaError> {
+        let request = OpaRequest::new(input.clone());
+        let endpoint = self.policy_endpoint();
+
+        let response = self
+            .http_client
+            .post(&endpoint)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    OpaError::Timeout {
+                        policy_path: self.config.policy_path.clone(),
+                        timeout_ms: self.config.timeout_ms,
+                    }
+                } else {
+                    OpaError::ConnectionFailed(e.to_string())
+                }
+            })?;
+
+        if !response.status().is_success() {
+            return Err(OpaError::PolicyError {
+                message: format!("OPA returned status {}", response.status()),
+            });
+        }
+
+        let opa_response: OpaResponse = response.json().await.map_err(|e| {
+            OpaError::InvalidResponse(format!("Failed to parse OPA response: {}", e))
+        })?;
+
+        Ok(opa_response.is_allowed())
+    }
+}
 
 /// Shared OPA client (thread-safe)
 pub type SharedOpaClient = Arc<OpaClient>;
