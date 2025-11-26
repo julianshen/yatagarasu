@@ -18,7 +18,7 @@ use std::time::Duration;
 const DEFAULT_OPA_TIMEOUT_MS: u64 = 100;
 
 /// Error type for OPA operations
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OpaError {
     /// Request to OPA timed out
     Timeout {

@@ -17,6 +17,10 @@ use crate::cache::{Cache, CacheKey};
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
+use crate::opa::{
+    AuthorizationDecision, FailMode, OpaCache, OpaClient, OpaClientConfig, OpaInput,
+    SharedOpaClient,
+};
 use crate::pipeline::RequestContext;
 use crate::rate_limit::RateLimitManager;
 use crate::reload::ReloadManager;
@@ -26,6 +30,7 @@ use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
 use crate::security::{self, SecurityLimits};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
 /// Handles routing, authentication, and S3 proxying
@@ -51,6 +56,12 @@ pub struct YatagarasuProxy {
     /// Tiered cache (memory → disk → redis) for caching S3 responses (Phase 30)
     /// Optional: cache is only enabled if configured
     cache: Option<Arc<TieredCache>>,
+    /// OPA clients per bucket (Phase 32: OPA Integration)
+    /// Maps bucket name to OPA client for authorization decisions
+    opa_clients: Arc<HashMap<String, SharedOpaClient>>,
+    /// OPA authorization decision cache (Phase 32: OPA Integration)
+    /// Shared cache for all OPA clients to avoid redundant evaluations
+    opa_cache: Option<Arc<OpaCache>>,
 }
 
 impl YatagarasuProxy {
@@ -148,6 +159,41 @@ impl YatagarasuProxy {
         // TODO Phase 30: Initialize cache from config if enabled
         let cache = None; // Temporarily None until cache initialization is implemented
 
+        // Phase 32: Initialize OPA clients and cache for buckets with authorization config
+        let mut opa_clients = HashMap::new();
+        let mut max_cache_ttl = 0u64;
+        for bucket in &config.buckets {
+            if let Some(ref auth_config) = bucket.authorization {
+                if auth_config.auth_type == "opa" {
+                    if let (Some(opa_url), Some(policy_path)) =
+                        (&auth_config.opa_url, &auth_config.opa_policy_path)
+                    {
+                        let client_config = OpaClientConfig {
+                            url: opa_url.clone(),
+                            policy_path: policy_path.clone(),
+                            timeout_ms: auth_config.opa_timeout_ms,
+                            cache_ttl_seconds: auth_config.opa_cache_ttl_seconds,
+                        };
+                        max_cache_ttl = max_cache_ttl.max(client_config.cache_ttl_seconds);
+                        let client = Arc::new(OpaClient::new(client_config));
+                        opa_clients.insert(bucket.name.clone(), client);
+                        tracing::info!(
+                            bucket = %bucket.name,
+                            opa_url = %opa_url,
+                            policy_path = %policy_path,
+                            "OPA authorization enabled for bucket"
+                        );
+                    }
+                }
+            }
+        }
+        // Create shared OPA cache if any bucket uses OPA
+        let opa_cache = if !opa_clients.is_empty() {
+            Some(Arc::new(OpaCache::new(max_cache_ttl.max(60))))
+        } else {
+            None
+        };
+
         Self {
             config: Arc::new(config),
             router,
@@ -162,6 +208,8 @@ impl YatagarasuProxy {
             start_time: Instant::now(),
             replica_sets: Arc::new(replica_sets),
             cache,
+            opa_clients: Arc::new(opa_clients),
+            opa_cache,
         }
     }
 
@@ -260,6 +308,41 @@ impl YatagarasuProxy {
         // TODO Phase 30: Initialize cache from config if enabled
         let cache = None; // Temporarily None until cache initialization is implemented
 
+        // Phase 32: Initialize OPA clients and cache for buckets with authorization config
+        let mut opa_clients = HashMap::new();
+        let mut max_cache_ttl = 0u64;
+        for bucket in &config.buckets {
+            if let Some(ref auth_config) = bucket.authorization {
+                if auth_config.auth_type == "opa" {
+                    if let (Some(opa_url), Some(policy_path)) =
+                        (&auth_config.opa_url, &auth_config.opa_policy_path)
+                    {
+                        let client_config = OpaClientConfig {
+                            url: opa_url.clone(),
+                            policy_path: policy_path.clone(),
+                            timeout_ms: auth_config.opa_timeout_ms,
+                            cache_ttl_seconds: auth_config.opa_cache_ttl_seconds,
+                        };
+                        max_cache_ttl = max_cache_ttl.max(client_config.cache_ttl_seconds);
+                        let client = Arc::new(OpaClient::new(client_config));
+                        opa_clients.insert(bucket.name.clone(), client);
+                        tracing::info!(
+                            bucket = %bucket.name,
+                            opa_url = %opa_url,
+                            policy_path = %policy_path,
+                            "OPA authorization enabled for bucket"
+                        );
+                    }
+                }
+            }
+        }
+        // Create shared OPA cache if any bucket uses OPA
+        let opa_cache = if !opa_clients.is_empty() {
+            Some(Arc::new(OpaCache::new(max_cache_ttl.max(60))))
+        } else {
+            None
+        };
+
         Self {
             config: Arc::new(config),
             router,
@@ -274,6 +357,8 @@ impl YatagarasuProxy {
             start_time: Instant::now(),
             replica_sets: Arc::new(replica_sets),
             cache,
+            opa_clients: Arc::new(opa_clients),
+            opa_cache,
         }
     }
 
@@ -1990,6 +2075,99 @@ impl ProxyHttp for YatagarasuProxy {
         } else {
             // Authentication bypassed (public bucket - no auth config)
             self.metrics.increment_auth_bypassed();
+        }
+
+        // Phase 32: OPA Authorization check (after JWT authentication)
+        if let Some(opa_client) = self.opa_clients.get(&bucket_config.name) {
+            // Get authorization config for fail mode
+            let fail_mode = bucket_config
+                .authorization
+                .as_ref()
+                .and_then(|a| a.opa_fail_mode.as_ref())
+                .map(|s| FailMode::from_str(s).unwrap_or_default())
+                .unwrap_or_default();
+
+            // Build OPA input from request context
+            let jwt_claims = ctx
+                .claims()
+                .map(|c| serde_json::to_value(c).unwrap_or_default())
+                .unwrap_or(serde_json::json!({}));
+            let opa_input = OpaInput::new(
+                jwt_claims,
+                bucket_config.name.clone(),
+                ctx.path().to_string(),
+                ctx.method().to_string(),
+                ctx.headers().get("x-forwarded-for").cloned(),
+            );
+
+            // Check cache first
+            let cache_key = opa_input.cache_key();
+            let cached_decision = if let Some(ref opa_cache) = self.opa_cache {
+                opa_cache.get(&cache_key).await
+            } else {
+                None
+            };
+
+            let decision = if let Some(allowed) = cached_decision {
+                // Cache hit
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_config.name,
+                    allowed = %allowed,
+                    "OPA authorization decision from cache"
+                );
+                AuthorizationDecision::from_opa_result(Ok(allowed), fail_mode)
+            } else {
+                // Cache miss - call OPA
+                let eval_result = opa_client.evaluate(&opa_input).await;
+                let decision =
+                    AuthorizationDecision::from_opa_result(eval_result.clone(), fail_mode);
+
+                // Cache the result on success
+                if let (Ok(allowed), Some(ref opa_cache)) = (eval_result, &self.opa_cache) {
+                    opa_cache.put(cache_key, allowed).await;
+                }
+
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_config.name,
+                    allowed = %decision.is_allowed(),
+                    fail_open = %decision.is_fail_open_allow(),
+                    "OPA authorization decision"
+                );
+
+                decision
+            };
+
+            // Log warning for fail-open decisions
+            if decision.is_fail_open_allow() {
+                if let Some(error) = decision.error() {
+                    tracing::warn!(
+                        request_id = %ctx.request_id(),
+                        bucket = %bucket_config.name,
+                        error = %error,
+                        "OPA authorization failed but allowing due to fail-open mode"
+                    );
+                }
+            }
+
+            // Deny if not allowed
+            if !decision.is_allowed() {
+                let mut header = ResponseHeader::build(403, None)?;
+                header.insert_header("Content-Type", "text/plain")?;
+                session
+                    .write_response_header(Box::new(header), true)
+                    .await?;
+
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_config.name,
+                    "OPA authorization denied"
+                );
+
+                self.metrics.increment_status_count(403);
+                return Ok(true); // Short-circuit
+            }
         }
 
         // FOURTH: Check cache (Phase 30.7: Cache Integration)
