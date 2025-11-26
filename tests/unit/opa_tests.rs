@@ -737,3 +737,138 @@ async fn test_opa_cache_stores_deny_decisions() {
     let result = cache.get(&key).await;
     assert_eq!(result, Some(false), "Should retrieve cached deny decision");
 }
+
+// ============================================================================
+// Phase 32.5: Authorization Integration Tests
+// ============================================================================
+
+#[test]
+fn test_fail_mode_open_parses_correctly() {
+    use std::str::FromStr;
+    use yatagarasu::opa::FailMode;
+
+    // Test: Can parse "open" fail mode
+    let mode = FailMode::from_str("open").unwrap();
+    assert!(matches!(mode, FailMode::Open));
+}
+
+#[test]
+fn test_fail_mode_closed_parses_correctly() {
+    use std::str::FromStr;
+    use yatagarasu::opa::FailMode;
+
+    // Test: Can parse "closed" fail mode
+    let mode = FailMode::from_str("closed").unwrap();
+    assert!(matches!(mode, FailMode::Closed));
+}
+
+#[test]
+fn test_fail_mode_default_is_closed() {
+    use yatagarasu::opa::FailMode;
+
+    // Test: Default fail mode is closed (deny on OPA failure)
+    let mode = FailMode::default();
+    assert!(matches!(mode, FailMode::Closed));
+}
+
+#[test]
+fn test_fail_mode_unknown_defaults_to_closed() {
+    use std::str::FromStr;
+    use yatagarasu::opa::FailMode;
+
+    // Test: Unknown fail mode value defaults to closed for security
+    let mode = FailMode::from_str("unknown").unwrap();
+    assert!(matches!(mode, FailMode::Closed));
+
+    let mode2 = FailMode::from_str("").unwrap();
+    assert!(matches!(mode2, FailMode::Closed));
+}
+
+#[test]
+fn test_authorization_decision_allow() {
+    use yatagarasu::opa::{AuthorizationDecision, FailMode};
+
+    // Test: Request allowed if OPA returns true
+    let decision = AuthorizationDecision::from_opa_result(Ok(true), FailMode::Closed);
+    assert!(decision.is_allowed());
+    assert!(decision.error().is_none());
+}
+
+#[test]
+fn test_authorization_decision_deny() {
+    use yatagarasu::opa::{AuthorizationDecision, FailMode};
+
+    // Test: Request denied (403) if OPA returns false
+    let decision = AuthorizationDecision::from_opa_result(Ok(false), FailMode::Closed);
+    assert!(!decision.is_allowed());
+    assert!(decision.error().is_none());
+}
+
+#[test]
+fn test_authorization_decision_fail_closed_on_error() {
+    use yatagarasu::opa::{AuthorizationDecision, FailMode, OpaError};
+
+    // Test: Fail-closed denies request when OPA unreachable
+    let error = OpaError::ConnectionFailed("connection refused".to_string());
+    let decision = AuthorizationDecision::from_opa_result(Err(error), FailMode::Closed);
+
+    assert!(!decision.is_allowed(), "Fail-closed should deny on error");
+    assert!(decision.error().is_some(), "Should preserve error info");
+}
+
+#[test]
+fn test_authorization_decision_fail_open_on_error() {
+    use yatagarasu::opa::{AuthorizationDecision, FailMode, OpaError};
+
+    // Test: Fail-open allows request when OPA unreachable
+    let error = OpaError::Timeout {
+        policy_path: "authz/allow".to_string(),
+        timeout_ms: 100,
+    };
+    let decision = AuthorizationDecision::from_opa_result(Err(error), FailMode::Open);
+
+    assert!(decision.is_allowed(), "Fail-open should allow on error");
+    assert!(
+        decision.error().is_some(),
+        "Should preserve error for logging"
+    );
+}
+
+#[test]
+fn test_authorization_decision_is_fail_open() {
+    use yatagarasu::opa::{AuthorizationDecision, FailMode, OpaError};
+
+    // Test: Can detect fail-open decisions for logging
+    let error = OpaError::ConnectionFailed("timeout".to_string());
+    let decision = AuthorizationDecision::from_opa_result(Err(error), FailMode::Open);
+
+    assert!(
+        decision.is_fail_open_allow(),
+        "Should identify fail-open allow"
+    );
+}
+
+#[test]
+fn test_authorization_decision_normal_allow_is_not_fail_open() {
+    use yatagarasu::opa::{AuthorizationDecision, FailMode};
+
+    // Test: Normal allow (from OPA) is not a fail-open decision
+    let decision = AuthorizationDecision::from_opa_result(Ok(true), FailMode::Open);
+
+    assert!(
+        !decision.is_fail_open_allow(),
+        "Normal allow is not fail-open"
+    );
+}
+
+#[test]
+fn test_authorization_skipped_when_no_opa_config() {
+    use yatagarasu::opa::AuthorizationDecision;
+
+    // Test: Buckets without authorization section skip OPA check
+    let decision = AuthorizationDecision::skipped();
+
+    assert!(decision.is_allowed(), "Skipped auth should allow");
+    assert!(decision.is_skipped(), "Should be marked as skipped");
+    assert!(decision.error().is_none());
+}

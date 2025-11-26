@@ -8,7 +8,9 @@ use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
+use std::convert::Infallible;
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,6 +65,104 @@ impl fmt::Display for OpaError {
 }
 
 impl std::error::Error for OpaError {}
+
+/// Fail mode for OPA authorization
+///
+/// Determines behavior when OPA is unreachable or returns an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FailMode {
+    /// Fail-open: Allow requests when OPA is unavailable (less secure, higher availability)
+    Open,
+    /// Fail-closed: Deny requests when OPA is unavailable (more secure, default)
+    #[default]
+    Closed,
+}
+
+impl FromStr for FailMode {
+    type Err = Infallible;
+
+    /// Parse fail mode from string
+    ///
+    /// Returns Closed (deny) for unknown values as a secure default.
+    /// This never fails - unknown values default to Closed.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
+            "open" => FailMode::Open,
+            _ => FailMode::Closed, // Default to closed for security
+        })
+    }
+}
+
+/// Result of an authorization decision
+///
+/// Captures the authorization outcome along with any error information
+/// for logging and debugging purposes.
+#[derive(Debug)]
+pub struct AuthorizationDecision {
+    /// Whether the request is allowed
+    allowed: bool,
+    /// Error that occurred during authorization (if any)
+    error: Option<OpaError>,
+    /// Whether this was a fail-open decision
+    fail_open: bool,
+    /// Whether authorization was skipped (no OPA config)
+    skipped: bool,
+}
+
+impl AuthorizationDecision {
+    /// Create a decision from an OPA result and fail mode
+    pub fn from_opa_result(result: Result<bool, OpaError>, fail_mode: FailMode) -> Self {
+        match result {
+            Ok(allowed) => AuthorizationDecision {
+                allowed,
+                error: None,
+                fail_open: false,
+                skipped: false,
+            },
+            Err(e) => {
+                let allowed = matches!(fail_mode, FailMode::Open);
+                AuthorizationDecision {
+                    allowed,
+                    error: Some(e),
+                    fail_open: allowed, // Only fail_open if we're allowing due to error
+                    skipped: false,
+                }
+            }
+        }
+    }
+
+    /// Create a skipped authorization decision (no OPA configured)
+    pub fn skipped() -> Self {
+        AuthorizationDecision {
+            allowed: true,
+            error: None,
+            fail_open: false,
+            skipped: true,
+        }
+    }
+
+    /// Check if the request is allowed
+    pub fn is_allowed(&self) -> bool {
+        self.allowed
+    }
+
+    /// Get the error that occurred (if any)
+    pub fn error(&self) -> Option<&OpaError> {
+        self.error.as_ref()
+    }
+
+    /// Check if this is a fail-open allow (allowed due to OPA error)
+    ///
+    /// This is useful for logging warnings about fail-open decisions
+    pub fn is_fail_open_allow(&self) -> bool {
+        self.fail_open
+    }
+
+    /// Check if authorization was skipped (no OPA config)
+    pub fn is_skipped(&self) -> bool {
+        self.skipped
+    }
+}
 
 /// OPA Client configuration
 #[derive(Debug, Clone)]
