@@ -3096,3 +3096,253 @@ fn test_error_response_includes_clear_error_message() {
         );
     }
 }
+
+// ============================================================================
+// Phase 31.1: JWT Library Upgrade Tests - RS256/ES256/Multiple Keys Support
+// ============================================================================
+
+#[test]
+fn test_jsonwebtoken_supports_rs256_algorithm() {
+    // Test that the jsonwebtoken library supports RS256 (RSA with SHA-256)
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+    use rsa::pkcs1v15::SigningKey;
+    use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
+    use rsa::RsaPrivateKey;
+    use sha2::Sha256;
+
+    // Generate a test RSA key pair (2048-bit for testing)
+    let mut rng = rand::thread_rng();
+    let bits = 2048;
+    let private_key = RsaPrivateKey::new(&mut rng, bits).expect("Failed to generate RSA key");
+    let public_key = private_key.to_public_key();
+
+    // Export keys to PEM format
+    let private_pem = private_key
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .expect("Failed to export private key");
+    let public_pem = public_key
+        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+        .expect("Failed to export public key");
+
+    // Create claims
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Create and sign JWT with RS256
+    let encoding_key =
+        EncodingKey::from_rsa_pem(private_pem.as_bytes()).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .expect("Failed to encode RS256 JWT");
+
+    // Verify the token with RS256
+    let decoding_key =
+        DecodingKey::from_rsa_pem(public_pem.as_bytes()).expect("Failed to create decoding key");
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.required_spec_claims.clear();
+
+    let token_data = decode::<serde_json::Value>(&token, &decoding_key, &validation)
+        .expect("Failed to decode RS256 JWT");
+
+    assert_eq!(
+        token_data.claims["sub"], "test-user",
+        "Subject claim should match"
+    );
+    assert_eq!(
+        token_data.header.alg,
+        Algorithm::RS256,
+        "Algorithm should be RS256"
+    );
+}
+
+#[test]
+fn test_jsonwebtoken_supports_es256_algorithm() {
+    // Test that the jsonwebtoken library supports ES256 (ECDSA with P-256 and SHA-256)
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+    use p256::ecdsa::{SigningKey, VerifyingKey};
+    use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey};
+
+    // Generate a test ECDSA P-256 key pair
+    let signing_key = SigningKey::random(&mut rand::thread_rng());
+    let verifying_key = VerifyingKey::from(&signing_key);
+
+    // Export keys to PEM format
+    let private_pem = signing_key
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .expect("Failed to export private key");
+    let public_pem = verifying_key
+        .to_public_key_pem(p256::pkcs8::LineEnding::LF)
+        .expect("Failed to export public key");
+
+    // Create claims
+    let claims = serde_json::json!({
+        "sub": "ecdsa-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Create and sign JWT with ES256
+    let encoding_key = EncodingKey::from_ec_pem(private_pem.as_bytes())
+        .expect("Failed to create ES256 encoding key");
+    let token = encode(&Header::new(Algorithm::ES256), &claims, &encoding_key)
+        .expect("Failed to encode ES256 JWT");
+
+    // Verify the token with ES256
+    let decoding_key = DecodingKey::from_ec_pem(public_pem.as_bytes())
+        .expect("Failed to create ES256 decoding key");
+    let mut validation = Validation::new(Algorithm::ES256);
+    validation.required_spec_claims.clear();
+
+    let token_data = decode::<serde_json::Value>(&token, &decoding_key, &validation)
+        .expect("Failed to decode ES256 JWT");
+
+    assert_eq!(
+        token_data.claims["sub"], "ecdsa-user",
+        "Subject claim should match"
+    );
+    assert_eq!(
+        token_data.header.alg,
+        Algorithm::ES256,
+        "Algorithm should be ES256"
+    );
+}
+
+#[test]
+fn test_jsonwebtoken_supports_multiple_validation_keys() {
+    // Test that we can attempt validation with multiple keys until one succeeds
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+
+    // Create two different HS256 secrets
+    let secret1 = "first-secret-key-for-testing-12345";
+    let secret2 = "second-secret-key-for-testing-67890";
+
+    // Create claims
+    let claims = serde_json::json!({
+        "sub": "multi-key-user",
+        "exp": chrono::Utc::now().timestamp() + 3600
+    });
+
+    // Sign with secret2
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret2.as_bytes()),
+    )
+    .expect("Failed to encode JWT");
+
+    // Create validation
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.required_spec_claims.clear();
+
+    // Try decoding with multiple keys - simulating key rotation
+    let keys = vec![
+        DecodingKey::from_secret(secret1.as_bytes()),
+        DecodingKey::from_secret(secret2.as_bytes()),
+    ];
+
+    let mut decoded = None;
+    for key in &keys {
+        if let Ok(token_data) = decode::<serde_json::Value>(&token, key, &validation) {
+            decoded = Some(token_data);
+            break;
+        }
+    }
+
+    let token_data = decoded.expect("Should decode with one of the keys");
+    assert_eq!(
+        token_data.claims["sub"], "multi-key-user",
+        "Subject claim should match"
+    );
+}
+
+#[test]
+fn test_rs256_rejects_invalid_signature() {
+    // Test that RS256 properly rejects tokens with invalid signatures
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+    use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+    use rsa::RsaPrivateKey;
+
+    let mut rng = rand::thread_rng();
+
+    // Generate two different RSA key pairs
+    let private_key1 = RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key 1");
+    let private_key2 = RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key 2");
+    let public_key2 = private_key2.to_public_key();
+
+    // Get PEM formats
+    let private_pem1 = private_key1
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .expect("Failed to export private key 1");
+    let public_pem2 = public_key2
+        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+        .expect("Failed to export public key 2");
+
+    // Create claims and sign with key1
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600
+    });
+
+    let encoding_key =
+        EncodingKey::from_rsa_pem(private_pem1.as_bytes()).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Try to verify with key2 (should fail)
+    let decoding_key =
+        DecodingKey::from_rsa_pem(public_pem2.as_bytes()).expect("Failed to create decoding key");
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.required_spec_claims.clear();
+
+    let result = decode::<serde_json::Value>(&token, &decoding_key, &validation);
+    assert!(
+        result.is_err(),
+        "Should reject token signed with different key"
+    );
+}
+
+#[test]
+fn test_es256_rejects_invalid_signature() {
+    // Test that ES256 properly rejects tokens with invalid signatures
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+    use p256::ecdsa::{SigningKey, VerifyingKey};
+    use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
+
+    // Generate two different ECDSA key pairs
+    let signing_key1 = SigningKey::random(&mut rand::thread_rng());
+    let signing_key2 = SigningKey::random(&mut rand::thread_rng());
+    let verifying_key2 = VerifyingKey::from(&signing_key2);
+
+    // Get PEM formats
+    let private_pem1 = signing_key1
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .expect("Failed to export private key 1");
+    let public_pem2 = verifying_key2
+        .to_public_key_pem(p256::pkcs8::LineEnding::LF)
+        .expect("Failed to export public key 2");
+
+    // Create claims and sign with key1
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600
+    });
+
+    let encoding_key =
+        EncodingKey::from_ec_pem(private_pem1.as_bytes()).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::ES256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Try to verify with key2 (should fail)
+    let decoding_key =
+        DecodingKey::from_ec_pem(public_pem2.as_bytes()).expect("Failed to create decoding key");
+    let mut validation = Validation::new(Algorithm::ES256);
+    validation.required_spec_claims.clear();
+
+    let result = decode::<serde_json::Value>(&token, &decoding_key, &validation);
+    assert!(
+        result.is_err(),
+        "Should reject token signed with different key"
+    );
+}

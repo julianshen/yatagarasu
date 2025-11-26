@@ -25,7 +25,7 @@ aws-config = "1.0"
 aws-credential-types = "1.0"
 
 # JWT Authentication
-jsonwebtoken = "9.2"
+jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -95,6 +95,11 @@ reqwest = { version = "0.11", features = ["blocking", "json"] }
 tokio-test = "0.4"
 log = "0.4"
 # env_logger removed - use tracing-subscriber in tests instead
+
+# Cryptography for JWT algorithm tests (RS256/ES256 key generation)
+rsa = { version = "0.9", features = ["std"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
+rand = "0.8"
 
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
