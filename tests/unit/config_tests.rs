@@ -1507,3 +1507,68 @@ jwt:
         Some("/etc/keys/ecdsa_public.pem".to_string())
     );
 }
+
+// =============================================================================
+// Phase 31.5: JWKS (JSON Web Key Set) Configuration Tests
+// =============================================================================
+
+#[test]
+fn test_jwt_config_can_have_jwks_url() {
+    // Test that JWT config supports jwks_url for dynamic key fetching
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "RS256"
+  jwks_url: "https://example.com/.well-known/jwks.json"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with jwks_url");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(
+        jwt.jwks_url,
+        Some("https://example.com/.well-known/jwks.json".to_string())
+    );
+}
+
+#[test]
+fn test_jwks_url_is_optional() {
+    // Test that jwks_url is optional (defaults to None)
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "HS256"
+  secret: "test-secret"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config without jwks_url");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert!(jwt.jwks_url.is_none());
+}
+
+#[test]
+fn test_jwks_url_with_refresh_interval() {
+    // Test that jwks_refresh_interval can be configured
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+jwt:
+  enabled: true
+  algorithm: "RS256"
+  jwks_url: "https://auth.example.com/.well-known/jwks.json"
+  jwks_refresh_interval_secs: 3600
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to deserialize JWT config with refresh interval");
+    let jwt = config.jwt.as_ref().expect("JWT config should be present");
+    assert_eq!(jwt.jwks_refresh_interval_secs, Some(3600));
+}

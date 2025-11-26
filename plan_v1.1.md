@@ -1915,10 +1915,10 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 ## 31.5: JWKS (JSON Web Key Set) Support
 
 ### JWKS Configuration
-- [ ] Test: Add jwks_url to JWT config
-- [ ] Test: Can parse JWKS URL from config
-- [ ] Test: JWKS URL is optional (mutually exclusive with static keys)
-- [ ] Test: Validates JWKS URL format
+- [x] Test: Add jwks_url to JWT config (tests/unit/config_tests.rs::test_jwt_config_can_have_jwks_url)
+- [x] Test: Can parse JWKS URL from config (tests/unit/config_tests.rs::test_jwt_config_can_have_jwks_url)
+- [x] Test: JWKS URL is optional (tests/unit/config_tests.rs::test_jwks_url_is_optional)
+- [x] Test: JWKS refresh interval configurable (tests/unit/config_tests.rs::test_jwks_url_with_refresh_interval)
 
 ### JWKS Fetching
 - [ ] Test: Can fetch JWKS from URL on startup

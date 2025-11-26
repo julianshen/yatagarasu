@@ -434,6 +434,12 @@ pub struct JwtConfig {
     /// Multiple keys for key rotation support
     #[serde(default)]
     pub keys: Vec<JwtKey>,
+    /// URL to fetch JWKS (JSON Web Key Set) for dynamic key validation
+    #[serde(default)]
+    pub jwks_url: Option<String>,
+    /// JWKS cache refresh interval in seconds (default: 3600 = 1 hour)
+    #[serde(default)]
+    pub jwks_refresh_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
