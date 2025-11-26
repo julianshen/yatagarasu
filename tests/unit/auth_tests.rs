@@ -3364,3 +3364,323 @@ fn test_es256_rejects_invalid_signature() {
         "Should reject token signed with different key"
     );
 }
+
+// ============================================================================
+// Phase 31.2: RSA Key Loading and RS256 Validation Tests
+// ============================================================================
+
+#[test]
+fn test_can_load_rsa_public_key_from_pem_file() {
+    use yatagarasu::auth::load_rsa_public_key;
+
+    // Load the test RSA public key
+    let result = load_rsa_public_key("tests/fixtures/rsa_public.pem");
+    assert!(result.is_ok(), "Should load RSA public key from PEM file");
+}
+
+#[test]
+fn test_rsa_key_loading_returns_error_if_file_not_found() {
+    use yatagarasu::auth::load_rsa_public_key;
+
+    let result = load_rsa_public_key("/nonexistent/path/key.pem");
+    assert!(result.is_err(), "Should return error for missing file");
+
+    if let Err(e) = result {
+        let error_msg = e.to_string();
+        assert!(
+            error_msg.contains("not found") || error_msg.contains("Key file"),
+            "Error should indicate file not found: {}",
+            error_msg
+        );
+    }
+}
+
+#[test]
+fn test_rsa_key_loading_rejects_invalid_format() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+    use yatagarasu::auth::load_rsa_public_key;
+
+    // Create a temp file with invalid PEM content
+    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+    temp_file
+        .write_all(b"this is not a valid PEM file")
+        .expect("Failed to write");
+    temp_file.flush().expect("Failed to flush");
+
+    let result = load_rsa_public_key(temp_file.path().to_str().unwrap());
+    assert!(result.is_err(), "Should reject invalid PEM format");
+
+    if let Err(e) = result {
+        let error_msg = e.to_string();
+        assert!(
+            error_msg.contains("Invalid") || error_msg.contains("format"),
+            "Error should indicate invalid format: {}",
+            error_msg
+        );
+    }
+}
+
+#[test]
+fn test_can_load_ecdsa_public_key_from_pem_file() {
+    use yatagarasu::auth::load_ecdsa_public_key;
+
+    // Load the test ECDSA public key
+    let result = load_ecdsa_public_key("tests/fixtures/ecdsa_public.pem");
+    assert!(result.is_ok(), "Should load ECDSA public key from PEM file");
+}
+
+#[test]
+fn test_ecdsa_key_loading_returns_error_if_file_not_found() {
+    use yatagarasu::auth::load_ecdsa_public_key;
+
+    let result = load_ecdsa_public_key("/nonexistent/path/key.pem");
+    assert!(result.is_err(), "Should return error for missing file");
+}
+
+#[test]
+fn test_can_validate_rs256_jwt_with_test_key() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::{load_rsa_public_key, validate_jwt_with_key};
+
+    // Read the test private key to sign a token
+    let private_key =
+        fs::read("tests/fixtures/rsa_private.pem").expect("Failed to read private key");
+
+    // Create claims
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Sign the token with RS256
+    let encoding_key =
+        EncodingKey::from_rsa_pem(&private_key).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Load the public key and validate
+    let decoding_key =
+        load_rsa_public_key("tests/fixtures/rsa_public.pem").expect("Failed to load public key");
+
+    let result = validate_jwt_with_key(&token, &decoding_key, "RS256");
+    assert!(
+        result.is_ok(),
+        "Should validate RS256 JWT: {:?}",
+        result.err()
+    );
+
+    let validated_claims = result.unwrap();
+    assert_eq!(validated_claims.sub, Some("test-user".to_string()));
+}
+
+#[test]
+fn test_can_validate_es256_jwt_with_test_key() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::{load_ecdsa_public_key, validate_jwt_with_key};
+
+    // Read the test private key to sign a token
+    let private_key =
+        fs::read("tests/fixtures/ecdsa_private.pem").expect("Failed to read private key");
+
+    // Create claims
+    let claims = serde_json::json!({
+        "sub": "ecdsa-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Sign the token with ES256
+    let encoding_key =
+        EncodingKey::from_ec_pem(&private_key).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::ES256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Load the public key and validate
+    let decoding_key = load_ecdsa_public_key("tests/fixtures/ecdsa_public.pem")
+        .expect("Failed to load public key");
+
+    let result = validate_jwt_with_key(&token, &decoding_key, "ES256");
+    assert!(
+        result.is_ok(),
+        "Should validate ES256 JWT: {:?}",
+        result.err()
+    );
+
+    let validated_claims = result.unwrap();
+    assert_eq!(validated_claims.sub, Some("ecdsa-user".to_string()));
+}
+
+#[test]
+fn test_rs256_authenticate_request_with_config() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::authenticate_request;
+    use yatagarasu::config::TokenSource;
+
+    // Read the test private key to sign a token
+    let private_key =
+        fs::read("tests/fixtures/rsa_private.pem").expect("Failed to read private key");
+
+    // Create claims
+    let now = chrono::Utc::now().timestamp() as u64;
+    let claims = yatagarasu::auth::Claims {
+        sub: Some("rs256-user".to_string()),
+        exp: Some(now + 3600),
+        iat: Some(now),
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Sign the token with RS256
+    let encoding_key =
+        EncodingKey::from_rsa_pem(&private_key).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Create JWT config for RS256
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: String::new(), // Not used for RS256
+        algorithm: "RS256".to_string(),
+        rsa_public_key_path: Some("tests/fixtures/rsa_public.pem".to_string()),
+        ecdsa_public_key_path: None,
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![],
+    };
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+    let query_params = HashMap::new();
+
+    let result = authenticate_request(&headers, &query_params, &jwt_config);
+    assert!(
+        result.is_ok(),
+        "Should authenticate RS256 JWT: {:?}",
+        result.err()
+    );
+
+    let validated_claims = result.unwrap();
+    assert_eq!(validated_claims.sub, Some("rs256-user".to_string()));
+}
+
+#[test]
+fn test_es256_authenticate_request_with_config() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::authenticate_request;
+    use yatagarasu::config::TokenSource;
+
+    // Read the test private key to sign a token
+    let private_key =
+        fs::read("tests/fixtures/ecdsa_private.pem").expect("Failed to read private key");
+
+    // Create claims
+    let now = chrono::Utc::now().timestamp() as u64;
+    let claims = yatagarasu::auth::Claims {
+        sub: Some("es256-user".to_string()),
+        exp: Some(now + 3600),
+        iat: Some(now),
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Sign the token with ES256
+    let encoding_key =
+        EncodingKey::from_ec_pem(&private_key).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::ES256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Create JWT config for ES256
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: String::new(), // Not used for ES256
+        algorithm: "ES256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: Some("tests/fixtures/ecdsa_public.pem".to_string()),
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![],
+    };
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+    let query_params = HashMap::new();
+
+    let result = authenticate_request(&headers, &query_params, &jwt_config);
+    assert!(
+        result.is_ok(),
+        "Should authenticate ES256 JWT: {:?}",
+        result.err()
+    );
+
+    let validated_claims = result.unwrap();
+    assert_eq!(validated_claims.sub, Some("es256-user".to_string()));
+}
+
+#[test]
+fn test_rs256_rejects_token_signed_with_wrong_key() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use rsa::pkcs8::EncodePrivateKey;
+    use rsa::RsaPrivateKey;
+    use yatagarasu::auth::authenticate_request;
+    use yatagarasu::config::TokenSource;
+
+    // Generate a different key pair for signing (not our test fixtures)
+    let mut rng = rand::thread_rng();
+    let wrong_private_key = RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key");
+    let wrong_pem = wrong_private_key
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .expect("Failed to export");
+
+    // Create claims
+    let now = chrono::Utc::now().timestamp() as u64;
+    let claims = yatagarasu::auth::Claims {
+        sub: Some("wrong-key-user".to_string()),
+        exp: Some(now + 3600),
+        iat: Some(now),
+        nbf: None,
+        iss: None,
+        custom: serde_json::Map::new(),
+    };
+
+    // Sign with the wrong key
+    let encoding_key =
+        EncodingKey::from_rsa_pem(wrong_pem.as_bytes()).expect("Failed to create encoding key");
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .expect("Failed to encode JWT");
+
+    // Create JWT config using our test public key (which won't match)
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: String::new(),
+        algorithm: "RS256".to_string(),
+        rsa_public_key_path: Some("tests/fixtures/rsa_public.pem".to_string()),
+        ecdsa_public_key_path: None,
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![],
+    };
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+    let query_params = HashMap::new();
+
+    let result = authenticate_request(&headers, &query_params, &jwt_config);
+    assert!(result.is_err(), "Should reject token signed with wrong key");
+}

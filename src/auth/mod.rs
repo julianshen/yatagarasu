@@ -3,8 +3,68 @@
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 use crate::config::{ClaimRule, JwtConfig};
+
+/// Error type for key loading operations
+#[derive(Debug)]
+pub enum KeyLoadError {
+    FileNotFound(String),
+    InvalidKeyFormat(String),
+    IoError(std::io::Error),
+}
+
+impl std::fmt::Display for KeyLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeyLoadError::FileNotFound(path) => {
+                write!(f, "Key file not found: {}", path)
+            }
+            KeyLoadError::InvalidKeyFormat(reason) => {
+                write!(f, "Invalid key format: {}", reason)
+            }
+            KeyLoadError::IoError(err) => {
+                write!(f, "IO error reading key file: {}", err)
+            }
+        }
+    }
+}
+
+impl std::error::Error for KeyLoadError {}
+
+impl From<std::io::Error> for KeyLoadError {
+    fn from(err: std::io::Error) -> Self {
+        KeyLoadError::IoError(err)
+    }
+}
+
+/// Load RSA public key from PEM file
+pub fn load_rsa_public_key(path: &str) -> Result<DecodingKey, KeyLoadError> {
+    let key_path = Path::new(path);
+    if !key_path.exists() {
+        return Err(KeyLoadError::FileNotFound(path.to_string()));
+    }
+
+    let pem_content = fs::read(key_path)?;
+
+    DecodingKey::from_rsa_pem(&pem_content)
+        .map_err(|e| KeyLoadError::InvalidKeyFormat(format!("Invalid RSA PEM format: {}", e)))
+}
+
+/// Load ECDSA public key from PEM file
+pub fn load_ecdsa_public_key(path: &str) -> Result<DecodingKey, KeyLoadError> {
+    let key_path = Path::new(path);
+    if !key_path.exists() {
+        return Err(KeyLoadError::FileNotFound(path.to_string()));
+    }
+
+    let pem_content = fs::read(key_path)?;
+
+    DecodingKey::from_ec_pem(&pem_content)
+        .map_err(|e| KeyLoadError::InvalidKeyFormat(format!("Invalid ECDSA PEM format: {}", e)))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -115,18 +175,28 @@ pub fn try_extract_token(
     None
 }
 
+/// Parse algorithm string to Algorithm enum
+pub fn parse_algorithm(algorithm: &str) -> Algorithm {
+    match algorithm {
+        "HS256" => Algorithm::HS256,
+        "HS384" => Algorithm::HS384,
+        "HS512" => Algorithm::HS512,
+        "RS256" => Algorithm::RS256,
+        "RS384" => Algorithm::RS384,
+        "RS512" => Algorithm::RS512,
+        "ES256" => Algorithm::ES256,
+        "ES384" => Algorithm::ES384,
+        _ => Algorithm::HS256, // Default to HS256 for backward compatibility
+    }
+}
+
+/// Validate JWT with HMAC secret (HS256, HS384, HS512)
 pub fn validate_jwt(
     token: &str,
     secret: &str,
     algorithm: &str,
 ) -> Result<Claims, jsonwebtoken::errors::Error> {
-    // Map algorithm string from config to jsonwebtoken Algorithm enum
-    let algo = match algorithm {
-        "HS256" => Algorithm::HS256,
-        "HS384" => Algorithm::HS384,
-        "HS512" => Algorithm::HS512,
-        _ => Algorithm::HS256, // Default to HS256 for backward compatibility
-    };
+    let algo = parse_algorithm(algorithm);
 
     let mut validation = Validation::new(algo);
     validation.validate_exp = true; // Validate expiration if present
@@ -138,6 +208,24 @@ pub fn validate_jwt(
         &DecodingKey::from_secret(secret.as_ref()),
         &validation,
     )?;
+
+    Ok(token_data.claims)
+}
+
+/// Validate JWT with a DecodingKey (for RS256, ES256, etc.)
+pub fn validate_jwt_with_key(
+    token: &str,
+    key: &DecodingKey,
+    algorithm: &str,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
+    let algo = parse_algorithm(algorithm);
+
+    let mut validation = Validation::new(algo);
+    validation.validate_exp = true;
+    validation.validate_nbf = true;
+    validation.required_spec_claims.clear();
+
+    let token_data = decode::<Claims>(token, key, &validation)?;
 
     Ok(token_data.claims)
 }
@@ -206,7 +294,47 @@ pub fn authenticate_request(
         "Validating JWT signature with algorithm: {}",
         jwt_config.algorithm
     );
-    let claims = validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm).map_err(|e| {
+
+    // Determine validation method based on algorithm
+    let claims = match jwt_config.algorithm.as_str() {
+        "RS256" | "RS384" | "RS512" => {
+            // Use RSA public key for RS* algorithms
+            let key_path = jwt_config.rsa_public_key_path.as_ref().ok_or_else(|| {
+                AuthError::InvalidToken(format!(
+                    "RSA public key path not configured for {} algorithm",
+                    jwt_config.algorithm
+                ))
+            })?;
+
+            let decoding_key = load_rsa_public_key(key_path).map_err(|e| {
+                tracing::error!("Failed to load RSA public key: {}", e);
+                AuthError::InvalidToken(format!("Failed to load RSA public key: {}", e))
+            })?;
+
+            validate_jwt_with_key(&token, &decoding_key, &jwt_config.algorithm)
+        }
+        "ES256" | "ES384" => {
+            // Use ECDSA public key for ES* algorithms
+            let key_path = jwt_config.ecdsa_public_key_path.as_ref().ok_or_else(|| {
+                AuthError::InvalidToken(format!(
+                    "ECDSA public key path not configured for {} algorithm",
+                    jwt_config.algorithm
+                ))
+            })?;
+
+            let decoding_key = load_ecdsa_public_key(key_path).map_err(|e| {
+                tracing::error!("Failed to load ECDSA public key: {}", e);
+                AuthError::InvalidToken(format!("Failed to load ECDSA public key: {}", e))
+            })?;
+
+            validate_jwt_with_key(&token, &decoding_key, &jwt_config.algorithm)
+        }
+        _ => {
+            // Use HMAC secret for HS* algorithms (default)
+            validate_jwt(&token, &jwt_config.secret, &jwt_config.algorithm)
+        }
+    }
+    .map_err(|e| {
         tracing::warn!("JWT signature validation failed: {}", e);
         AuthError::InvalidToken(e.to_string())
     })?;
