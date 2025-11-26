@@ -67,7 +67,10 @@ async fn test_end_to_end_cache_hit_flow() {
     let stats = cache.stats().await.unwrap();
     // Note: Stats may vary depending on implementation details of each layer
     // The key point is that we can retrieve the entry
-    assert!(stats.current_item_count >= 1, "Should have at least 1 entry after set");
+    assert!(
+        stats.current_item_count >= 1,
+        "Should have at least 1 entry after set"
+    );
 
     // Test 5: Delete entry
     let deleted = cache.delete(&key).await.unwrap();
@@ -78,7 +81,10 @@ async fn test_end_to_end_cache_hit_flow() {
     assert!(result.is_none(), "Should be cache miss after deletion");
 
     let stats = cache.stats().await.unwrap();
-    assert_eq!(stats.current_item_count, 0, "Should have 0 entries after deletion");
+    assert_eq!(
+        stats.current_item_count, 0,
+        "Should have 0 entries after deletion"
+    );
 }
 
 #[tokio::test]
@@ -94,7 +100,9 @@ async fn test_cache_promotion_disk_to_memory() {
     let cache_dir = temp_dir.path();
 
     // Create separate memory and disk cache instances
-    let memory_cache: Box<dyn Cache + Send + Sync> = Box::new(MemoryCache::new(&yatagarasu::cache::MemoryCacheConfig::default()));
+    let memory_cache: Box<dyn Cache + Send + Sync> = Box::new(MemoryCache::new(
+        &yatagarasu::cache::MemoryCacheConfig::default(),
+    ));
     let disk_cache: Box<dyn Cache + Send + Sync> = Box::new(DiskCache::with_config(
         cache_dir.to_path_buf(),
         100 * 1024 * 1024, // 100 MB
@@ -287,11 +295,7 @@ async fn test_cache_clear_api() {
         };
 
         let result = cache.get(&key).await.unwrap();
-        assert!(
-            result.is_none(),
-            "Should not find entry {} after clear",
-            i
-        );
+        assert!(result.is_none(), "Should not find entry {} after clear", i);
     }
 }
 
@@ -337,7 +341,10 @@ async fn test_cache_survives_disk_persistence() {
 
         // Verify entry exists
         let result = cache1.get(&key).await.unwrap();
-        assert!(result.is_some(), "Should find entry in first cache instance");
+        assert!(
+            result.is_some(),
+            "Should find entry in first cache instance"
+        );
 
         // cache1 is dropped here, but disk cache should persist
     }
@@ -440,7 +447,10 @@ async fn test_s3_response_populates_cache() {
     );
 
     // This is what SHOULD happen automatically after S3 response streaming
-    cache.set(key.clone(), simulated_s3_response.clone()).await.unwrap();
+    cache
+        .set(key.clone(), simulated_s3_response.clone())
+        .await
+        .unwrap();
 
     // STEP 3: Verify the "S3 response" is now in cache
     let cached_result = cache.get(&key).await.unwrap();
@@ -613,8 +623,9 @@ async fn test_promotion_is_async_and_does_not_slow_response() {
     let cache_dir = temp_dir.path();
 
     // Create separate memory and disk cache instances
-    let memory_cache: Box<dyn Cache + Send + Sync> =
-        Box::new(MemoryCache::new(&yatagarasu::cache::MemoryCacheConfig::default()));
+    let memory_cache: Box<dyn Cache + Send + Sync> = Box::new(MemoryCache::new(
+        &yatagarasu::cache::MemoryCacheConfig::default(),
+    ));
     let disk_cache: Box<dyn Cache + Send + Sync> = Box::new(DiskCache::with_config(
         cache_dir.to_path_buf(),
         100 * 1024 * 1024, // 100 MB
@@ -678,8 +689,8 @@ async fn test_promotion_is_async_and_does_not_slow_response() {
 #[tokio::test]
 async fn test_metrics_track_cache_evictions() {
     // Test: Metrics track cache evictions correctly
-    use yatagarasu::metrics::Metrics;
     use yatagarasu::cache::MemoryCacheConfig;
+    use yatagarasu::metrics::Metrics;
 
     let config = CacheConfig {
         enabled: true,
@@ -727,8 +738,8 @@ async fn test_metrics_track_cache_evictions() {
 #[tokio::test]
 async fn test_metrics_track_cache_size_bytes() {
     // Test: Metrics track cache size in bytes correctly
-    use yatagarasu::metrics::Metrics;
     use yatagarasu::cache::MemoryCacheConfig;
+    use yatagarasu::metrics::Metrics;
 
     let config = CacheConfig {
         enabled: true,
@@ -776,8 +787,8 @@ async fn test_metrics_track_cache_size_bytes() {
 #[tokio::test]
 async fn test_metrics_track_cache_items_count() {
     // Test: Metrics track cache item count correctly
-    use yatagarasu::metrics::Metrics;
     use yatagarasu::cache::MemoryCacheConfig;
+    use yatagarasu::metrics::Metrics;
 
     let config = CacheConfig {
         enabled: true,

@@ -181,13 +181,10 @@ impl RedisCache {
         let mut conn = self.connection.clone();
 
         // Get bytes from Redis using GET command
-        let bytes: Option<Vec<u8>> = conn
-            .get(&redis_key)
-            .await
-            .map_err(|e| {
-                RedisCacheMetrics::global().errors.inc();
-                CacheError::RedisError(format!("Redis GET failed: {}", e))
-            })?;
+        let bytes: Option<Vec<u8>> = conn.get(&redis_key).await.map_err(|e| {
+            RedisCacheMetrics::global().errors.inc();
+            CacheError::RedisError(format!("Redis GET failed: {}", e))
+        })?;
 
         match bytes {
             Some(data) => {
@@ -287,7 +284,10 @@ impl RedisCache {
         let mut conn = self.connection.clone();
 
         // Calculate TTL from entry.expires_at
-        let ttl_secs = match entry.expires_at.duration_since(std::time::SystemTime::now()) {
+        let ttl_secs = match entry
+            .expires_at
+            .duration_since(std::time::SystemTime::now())
+        {
             Ok(remaining) => {
                 let secs = remaining.as_secs();
                 // Apply minimum TTL: 1 second (don't set 0 or negative)
@@ -347,12 +347,10 @@ impl RedisCache {
         // Use DEL command to remove the key
         // DEL returns the number of keys deleted (0 or 1), but we don't care about the return value
         // because delete is idempotent - we succeed whether the key existed or not
-        conn.del::<_, ()>(&redis_key)
-            .await
-            .map_err(|e| {
-                RedisCacheMetrics::global().errors.inc();
-                CacheError::RedisError(format!("Redis DEL failed: {}", e))
-            })?;
+        conn.del::<_, ()>(&redis_key).await.map_err(|e| {
+            RedisCacheMetrics::global().errors.inc();
+            CacheError::RedisError(format!("Redis DEL failed: {}", e))
+        })?;
 
         // Increment eviction counter
         self.stats.increment_evictions();
@@ -442,6 +440,59 @@ impl RedisCache {
     /// - max_size_bytes: 0 (not applicable to Redis)
     pub fn stats(&self) -> CacheStats {
         self.stats.snapshot()
+    }
+}
+
+// ============================================================
+// Cache trait implementation for RedisCache
+// ============================================================
+
+use crate::cache::Cache;
+use async_trait::async_trait;
+
+#[async_trait]
+impl Cache for RedisCache {
+    async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+        // Delegate to the inherent method
+        RedisCache::get(self, key).await
+    }
+
+    async fn set(&self, key: CacheKey, entry: CacheEntry) -> Result<(), CacheError> {
+        // Delegate to the inherent method
+        RedisCache::set(self, key, entry).await
+    }
+
+    async fn delete(&self, key: &CacheKey) -> Result<bool, CacheError> {
+        // Format Redis key to check if it exists before deletion
+        let redis_key = key::format_key(&self.key_prefix, &key.bucket, &key.object_key);
+
+        // Check if key exists
+        let mut conn = self.connection.clone();
+        let exists: bool = conn
+            .exists(&redis_key)
+            .await
+            .map_err(|e| CacheError::RedisError(format!("Redis EXISTS failed: {}", e)))?;
+
+        // Delete the key (inherent method returns () not bool)
+        RedisCache::delete(self, key).await?;
+
+        // Return whether the key existed
+        Ok(exists)
+    }
+
+    async fn clear(&self) -> Result<(), CacheError> {
+        // Delegate to the inherent method (which returns count, we discard it)
+        let _count = RedisCache::clear(self).await?;
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<CacheStats, CacheError> {
+        // Delegate to the inherent method (which is sync, wrap in Ok)
+        Ok(RedisCache::stats(self))
+    }
+
+    async fn run_pending_tasks(&self) {
+        // No-op for Redis - all operations are immediately persisted
     }
 }
 

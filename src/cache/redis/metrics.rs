@@ -65,7 +65,7 @@ impl RedisCacheMetrics {
                 "yatagarasu_cache_operation_duration_seconds",
                 "Duration of cache operations in seconds",
                 &["operation"], // get, set, delete, clear
-                vec![0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0] // 0.1ms to 1s
+                vec![0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]  // 0.1ms to 1s
             )
             .expect("Failed to register cache_operation_duration_seconds metric");
 
@@ -74,7 +74,7 @@ impl RedisCacheMetrics {
                 "yatagarasu_cache_serialization_duration_seconds",
                 "Duration of serialization/deserialization in seconds",
                 &["operation"], // serialize, deserialize
-                vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01] // 10μs to 10ms
+                vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01]  // 10μs to 10ms
             )
             .expect("Failed to register cache_serialization_duration_seconds metric");
 

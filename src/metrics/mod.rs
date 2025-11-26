@@ -100,7 +100,7 @@ pub struct Metrics {
     // Phase 30: Cache metrics
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
-    cache_evictions: AtomicU64,          // Phase 30.8: eviction counter
+    cache_evictions: AtomicU64,           // Phase 30.8: eviction counter
     cache_size_bytes: AtomicU64,          // Phase 30.8: current cache size gauge
     cache_items: AtomicU64,               // Phase 30.8: current cached items gauge
     cache_get_durations: Mutex<Vec<u64>>, // microseconds
@@ -164,7 +164,7 @@ impl Metrics {
 
     /// Get the global singleton instance of Metrics
     pub fn global() -> &'static Self {
-        METRICS.get_or_init(|| Metrics::new())
+        METRICS.get_or_init(Metrics::new)
     }
 
     /// Check if metrics struct is valid (for testing)

@@ -1074,7 +1074,10 @@ async fn test_sets_redis_ttl_on_entry_insertion() {
 
     // Verify TTL is set in Redis by directly querying with TTL command
     // Format the Redis key
-    let redis_key = format!("{}:{}:{}", config.redis_key_prefix, key.bucket, key.object_key);
+    let redis_key = format!(
+        "{}:{}:{}",
+        config.redis_key_prefix, key.bucket, key.object_key
+    );
 
     // Get a connection and check TTL
     let client = redis::Client::open(redis_url.as_str()).unwrap();
@@ -1139,7 +1142,10 @@ async fn test_calculates_ttl_from_entry_expires_at() {
     cache.set(key.clone(), entry).await.unwrap();
 
     // Verify TTL matches entry.expires_at (3600s), not config default (7200s)
-    let redis_key = format!("{}:{}:{}", config.redis_key_prefix, key.bucket, key.object_key);
+    let redis_key = format!(
+        "{}:{}:{}",
+        config.redis_key_prefix, key.bucket, key.object_key
+    );
 
     let client = redis::Client::open(redis_url.as_str()).unwrap();
     let mut conn = client.get_async_connection().await.unwrap();

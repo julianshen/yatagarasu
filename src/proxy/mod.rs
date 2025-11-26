@@ -284,6 +284,44 @@ impl YatagarasuProxy {
         self
     }
 
+    /// Initialize the cache from configuration asynchronously
+    /// Phase 30: Cache integration
+    ///
+    /// This method should be called after creating the proxy to initialize
+    /// the tiered cache if caching is enabled in the configuration.
+    ///
+    /// # Returns
+    /// Returns the proxy with cache initialized, or the proxy unchanged if cache is disabled
+    pub async fn init_cache(mut self) -> Self {
+        // Check if cache is enabled in config
+        if let Some(ref cache_config) = self.config.cache {
+            if cache_config.enabled && !cache_config.cache_layers.is_empty() {
+                match TieredCache::from_config(cache_config).await {
+                    Ok(tiered_cache) => {
+                        tracing::info!(
+                            layers = ?cache_config.cache_layers,
+                            "Cache initialized successfully"
+                        );
+                        self.cache = Some(Arc::new(tiered_cache));
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "Failed to initialize cache, continuing without cache"
+                        );
+                        // Continue without cache - graceful degradation
+                    }
+                }
+            } else {
+                tracing::info!("Cache is disabled or no cache layers configured");
+            }
+        } else {
+            tracing::info!("No cache configuration found");
+        }
+
+        self
+    }
+
     /// Get a reference to the metrics instance
     pub fn metrics(&self) -> Arc<Metrics> {
         Arc::clone(&self.metrics)
@@ -1383,6 +1421,219 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
+        // Special handling for /admin/cache/purge/:bucket/*path endpoint (Phase 30.6: Bucket-level purge)
+        // Path format: /admin/cache/purge/{bucket}/{object_path}
+        if path.starts_with("/admin/cache/purge/")
+            && method == "POST"
+            && path != "/admin/cache/purge"
+        {
+            // Parse bucket and optional object path from URL
+            let parts: Vec<&str> = path
+                .strip_prefix("/admin/cache/purge/")
+                .unwrap()
+                .splitn(2, '/')
+                .collect();
+            let bucket_name = parts[0];
+            let object_path = parts.get(1).map(|s| format!("/{}", s));
+
+            if let Some(ref cache) = self.cache {
+                // Check authentication if JWT is enabled
+                if let Some(jwt_config) = &self.config.jwt {
+                    if jwt_config.enabled {
+                        let headers = Self::extract_headers(req);
+                        let query_params = Self::extract_query_params(req);
+
+                        match authenticate_request(&headers, &query_params, jwt_config) {
+                            Ok(_claims) => {
+                                tracing::debug!(
+                                    request_id = %ctx.request_id(),
+                                    bucket = %bucket_name,
+                                    "Cache purge request authenticated successfully"
+                                );
+                            }
+                            Err(auth_error) => {
+                                tracing::warn!(
+                                    request_id = %ctx.request_id(),
+                                    error = %auth_error,
+                                    "Cache purge authentication failed"
+                                );
+
+                                let response_json = serde_json::json!({
+                                    "status": "error",
+                                    "message": format!("Authentication required: {}", auth_error),
+                                });
+                                let response_body = response_json.to_string();
+
+                                let mut header = ResponseHeader::build(401, None)?;
+                                header.insert_header("Content-Type", "application/json")?;
+                                header.insert_header(
+                                    "Content-Length",
+                                    response_body.len().to_string(),
+                                )?;
+
+                                session
+                                    .write_response_header(Box::new(header), false)
+                                    .await?;
+                                session
+                                    .write_response_body(Some(response_body.into()), true)
+                                    .await?;
+                                self.metrics.increment_status_count(401);
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+
+                // Handle purge based on whether object_path is provided
+                if let Some(obj_path) = object_path {
+                    // Purge specific object: /admin/cache/purge/:bucket/*path
+                    let cache_key = CacheKey {
+                        bucket: bucket_name.to_string(),
+                        object_key: obj_path.clone(),
+                        etag: None,
+                    };
+
+                    match cache.delete(&cache_key).await {
+                        Ok(deleted) => {
+                            tracing::info!(
+                                request_id = %ctx.request_id(),
+                                bucket = %bucket_name,
+                                object_path = %obj_path,
+                                deleted = deleted,
+                                "Cache entry purged"
+                            );
+
+                            let response_json = serde_json::json!({
+                                "status": "success",
+                                "message": if deleted { "Cache entry purged" } else { "Cache entry not found" },
+                                "bucket": bucket_name,
+                                "path": obj_path,
+                                "deleted": deleted,
+                            });
+                            let response_body = response_json.to_string();
+
+                            let mut header = ResponseHeader::build(200, None)?;
+                            header.insert_header("Content-Type", "application/json")?;
+                            header
+                                .insert_header("Content-Length", response_body.len().to_string())?;
+
+                            session
+                                .write_response_header(Box::new(header), false)
+                                .await?;
+                            session
+                                .write_response_body(Some(response_body.into()), true)
+                                .await?;
+                            self.metrics.increment_status_count(200);
+                            return Ok(true);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                request_id = %ctx.request_id(),
+                                error = %e,
+                                "Failed to purge cache entry"
+                            );
+
+                            let response_json = serde_json::json!({
+                                "status": "error",
+                                "message": format!("Failed to purge cache entry: {}", e),
+                            });
+                            let response_body = response_json.to_string();
+
+                            let mut header = ResponseHeader::build(500, None)?;
+                            header.insert_header("Content-Type", "application/json")?;
+                            header
+                                .insert_header("Content-Length", response_body.len().to_string())?;
+
+                            session
+                                .write_response_header(Box::new(header), false)
+                                .await?;
+                            session
+                                .write_response_body(Some(response_body.into()), true)
+                                .await?;
+                            self.metrics.increment_status_count(500);
+                            return Ok(true);
+                        }
+                    }
+                } else {
+                    // Purge entire bucket: /admin/cache/purge/:bucket
+                    // Note: This requires iterating through cache - currently we just clear the entire cache
+                    // TODO: Implement bucket-specific purge when Cache trait supports it
+                    tracing::warn!(
+                        request_id = %ctx.request_id(),
+                        bucket = %bucket_name,
+                        "Bucket-level purge not yet fully implemented, clearing entire cache"
+                    );
+
+                    match cache.clear().await {
+                        Ok(()) => {
+                            let response_json = serde_json::json!({
+                                "status": "success",
+                                "message": "Cache cleared (bucket-specific purge not yet implemented)",
+                                "bucket": bucket_name,
+                                "note": "Currently clears entire cache. Bucket-specific purge coming soon.",
+                            });
+                            let response_body = response_json.to_string();
+
+                            let mut header = ResponseHeader::build(200, None)?;
+                            header.insert_header("Content-Type", "application/json")?;
+                            header
+                                .insert_header("Content-Length", response_body.len().to_string())?;
+
+                            session
+                                .write_response_header(Box::new(header), false)
+                                .await?;
+                            session
+                                .write_response_body(Some(response_body.into()), true)
+                                .await?;
+                            self.metrics.increment_status_count(200);
+                            return Ok(true);
+                        }
+                        Err(e) => {
+                            let response_json = serde_json::json!({
+                                "status": "error",
+                                "message": format!("Failed to purge cache: {}", e),
+                            });
+                            let response_body = response_json.to_string();
+
+                            let mut header = ResponseHeader::build(500, None)?;
+                            header.insert_header("Content-Type", "application/json")?;
+                            header
+                                .insert_header("Content-Length", response_body.len().to_string())?;
+
+                            session
+                                .write_response_header(Box::new(header), false)
+                                .await?;
+                            session
+                                .write_response_body(Some(response_body.into()), true)
+                                .await?;
+                            self.metrics.increment_status_count(500);
+                            return Ok(true);
+                        }
+                    }
+                }
+            } else {
+                // Cache not enabled
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Cache is not enabled",
+                });
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(404, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+                self.metrics.increment_status_count(404);
+                return Ok(true);
+            }
+        }
+
         // Special handling for /admin/cache/stats endpoint (Phase 30: Cache Management API)
         if path == "/admin/cache/stats" && method == "GET" {
             // Check if cache is enabled
@@ -1786,7 +2037,8 @@ impl ProxyHttp for YatagarasuProxy {
                             // Cache hit!
                             // Phase 30.7: ETag validation
                             // Check if client sent If-None-Match header for conditional requests
-                            if let Some(if_none_match) = headers.get("If-None-Match")
+                            if let Some(if_none_match) = headers
+                                .get("If-None-Match")
                                 .or_else(|| headers.get("if-none-match"))
                             {
                                 // If ETags match, return 304 Not Modified
@@ -1803,7 +2055,9 @@ impl ProxyHttp for YatagarasuProxy {
                                     header.insert_header("ETag", cached_entry.etag.as_str())?;
                                     header.insert_header("X-Cache", "HIT")?;
 
-                                    session.write_response_header(Box::new(header), true).await?;
+                                    session
+                                        .write_response_header(Box::new(header), true)
+                                        .await?;
                                     self.metrics.increment_status_count(304);
                                     self.metrics.increment_cache_hit();
                                     return Ok(true);
@@ -1819,9 +2073,15 @@ impl ProxyHttp for YatagarasuProxy {
 
                             // Build response from cached entry
                             let mut header = ResponseHeader::build(200, None)?;
-                            header.insert_header("Content-Type", cached_entry.content_type.as_str())?;
+                            header.insert_header(
+                                "Content-Type",
+                                cached_entry.content_type.as_str(),
+                            )?;
                             header.insert_header("ETag", cached_entry.etag.as_str())?;
-                            header.insert_header("Content-Length", cached_entry.data.len().to_string())?;
+                            header.insert_header(
+                                "Content-Length",
+                                cached_entry.data.len().to_string(),
+                            )?;
                             header.insert_header("X-Cache", "HIT")?; // Indicate cache hit
 
                             // Write response header
@@ -2230,7 +2490,9 @@ impl ProxyHttp for YatagarasuProxy {
         // Only buffer successful (200) responses that are not range requests
         if status == 200 && self.cache.is_some() {
             // Capture response headers for cache entry
-            if let Some(content_type) = upstream_response.headers.get("content-type")
+            if let Some(content_type) = upstream_response
+                .headers
+                .get("content-type")
                 .or_else(|| upstream_response.headers.get("Content-Type"))
             {
                 if let Ok(ct_str) = content_type.to_str() {
@@ -2238,7 +2500,9 @@ impl ProxyHttp for YatagarasuProxy {
                 }
             }
 
-            if let Some(etag) = upstream_response.headers.get("etag")
+            if let Some(etag) = upstream_response
+                .headers
+                .get("etag")
                 .or_else(|| upstream_response.headers.get("ETag"))
             {
                 if let Ok(etag_str) = etag.to_str() {

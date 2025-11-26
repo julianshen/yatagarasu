@@ -3,8 +3,9 @@
 //! Provides a cache hierarchy with multiple layers (memory → disk → redis)
 //! that automatically promotes frequently accessed items to faster layers.
 
-use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats, MemoryCache};
 use crate::cache::disk::DiskCache;
+use crate::cache::redis::{RedisCache, RedisConfig};
+use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats, MemoryCache};
 use crate::metrics::Metrics;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -88,12 +89,24 @@ impl TieredCache {
                     layers.push(Box::new(disk_cache));
                 }
                 "redis" => {
-                    // TODO: Create RedisCache from configuration (async)
-                    // RedisCache needs to implement the Cache trait first
-                    // For now, return an error
-                    return Err(CacheError::ConfigurationError(
-                        "Redis cache layer not yet integrated with Cache trait".to_string(),
-                    ));
+                    // Create RedisCache from configuration
+                    // Convert RedisCacheConfig to RedisConfig
+                    let redis_config = RedisConfig {
+                        redis_url: config.redis.redis_url.clone(),
+                        redis_password: config.redis.redis_password.clone(),
+                        redis_db: config.redis.redis_db,
+                        redis_key_prefix: config.redis.redis_key_prefix.clone(),
+                        redis_ttl_seconds: config.redis.redis_ttl_seconds,
+                        redis_max_ttl_seconds: 86400, // Default: 1 day
+                        connection_timeout_ms: 5000,  // Default: 5 seconds
+                        operation_timeout_ms: 2000,   // Default: 2 seconds
+                        min_pool_size: 1,
+                        max_pool_size: 10,
+                    };
+
+                    // Create RedisCache (async)
+                    let redis_cache = RedisCache::new(redis_config).await?;
+                    layers.push(Box::new(redis_cache));
                 }
                 unknown => {
                     return Err(CacheError::ConfigurationError(format!(
@@ -130,7 +143,9 @@ impl Cache for TieredCache {
                         for promote_to_index in 0..layer_index {
                             if let Some(faster_layer) = self.layers.get(promote_to_index) {
                                 // Ignore promotion errors - they shouldn't block the get
-                                let _ = faster_layer.set(key_clone.clone(), entry_clone.clone()).await;
+                                let _ = faster_layer
+                                    .set(key_clone.clone(), entry_clone.clone())
+                                    .await;
                             }
                         }
                     }
@@ -463,9 +478,9 @@ mod tests {
         let mock_redis = MockCache::new("redis");
 
         let tiered = TieredCache::new(vec![
-            Box::new(mock_memory),  // Layer 0: memory (fastest)
-            Box::new(mock_disk),    // Layer 1: disk
-            Box::new(mock_redis),   // Layer 2: redis (slowest)
+            Box::new(mock_memory), // Layer 0: memory (fastest)
+            Box::new(mock_disk),   // Layer 1: disk
+            Box::new(mock_redis),  // Layer 2: redis (slowest)
         ]);
 
         // Verify layer count matches expected order
@@ -509,7 +524,10 @@ mod tests {
 
         // This should not panic - verifies the method exists and can be called
         let result = TieredCache::from_config(&config).await;
-        assert!(result.is_ok(), "Should create TieredCache from empty config");
+        assert!(
+            result.is_ok(),
+            "Should create TieredCache from empty config"
+        );
 
         let tiered = result.unwrap();
         // With empty cache_layers, we expect 0 layers
@@ -584,10 +602,7 @@ mod tests {
         memory_cache.set(key.clone(), entry.clone()).await.unwrap();
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Get from tiered cache - should find in memory layer
         let result = tiered.get(&key).await.unwrap();
@@ -627,14 +642,14 @@ mod tests {
         disk_cache.set(key.clone(), entry.clone()).await.unwrap();
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Get from tiered cache - should miss memory, find in disk
         let result = tiered.get(&key).await.unwrap();
-        assert!(result.is_some(), "Should find entry in disk layer after memory miss");
+        assert!(
+            result.is_some(),
+            "Should find entry in disk layer after memory miss"
+        );
 
         let retrieved = result.unwrap();
         assert_eq!(retrieved.data, Bytes::from("test data from disk"));
@@ -651,10 +666,7 @@ mod tests {
         let disk_cache = MockCache::new("disk");
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Try to get a key that doesn't exist in any layer
         let key = CacheKey {
@@ -698,10 +710,7 @@ mod tests {
         disk_cache.set(key.clone(), entry.clone()).await.unwrap();
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Get from tiered cache - should find in disk and promote to memory
         let result = tiered.get(&key).await.unwrap();
@@ -718,10 +727,16 @@ mod tests {
             let entries = memory_entries.lock().await;
             let cache_key = format!("{}/{}", key.bucket, key.object_key);
             let promoted = entries.get(&cache_key);
-            assert!(promoted.is_some(), "Entry should be promoted to memory layer");
+            assert!(
+                promoted.is_some(),
+                "Entry should be promoted to memory layer"
+            );
 
             let promoted_entry = promoted.unwrap();
-            assert_eq!(promoted_entry.data, Bytes::from("data from disk to be promoted"));
+            assert_eq!(
+                promoted_entry.data,
+                Bytes::from("data from disk to be promoted")
+            );
         }
     }
 
@@ -741,10 +756,7 @@ mod tests {
         let disk_entries = disk_cache.entries.clone(); // Keep reference to check writes
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Create entry to set
         let key = CacheKey {
@@ -768,7 +780,10 @@ mod tests {
             let entries = memory_entries.lock().await;
             let cache_key = format!("{}/{}", key.bucket, key.object_key);
             let memory_entry = entries.get(&cache_key);
-            assert!(memory_entry.is_some(), "Entry should be written to memory layer");
+            assert!(
+                memory_entry.is_some(),
+                "Entry should be written to memory layer"
+            );
 
             let written = memory_entry.unwrap();
             assert_eq!(written.data, Bytes::from("data written to all layers"));
@@ -781,7 +796,10 @@ mod tests {
             let entries = disk_entries.lock().await;
             let cache_key = format!("{}/{}", key.bucket, key.object_key);
             let disk_entry = entries.get(&cache_key);
-            assert!(disk_entry.is_some(), "Entry should be written to disk layer");
+            assert!(
+                disk_entry.is_some(),
+                "Entry should be written to disk layer"
+            );
 
             let written = disk_entry.unwrap();
             assert_eq!(written.data, Bytes::from("data written to all layers"));
@@ -833,10 +851,7 @@ mod tests {
         }
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Delete from tiered cache
         let deleted = tiered.delete(&key).await.unwrap();
@@ -846,14 +861,20 @@ mod tests {
         {
             let entries = memory_entries.lock().await;
             let cache_key = format!("{}/{}", key.bucket, key.object_key);
-            assert!(entries.get(&cache_key).is_none(), "Entry should be removed from memory");
+            assert!(
+                entries.get(&cache_key).is_none(),
+                "Entry should be removed from memory"
+            );
         }
 
         // Verify entry is removed from disk layer
         {
             let entries = disk_entries.lock().await;
             let cache_key = format!("{}/{}", key.bucket, key.object_key);
-            assert!(entries.get(&cache_key).is_none(), "Entry should be removed from disk");
+            assert!(
+                entries.get(&cache_key).is_none(),
+                "Entry should be removed from disk"
+            );
         }
     }
 
@@ -900,10 +921,7 @@ mod tests {
         }
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Clear all layers
         tiered.clear().await.unwrap();
@@ -933,10 +951,7 @@ mod tests {
         let disk_cache = MockCache::new("disk");
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Get stats from tiered cache
         let stats = tiered.stats().await.unwrap();
@@ -972,10 +987,7 @@ mod tests {
         let disk_cache = MockCache::new("disk");
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![
-            Box::new(memory_cache),
-            Box::new(disk_cache),
-        ]);
+        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
 
         // Get per-layer stats breakdown
         let per_layer = tiered.per_layer_stats().await.unwrap();

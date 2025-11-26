@@ -7,6 +7,7 @@ use bytes::Bytes;
 use std::path::Path;
 
 /// Portable filesystem backend using tokio::fs
+#[derive(Default)]
 pub struct TokioFsBackend;
 
 impl TokioFsBackend {

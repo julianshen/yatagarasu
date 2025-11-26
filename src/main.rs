@@ -109,8 +109,19 @@ fn main() {
     });
     server.bootstrap();
 
-    // Create YatagarasuProxy instance with reload support
-    let proxy = YatagarasuProxy::with_reload(config.clone(), args.config.clone());
+    // Create YatagarasuProxy instance with reload support and cache initialization
+    // Use a tokio runtime to initialize the cache (async operation) in the sync main function
+    let proxy = {
+        let proxy = YatagarasuProxy::with_reload(config.clone(), args.config.clone());
+
+        // Initialize cache using a temporary tokio runtime
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime for cache initialization");
+
+        rt.block_on(proxy.init_cache())
+    };
 
     // Create HTTP proxy service
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);

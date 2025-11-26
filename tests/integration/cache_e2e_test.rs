@@ -600,11 +600,7 @@ fn test_e2e_etag_validation_on_cache_hit() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -713,7 +709,10 @@ fn test_e2e_etag_validation_on_cache_hit() {
     });
     let etag_v2 = put_response_v2.e_tag().expect("No ETag in response");
     log::info!("Uploaded version 2 with ETag: {}", etag_v2);
-    assert_ne!(etag_v1, etag_v2, "ETags should differ for different content");
+    assert_ne!(
+        etag_v1, etag_v2,
+        "ETags should differ for different content"
+    );
 
     // Request 3: Cache hit → validate ETag with S3 → ETag differs → fetch new content
     log::info!("Request 3: Cache hit → ETag validation (should differ) → fetch new content");
@@ -786,11 +785,7 @@ fn test_e2e_if_none_match_returns_304() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -863,7 +858,11 @@ fn test_e2e_if_none_match_returns_304() {
         .get(&url)
         .send()
         .expect("Failed to make first request");
-    assert_eq!(response1.status(), 200, "First request should return 200 OK");
+    assert_eq!(
+        response1.status(),
+        200,
+        "First request should return 200 OK"
+    );
 
     // Extract ETag from response (before consuming response body)
     let response_etag = response1
@@ -879,9 +878,7 @@ fn test_e2e_if_none_match_returns_304() {
     assert_eq!(body1.as_ref(), test_content_v1);
 
     // Request 2: Send If-None-Match with matching ETag → expect 304 Not Modified
-    log::info!(
-        "Request 2: If-None-Match with matching ETag → expect 304 Not Modified"
-    );
+    log::info!("Request 2: If-None-Match with matching ETag → expect 304 Not Modified");
     let response2 = client
         .get(&url)
         .header("If-None-Match", &response_etag)
@@ -923,7 +920,10 @@ fn test_e2e_if_none_match_returns_304() {
         .expect("No ETag in response")
         .to_string();
     log::info!("Uploaded version 2 with ETag: {}", etag_v2);
-    assert_ne!(etag_v1, etag_v2, "ETags should differ for different content");
+    assert_ne!(
+        etag_v1, etag_v2,
+        "ETags should differ for different content"
+    );
 
     // Request 3: Send If-None-Match with old ETag (no longer matches) → expect 200 + new content
     log::info!("Request 3: If-None-Match with OLD ETag → expect 200 OK with new content");
@@ -1030,11 +1030,7 @@ fn test_e2e_range_requests_bypass_cache() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -1061,7 +1057,9 @@ fn test_e2e_range_requests_bypass_cache() {
             .put_object()
             .bucket("test-bucket")
             .key("range-test.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .content_type("application/octet-stream")
             .send()
             .await
@@ -1103,7 +1101,10 @@ fn test_e2e_range_requests_bypass_cache() {
         .expect("Failed to make first request");
     assert_eq!(response1.status(), 200);
     assert_eq!(
-        response1.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        response1
+            .headers()
+            .get("content-length")
+            .map(|v| v.to_str().unwrap()),
         Some("256"),
         "Full file should be 256 bytes"
     );
@@ -1134,15 +1135,15 @@ fn test_e2e_range_requests_bypass_cache() {
         .headers()
         .get("content-range")
         .map(|v| v.to_str().unwrap());
-    assert!(
-        content_range.is_some(),
-        "Should have Content-Range header"
-    );
+    assert!(content_range.is_some(), "Should have Content-Range header");
     log::info!("Content-Range: {:?}", content_range);
 
     // Verify content length
     assert_eq!(
-        response2.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        response2
+            .headers()
+            .get("content-length")
+            .map(|v| v.to_str().unwrap()),
         Some("100"),
         "Range response should be 100 bytes"
     );
@@ -1171,12 +1172,17 @@ fn test_e2e_range_requests_bypass_cache() {
         "Second range request should return 206"
     );
     assert_eq!(
-        response3.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        response3
+            .headers()
+            .get("content-length")
+            .map(|v| v.to_str().unwrap()),
         Some("100"),
         "Second range response should be 100 bytes"
     );
 
-    let body3 = response3.bytes().expect("Failed to read second range response");
+    let body3 = response3
+        .bytes()
+        .expect("Failed to read second range response");
     assert_eq!(body3.len(), 100, "Should receive 100 bytes again");
     assert_eq!(
         body3.as_ref(),
@@ -1200,12 +1206,17 @@ fn test_e2e_range_requests_bypass_cache() {
         "Third range request should return 206"
     );
     assert_eq!(
-        response4.headers().get("content-length").map(|v| v.to_str().unwrap()),
+        response4
+            .headers()
+            .get("content-length")
+            .map(|v| v.to_str().unwrap()),
         Some("100"),
         "Third range response should be 100 bytes"
     );
 
-    let body4 = response4.bytes().expect("Failed to read third range response");
+    let body4 = response4
+        .bytes()
+        .expect("Failed to read third range response");
     assert_eq!(body4.len(), 100, "Should receive 100 bytes");
     assert_eq!(
         body4.as_ref(),
@@ -1291,11 +1302,7 @@ fn test_e2e_large_files_bypass_cache() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -1323,7 +1330,9 @@ fn test_e2e_large_files_bypass_cache() {
             .put_object()
             .bucket("test-bucket")
             .key("large-file.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(large_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                large_content.clone(),
+            ))
             .content_type("application/octet-stream")
             .send()
             .await
@@ -1339,7 +1348,9 @@ fn test_e2e_large_files_bypass_cache() {
             .put_object()
             .bucket("test-bucket")
             .key("small-file.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(small_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                small_content.clone(),
+            ))
             .content_type("application/octet-stream")
             .send()
             .await
@@ -1414,7 +1425,11 @@ buckets:
     );
 
     let body1 = response1.bytes().expect("Failed to read large file body");
-    assert_eq!(body1.len(), large_file_size, "Should receive full large file");
+    assert_eq!(
+        body1.len(),
+        large_file_size,
+        "Should receive full large file"
+    );
     assert_eq!(
         body1.as_ref(),
         &large_content[..],
@@ -1548,8 +1563,8 @@ fn test_e2e_small_files_cached_in_memory() {
     // Start LocalStack container for S3 backend
     log::info!("Starting LocalStack container...");
     let docker = Cli::default();
-    let localstack_image = RunnableImage::from(LocalStack::default())
-        .with_env_var(("SERVICES", "s3"));
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
     let container = docker.run(localstack_image);
     let s3_port = container.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
@@ -1563,11 +1578,7 @@ fn test_e2e_small_files_cached_in_memory() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -1699,7 +1710,11 @@ buckets:
     assert_eq!(response1.status(), 200, "Expected 200 OK");
     let body1 = response1.bytes().expect("Failed to read response body");
     assert_eq!(body1.len(), 102400, "Expected 100KB file");
-    assert_eq!(body1.as_ref(), file_100kb.as_slice(), "File content mismatch");
+    assert_eq!(
+        body1.as_ref(),
+        file_100kb.as_slice(),
+        "File content mismatch"
+    );
     log::info!("✓ 100KB file fetched successfully (first request)");
 
     // Test 2: Second request for same 100 KB file → should serve from cache
@@ -1712,7 +1727,11 @@ buckets:
     assert_eq!(response2.status(), 200, "Expected 200 OK");
     let body2 = response2.bytes().expect("Failed to read response body");
     assert_eq!(body2.len(), 102400, "Expected 100KB file");
-    assert_eq!(body2.as_ref(), file_100kb.as_slice(), "File content mismatch");
+    assert_eq!(
+        body2.as_ref(),
+        file_100kb.as_slice(),
+        "File content mismatch"
+    );
     log::info!("✓ 100KB file fetched successfully (second request - cache hit expected)");
 
     // Test 3: First request for 500 KB file → should cache
@@ -1725,7 +1744,11 @@ buckets:
     assert_eq!(response3.status(), 200, "Expected 200 OK");
     let body3 = response3.bytes().expect("Failed to read response body");
     assert_eq!(body3.len(), 512000, "Expected 500KB file");
-    assert_eq!(body3.as_ref(), file_500kb.as_slice(), "File content mismatch");
+    assert_eq!(
+        body3.as_ref(),
+        file_500kb.as_slice(),
+        "File content mismatch"
+    );
     log::info!("✓ 500KB file fetched successfully (first request)");
 
     // Test 4: Second request for same 500 KB file → should serve from cache
@@ -1738,7 +1761,11 @@ buckets:
     assert_eq!(response4.status(), 200, "Expected 200 OK");
     let body4 = response4.bytes().expect("Failed to read response body");
     assert_eq!(body4.len(), 512000, "Expected 500KB file");
-    assert_eq!(body4.as_ref(), file_500kb.as_slice(), "File content mismatch");
+    assert_eq!(
+        body4.as_ref(),
+        file_500kb.as_slice(),
+        "File content mismatch"
+    );
     log::info!("✓ 500KB file fetched successfully (second request - cache hit expected)");
 
     // Test 5: First request for 1 MB file → should cache
@@ -1803,7 +1830,11 @@ buckets:
     assert_eq!(response9.status(), 200, "Expected 200 OK");
     let body9 = response9.bytes().expect("Failed to read response body");
     assert_eq!(body9.len(), 102400, "Expected 100KB file");
-    assert_eq!(body9.as_ref(), file_100kb.as_slice(), "File content mismatch");
+    assert_eq!(
+        body9.as_ref(),
+        file_100kb.as_slice(),
+        "File content mismatch"
+    );
     log::info!("✓ 100KB file fetched successfully (should still be cached)");
 
     log::info!("Small files cached in memory test completed successfully");
@@ -1859,8 +1890,8 @@ fn test_e2e_lru_eviction_under_memory_pressure() {
     // Start LocalStack container for S3 backend
     log::info!("Starting LocalStack container...");
     let docker = Cli::default();
-    let localstack_image = RunnableImage::from(LocalStack::default())
-        .with_env_var(("SERVICES", "s3"));
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
     let container = docker.run(localstack_image);
     let s3_port = container.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
@@ -1874,11 +1905,7 @@ fn test_e2e_lru_eviction_under_memory_pressure() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -2222,8 +2249,8 @@ fn test_e2e_concurrent_requests_coalesce() {
     // Start LocalStack container for S3 backend
     log::info!("Starting LocalStack container...");
     let docker = Cli::default();
-    let localstack_image = RunnableImage::from(LocalStack::default())
-        .with_env_var(("SERVICES", "s3"));
+    let localstack_image =
+        RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
     let container = docker.run(localstack_image);
     let s3_port = container.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
@@ -2237,11 +2264,7 @@ fn test_e2e_concurrent_requests_coalesce() {
             .endpoint_url(&s3_endpoint)
             .region(aws_config::Region::new("us-east-1"))
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -2422,13 +2445,24 @@ buckets:
         "All concurrent requests should succeed with correct content"
     );
 
-    log::info!("✓ All {} concurrent requests succeeded", concurrent_requests);
+    log::info!(
+        "✓ All {} concurrent requests succeeded",
+        concurrent_requests
+    );
 
     // Calculate statistics
     let total_time: Duration = results.iter().map(|(_, _, elapsed)| *elapsed).sum();
     let avg_time = total_time / concurrent_requests as u32;
-    let max_time = results.iter().map(|(_, _, elapsed)| *elapsed).max().unwrap();
-    let min_time = results.iter().map(|(_, _, elapsed)| *elapsed).min().unwrap();
+    let max_time = results
+        .iter()
+        .map(|(_, _, elapsed)| *elapsed)
+        .max()
+        .unwrap();
+    let min_time = results
+        .iter()
+        .map(|(_, _, elapsed)| *elapsed)
+        .min()
+        .unwrap();
 
     log::info!("Concurrent request statistics:");
     log::info!("  - Average time: {:?}", avg_time);
@@ -2508,11 +2542,7 @@ fn test_e2e_memory_cache_metrics_tracked_correctly() {
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "static",
+                "test", "test", None, None, "static",
             ))
             .load()
             .await;
@@ -2546,7 +2576,9 @@ fn test_e2e_memory_cache_metrics_tracked_correctly() {
             .put_object()
             .bucket(bucket_name)
             .key("file-a.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_a_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_a_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file A");
@@ -2556,7 +2588,9 @@ fn test_e2e_memory_cache_metrics_tracked_correctly() {
             .put_object()
             .bucket(bucket_name)
             .key("file-b.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_b_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_b_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file B");
@@ -2566,7 +2600,9 @@ fn test_e2e_memory_cache_metrics_tracked_correctly() {
             .put_object()
             .bucket(bucket_name)
             .key("file-c.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_c_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_c_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file C");
@@ -2576,7 +2612,9 @@ fn test_e2e_memory_cache_metrics_tracked_correctly() {
             .put_object()
             .bucket(bucket_name)
             .key("file-d.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_d_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_d_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file D");
@@ -2619,11 +2657,8 @@ buckets:
     println!("Created config at: {:?}", config_path);
 
     // Start proxy
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().expect("Invalid config path"),
-        PORT,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().expect("Invalid config path"), PORT)
+        .expect("Failed to start proxy");
 
     println!("Proxy started on port {}", PORT);
 
@@ -2665,11 +2700,7 @@ buckets:
     );
 
     let body_a = response.bytes().expect("Failed to read response body");
-    assert_eq!(
-        body_a.len(),
-        400 * 1024,
-        "File A should be 400 KB"
-    );
+    assert_eq!(body_a.len(), 400 * 1024, "File A should be 400 KB");
     assert_eq!(
         body_a.as_ref(),
         file_a_content.as_slice(),
@@ -2721,10 +2752,7 @@ buckets:
     // === Phase 3: Add file B (cache miss) ===
     println!("\n=== Phase 3: First request to file B (cache miss) ===");
     let url_b = proxy.url("/data/file-b.bin");
-    let response = client
-        .get(&url_b)
-        .send()
-        .expect("Failed to request file B");
+    let response = client.get(&url_b).send().expect("Failed to request file B");
 
     assert_eq!(response.status(), 200, "Request to file B should succeed");
 
@@ -2750,10 +2778,7 @@ buckets:
     // === Phase 4: Add file C (cache miss) ===
     println!("\n=== Phase 4: First request to file C (cache miss) ===");
     let url_c = proxy.url("/data/file-c.bin");
-    let response = client
-        .get(&url_c)
-        .send()
-        .expect("Failed to request file C");
+    let response = client.get(&url_c).send().expect("Failed to request file C");
 
     assert_eq!(response.status(), 200, "Request to file C should succeed");
 
@@ -2773,16 +2798,16 @@ buckets:
         misses_after_c,
         misses_after_c - misses_after_b
     );
-    println!("  cache_size_bytes = {} bytes (~1.2 MB, may trigger eviction)", size_after_c);
+    println!(
+        "  cache_size_bytes = {} bytes (~1.2 MB, may trigger eviction)",
+        size_after_c
+    );
     println!("  cache_items = {}", items_after_c);
 
     // === Phase 5: Add file D (cache miss, triggers eviction of file A) ===
     println!("\n=== Phase 5: First request to file D (cache miss + eviction) ===");
     let url_d = proxy.url("/data/file-d.bin");
-    let response = client
-        .get(&url_d)
-        .send()
-        .expect("Failed to request file D");
+    let response = client.get(&url_d).send().expect("Failed to request file D");
 
     assert_eq!(response.status(), 200, "Request to file D should succeed");
 
@@ -2808,7 +2833,10 @@ buckets:
         evictions_after_d,
         evictions_after_d - initial_evictions
     );
-    println!("  cache_size_bytes = {} bytes (should be <= 1 MB)", size_after_d);
+    println!(
+        "  cache_size_bytes = {} bytes (should be <= 1 MB)",
+        size_after_d
+    );
     println!("  cache_items = {} (should be 3: B, C, D)", items_after_d);
 
     // === Phase 6: Verify file A was evicted (cache miss again) ===
@@ -2847,9 +2875,21 @@ buckets:
     println!("  cache_size_bytes: {}", initial_size);
     println!("  cache_items: {}", initial_items);
     println!("\nFinal:");
-    println!("  cache_misses: {} (delta: +{})", misses_after_a3, misses_after_a3 - initial_misses);
-    println!("  cache_hits: {} (delta: +{})", hits_after_a2, hits_after_a2 - initial_hits);
-    println!("  cache_evictions: {} (delta: +{})", evictions_after_d, evictions_after_d - initial_evictions);
+    println!(
+        "  cache_misses: {} (delta: +{})",
+        misses_after_a3,
+        misses_after_a3 - initial_misses
+    );
+    println!(
+        "  cache_hits: {} (delta: +{})",
+        hits_after_a2,
+        hits_after_a2 - initial_hits
+    );
+    println!(
+        "  cache_evictions: {} (delta: +{})",
+        evictions_after_d,
+        evictions_after_d - initial_evictions
+    );
     println!("  cache_size_bytes: {}", metrics.get_cache_size_bytes());
     println!("  cache_items: {}", metrics.get_cache_items());
 
@@ -2921,11 +2961,7 @@ fn test_e2e_purge_api_clears_memory_cache() {
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "static",
+                "test", "test", None, None, "static",
             ))
             .load()
             .await;
@@ -2951,7 +2987,9 @@ fn test_e2e_purge_api_clears_memory_cache() {
             .put_object()
             .bucket(bucket_name)
             .key("file-a.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_a_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_a_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file A");
@@ -2960,7 +2998,9 @@ fn test_e2e_purge_api_clears_memory_cache() {
             .put_object()
             .bucket(bucket_name)
             .key("file-b.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_b_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_b_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file B");
@@ -3003,11 +3043,8 @@ buckets:
     println!("Created config at: {:?}", config_path);
 
     // Start proxy
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().expect("Invalid config path"),
-        PORT,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().expect("Invalid config path"), PORT)
+        .expect("Failed to start proxy");
 
     println!("Proxy started on port {}", PORT);
 
@@ -3024,19 +3061,13 @@ buckets:
     let url_b = proxy.url("/data/file-b.bin");
 
     // Request file A (cache miss → populate)
-    let response = client
-        .get(&url_a)
-        .send()
-        .expect("Failed to request file A");
+    let response = client.get(&url_a).send().expect("Failed to request file A");
     assert_eq!(response.status(), 200, "File A should succeed");
     let body_a = response.bytes().expect("Failed to read file A");
     assert_eq!(body_a.as_ref(), file_a_content.as_slice());
 
     // Request file B (cache miss → populate)
-    let response = client
-        .get(&url_b)
-        .send()
-        .expect("Failed to request file B");
+    let response = client.get(&url_b).send().expect("Failed to request file B");
     assert_eq!(response.status(), 200, "File B should succeed");
     let body_b = response.bytes().expect("Failed to read file B");
     assert_eq!(body_b.as_ref(), file_b_content.as_slice());
@@ -3078,8 +3109,7 @@ buckets:
     println!("Purge API response: {}", purge_json);
 
     assert_eq!(
-        purge_json["status"],
-        "success",
+        purge_json["status"], "success",
         "Purge should return success status"
     );
     assert!(
@@ -3117,11 +3147,7 @@ buckets:
         .send()
         .expect("Failed to request file A after purge");
 
-    assert_eq!(
-        response.status(),
-        200,
-        "File A should succeed after purge"
-    );
+    assert_eq!(response.status(), 200, "File A should succeed after purge");
 
     let body_a_after = response.bytes().expect("Failed to read file A after purge");
     assert_eq!(
@@ -3138,11 +3164,7 @@ buckets:
         .send()
         .expect("Failed to request file B after purge");
 
-    assert_eq!(
-        response.status(),
-        200,
-        "File B should succeed after purge"
-    );
+    assert_eq!(response.status(), 200, "File B should succeed after purge");
 
     let body_b_after = response.bytes().expect("Failed to read file B after purge");
     assert_eq!(
@@ -3204,11 +3226,7 @@ fn test_e2e_stats_api_returns_memory_cache_stats() {
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "static",
+                "test", "test", None, None, "static",
             ))
             .load()
             .await;
@@ -3235,7 +3253,9 @@ fn test_e2e_stats_api_returns_memory_cache_stats() {
             .put_object()
             .bucket(bucket_name)
             .key("file-a.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_a_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_a_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file A");
@@ -3244,7 +3264,9 @@ fn test_e2e_stats_api_returns_memory_cache_stats() {
             .put_object()
             .bucket(bucket_name)
             .key("file-b.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_b_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_b_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file B");
@@ -3253,7 +3275,9 @@ fn test_e2e_stats_api_returns_memory_cache_stats() {
             .put_object()
             .bucket(bucket_name)
             .key("file-c.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(file_c_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                file_c_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file C");
@@ -3296,11 +3320,8 @@ buckets:
     println!("Created config at: {:?}", config_path);
 
     // Start proxy
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().expect("Invalid config path"),
-        PORT,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().expect("Invalid config path"), PORT)
+        .expect("Failed to start proxy");
 
     println!("Proxy started on port {}", PORT);
 
@@ -3328,7 +3349,10 @@ buckets:
     println!("Request 2: file-b.bin (miss)");
 
     // Request 3: file-a.bin again (cache hit)
-    let response = client.get(&url_a).send().expect("Failed to request file A again");
+    let response = client
+        .get(&url_a)
+        .send()
+        .expect("Failed to request file A again");
     assert_eq!(response.status(), 200);
     println!("Request 3: file-a.bin (hit)");
 
@@ -3338,7 +3362,10 @@ buckets:
     println!("Request 4: file-c.bin (miss)");
 
     // Request 5: file-b.bin again (cache hit)
-    let response = client.get(&url_b).send().expect("Failed to request file B again");
+    let response = client
+        .get(&url_b)
+        .send()
+        .expect("Failed to request file B again");
     assert_eq!(response.status(), 200);
     println!("Request 5: file-b.bin (hit)");
 
@@ -3367,7 +3394,10 @@ buckets:
         .json()
         .expect("Stats response should be JSON");
 
-    println!("Stats API response:\n{}", serde_json::to_string_pretty(&stats_json).unwrap());
+    println!(
+        "Stats API response:\n{}",
+        serde_json::to_string_pretty(&stats_json).unwrap()
+    );
 
     // === Phase 3: Verify stats structure and data ===
     println!("\n=== Phase 3: Verify stats structure ===");
@@ -3464,11 +3494,7 @@ fn test_e2e_disk_cache_hit() {
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "static",
+                "test", "test", None, None, "static",
             ))
             .load()
             .await;
@@ -3493,7 +3519,9 @@ fn test_e2e_disk_cache_hit() {
             .put_object()
             .bucket(bucket_name)
             .key("disk-test.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload test file");
@@ -3544,11 +3572,8 @@ buckets:
     println!("Disk cache directory: {:?}", cache_dir);
 
     // Start proxy
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().expect("Invalid config path"),
-        PORT,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().expect("Invalid config path"), PORT)
+        .expect("Failed to start proxy");
 
     println!("Proxy started on port {}", PORT);
 
@@ -3570,11 +3595,7 @@ buckets:
     let first_duration = start.elapsed();
 
     println!("First request duration: {:?}", first_duration);
-    assert_eq!(
-        response.status(),
-        200,
-        "First request should return 200 OK"
-    );
+    assert_eq!(response.status(), 200, "First request should return 200 OK");
 
     let body = response.bytes().expect("Failed to read response body");
     assert_eq!(
@@ -3704,11 +3725,7 @@ fn test_e2e_disk_cache_miss_s3_fetch_cache_population() {
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "static",
+                "test", "test", None, None, "static",
             ))
             .load()
             .await;
@@ -3733,7 +3750,9 @@ fn test_e2e_disk_cache_miss_s3_fetch_cache_population() {
             .put_object()
             .bucket(bucket_name)
             .key("populate-test.bin")
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload test file");
@@ -3784,11 +3803,8 @@ buckets:
     println!("Disk cache directory: {:?}", cache_dir);
 
     // Start proxy
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().expect("Invalid config path"),
-        PORT,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().expect("Invalid config path"), PORT)
+        .expect("Failed to start proxy");
 
     println!("Proxy started on port {}", PORT);
 
@@ -3806,7 +3822,10 @@ buckets:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Initial cache directory contains {} files", initial_files.len());
+    println!(
+        "Initial cache directory contains {} files",
+        initial_files.len()
+    );
     assert_eq!(
         initial_files.len(),
         0,
@@ -3825,11 +3844,7 @@ buckets:
     let first_duration = start.elapsed();
 
     println!("First request duration: {:?}", first_duration);
-    assert_eq!(
-        response.status(),
-        200,
-        "First request should return 200 OK"
-    );
+    assert_eq!(response.status(), 200, "First request should return 200 OK");
 
     let body = response.bytes().expect("Failed to read response body");
     assert_eq!(
@@ -3856,7 +3871,10 @@ buckets:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("After first request: cache directory contains {} files", cache_files.len());
+    println!(
+        "After first request: cache directory contains {} files",
+        cache_files.len()
+    );
     for entry in &cache_files {
         let metadata = entry.metadata().expect("Failed to get metadata");
         println!(
@@ -4049,11 +4067,7 @@ cache:
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_credential_types::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -4076,7 +4090,11 @@ cache:
     let test_key = "test-persistence.bin";
     let test_data = vec![0xAB; 1024 * 1024]; // 1 MB
 
-    println!("Uploading test file to S3: {} (size: {} bytes)", test_key, test_data.len());
+    println!(
+        "Uploading test file to S3: {} (size: {} bytes)",
+        test_key,
+        test_data.len()
+    );
     rt.block_on(async {
         s3_client
             .put_object()
@@ -4093,11 +4111,8 @@ cache:
     // ========================================
     println!("\n📍 Phase 1: Start proxy and populate cache");
 
-    let mut proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18086,
-    )
-    .expect("Failed to start proxy");
+    let mut proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18086)
+        .expect("Failed to start proxy");
 
     // Wait for proxy to fully initialize
     std::thread::sleep(Duration::from_secs(1));
@@ -4119,13 +4134,11 @@ cache:
         .expect("Failed to make first request");
     let first_duration = start.elapsed();
 
-    assert_eq!(
-        response.status(),
-        200,
-        "First request should return 200 OK"
-    );
+    assert_eq!(response.status(), 200, "First request should return 200 OK");
 
-    let body = response.bytes().expect("Failed to read first response body");
+    let body = response
+        .bytes()
+        .expect("Failed to read first response body");
     assert_eq!(
         body.len(),
         test_data.len(),
@@ -4144,10 +4157,17 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files before restart", cache_files_before.len());
+    println!(
+        "Cache directory contains {} files before restart",
+        cache_files_before.len()
+    );
     for entry in &cache_files_before {
         let metadata = entry.metadata().expect("Failed to get file metadata");
-        println!("  - {} ({} bytes)", entry.file_name().to_string_lossy(), metadata.len());
+        println!(
+            "  - {} ({} bytes)",
+            entry.file_name().to_string_lossy(),
+            metadata.len()
+        );
     }
 
     // ========================================
@@ -4167,7 +4187,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files after stop", cache_files_after_stop.len());
+    println!(
+        "Cache directory contains {} files after stop",
+        cache_files_after_stop.len()
+    );
     assert!(
         cache_files_after_stop.len() > 0,
         "Cache files should persist after proxy stops"
@@ -4178,18 +4201,18 @@ cache:
     // ========================================
     println!("\n📍 Phase 3: Restart proxy and serve from persisted cache");
 
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18086,
-    )
-    .expect("Failed to restart proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18086)
+        .expect("Failed to restart proxy");
 
     // Wait for proxy to fully initialize and load cache index
     println!("Waiting for proxy to initialize and load cache index...");
     std::thread::sleep(Duration::from_secs(2));
 
     // Make second request (should serve from persisted cache)
-    println!("Making second request (should serve from persisted cache): {}", url);
+    println!(
+        "Making second request (should serve from persisted cache): {}",
+        url
+    );
 
     let start = Instant::now();
     let response = client
@@ -4204,7 +4227,9 @@ cache:
         "Second request should return 200 OK"
     );
 
-    let body = response.bytes().expect("Failed to read second response body");
+    let body = response
+        .bytes()
+        .expect("Failed to read second response body");
     assert_eq!(
         body.len(),
         test_data.len(),
@@ -4219,7 +4244,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files after restart", cache_files_after_restart.len());
+    println!(
+        "Cache directory contains {} files after restart",
+        cache_files_after_restart.len()
+    );
     assert!(
         cache_files_after_restart.len() > 0,
         "Cache files should persist after restart"
@@ -4235,7 +4263,10 @@ cache:
     println!("Cache directory: {:?}", cache_dir);
     println!("Cache files before stop: {}", cache_files_before.len());
     println!("Cache files after stop: {}", cache_files_after_stop.len());
-    println!("Cache files after restart: {}", cache_files_after_restart.len());
+    println!(
+        "Cache files after restart: {}",
+        cache_files_after_restart.len()
+    );
 
     println!("\n✅ Test completed - Cache persistence across restarts verified");
     println!("   Once cache integration is complete, this test will verify:");
@@ -4345,11 +4376,7 @@ cache:
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_credential_types::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -4372,7 +4399,11 @@ cache:
     let test_key = "etag-validation.bin";
     let test_data = vec![0xCD; 500 * 1024]; // 500 KB
 
-    println!("Uploading test file to S3: {} (size: {} bytes)", test_key, test_data.len());
+    println!(
+        "Uploading test file to S3: {} (size: {} bytes)",
+        test_key,
+        test_data.len()
+    );
     let s3_etag = rt.block_on(async {
         let response = s3_client
             .put_object()
@@ -4391,11 +4422,8 @@ cache:
 
     // Start proxy
     println!("\nStarting proxy...");
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18087,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18087)
+        .expect("Failed to start proxy");
 
     // Wait for proxy to fully initialize
     std::thread::sleep(Duration::from_secs(1));
@@ -4419,11 +4447,7 @@ cache:
         .send()
         .expect("Failed to make first request");
 
-    assert_eq!(
-        response.status(),
-        200,
-        "First request should return 200 OK"
-    );
+    assert_eq!(response.status(), 200, "First request should return 200 OK");
 
     // Extract ETag from response BEFORE consuming the response body
     let response_etag = response
@@ -4434,7 +4458,9 @@ cache:
 
     println!("Response ETag: {}", response_etag);
 
-    let body = response.bytes().expect("Failed to read first response body");
+    let body = response
+        .bytes()
+        .expect("Failed to read first response body");
     assert_eq!(
         body.len(),
         test_data.len(),
@@ -4455,7 +4481,10 @@ cache:
         s3_etag.clone()
     };
 
-    println!("Making conditional request with If-None-Match: {}", etag_to_match);
+    println!(
+        "Making conditional request with If-None-Match: {}",
+        etag_to_match
+    );
 
     let conditional_response = client
         .get(&url)
@@ -4480,7 +4509,9 @@ cache:
         println!("304 Response ETag header: {:?}", etag_header);
 
         // 304 responses should have no body
-        let body = conditional_response.bytes().expect("Failed to read 304 response");
+        let body = conditional_response
+            .bytes()
+            .expect("Failed to read 304 response");
         assert_eq!(
             body.len(),
             0,
@@ -4488,10 +4519,12 @@ cache:
         );
     } else {
         // Cache validation not yet implemented - still returns 200
-        println!("⚠️  Cache validation not yet implemented: {} received (expected 304)", conditional_status);
+        println!(
+            "⚠️  Cache validation not yet implemented: {} received (expected 304)",
+            conditional_status
+        );
         assert_eq!(
-            conditional_status,
-            200,
+            conditional_status, 200,
             "Without cache validation, should return 200 OK"
         );
     }
@@ -4502,7 +4535,10 @@ cache:
     println!("\n📍 Phase 3: Conditional request with non-matching ETag");
 
     let different_etag = "\"different-etag-12345\"";
-    println!("Making conditional request with If-None-Match: {}", different_etag);
+    println!(
+        "Making conditional request with If-None-Match: {}",
+        different_etag
+    );
 
     let mismatch_response = client
         .get(&url)
@@ -4519,7 +4555,9 @@ cache:
         "Request with non-matching ETag should return 200 OK"
     );
 
-    let body = mismatch_response.bytes().expect("Failed to read mismatch response body");
+    let body = mismatch_response
+        .bytes()
+        .expect("Failed to read mismatch response body");
     assert_eq!(
         body.len(),
         test_data.len(),
@@ -4534,7 +4572,14 @@ cache:
     println!("\n📍 Phase 4: Verify results");
 
     println!("S3 ETag: {}", s3_etag);
-    println!("Response ETag: {}", if !response_etag.is_empty() { response_etag.as_str() } else { "none" });
+    println!(
+        "Response ETag: {}",
+        if !response_etag.is_empty() {
+            response_etag.as_str()
+        } else {
+            "none"
+        }
+    );
     println!("Conditional request with matching ETag: expected 304 (or 200 if not implemented)");
     println!("Conditional request with different ETag: 200 OK");
 
@@ -4655,11 +4700,7 @@ cache:
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_credential_types::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -4683,7 +4724,11 @@ cache:
     // Create test data with byte value = byte position % 256 (for verification)
     let test_data: Vec<u8> = (0..1024 * 1024).map(|i| (i % 256) as u8).collect();
 
-    println!("Uploading test file to S3: {} (size: {} bytes)", test_key, test_data.len());
+    println!(
+        "Uploading test file to S3: {} (size: {} bytes)",
+        test_key,
+        test_data.len()
+    );
     rt.block_on(async {
         s3_client
             .put_object()
@@ -4697,11 +4742,8 @@ cache:
 
     // Start proxy
     println!("\nStarting proxy...");
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18088,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18088)
+        .expect("Failed to start proxy");
 
     // Wait for proxy to fully initialize
     std::thread::sleep(Duration::from_secs(1));
@@ -4730,7 +4772,9 @@ cache:
         "Normal request should return 200 OK"
     );
 
-    let body = response.bytes().expect("Failed to read normal response body");
+    let body = response
+        .bytes()
+        .expect("Failed to read normal response body");
     assert_eq!(
         body.len(),
         test_data.len(),
@@ -4749,7 +4793,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files after normal request", cache_files_after_normal.len());
+    println!(
+        "Cache directory contains {} files after normal request",
+        cache_files_after_normal.len()
+    );
 
     // ========================================
     // Phase 2: Range request for first 1 KB (bytes 0-1023)
@@ -4777,7 +4824,9 @@ cache:
 
         println!("Content-Range header: {:?}", content_range);
 
-        let range1_body = range1_response.bytes().expect("Failed to read range 1 body");
+        let range1_body = range1_response
+            .bytes()
+            .expect("Failed to read range 1 body");
         assert_eq!(
             range1_body.len(),
             1024,
@@ -4794,13 +4843,18 @@ cache:
             );
         }
 
-        println!("Range 1 completed (206 Partial Content, {} bytes verified)", range1_body.len());
+        println!(
+            "Range 1 completed (206 Partial Content, {} bytes verified)",
+            range1_body.len()
+        );
     } else {
         // Range support not yet implemented - should return 200 with full file
-        println!("⚠️  Range support not yet implemented: {} received (expected 206)", range1_status);
+        println!(
+            "⚠️  Range support not yet implemented: {} received (expected 206)",
+            range1_status
+        );
         assert_eq!(
-            range1_status,
-            200,
+            range1_status, 200,
             "Without range support, should return 200 OK"
         );
     }
@@ -4822,7 +4876,9 @@ cache:
     if range2_status == 206 {
         println!("✅ Range support working: 206 Partial Content received");
 
-        let range2_body = range2_response.bytes().expect("Failed to read range 2 body");
+        let range2_body = range2_response
+            .bytes()
+            .expect("Failed to read range 2 body");
         assert_eq!(
             range2_body.len(),
             1024,
@@ -4840,9 +4896,15 @@ cache:
             );
         }
 
-        println!("Range 2 completed (206 Partial Content, {} bytes verified)", range2_body.len());
+        println!(
+            "Range 2 completed (206 Partial Content, {} bytes verified)",
+            range2_body.len()
+        );
     } else {
-        println!("⚠️  Range support not yet implemented: {} received (expected 206)", range2_status);
+        println!(
+            "⚠️  Range support not yet implemented: {} received (expected 206)",
+            range2_status
+        );
     }
 
     // ========================================
@@ -4858,7 +4920,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files after range requests", cache_files_after_ranges.len());
+    println!(
+        "Cache directory contains {} files after range requests",
+        cache_files_after_ranges.len()
+    );
 
     // Cache file count should be unchanged (Range requests don't cache)
     assert_eq!(
@@ -4873,10 +4938,22 @@ cache:
     println!("\n📍 Phase 5: Verify results");
 
     println!("Normal request: 200 OK ({} bytes)", test_data.len());
-    println!("Cache files after normal: {}", cache_files_after_normal.len());
-    println!("Range request 1: {} (expected 206 Partial Content)", range1_status);
-    println!("Range request 2: {} (expected 206 Partial Content)", range2_status);
-    println!("Cache files after ranges: {}", cache_files_after_ranges.len());
+    println!(
+        "Cache files after normal: {}",
+        cache_files_after_normal.len()
+    );
+    println!(
+        "Range request 1: {} (expected 206 Partial Content)",
+        range1_status
+    );
+    println!(
+        "Range request 2: {} (expected 206 Partial Content)",
+        range2_status
+    );
+    println!(
+        "Cache files after ranges: {}",
+        cache_files_after_ranges.len()
+    );
 
     println!("\n✅ Test completed - Range request bypass behavior documented");
     println!("   Once range support is implemented, this test will verify:");
@@ -4994,11 +5071,7 @@ cache:
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_credential_types::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -5021,8 +5094,12 @@ cache:
     let small_key = "small-file.bin";
     let small_data = vec![0xAA; 1024 * 1024]; // 1 MB
 
-    println!("Uploading small test file to S3: {} (size: {} bytes = {} MB)",
-        small_key, small_data.len(), small_data.len() / (1024 * 1024));
+    println!(
+        "Uploading small test file to S3: {} (size: {} bytes = {} MB)",
+        small_key,
+        small_data.len(),
+        small_data.len() / (1024 * 1024)
+    );
     rt.block_on(async {
         s3_client
             .put_object()
@@ -5038,8 +5115,12 @@ cache:
     let large_key = "large-file.bin";
     let large_data = vec![0xBB; 10 * 1024 * 1024]; // 10 MB
 
-    println!("Uploading large test file to S3: {} (size: {} bytes = {} MB)",
-        large_key, large_data.len(), large_data.len() / (1024 * 1024));
+    println!(
+        "Uploading large test file to S3: {} (size: {} bytes = {} MB)",
+        large_key,
+        large_data.len(),
+        large_data.len() / (1024 * 1024)
+    );
     rt.block_on(async {
         s3_client
             .put_object()
@@ -5053,11 +5134,8 @@ cache:
 
     // Start proxy
     println!("\nStarting proxy...");
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18089,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18089)
+        .expect("Failed to start proxy");
 
     // Wait for proxy to fully initialize
     std::thread::sleep(Duration::from_secs(1));
@@ -5089,14 +5167,20 @@ cache:
         "Small file request should return 200 OK"
     );
 
-    let small_body = small_response.bytes().expect("Failed to read small file response");
+    let small_body = small_response
+        .bytes()
+        .expect("Failed to read small file response");
     assert_eq!(
         small_body.len(),
         small_data.len(),
         "Small file response should return full file"
     );
 
-    println!("Small file request completed (200 OK, {} bytes, {:?})", small_body.len(), small_duration);
+    println!(
+        "Small file request completed (200 OK, {} bytes, {:?})",
+        small_body.len(),
+        small_duration
+    );
 
     // Wait for disk cache write
     println!("Waiting for disk cache write...");
@@ -5108,7 +5192,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files after small file request", cache_files_after_small.len());
+    println!(
+        "Cache directory contains {} files after small file request",
+        cache_files_after_small.len()
+    );
 
     // ========================================
     // Phase 2: Request large file (should NOT cache)
@@ -5131,15 +5218,21 @@ cache:
         "Large file request should return 200 OK"
     );
 
-    let large_body1 = large_response1.bytes().expect("Failed to read large file response");
+    let large_body1 = large_response1
+        .bytes()
+        .expect("Failed to read large file response");
     assert_eq!(
         large_body1.len(),
         large_data.len(),
         "Large file response should return full file"
     );
 
-    println!("Large file request completed (200 OK, {} bytes = {} MB, {:?})",
-        large_body1.len(), large_body1.len() / (1024 * 1024), large_duration1);
+    println!(
+        "Large file request completed (200 OK, {} bytes = {} MB, {:?})",
+        large_body1.len(),
+        large_body1.len() / (1024 * 1024),
+        large_duration1
+    );
 
     // Wait a moment to ensure no async cache writes
     println!("Waiting to verify no cache write for large file...");
@@ -5151,7 +5244,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files after large file request", cache_files_after_large.len());
+    println!(
+        "Cache directory contains {} files after large file request",
+        cache_files_after_large.len()
+    );
 
     assert_eq!(
         cache_files_after_large.len(),
@@ -5179,19 +5275,28 @@ cache:
         "Second large file request should return 200 OK"
     );
 
-    let large_body2 = large_response2.bytes().expect("Failed to read second large file response");
+    let large_body2 = large_response2
+        .bytes()
+        .expect("Failed to read second large file response");
     assert_eq!(
         large_body2.len(),
         large_data.len(),
         "Second large file response should return full file"
     );
 
-    println!("Second large file request completed (200 OK, {} bytes, {:?})",
-        large_body2.len(), large_duration2);
+    println!(
+        "Second large file request completed (200 OK, {} bytes, {:?})",
+        large_body2.len(),
+        large_duration2
+    );
 
     // Both requests should take similar time (both from S3, not cache)
-    let duration_diff_ms = (large_duration2.as_millis() as i128 - large_duration1.as_millis() as i128).abs();
-    println!("Duration difference between requests: {}ms", duration_diff_ms);
+    let duration_diff_ms =
+        (large_duration2.as_millis() as i128 - large_duration1.as_millis() as i128).abs();
+    println!(
+        "Duration difference between requests: {}ms",
+        duration_diff_ms
+    );
 
     // ========================================
     // Phase 4: Verify final cache state
@@ -5203,7 +5308,10 @@ cache:
         .filter_map(|e| e.ok())
         .collect();
 
-    println!("Cache directory contains {} files in final state", cache_files_final.len());
+    println!(
+        "Cache directory contains {} files in final state",
+        cache_files_final.len()
+    );
 
     // Cache should only contain the small file
     assert_eq!(
@@ -5215,7 +5323,11 @@ cache:
     // List cache files
     for entry in &cache_files_final {
         let metadata = entry.metadata().expect("Failed to get file metadata");
-        println!("  - {} ({} bytes)", entry.file_name().to_string_lossy(), metadata.len());
+        println!(
+            "  - {} ({} bytes)",
+            entry.file_name().to_string_lossy(),
+            metadata.len()
+        );
     }
 
     // ========================================
@@ -5346,11 +5458,7 @@ cache:
             .endpoint_url(&s3_endpoint)
             .region("us-east-1")
             .credentials_provider(aws_credential_types::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -5372,12 +5480,14 @@ cache:
     // Upload test file with predictable content pattern (256 KB)
     let test_key = "disk-write-test.bin";
     // Create test data with predictable pattern: byte value = (position / 1024) % 256
-    let test_data: Vec<u8> = (0..256 * 1024)
-        .map(|i| ((i / 1024) % 256) as u8)
-        .collect();
+    let test_data: Vec<u8> = (0..256 * 1024).map(|i| ((i / 1024) % 256) as u8).collect();
 
-    println!("Uploading test file to S3: {} (size: {} bytes = {} KB)",
-        test_key, test_data.len(), test_data.len() / 1024);
+    println!(
+        "Uploading test file to S3: {} (size: {} bytes = {} KB)",
+        test_key,
+        test_data.len(),
+        test_data.len() / 1024
+    );
     rt.block_on(async {
         s3_client
             .put_object()
@@ -5391,11 +5501,8 @@ cache:
 
     // Start proxy
     println!("\nStarting proxy...");
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18090,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18090)
+        .expect("Failed to start proxy");
 
     // Wait for proxy to fully initialize
     std::thread::sleep(Duration::from_secs(1));
@@ -5415,17 +5522,10 @@ cache:
     println!("Making request: {}", url);
 
     let start = Instant::now();
-    let response = client
-        .get(&url)
-        .send()
-        .expect("Failed to make request");
+    let response = client.get(&url).send().expect("Failed to make request");
     let request_duration = start.elapsed();
 
-    assert_eq!(
-        response.status(),
-        200,
-        "Request should return 200 OK"
-    );
+    assert_eq!(response.status(), 200, "Request should return 200 OK");
 
     let response_body = response.bytes().expect("Failed to read response body");
     assert_eq!(
@@ -5434,7 +5534,11 @@ cache:
         "Response body size should match"
     );
 
-    println!("Request completed (200 OK, {} bytes, {:?})", response_body.len(), request_duration);
+    println!(
+        "Request completed (200 OK, {} bytes, {:?})",
+        response_body.len(),
+        request_duration
+    );
 
     // Wait for disk write to complete
     println!("Waiting for disk write to complete...");
@@ -5446,10 +5550,7 @@ cache:
     println!("\n📍 Phase 2: Verify cache directory structure");
 
     // Verify cache directory exists
-    assert!(
-        cache_dir.exists(),
-        "Cache directory should exist"
-    );
+    assert!(cache_dir.exists(), "Cache directory should exist");
 
     let cache_dir_metadata = fs::metadata(&cache_dir).expect("Failed to get cache dir metadata");
     assert!(
@@ -5486,20 +5587,21 @@ cache:
     println!("Cache file path: {:?}", cache_file_path);
 
     // Verify file exists
-    assert!(
-        cache_file_path.exists(),
-        "Cache file should exist"
-    );
+    assert!(cache_file_path.exists(), "Cache file should exist");
 
     // Get file metadata
     let file_metadata = fs::metadata(&cache_file_path).expect("Failed to get file metadata");
     println!("File size: {} bytes", file_metadata.len());
-    println!("File type: {:?}", if file_metadata.is_file() { "file" } else { "other" });
-
-    assert!(
-        file_metadata.is_file(),
-        "Cache entry should be a file"
+    println!(
+        "File type: {:?}",
+        if file_metadata.is_file() {
+            "file"
+        } else {
+            "other"
+        }
     );
+
+    assert!(file_metadata.is_file(), "Cache entry should be a file");
 
     // Read cache file contents
     println!("Reading cache file from disk...");
@@ -5512,10 +5614,7 @@ cache:
     // the cache file format to extract the actual data.
 
     // For now, verify file was written and has reasonable size
-    assert!(
-        cached_data.len() > 0,
-        "Cache file should not be empty"
-    );
+    assert!(cached_data.len() > 0, "Cache file should not be empty");
 
     println!("Cache file contains data ({} bytes)", cached_data.len());
 
@@ -5539,7 +5638,9 @@ cache:
         "Second request should return 200 OK"
     );
 
-    let response2_body = response2.bytes().expect("Failed to read second response body");
+    let response2_body = response2
+        .bytes()
+        .expect("Failed to read second response body");
     assert_eq!(
         response2_body.len(),
         test_data.len(),
@@ -5553,7 +5654,11 @@ cache:
         "Second response content should match original data"
     );
 
-    println!("Second request completed (200 OK, {} bytes, {:?})", response2_body.len(), request2_duration);
+    println!(
+        "Second request completed (200 OK, {} bytes, {:?})",
+        response2_body.len(),
+        request2_duration
+    );
 
     // ========================================
     // Phase 5: Verify results
@@ -5628,11 +5733,7 @@ fn test_e2e_lru_eviction_when_disk_threshold_reached() {
             .region(aws_config::Region::new("us-east-1"))
             .endpoint_url(&s3_endpoint)
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -5731,11 +5832,8 @@ buckets:
     // SETUP: Start proxy server
     // ========================================================================
 
-    let proxy = ProxyTestHarness::start(
-        config_path.to_str().unwrap(),
-        18099,
-    )
-    .expect("Failed to start proxy");
+    let proxy = ProxyTestHarness::start(config_path.to_str().unwrap(), 18099)
+        .expect("Failed to start proxy");
 
     println!("✓ Proxy started on port 18099");
 
@@ -5769,14 +5867,8 @@ buckets:
         200,
         "file1 request should succeed"
     );
-    let file1_body1 = file1_response1
-        .bytes()
-        .expect("Failed to read file1 body");
-    assert_eq!(
-        file1_body1.len(),
-        file_size,
-        "file1 size should be 2 MB"
-    );
+    let file1_body1 = file1_response1.bytes().expect("Failed to read file1 body");
+    assert_eq!(file1_body1.len(), file_size, "file1 size should be 2 MB");
     println!("  ✓ Requested file1 (2 MB) - should populate cache");
 
     // Request file2
@@ -5789,14 +5881,8 @@ buckets:
         200,
         "file2 request should succeed"
     );
-    let file2_body1 = file2_response1
-        .bytes()
-        .expect("Failed to read file2 body");
-    assert_eq!(
-        file2_body1.len(),
-        file_size,
-        "file2 size should be 2 MB"
-    );
+    let file2_body1 = file2_response1.bytes().expect("Failed to read file2 body");
+    assert_eq!(file2_body1.len(), file_size, "file2 size should be 2 MB");
     println!("  ✓ Requested file2 (2 MB) - should populate cache");
 
     // Check cache directory
@@ -5848,14 +5934,8 @@ buckets:
         200,
         "file3 request should succeed"
     );
-    let file3_body1 = file3_response1
-        .bytes()
-        .expect("Failed to read file3 body");
-    assert_eq!(
-        file3_body1.len(),
-        file_size,
-        "file3 size should be 2 MB"
-    );
+    let file3_body1 = file3_response1.bytes().expect("Failed to read file3 body");
+    assert_eq!(file3_body1.len(), file_size, "file3 size should be 2 MB");
     println!("  ✓ Requested file3 (2 MB)");
 
     let cache_files_after_phase3: Vec<_> = fs::read_dir(&cache_dir)
@@ -5885,14 +5965,8 @@ buckets:
         200,
         "file4 request should succeed"
     );
-    let file4_body1 = file4_response1
-        .bytes()
-        .expect("Failed to read file4 body");
-    assert_eq!(
-        file4_body1.len(),
-        file_size,
-        "file4 size should be 2 MB"
-    );
+    let file4_body1 = file4_response1.bytes().expect("Failed to read file4 body");
+    assert_eq!(file4_body1.len(), file_size, "file4 size should be 2 MB");
     println!("  ✓ Requested file4 (2 MB)");
 
     let cache_files_after_phase4: Vec<_> = fs::read_dir(&cache_dir)
@@ -5915,12 +5989,7 @@ buckets:
     // Calculate total cache size
     let total_cache_size: u64 = cache_files_after_phase4
         .iter()
-        .map(|entry| {
-            entry
-                .metadata()
-                .map(|m| m.len())
-                .unwrap_or(0)
-        })
+        .map(|entry| entry.metadata().map(|m| m.len()).unwrap_or(0))
         .sum();
 
     let total_cache_size_mb = total_cache_size as f64 / 1024.0 / 1024.0;
@@ -5968,7 +6037,10 @@ buckets:
     println!("  • file4: Should be cached (newest)");
     println!();
     println!("Actual results:");
-    println!("  • Cache files after phase 4: {}", cache_files_after_phase4.len());
+    println!(
+        "  • Cache files after phase 4: {}",
+        cache_files_after_phase4.len()
+    );
     println!("  • Total cache size: {:.2} MB", total_cache_size_mb);
     println!();
 
@@ -6046,11 +6118,7 @@ fn test_e2e_concurrent_requests_coalesce_correctly() {
             .region(aws_config::Region::new("us-east-1"))
             .endpoint_url(&s3_endpoint)
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -6209,7 +6277,10 @@ buckets:
 
     let total_duration = start_time.elapsed();
 
-    println!("  ✓ All {} concurrent requests completed", concurrent_requests);
+    println!(
+        "  ✓ All {} concurrent requests completed",
+        concurrent_requests
+    );
     println!("  ✓ Total time: {:?}", total_duration);
 
     // ========================================================================
@@ -6252,7 +6323,10 @@ buckets:
         );
     }
 
-    println!("  ✓ All {} requests received identical data", concurrent_requests);
+    println!(
+        "  ✓ All {} requests received identical data",
+        concurrent_requests
+    );
 
     // ========================================================================
     // PHASE 4: Check cache was populated
@@ -6301,7 +6375,10 @@ buckets:
         "Cache hit should return correct size"
     );
 
-    println!("  ✓ Subsequent request completed in {:?}", cache_hit_duration);
+    println!(
+        "  ✓ Subsequent request completed in {:?}",
+        cache_hit_duration
+    );
 
     // ========================================================================
     // PHASE 6: Analyze request patterns and coalescing behavior
@@ -6314,10 +6391,7 @@ buckets:
     let min_duration = durations.iter().min().unwrap();
     let max_duration = durations.iter().max().unwrap();
     let avg_duration = Duration::from_nanos(
-        (durations
-            .iter()
-            .map(|d| d.as_nanos())
-            .sum::<u128>() / durations.len() as u128) as u64,
+        (durations.iter().map(|d| d.as_nanos()).sum::<u128>() / durations.len() as u128) as u64,
     );
 
     println!("  Request duration statistics:");
@@ -6345,15 +6419,22 @@ buckets:
     println!("  • All requests succeeded: ✓");
     println!("  • All requests received identical data: ✓");
     println!("  • Cache populated: {} file(s)", cache_files.len());
-    println!("  • Request duration min/max/avg: {:?}/{:?}/{:?}",
-        min_duration, max_duration, avg_duration);
+    println!(
+        "  • Request duration min/max/avg: {:?}/{:?}/{:?}",
+        min_duration, max_duration, avg_duration
+    );
     println!("  • Subsequent cache hit: {:?}", cache_hit_duration);
     println!();
     println!("Expected behavior (once coalescing is implemented):");
-    println!("  • Only 1 S3 request should be made (not {})", concurrent_requests);
+    println!(
+        "  • Only 1 S3 request should be made (not {})",
+        concurrent_requests
+    );
     println!("  • First request fetches from S3 (~500ms)");
-    println!("  • Other {} requests wait and get cached result (~10ms)",
-        concurrent_requests - 1);
+    println!(
+        "  • Other {} requests wait and get cached result (~10ms)",
+        concurrent_requests - 1
+    );
     println!("  • Max duration >> Min duration (due to S3 vs cache)");
     println!();
     println!("Current behavior (without coalescing):");
@@ -6365,16 +6446,20 @@ buckets:
     // Check if durations suggest coalescing is working
     if max_duration.as_millis() > min_duration.as_millis() * 5 {
         println!("✅ Duration variance suggests request coalescing IS working!");
-        println!("   (Max duration is {}x longer than min)",
-            max_duration.as_millis() / min_duration.as_millis());
+        println!(
+            "   (Max duration is {}x longer than min)",
+            max_duration.as_millis() / min_duration.as_millis()
+        );
     } else {
         println!("⚠️  Similar durations suggest coalescing NOT yet implemented");
-        println!("   (Max/min ratio: {}x)",
+        println!(
+            "   (Max/min ratio: {}x)",
             if min_duration.as_millis() > 0 {
                 max_duration.as_millis() / min_duration.as_millis()
             } else {
                 1
-            });
+            }
+        );
     }
 
     println!();
@@ -6384,7 +6469,10 @@ buckets:
     println!("   • Multiple concurrent requests coalesce into single S3 fetch");
     println!("   • Only first request fetches from S3");
     println!("   • Other requests wait and receive cached result");
-    println!("   • Cache metrics show 1 miss + {} hits", concurrent_requests - 1);
+    println!(
+        "   • Cache metrics show 1 miss + {} hits",
+        concurrent_requests - 1
+    );
     println!("   • No \"cache stampede\" (duplicate S3 requests)");
 
     println!("\n✅ Test completed - Concurrent request coalescing documented");
@@ -6444,11 +6532,7 @@ fn test_e2e_disk_cache_metrics_tracked_correctly() {
             .region(aws_config::Region::new("us-east-1"))
             .endpoint_url(&s3_endpoint)
             .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test",
-                "test",
-                None,
-                None,
-                "test",
+                "test", "test", None, None, "test",
             ))
             .load()
             .await;
@@ -6595,7 +6679,10 @@ buckets:
         "First response should have correct size"
     );
 
-    println!("  ✓ First request completed (200 OK, {} bytes)", miss_body.len());
+    println!(
+        "  ✓ First request completed (200 OK, {} bytes)",
+        miss_body.len()
+    );
 
     // Give metrics time to update (if async)
     std::thread::sleep(Duration::from_millis(100));
@@ -6623,7 +6710,10 @@ buckets:
         "Second response should have correct size"
     );
 
-    println!("  ✓ Second request completed (200 OK, {} bytes)", hit_body.len());
+    println!(
+        "  ✓ Second request completed (200 OK, {} bytes)",
+        hit_body.len()
+    );
 
     // Give metrics time to update (if async)
     std::thread::sleep(Duration::from_millis(100));
@@ -6670,12 +6760,21 @@ buckets:
     println!("  • Cache evictions: {}", initial_cache_evictions);
     println!();
     println!("Metrics after requests:");
-    println!("  • Cache hits: {} (delta: {})", final_cache_hits,
-        final_cache_hits.saturating_sub(initial_cache_hits));
-    println!("  • Cache misses: {} (delta: {})", final_cache_misses,
-        final_cache_misses.saturating_sub(initial_cache_misses));
-    println!("  • Cache evictions: {} (delta: {})", final_cache_evictions,
-        final_cache_evictions.saturating_sub(initial_cache_evictions));
+    println!(
+        "  • Cache hits: {} (delta: {})",
+        final_cache_hits,
+        final_cache_hits.saturating_sub(initial_cache_hits)
+    );
+    println!(
+        "  • Cache misses: {} (delta: {})",
+        final_cache_misses,
+        final_cache_misses.saturating_sub(initial_cache_misses)
+    );
+    println!(
+        "  • Cache evictions: {} (delta: {})",
+        final_cache_evictions,
+        final_cache_evictions.saturating_sub(initial_cache_evictions)
+    );
     println!();
     println!("Expected behavior (once cache is integrated):");
     println!("  • First request: cache miss → increment cache_misses");
@@ -6763,11 +6862,7 @@ fn test_e2e_purge_api_clears_disk_cache_files() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -6787,8 +6882,8 @@ fn test_e2e_purge_api_clears_disk_cache_files() {
     // Phase 3: Upload test files to S3
     println!("\nPhase 3: Uploading test files to S3...");
     let test_files = vec![
-        ("file1.txt", vec![0xAA; 256 * 1024]), // 256 KB
-        ("file2.txt", vec![0xBB; 512 * 1024]), // 512 KB
+        ("file1.txt", vec![0xAA; 256 * 1024]),  // 256 KB
+        ("file2.txt", vec![0xBB; 512 * 1024]),  // 512 KB
         ("file3.txt", vec![0xCC; 1024 * 1024]), // 1 MB
     ];
 
@@ -6808,7 +6903,8 @@ fn test_e2e_purge_api_clears_disk_cache_files() {
 
     // Phase 4: Configure proxy with disk cache
     println!("\nPhase 4: Configuring proxy with disk cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_purge_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_purge_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18084; // Use unique port for this test
@@ -6862,10 +6958,7 @@ buckets:
 
     for (filename, expected_content) in &test_files {
         let url = proxy.url(&format!("/data/{}", filename));
-        let response = client
-            .get(&url)
-            .send()
-            .expect("Failed to send request");
+        let response = client.get(&url).send().expect("Failed to send request");
 
         assert_eq!(response.status(), 200, "Expected 200 OK for {}", filename);
         let body = response.bytes().expect("Failed to read response body");
@@ -6888,11 +6981,18 @@ buckets:
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .collect();
 
-    println!("  • Files in cache before purge: {}", cache_files_before.len());
+    println!(
+        "  • Files in cache before purge: {}",
+        cache_files_before.len()
+    );
     for entry in &cache_files_before {
         let path = entry.path();
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        println!("    - {} ({} bytes)", path.file_name().unwrap().to_string_lossy(), size);
+        println!(
+            "    - {} ({} bytes)",
+            path.file_name().unwrap().to_string_lossy(),
+            size
+        );
     }
 
     if cache_files_before.len() > 0 {
@@ -6906,9 +7006,7 @@ buckets:
     let purge_url = proxy.url("/cache/purge");
     println!("  • Purge URL: {}", purge_url);
 
-    let purge_response = client
-        .post(&purge_url)
-        .send();
+    let purge_response = client.post(&purge_url).send();
 
     match purge_response {
         Ok(response) => {
@@ -6943,12 +7041,19 @@ buckets:
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .collect();
 
-    println!("  • Files in cache after purge: {}", cache_files_after.len());
+    println!(
+        "  • Files in cache after purge: {}",
+        cache_files_after.len()
+    );
     if cache_files_after.len() > 0 {
         for entry in &cache_files_after {
             let path = entry.path();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            println!("    - {} ({} bytes)", path.file_name().unwrap().to_string_lossy(), size);
+            println!(
+                "    - {} ({} bytes)",
+                path.file_name().unwrap().to_string_lossy(),
+                size
+            );
         }
     }
 
@@ -6969,10 +7074,7 @@ buckets:
     for (filename, expected_content) in &test_files {
         let url = proxy.url(&format!("/data/{}", filename));
         let start = Instant::now();
-        let response = client
-            .get(&url)
-            .send()
-            .expect("Failed to send request");
+        let response = client.get(&url).send().expect("Failed to send request");
         let duration = start.elapsed();
 
         assert_eq!(response.status(), 200, "Expected 200 OK for {}", filename);
@@ -6983,7 +7085,12 @@ buckets:
             "Content length mismatch for {}",
             filename
         );
-        println!("  ✓ Fetched: {} (200 OK, {} bytes, {:?})", filename, body.len(), duration);
+        println!(
+            "  ✓ Fetched: {} (200 OK, {} bytes, {:?})",
+            filename,
+            body.len(),
+            duration
+        );
     }
 
     // Phase 12: Cleanup
@@ -7049,11 +7156,7 @@ fn test_e2e_stats_api_returns_disk_cache_stats() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -7094,7 +7197,8 @@ fn test_e2e_stats_api_returns_disk_cache_stats() {
 
     // Phase 4: Configure proxy with disk cache
     println!("\nPhase 4: Configuring proxy with disk cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_stats_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_stats_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18085; // Use unique port for this test
@@ -7148,10 +7252,7 @@ buckets:
 
     for (filename, expected_content) in &test_files {
         let url = proxy.url(&format!("/data/{}", filename));
-        let response = client
-            .get(&url)
-            .send()
-            .expect("Failed to send request");
+        let response = client.get(&url).send().expect("Failed to send request");
 
         assert_eq!(response.status(), 200, "Expected 200 OK for {}", filename);
         let body = response.bytes().expect("Failed to read response body");
@@ -7238,18 +7339,23 @@ buckets:
                     if let Some(ref initial) = initial_stats {
                         println!("\n  📊 Stats comparison:");
 
-                        if let (Some(init_items), Some(curr_items)) =
-                            (initial.get("current_item_count"), json.get("current_item_count")) {
+                        if let (Some(init_items), Some(curr_items)) = (
+                            initial.get("current_item_count"),
+                            json.get("current_item_count"),
+                        ) {
                             println!("    • Items: {} -> {}", init_items, curr_items);
                         }
 
-                        if let (Some(init_size), Some(curr_size)) =
-                            (initial.get("current_size_bytes"), json.get("current_size_bytes")) {
+                        if let (Some(init_size), Some(curr_size)) = (
+                            initial.get("current_size_bytes"),
+                            json.get("current_size_bytes"),
+                        ) {
                             println!("    • Size: {} -> {} bytes", init_size, curr_size);
                         }
 
                         if let (Some(init_hits), Some(curr_hits)) =
-                            (initial.get("hit_count"), json.get("hit_count")) {
+                            (initial.get("hit_count"), json.get("hit_count"))
+                        {
                             println!("    • Hits: {} -> {}", init_hits, curr_hits);
                         }
                     }
@@ -7275,7 +7381,11 @@ buckets:
         let path = entry.path();
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         total_size += size;
-        println!("    - {} ({} bytes)", path.file_name().unwrap().to_string_lossy(), size);
+        println!(
+            "    - {} ({} bytes)",
+            path.file_name().unwrap().to_string_lossy(),
+            size
+        );
     }
     println!("  • Total cache size: {} bytes", total_size);
 
@@ -7346,11 +7456,7 @@ fn test_e2e_index_persists_and_loads_correctly_on_restart() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -7390,7 +7496,8 @@ fn test_e2e_index_persists_and_loads_correctly_on_restart() {
 
     // Phase 4: Configure proxy with disk cache
     println!("\nPhase 4: Configuring proxy with disk cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_persist_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_persist_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18086; // Use unique port for this test
@@ -7444,10 +7551,7 @@ buckets:
 
     for (filename, expected_content) in &test_files {
         let url = proxy1.url(&format!("/data/{}", filename));
-        let response = client
-            .get(&url)
-            .send()
-            .expect("Failed to send request");
+        let response = client.get(&url).send().expect("Failed to send request");
 
         assert_eq!(response.status(), 200, "Expected 200 OK for {}", filename);
         let body = response.bytes().expect("Failed to read response body");
@@ -7475,11 +7579,17 @@ buckets:
         let path = entry.path();
         let file_type = if path.is_file() { "file" } else { "dir" };
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        println!("    - {} ({}, {} bytes)", path.file_name().unwrap().to_string_lossy(), file_type, size);
+        println!(
+            "    - {} ({}, {} bytes)",
+            path.file_name().unwrap().to_string_lossy(),
+            file_type,
+            size
+        );
     }
 
     // Look for index file (cache_index.json, index.json, or similar)
-    let index_files: Vec<_> = cache_files_before.iter()
+    let index_files: Vec<_> = cache_files_before
+        .iter()
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_lowercase();
             name.contains("index") && (name.ends_with(".json") || name.ends_with(".db"))
@@ -7517,10 +7627,7 @@ buckets:
     for (filename, expected_content) in &test_files {
         let url = proxy2.url(&format!("/data/{}", filename));
         let request_start = Instant::now();
-        let response = client
-            .get(&url)
-            .send()
-            .expect("Failed to send request");
+        let response = client.get(&url).send().expect("Failed to send request");
         let request_duration = request_start.elapsed();
 
         assert_eq!(response.status(), 200, "Expected 200 OK for {}", filename);
@@ -7537,7 +7644,12 @@ buckets:
             "Content mismatch for {}",
             filename
         );
-        println!("  ✓ Fetched: {} (200 OK, {} bytes, {:?})", filename, body.len(), request_duration);
+        println!(
+            "  ✓ Fetched: {} (200 OK, {} bytes, {:?})",
+            filename,
+            body.len(),
+            request_duration
+        );
     }
 
     let total_duration = start_time.elapsed();
@@ -7551,7 +7663,10 @@ buckets:
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .collect();
 
-    println!("  • Files in cache after restart: {}", cache_files_after.len());
+    println!(
+        "  • Files in cache after restart: {}",
+        cache_files_after.len()
+    );
     if cache_files_after.len() > 0 {
         println!("  ✓ Cache files persisted across restart");
     } else {
@@ -7620,11 +7735,7 @@ fn test_e2e_cleanup_removes_old_files_on_startup() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -7649,7 +7760,9 @@ fn test_e2e_cleanup_removes_old_files_on_startup() {
             .put_object()
             .bucket(bucket_name)
             .key("valid.txt")
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -7658,7 +7771,8 @@ fn test_e2e_cleanup_removes_old_files_on_startup() {
 
     // Phase 4: Create cache directory and populate with stale files
     println!("\nPhase 4: Creating cache directory with stale files...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_cleanup_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_cleanup_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     // Create various "stale" files to simulate previous runs
@@ -7672,7 +7786,11 @@ fn test_e2e_cleanup_removes_old_files_on_startup() {
     for (filename, content) in &stale_files {
         let file_path = cache_dir.join(filename);
         fs::write(&file_path, content).expect("Failed to write stale file");
-        println!("  ✓ Created stale file: {} ({} bytes)", filename, content.len());
+        println!(
+            "  ✓ Created stale file: {} ({} bytes)",
+            filename,
+            content.len()
+        );
     }
 
     // Count files before startup
@@ -7745,12 +7863,17 @@ buckets:
     for entry in &files_after {
         let path = entry.path();
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        println!("    - {} ({} bytes)", path.file_name().unwrap().to_string_lossy(), size);
+        println!(
+            "    - {} ({} bytes)",
+            path.file_name().unwrap().to_string_lossy(),
+            size
+        );
     }
 
     // Check if stale files were removed
     let stale_file_names: Vec<&str> = stale_files.iter().map(|(name, _)| *name).collect();
-    let remaining_stale: Vec<_> = files_after.iter()
+    let remaining_stale: Vec<_> = files_after
+        .iter()
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             stale_file_names.contains(&name.as_str())
@@ -7760,7 +7883,10 @@ buckets:
     println!("\n  📊 Cleanup analysis:");
     println!("    • Files before startup: {}", files_before.len());
     println!("    • Files after startup: {}", files_after.len());
-    println!("    • Stale files removed: {}", files_before.len() - remaining_stale.len());
+    println!(
+        "    • Stale files removed: {}",
+        files_before.len() - remaining_stale.len()
+    );
     println!("    • Stale files remaining: {}", remaining_stale.len());
 
     if remaining_stale.is_empty() && files_before.len() > 0 {
@@ -7867,11 +7993,7 @@ fn test_e2e_redis_cache_hit() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -7897,7 +8019,9 @@ fn test_e2e_redis_cache_hit() {
             .put_object()
             .bucket(bucket_name)
             .key(test_file)
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -7906,7 +8030,8 @@ fn test_e2e_redis_cache_hit() {
 
     // Phase 5: Configure proxy with Redis cache
     println!("\nPhase 5: Configuring proxy with Redis cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_redis_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18088; // Use unique port for this test
@@ -7938,9 +8063,7 @@ buckets:
     path: "/data"
     require_auth: false
 "#,
-        proxy_port,
-        redis_url,
-        s3_endpoint
+        proxy_port, redis_url, s3_endpoint
     );
 
     let config_file = cache_dir.join("config.yaml");
@@ -7963,11 +8086,27 @@ buckets:
     let miss_response = client.get(&url).send().expect("Failed to send request");
     let miss_duration = miss_start.elapsed();
 
-    assert_eq!(miss_response.status(), 200, "Expected 200 OK for cache miss");
+    assert_eq!(
+        miss_response.status(),
+        200,
+        "Expected 200 OK for cache miss"
+    );
     let miss_body = miss_response.bytes().expect("Failed to read response body");
-    assert_eq!(miss_body.len(), test_content.len(), "Content length mismatch");
-    assert_eq!(miss_body.as_ref(), test_content.as_slice(), "Content mismatch");
-    println!("  ✓ First request completed: 200 OK, {} bytes, {:?}", miss_body.len(), miss_duration);
+    assert_eq!(
+        miss_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
+    assert_eq!(
+        miss_body.as_ref(),
+        test_content.as_slice(),
+        "Content mismatch"
+    );
+    println!(
+        "  ✓ First request completed: 200 OK, {} bytes, {:?}",
+        miss_body.len(),
+        miss_duration
+    );
 
     // Allow time for async cache write to Redis
     std::thread::sleep(Duration::from_millis(100));
@@ -7980,9 +8119,21 @@ buckets:
 
     assert_eq!(hit_response.status(), 200, "Expected 200 OK for cache hit");
     let hit_body = hit_response.bytes().expect("Failed to read response body");
-    assert_eq!(hit_body.len(), test_content.len(), "Content length mismatch");
-    assert_eq!(hit_body.as_ref(), test_content.as_slice(), "Content mismatch");
-    println!("  ✓ Second request completed: 200 OK, {} bytes, {:?}", hit_body.len(), hit_duration);
+    assert_eq!(
+        hit_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
+    assert_eq!(
+        hit_body.as_ref(),
+        test_content.as_slice(),
+        "Content mismatch"
+    );
+    println!(
+        "  ✓ Second request completed: 200 OK, {} bytes, {:?}",
+        hit_body.len(),
+        hit_duration
+    );
 
     // Phase 9: Analyze performance difference
     println!("\nPhase 9: Analyzing performance...");
@@ -8072,11 +8223,7 @@ fn test_e2e_redis_cache_miss_and_population() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -8102,7 +8249,9 @@ fn test_e2e_redis_cache_miss_and_population() {
             .put_object()
             .bucket(bucket_name)
             .key(test_file)
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -8111,7 +8260,8 @@ fn test_e2e_redis_cache_miss_and_population() {
 
     // Phase 5: Configure proxy with Redis cache
     println!("\nPhase 5: Configuring proxy with Redis cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_miss_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_redis_miss_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18089; // Use unique port for this test
@@ -8143,9 +8293,7 @@ buckets:
     path: "/data"
     require_auth: false
 "#,
-        proxy_port,
-        redis_url,
-        s3_endpoint
+        proxy_port, redis_url, s3_endpoint
     );
 
     let config_file = cache_dir.join("config.yaml");
@@ -8168,11 +8316,27 @@ buckets:
     let miss_response = client.get(&url).send().expect("Failed to send request");
     let miss_duration = miss_start.elapsed();
 
-    assert_eq!(miss_response.status(), 200, "Expected 200 OK for cache miss");
+    assert_eq!(
+        miss_response.status(),
+        200,
+        "Expected 200 OK for cache miss"
+    );
     let miss_body = miss_response.bytes().expect("Failed to read response body");
-    assert_eq!(miss_body.len(), test_content.len(), "Content length mismatch");
-    assert_eq!(miss_body.as_ref(), test_content.as_slice(), "Content mismatch");
-    println!("  ✓ Request completed: 200 OK, {} bytes, {:?}", miss_body.len(), miss_duration);
+    assert_eq!(
+        miss_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
+    assert_eq!(
+        miss_body.as_ref(),
+        test_content.as_slice(),
+        "Content mismatch"
+    );
+    println!(
+        "  ✓ Request completed: 200 OK, {} bytes, {:?}",
+        miss_body.len(),
+        miss_duration
+    );
     println!("  ✓ Response content matches S3 object");
 
     // Phase 8: Allow time for async cache population
@@ -8187,10 +8351,24 @@ buckets:
     let verify_duration = verify_start.elapsed();
 
     assert_eq!(verify_response.status(), 200, "Expected 200 OK");
-    let verify_body = verify_response.bytes().expect("Failed to read response body");
-    assert_eq!(verify_body.len(), test_content.len(), "Content length mismatch");
-    assert_eq!(verify_body.as_ref(), test_content.as_slice(), "Content mismatch");
-    println!("  ✓ Verification request: 200 OK, {} bytes, {:?}", verify_body.len(), verify_duration);
+    let verify_body = verify_response
+        .bytes()
+        .expect("Failed to read response body");
+    assert_eq!(
+        verify_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
+    assert_eq!(
+        verify_body.as_ref(),
+        test_content.as_slice(),
+        "Content mismatch"
+    );
+    println!(
+        "  ✓ Verification request: 200 OK, {} bytes, {:?}",
+        verify_body.len(),
+        verify_duration
+    );
 
     // Phase 10: Analyze cache population effectiveness
     println!("\nPhase 10: Analyzing cache population...");
@@ -8284,11 +8462,7 @@ fn test_e2e_redis_cache_persists_across_proxy_restarts() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -8314,7 +8488,9 @@ fn test_e2e_redis_cache_persists_across_proxy_restarts() {
             .put_object()
             .bucket(bucket_name)
             .key(test_file)
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -8323,7 +8499,10 @@ fn test_e2e_redis_cache_persists_across_proxy_restarts() {
 
     // Phase 5: Configure proxy with Redis cache
     println!("\nPhase 5: Configuring proxy with Redis cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_persist_test_{}", std::process::id()));
+    let cache_dir = std::env::temp_dir().join(format!(
+        "yatagarasu_redis_persist_test_{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18090; // Use unique port for this test
@@ -8355,9 +8534,7 @@ buckets:
     path: "/data"
     require_auth: false
 "#,
-        proxy_port,
-        redis_url,
-        s3_endpoint
+        proxy_port, redis_url, s3_endpoint
     );
 
     let config_file = cache_dir.join("config.yaml");
@@ -8381,10 +8558,24 @@ buckets:
     let populate_duration = populate_start.elapsed();
 
     assert_eq!(populate_response.status(), 200, "Expected 200 OK");
-    let populate_body = populate_response.bytes().expect("Failed to read response body");
-    assert_eq!(populate_body.len(), test_content.len(), "Content length mismatch");
-    assert_eq!(populate_body.as_ref(), test_content.as_slice(), "Content mismatch");
-    println!("  ✓ Request completed: 200 OK, {} bytes, {:?}", populate_body.len(), populate_duration);
+    let populate_body = populate_response
+        .bytes()
+        .expect("Failed to read response body");
+    assert_eq!(
+        populate_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
+    assert_eq!(
+        populate_body.as_ref(),
+        test_content.as_slice(),
+        "Content mismatch"
+    );
+    println!(
+        "  ✓ Request completed: 200 OK, {} bytes, {:?}",
+        populate_body.len(),
+        populate_duration
+    );
 
     // Allow time for async cache write to Redis
     std::thread::sleep(Duration::from_millis(500));
@@ -8401,7 +8592,10 @@ buckets:
     println!("\nPhase 9: Starting second proxy instance (simulating restart)...");
     let proxy2 = ProxyTestHarness::start(config_file.to_str().unwrap(), proxy_port)
         .expect("Failed to start proxy after restart");
-    println!("  ✓ Second proxy started at: http://127.0.0.1:{}", proxy_port);
+    println!(
+        "  ✓ Second proxy started at: http://127.0.0.1:{}",
+        proxy_port
+    );
 
     // Allow time for Redis connection
     std::thread::sleep(Duration::from_millis(500));
@@ -8413,10 +8607,24 @@ buckets:
     let restart_duration = restart_start.elapsed();
 
     assert_eq!(restart_response.status(), 200, "Expected 200 OK");
-    let restart_body = restart_response.bytes().expect("Failed to read response body");
-    assert_eq!(restart_body.len(), test_content.len(), "Content length mismatch");
-    assert_eq!(restart_body.as_ref(), test_content.as_slice(), "Content mismatch");
-    println!("  ✓ Request completed: 200 OK, {} bytes, {:?}", restart_body.len(), restart_duration);
+    let restart_body = restart_response
+        .bytes()
+        .expect("Failed to read response body");
+    assert_eq!(
+        restart_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
+    assert_eq!(
+        restart_body.as_ref(),
+        test_content.as_slice(),
+        "Content mismatch"
+    );
+    println!(
+        "  ✓ Request completed: 200 OK, {} bytes, {:?}",
+        restart_body.len(),
+        restart_duration
+    );
 
     // Phase 11: Analyze cache persistence
     println!("\nPhase 11: Analyzing cache persistence...");
@@ -8424,7 +8632,8 @@ buckets:
     println!("  • Second proxy request: {:?}", restart_duration);
 
     if restart_duration < populate_duration {
-        let speedup = populate_duration.as_millis() as f64 / restart_duration.as_millis().max(1) as f64;
+        let speedup =
+            populate_duration.as_millis() as f64 / restart_duration.as_millis().max(1) as f64;
         println!("  • Speedup ratio: {:.2}x", speedup);
         if speedup > 2.0 {
             println!("  ✅ Cache persisted across restart - second proxy much faster!");
@@ -8504,11 +8713,7 @@ fn test_e2e_redis_cache_etag_validation() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -8534,7 +8739,9 @@ fn test_e2e_redis_cache_etag_validation() {
             .put_object()
             .bucket(bucket_name)
             .key(test_file)
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -8543,7 +8750,8 @@ fn test_e2e_redis_cache_etag_validation() {
 
     // Phase 5: Configure proxy with Redis cache
     println!("\nPhase 5: Configuring proxy with Redis cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_etag_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_redis_etag_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18091; // Use unique port for this test
@@ -8575,9 +8783,7 @@ buckets:
     path: "/data"
     require_auth: false
 "#,
-        proxy_port,
-        redis_url,
-        s3_endpoint
+        proxy_port, redis_url, s3_endpoint
     );
 
     let config_file = cache_dir.join("config.yaml");
@@ -8598,7 +8804,10 @@ buckets:
     let response1 = client.get(&url).send().expect("Failed to send request");
     assert_eq!(response1.status(), 200, "Expected 200 OK");
 
-    let etag1 = response1.headers().get("etag").map(|v| v.to_str().unwrap().to_string());
+    let etag1 = response1
+        .headers()
+        .get("etag")
+        .map(|v| v.to_str().unwrap().to_string());
     let body1 = response1.bytes().expect("Failed to read response body");
     assert_eq!(body1.len(), test_content.len(), "Content length mismatch");
 
@@ -8616,7 +8825,10 @@ buckets:
     let response2 = client.get(&url).send().expect("Failed to send request");
     assert_eq!(response2.status(), 200, "Expected 200 OK");
 
-    let etag2 = response2.headers().get("etag").map(|v| v.to_str().unwrap().to_string());
+    let etag2 = response2
+        .headers()
+        .get("etag")
+        .map(|v| v.to_str().unwrap().to_string());
     let body2 = response2.bytes().expect("Failed to read response body");
     assert_eq!(body2.len(), test_content.len(), "Content length mismatch");
     assert_eq!(body2.as_ref(), test_content.as_slice(), "Content mismatch");
@@ -8640,10 +8852,16 @@ buckets:
             }
         }
         (Some(e1), None) => {
-            println!("  ⚠  First request had ETag ({}), second request missing ETag", e1);
+            println!(
+                "  ⚠  First request had ETag ({}), second request missing ETag",
+                e1
+            );
         }
         (None, Some(e2)) => {
-            println!("  ⚠  First request missing ETag, second request has ETag ({})", e2);
+            println!(
+                "  ⚠  First request missing ETag, second request has ETag ({})",
+                e2
+            );
         }
         (None, None) => {
             println!("  ⚠  Both requests missing ETag (ETag support not yet implemented)");
@@ -8655,7 +8873,10 @@ buckets:
     if let Some(etag) = &etag1 {
         // S3 ETags are typically MD5 hashes in quotes
         let is_quoted = etag.starts_with('"') && etag.ends_with('"');
-        let is_hex = etag.trim_matches('"').chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+        let is_hex = etag
+            .trim_matches('"')
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '-');
 
         println!("  • ETag format: {}", etag);
         println!("  • Quoted: {}", is_quoted);
@@ -8733,11 +8954,7 @@ fn test_e2e_redis_cache_if_none_match_returns_304() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -8763,7 +8980,9 @@ fn test_e2e_redis_cache_if_none_match_returns_304() {
             .put_object()
             .bucket(bucket_name)
             .key(test_file)
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -8772,7 +8991,8 @@ fn test_e2e_redis_cache_if_none_match_returns_304() {
 
     // Phase 5: Configure proxy with Redis cache
     println!("\nPhase 5: Configuring proxy with Redis cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_304_test_{}", std::process::id()));
+    let cache_dir =
+        std::env::temp_dir().join(format!("yatagarasu_redis_304_test_{}", std::process::id()));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18092; // Use unique port for this test
@@ -8804,9 +9024,7 @@ buckets:
     path: "/data"
     require_auth: false
 "#,
-        proxy_port,
-        redis_url,
-        s3_endpoint
+        proxy_port, redis_url, s3_endpoint
     );
 
     let config_file = cache_dir.join("config.yaml");
@@ -8827,15 +9045,24 @@ buckets:
     let response1 = client.get(&url).send().expect("Failed to send request");
     assert_eq!(response1.status(), 200, "Expected 200 OK");
 
-    let etag = response1.headers().get("etag").map(|v| v.to_str().unwrap().to_string());
+    let etag = response1
+        .headers()
+        .get("etag")
+        .map(|v| v.to_str().unwrap().to_string());
     let body1 = response1.bytes().expect("Failed to read response body");
     let body1_len = body1.len();
     assert_eq!(body1_len, test_content.len(), "Content length mismatch");
 
     if let Some(ref etag_value) = etag {
-        println!("  ✓ First request: 200 OK, {} bytes, ETag: {}", body1_len, etag_value);
+        println!(
+            "  ✓ First request: 200 OK, {} bytes, ETag: {}",
+            body1_len, etag_value
+        );
     } else {
-        println!("  ⚠  First request: 200 OK, {} bytes, no ETag header", body1_len);
+        println!(
+            "  ⚠  First request: 200 OK, {} bytes, no ETag header",
+            body1_len
+        );
     }
 
     // Allow time for cache population
@@ -8869,7 +9096,8 @@ buckets:
         println!("\nPhase 9: Verifying 304 Not Modified response...");
         if status == 304 {
             println!("  ✅ Received 304 Not Modified - conditional GET working!");
-            println!("  • Bandwidth saved: {} bytes ({:.1}%)",
+            println!(
+                "  • Bandwidth saved: {} bytes ({:.1}%)",
                 body1_len,
                 (body1_len as f64 / body1_len as f64) * 100.0
             );
@@ -8894,9 +9122,30 @@ buckets:
         // Phase 10: Verify correct headers on 304
         if status == 304 {
             println!("\nPhase 10: Verifying 304 response headers...");
-            println!("  • ETag header: {}", if has_etag_in_response { "present" } else { "missing" });
-            println!("  • Cache-Control header: {}", if has_cache_control { "present" } else { "missing" });
-            println!("  • Content-Length: {}", if has_content_length { "present" } else { "missing" });
+            println!(
+                "  • ETag header: {}",
+                if has_etag_in_response {
+                    "present"
+                } else {
+                    "missing"
+                }
+            );
+            println!(
+                "  • Cache-Control header: {}",
+                if has_cache_control {
+                    "present"
+                } else {
+                    "missing"
+                }
+            );
+            println!(
+                "  • Content-Length: {}",
+                if has_content_length {
+                    "present"
+                } else {
+                    "missing"
+                }
+            );
 
             if has_etag_in_response {
                 println!("  ✓ ETag preserved in 304 response");
@@ -8975,11 +9224,7 @@ fn test_e2e_redis_cache_range_requests_bypass() {
         .endpoint_url(&s3_endpoint)
         .region(aws_sdk_s3::config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
@@ -9005,7 +9250,9 @@ fn test_e2e_redis_cache_range_requests_bypass() {
             .put_object()
             .bucket(bucket_name)
             .key(test_file)
-            .body(aws_sdk_s3::primitives::ByteStream::from(test_content.clone()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                test_content.clone(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -9014,7 +9261,10 @@ fn test_e2e_redis_cache_range_requests_bypass() {
 
     // Phase 5: Configure proxy with Redis cache
     println!("\nPhase 5: Configuring proxy with Redis cache...");
-    let cache_dir = std::env::temp_dir().join(format!("yatagarasu_redis_range_test_{}", std::process::id()));
+    let cache_dir = std::env::temp_dir().join(format!(
+        "yatagarasu_redis_range_test_{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
     let proxy_port = 18093; // Use unique port for this test
@@ -9046,9 +9296,7 @@ buckets:
     path: "/data"
     require_auth: false
 "#,
-        proxy_port,
-        redis_url,
-        s3_endpoint
+        proxy_port, redis_url, s3_endpoint
     );
 
     let config_file = cache_dir.join("config.yaml");
@@ -9068,8 +9316,14 @@ buckets:
 
     let regular_response = client.get(&url).send().expect("Failed to send request");
     assert_eq!(regular_response.status(), 200, "Expected 200 OK");
-    let regular_body = regular_response.bytes().expect("Failed to read response body");
-    assert_eq!(regular_body.len(), test_content.len(), "Content length mismatch");
+    let regular_body = regular_response
+        .bytes()
+        .expect("Failed to read response body");
+    assert_eq!(
+        regular_body.len(),
+        test_content.len(),
+        "Content length mismatch"
+    );
     println!("  ✓ Regular request: 200 OK, {} bytes", regular_body.len());
 
     // Allow time for cache population
@@ -9088,20 +9342,27 @@ buckets:
         .expect("Failed to send request");
 
     let status = range_response.status();
-    let content_range = range_response.headers()
+    let content_range = range_response
+        .headers()
         .get("content-range")
         .map(|v| v.to_str().unwrap().to_string());
-    let content_length = range_response.headers()
+    let content_length = range_response
+        .headers()
         .get("content-length")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<usize>().ok());
 
-    let range_body = range_response.bytes().expect("Failed to read response body");
+    let range_body = range_response
+        .bytes()
+        .expect("Failed to read response body");
     let range_body_len = range_body.len();
 
     println!("  • Range header: {}", range_header);
     println!("  • Response status: {}", status);
-    println!("  • Content-Range: {}", content_range.as_deref().unwrap_or("not present"));
+    println!(
+        "  • Content-Range: {}",
+        content_range.as_deref().unwrap_or("not present")
+    );
     println!("  • Content-Length: {}", content_length.unwrap_or(0));
     println!("  • Body length: {} bytes", range_body_len);
 
@@ -9113,9 +9374,15 @@ buckets:
         println!("  ✅ Received 206 Partial Content - Range request working!");
 
         if range_body_len == expected_range_len {
-            println!("  ✅ Correct partial content length: {} bytes", range_body_len);
+            println!(
+                "  ✅ Correct partial content length: {} bytes",
+                range_body_len
+            );
         } else {
-            println!("  ⚠  Expected {} bytes, got {} bytes", expected_range_len, range_body_len);
+            println!(
+                "  ⚠  Expected {} bytes, got {} bytes",
+                expected_range_len, range_body_len
+            );
         }
 
         if let Some(cr) = content_range {
@@ -9127,7 +9394,10 @@ buckets:
         println!("  ⚠  Received 200 OK instead of 206");
         println!("     (Range request support may not be fully implemented)");
         if range_body_len == test_content.len() {
-            println!("  ⚠  Full file returned ({} bytes) instead of range", range_body_len);
+            println!(
+                "  ⚠  Full file returned ({} bytes) instead of range",
+                range_body_len
+            );
         }
     } else {
         println!("  ⚠  Unexpected status: {} (expected 206)", status);
@@ -9140,8 +9410,12 @@ buckets:
 
         if range_body.as_ref() == expected_content {
             println!("  ✅ Partial content matches expected range bytes");
-            println!("  ✓ First byte: 0x{:02X} (expected: 0x{:02X})", range_body[0], expected_content[0]);
-            println!("  ✓ Last byte: 0x{:02X} (expected: 0x{:02X})",
+            println!(
+                "  ✓ First byte: 0x{:02X} (expected: 0x{:02X})",
+                range_body[0], expected_content[0]
+            );
+            println!(
+                "  ✓ Last byte: 0x{:02X} (expected: 0x{:02X})",
                 range_body[range_body_len - 1],
                 expected_content[expected_range_len - 1]
             );
@@ -9218,11 +9492,7 @@ async fn test_e2e_redis_cache_large_files_bypass() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -9245,7 +9515,10 @@ async fn test_e2e_redis_cache_large_files_bypass() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded 1MB file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded 1MB file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config with max_item_size=512KB
     println!("\nPhase 4: Creating proxy config with max_item_size=512KB...");
@@ -9305,7 +9578,10 @@ cache:
         "First request should return 200 OK"
     );
 
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(
         body1.len(),
         file_size,
@@ -9343,7 +9619,10 @@ cache:
         "Second request should return 200 OK"
     );
 
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(
         body2.len(),
         file_size,
@@ -9371,10 +9650,16 @@ cache:
     // If cache was used, we'd expect >2x speedup
     // Since file bypasses cache, durations should be similar (ratio near 1.0)
     if speedup_ratio > 1.5 {
-        println!("⚠️  Warning: Unexpectedly high speedup ratio {:.2}x", speedup_ratio);
+        println!(
+            "⚠️  Warning: Unexpectedly high speedup ratio {:.2}x",
+            speedup_ratio
+        );
         println!("   This may indicate the file was cached despite exceeding max_item_size");
     } else {
-        println!("✅ Speedup ratio {:.2}x indicates cache bypass (expected <1.5x)", speedup_ratio);
+        println!(
+            "✅ Speedup ratio {:.2}x indicates cache bypass (expected <1.5x)",
+            speedup_ratio
+        );
     }
 
     // Phase 10: Stop proxy
@@ -9394,7 +9679,10 @@ cache:
     println!("Max item size:   512 KB");
     println!("First request:   {:?}", duration1);
     println!("Second request:  {:?}", duration2);
-    println!("Speedup ratio:   {:.2}x (expected <1.5x for cache bypass)", speedup_ratio);
+    println!(
+        "Speedup ratio:   {:.2}x (expected <1.5x for cache bypass)",
+        speedup_ratio
+    );
     println!("Data integrity:  ✅ All bytes verified correct");
 
     println!("\n📝 Note: This test documents expected large file bypass behavior.");
@@ -9443,11 +9731,7 @@ async fn test_e2e_redis_cache_entries_expire_via_ttl() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -9470,7 +9754,10 @@ async fn test_e2e_redis_cache_entries_expire_via_ttl() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config with short TTL (5 seconds)
     println!("\nPhase 4: Creating proxy config with TTL=5 seconds...");
@@ -9530,8 +9817,15 @@ cache:
         "First request should return 200 OK"
     );
 
-    let body1 = response1.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body1[..], file_data, "Response data should match uploaded file");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body1[..],
+        file_data,
+        "Response data should match uploaded file"
+    );
 
     println!("✅ First request completed in {:?} (cache miss)", duration1);
 
@@ -9551,11 +9845,21 @@ cache:
         "Second request should return 200 OK"
     );
 
-    let body2 = response2.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body2[..], file_data, "Response data should match uploaded file");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body2[..],
+        file_data,
+        "Response data should match uploaded file"
+    );
 
     let speedup_ratio = duration1.as_secs_f64() / duration2.as_secs_f64();
-    println!("✅ Second request completed in {:?} (cache hit, speedup: {:.2}x)", duration2, speedup_ratio);
+    println!(
+        "✅ Second request completed in {:?} (cache hit, speedup: {:.2}x)",
+        duration2, speedup_ratio
+    );
 
     // Phase 8: Wait for TTL to expire (wait 6 seconds to be safe)
     println!("\nPhase 8: Waiting for TTL to expire (6 seconds)...");
@@ -9584,15 +9888,25 @@ cache:
         "Third request should return 200 OK"
     );
 
-    let body3 = response3.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body3[..], file_data, "Response data should match uploaded file");
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body3[..],
+        file_data,
+        "Response data should match uploaded file"
+    );
 
     println!("✅ Third request completed in {:?}", duration3);
 
     // Phase 10: Analyze timing to verify expiration
     println!("\nPhase 10: Analyzing request timing to verify TTL expiration...");
     println!("   Request 1 (cache miss):  {:?}", duration1);
-    println!("   Request 2 (cache hit):   {:?} (speedup: {:.2}x)", duration2, speedup_ratio);
+    println!(
+        "   Request 2 (cache hit):   {:?} (speedup: {:.2}x)",
+        duration2, speedup_ratio
+    );
     println!("   Request 3 (after TTL):   {:?}", duration3);
 
     // Third request should be slower than second (cache expired)
@@ -9600,8 +9914,14 @@ cache:
     let third_vs_second_ratio = duration3.as_secs_f64() / duration2.as_secs_f64();
 
     if third_vs_second_ratio > 1.5 {
-        println!("✅ Third request ({:?}) significantly slower than second ({:?})", duration3, duration2);
-        println!("   Ratio: {:.2}x - This indicates cache expired as expected", third_vs_second_ratio);
+        println!(
+            "✅ Third request ({:?}) significantly slower than second ({:?})",
+            duration3, duration2
+        );
+        println!(
+            "   Ratio: {:.2}x - This indicates cache expired as expected",
+            third_vs_second_ratio
+        );
     } else {
         println!("⚠️  Warning: Third request not significantly slower than second");
         println!("   This may indicate TTL expiration didn't work as expected");
@@ -9623,9 +9943,15 @@ cache:
     println!("================");
     println!("TTL configured:  5 seconds");
     println!("Request 1:       {:?} (cache miss)", duration1);
-    println!("Request 2:       {:?} (cache hit, {:.2}x faster)", duration2, speedup_ratio);
+    println!(
+        "Request 2:       {:?} (cache hit, {:.2}x faster)",
+        duration2, speedup_ratio
+    );
     println!("Wait period:     6 seconds");
-    println!("Request 3:       {:?} (after expiry, {:.2}x slower than hit)", duration3, third_vs_second_ratio);
+    println!(
+        "Request 3:       {:?} (after expiry, {:.2}x slower than hit)",
+        duration3, third_vs_second_ratio
+    );
     println!("Data integrity:  ✅ All bytes verified correct");
 
     println!("\n📝 Note: This test documents expected Redis TTL behavior.");
@@ -9675,11 +10001,7 @@ async fn test_e2e_redis_cache_concurrent_requests_coalesce() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -9702,7 +10024,10 @@ async fn test_e2e_redis_cache_concurrent_requests_coalesce() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config
     println!("\nPhase 4: Creating proxy config...");
@@ -9766,7 +10091,10 @@ cache:
             let request_duration = request_start.elapsed();
 
             let status = response.status();
-            let body = response.bytes().await.expect("Failed to read response body");
+            let body = response
+                .bytes()
+                .await
+                .expect("Failed to read response body");
 
             (i, status, body, request_duration)
         });
@@ -9809,7 +10137,10 @@ cache:
         durations.push(*duration);
     }
 
-    println!("✅ All {} requests succeeded with correct data", success_count);
+    println!(
+        "✅ All {} requests succeeded with correct data",
+        success_count
+    );
 
     // Phase 9: Analyze request durations to verify coalescing behavior
     println!("\nPhase 9: Analyzing request durations to verify coalescing...");
@@ -9858,7 +10189,10 @@ cache:
             let request_duration = request_start.elapsed();
 
             let status = response.status();
-            let body = response.bytes().await.expect("Failed to read response body");
+            let body = response
+                .bytes()
+                .await
+                .expect("Failed to read response body");
 
             (i, status, body, request_duration)
         });
@@ -9874,20 +10208,34 @@ cache:
     }
     let cache_hit_total = cache_hit_start.elapsed();
 
-    println!("✅ All 10 cache hit requests completed in {:?}", cache_hit_total);
+    println!(
+        "✅ All 10 cache hit requests completed in {:?}",
+        cache_hit_total
+    );
 
     // Phase 11: Verify cache hits were faster
     println!("\nPhase 11: Analyzing cache hit performance...");
     let mut cache_hit_durations = Vec::new();
 
     for (i, status, body, duration) in &cache_hit_results {
-        assert_eq!(*status, reqwest::StatusCode::OK, "Request {} should return 200 OK", i);
-        assert_eq!(&body[..], file_data, "Request {} should return correct data", i);
+        assert_eq!(
+            *status,
+            reqwest::StatusCode::OK,
+            "Request {} should return 200 OK",
+            i
+        );
+        assert_eq!(
+            &body[..],
+            file_data,
+            "Request {} should return correct data",
+            i
+        );
         cache_hit_durations.push(*duration);
     }
 
     cache_hit_durations.sort();
-    let cache_hit_avg = cache_hit_durations.iter().sum::<std::time::Duration>() / cache_hit_durations.len() as u32;
+    let cache_hit_avg =
+        cache_hit_durations.iter().sum::<std::time::Duration>() / cache_hit_durations.len() as u32;
 
     println!("   Cache miss average: {:?}", avg_duration);
     println!("   Cache hit average:  {:?}", cache_hit_avg);
@@ -9896,7 +10244,10 @@ cache:
     println!("   Speedup ratio:      {:.2}x", speedup);
 
     if speedup > 2.0 {
-        println!("✅ Cache hits significantly faster ({:.2}x speedup)", speedup);
+        println!(
+            "✅ Cache hits significantly faster ({:.2}x speedup)",
+            speedup
+        );
     }
 
     // Phase 12: Stop proxy
@@ -9914,7 +10265,11 @@ cache:
     println!("================");
     println!("Concurrent requests (cache miss): 10");
     println!("  - All succeeded:    ✅");
-    println!("  - Duration spread:  {:?} ({} ms)", *max_duration - *min_duration, spread);
+    println!(
+        "  - Duration spread:  {:?} ({} ms)",
+        *max_duration - *min_duration,
+        spread
+    );
     println!("  - Average duration: {:?}", avg_duration);
     println!("\nConcurrent requests (cache hit): 10");
     println!("  - All succeeded:    ✅");
@@ -9969,11 +10324,7 @@ async fn test_e2e_redis_cache_metrics_tracked_correctly() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -9996,7 +10347,10 @@ async fn test_e2e_redis_cache_metrics_tracked_correctly() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config with metrics enabled
     println!("\nPhase 4: Creating proxy config with metrics enabled...");
@@ -10063,7 +10417,10 @@ metrics:
         .await
         .expect("Failed to read initial metrics");
 
-    println!("✅ Initial metrics fetched ({} bytes)", initial_metrics_text.len());
+    println!(
+        "✅ Initial metrics fetched ({} bytes)",
+        initial_metrics_text.len()
+    );
 
     // Phase 7: Make first request (cache miss)
     println!("\nPhase 7: Making first request (should be cache miss)...");
@@ -10076,10 +10433,21 @@ metrics:
         .await
         .expect("Failed to send request");
 
-    assert_eq!(response1.status(), 200, "First request should return 200 OK");
+    assert_eq!(
+        response1.status(),
+        200,
+        "First request should return 200 OK"
+    );
 
-    let body1 = response1.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body1[..], file_data, "Response data should match uploaded file");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body1[..],
+        file_data,
+        "Response data should match uploaded file"
+    );
 
     println!("✅ First request completed (cache miss)");
 
@@ -10091,10 +10459,21 @@ metrics:
         .await
         .expect("Failed to send request");
 
-    assert_eq!(response2.status(), 200, "Second request should return 200 OK");
+    assert_eq!(
+        response2.status(),
+        200,
+        "Second request should return 200 OK"
+    );
 
-    let body2 = response2.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body2[..], file_data, "Response data should match uploaded file");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body2[..],
+        file_data,
+        "Response data should match uploaded file"
+    );
 
     println!("✅ Second request completed (cache hit)");
 
@@ -10106,10 +10485,21 @@ metrics:
         .await
         .expect("Failed to send request");
 
-    assert_eq!(response3.status(), 200, "Third request should return 200 OK");
+    assert_eq!(
+        response3.status(),
+        200,
+        "Third request should return 200 OK"
+    );
 
-    let body3 = response3.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body3[..], file_data, "Response data should match uploaded file");
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body3[..],
+        file_data,
+        "Response data should match uploaded file"
+    );
 
     println!("✅ Third request completed (cache hit)");
 
@@ -10134,7 +10524,10 @@ metrics:
         .await
         .expect("Failed to read updated metrics");
 
-    println!("✅ Updated metrics fetched ({} bytes)", updated_metrics_text.len());
+    println!(
+        "✅ Updated metrics fetched ({} bytes)",
+        updated_metrics_text.len()
+    );
 
     // Phase 11: Parse and verify metrics
     println!("\nPhase 11: Parsing and verifying Redis cache metrics...");
@@ -10144,13 +10537,19 @@ metrics:
         || updated_metrics_text.contains("cache_hits");
     let has_redis_misses = updated_metrics_text.contains("redis_cache_misses")
         || updated_metrics_text.contains("cache_misses");
-    let has_cache_operations = updated_metrics_text.contains("cache_")
-        || updated_metrics_text.contains("redis_");
+    let has_cache_operations =
+        updated_metrics_text.contains("cache_") || updated_metrics_text.contains("redis_");
 
     println!("   Metrics analysis:");
     println!("   - Redis cache hits metric present:   {}", has_redis_hits);
-    println!("   - Redis cache misses metric present: {}", has_redis_misses);
-    println!("   - Cache operations tracked:          {}", has_cache_operations);
+    println!(
+        "   - Redis cache misses metric present: {}",
+        has_redis_misses
+    );
+    println!(
+        "   - Cache operations tracked:          {}",
+        has_cache_operations
+    );
 
     // Count metric lines for detailed analysis
     let metric_lines: Vec<&str> = updated_metrics_text
@@ -10158,7 +10557,10 @@ metrics:
         .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
         .collect();
 
-    println!("   - Total metric data points:          {}", metric_lines.len());
+    println!(
+        "   - Total metric data points:          {}",
+        metric_lines.len()
+    );
 
     // Look for specific cache-related metrics
     let cache_metric_lines: Vec<&str> = metric_lines
@@ -10173,11 +10575,16 @@ metrics:
             println!("   {}. {}", i + 1, line);
         }
         if cache_metric_lines.len() > 10 {
-            println!("   ... and {} more cache metrics", cache_metric_lines.len() - 10);
+            println!(
+                "   ... and {} more cache metrics",
+                cache_metric_lines.len() - 10
+            );
         }
     } else {
         println!("\n   ⚠️  No cache-specific metrics found yet");
-        println!("   (This is expected in Red phase - metrics will be added during cache integration)");
+        println!(
+            "   (This is expected in Red phase - metrics will be added during cache integration)"
+        );
     }
 
     // Phase 12: Stop proxy
@@ -10250,11 +10657,7 @@ async fn test_e2e_redis_cache_purge_api_clears_entries() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -10335,44 +10738,77 @@ cache:
 
     // Request file1 (cache miss)
     let start1 = std::time::Instant::now();
-    let response1 = client.get(&url1).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url1)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration1 = start1.elapsed();
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], file_data1);
 
     // Request file2 (cache miss)
     let start2 = std::time::Instant::now();
-    let response2 = client.get(&url2).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url2)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration2 = start2.elapsed();
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], file_data2);
 
-    println!("✅ Populated cache with 2 files (file1: {:?}, file2: {:?})", duration1, duration2);
+    println!(
+        "✅ Populated cache with 2 files (file1: {:?}, file2: {:?})",
+        duration1, duration2
+    );
 
     // Phase 7: Verify cache is working (cache hits should be faster)
     println!("\nPhase 7: Verifying cache is working (making cached requests)...");
 
     let cached_start1 = std::time::Instant::now();
-    let cached_response1 = client.get(&url1).send().await.expect("Failed to send request");
+    let cached_response1 = client
+        .get(&url1)
+        .send()
+        .await
+        .expect("Failed to send request");
     let cached_duration1 = cached_start1.elapsed();
     assert_eq!(cached_response1.status(), 200);
-    let cached_body1 = cached_response1.bytes().await.expect("Failed to read response body");
+    let cached_body1 = cached_response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&cached_body1[..], file_data1);
 
     let cached_start2 = std::time::Instant::now();
-    let cached_response2 = client.get(&url2).send().await.expect("Failed to send request");
+    let cached_response2 = client
+        .get(&url2)
+        .send()
+        .await
+        .expect("Failed to send request");
     let cached_duration2 = cached_start2.elapsed();
     assert_eq!(cached_response2.status(), 200);
-    let cached_body2 = cached_response2.bytes().await.expect("Failed to read response body");
+    let cached_body2 = cached_response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&cached_body2[..], file_data2);
 
     let speedup1 = duration1.as_secs_f64() / cached_duration1.as_secs_f64();
     let speedup2 = duration2.as_secs_f64() / cached_duration2.as_secs_f64();
 
-    println!("✅ Cache hits confirmed (file1: {:?}, speedup {:.2}x; file2: {:?}, speedup {:.2}x)",
-             cached_duration1, speedup1, cached_duration2, speedup2);
+    println!(
+        "✅ Cache hits confirmed (file1: {:?}, speedup {:.2}x; file2: {:?}, speedup {:.2}x)",
+        cached_duration1, speedup1, cached_duration2, speedup2
+    );
 
     // Phase 8: Call purge API
     println!("\nPhase 8: Calling cache purge API...");
@@ -10405,21 +10841,41 @@ cache:
     println!("\nPhase 10: Verifying cache was cleared (making post-purge requests)...");
 
     let post_purge_start1 = std::time::Instant::now();
-    let post_purge_response1 = client.get(&url1).send().await.expect("Failed to send request");
+    let post_purge_response1 = client
+        .get(&url1)
+        .send()
+        .await
+        .expect("Failed to send request");
     let post_purge_duration1 = post_purge_start1.elapsed();
     assert_eq!(post_purge_response1.status(), 200);
-    let post_purge_body1 = post_purge_response1.bytes().await.expect("Failed to read response body");
+    let post_purge_body1 = post_purge_response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&post_purge_body1[..], file_data1);
 
     let post_purge_start2 = std::time::Instant::now();
-    let post_purge_response2 = client.get(&url2).send().await.expect("Failed to send request");
+    let post_purge_response2 = client
+        .get(&url2)
+        .send()
+        .await
+        .expect("Failed to send request");
     let post_purge_duration2 = post_purge_start2.elapsed();
     assert_eq!(post_purge_response2.status(), 200);
-    let post_purge_body2 = post_purge_response2.bytes().await.expect("Failed to read response body");
+    let post_purge_body2 = post_purge_response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&post_purge_body2[..], file_data2);
 
-    println!("   Post-purge file1: {:?} (pre-purge cache hit: {:?})", post_purge_duration1, cached_duration1);
-    println!("   Post-purge file2: {:?} (pre-purge cache hit: {:?})", post_purge_duration2, cached_duration2);
+    println!(
+        "   Post-purge file1: {:?} (pre-purge cache hit: {:?})",
+        post_purge_duration1, cached_duration1
+    );
+    println!(
+        "   Post-purge file2: {:?} (pre-purge cache hit: {:?})",
+        post_purge_duration2, cached_duration2
+    );
 
     // Post-purge requests should be slower than cached requests (cache was cleared)
     let post_purge_ratio1 = post_purge_duration1.as_secs_f64() / cached_duration1.as_secs_f64();
@@ -10452,7 +10908,10 @@ cache:
     println!("Files cached:           2 (file1.txt, file2.txt)");
     println!("Cache hit speedup:      {:.2}x, {:.2}x", speedup1, speedup2);
     println!("Purge API called:       ✅");
-    println!("Post-purge slowdown:    {:.2}x, {:.2}x", post_purge_ratio1, post_purge_ratio2);
+    println!(
+        "Post-purge slowdown:    {:.2}x, {:.2}x",
+        post_purge_ratio1, post_purge_ratio2
+    );
     println!("Data integrity:         ✅ All bytes verified correct");
 
     println!("\n📝 Note: This test documents expected Redis cache purge behavior.");
@@ -10505,11 +10964,7 @@ async fn test_e2e_redis_cache_stats_api_returns_stats() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -10613,30 +11068,58 @@ cache:
     let url2 = proxy.url("/files/file2.txt");
 
     // Request 1: file1 (cache miss)
-    let response1 = client.get(&url1).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url1)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], file_data1);
     println!("   ✅ Request 1: file1 (cache miss)");
 
     // Request 2: file2 (cache miss)
-    let response2 = client.get(&url2).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url2)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], file_data2);
     println!("   ✅ Request 2: file2 (cache miss)");
 
     // Request 3: file1 again (cache hit)
-    let response3 = client.get(&url1).send().await.expect("Failed to send request");
+    let response3 = client
+        .get(&url1)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response3.status(), 200);
-    let body3 = response3.bytes().await.expect("Failed to read response body");
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body3[..], file_data1);
     println!("   ✅ Request 3: file1 (cache hit)");
 
     // Request 4: file2 again (cache hit)
-    let response4 = client.get(&url2).send().await.expect("Failed to send request");
+    let response4 = client
+        .get(&url2)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response4.status(), 200);
-    let body4 = response4.bytes().await.expect("Failed to read response body");
+    let body4 = response4
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body4[..], file_data2);
     println!("   ✅ Request 4: file2 (cache hit)");
 
@@ -10676,32 +11159,47 @@ cache:
         Ok(stats_json) => {
             println!("   ✅ Stats are valid JSON");
             println!("   Stats structure:");
-            println!("   {}", serde_json::to_string_pretty(&stats_json).unwrap_or_default());
+            println!(
+                "   {}",
+                serde_json::to_string_pretty(&stats_json).unwrap_or_default()
+            );
 
             // Look for expected Redis cache stats fields
             let has_redis_stats = stats_json.get("redis").is_some()
                 || stats_json.get("redis_cache").is_some()
-                || stats_json.as_object().map(|o| {
-                    o.keys().any(|k| k.contains("redis") || k.contains("cache"))
-                }).unwrap_or(false);
+                || stats_json
+                    .as_object()
+                    .map(|o| o.keys().any(|k| k.contains("redis") || k.contains("cache")))
+                    .unwrap_or(false);
 
             if has_redis_stats {
                 println!("   ✅ Redis cache stats present in response");
             } else {
                 println!("   ⚠️  No Redis-specific stats found yet");
-                println!("   (This is expected in Red phase - stats will be added during integration)");
+                println!(
+                    "   (This is expected in Red phase - stats will be added during integration)"
+                );
             }
         }
         Err(_) => {
             println!("   ⚠️  Stats response is not JSON (may be plain text or other format)");
-            println!("   Response preview: {}", &updated_stats_text[..updated_stats_text.len().min(200)]);
+            println!(
+                "   Response preview: {}",
+                &updated_stats_text[..updated_stats_text.len().min(200)]
+            );
         }
     }
 
     // Phase 10: Compare initial vs updated stats
     println!("\nPhase 10: Comparing initial vs updated stats...");
-    println!("   Initial stats length: {} bytes", initial_stats_text.len());
-    println!("   Updated stats length: {} bytes", updated_stats_text.len());
+    println!(
+        "   Initial stats length: {} bytes",
+        initial_stats_text.len()
+    );
+    println!(
+        "   Updated stats length: {} bytes",
+        updated_stats_text.len()
+    );
 
     if initial_stats_text != updated_stats_text {
         println!("   ✅ Stats changed after cache activity (as expected)");
@@ -10726,8 +11224,22 @@ cache:
     println!("Cache activity:        2 misses, 2 hits");
     println!("Stats endpoint:        GET /cache/stats");
     println!("Stats accessible:      ✅");
-    println!("Stats format:          {}", if serde_json::from_str::<serde_json::Value>(&updated_stats_text).is_ok() { "JSON" } else { "Other" });
-    println!("Stats updated:         {}", if initial_stats_text != updated_stats_text { "✅" } else { "⚠️" });
+    println!(
+        "Stats format:          {}",
+        if serde_json::from_str::<serde_json::Value>(&updated_stats_text).is_ok() {
+            "JSON"
+        } else {
+            "Other"
+        }
+    );
+    println!(
+        "Stats updated:         {}",
+        if initial_stats_text != updated_stats_text {
+            "✅"
+        } else {
+            "⚠️"
+        }
+    );
 
     println!("\n📝 Note: This test documents expected Redis cache stats API behavior.");
     println!("   Once Redis cache stats API is fully integrated, this test will verify:");
@@ -10777,11 +11289,7 @@ async fn test_e2e_redis_cache_connection_pool_handles_reconnections() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -10804,7 +11312,10 @@ async fn test_e2e_redis_cache_connection_pool_handles_reconnections() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config
     println!("\nPhase 4: Creating proxy config...");
@@ -10850,17 +11361,31 @@ cache:
     let client = reqwest::Client::new();
     let url = proxy.url("/files/test-file.txt");
 
-    let response1 = client.get(&url).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], file_data);
     println!("✅ Initial request completed (cache populated)");
 
     // Phase 7: Verify cache is working
     println!("\nPhase 7: Verifying cache is working (cache hit)...");
-    let response2 = client.get(&url).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], file_data);
     println!("✅ Cache hit confirmed");
 
@@ -10883,9 +11408,20 @@ cache:
     println!("\nPhase 9: Making request during Redis unavailability...");
     println!("   Expected: Request succeeds (falls back to S3)");
 
-    let response3 = client.get(&url).send().await.expect("Failed to send request");
-    assert_eq!(response3.status(), 200, "Proxy should continue serving from S3");
-    let body3 = response3.bytes().await.expect("Failed to read response body");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(
+        response3.status(),
+        200,
+        "Proxy should continue serving from S3"
+    );
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body3[..], file_data, "Data should still be correct");
 
     println!("✅ Request succeeded during Redis unavailability (S3 fallback)");
@@ -10900,15 +11436,29 @@ cache:
     println!("\nPhase 11: Verifying cache works after Redis recovery...");
 
     // Make a request to populate cache again
-    let response4 = client.get(&url).send().await.expect("Failed to send request");
+    let response4 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response4.status(), 200);
-    let body4 = response4.bytes().await.expect("Failed to read response body");
+    let body4 = response4
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body4[..], file_data);
 
     // Make another request (should be cache hit)
-    let response5 = client.get(&url).send().await.expect("Failed to send request");
+    let response5 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response5.status(), 200);
-    let body5 = response5.bytes().await.expect("Failed to read response body");
+    let body5 = response5
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body5[..], file_data);
 
     println!("✅ Cache functioning normally after recovery");
@@ -10981,11 +11531,7 @@ async fn test_e2e_redis_cache_handles_server_restart_gracefully() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -11008,7 +11554,10 @@ async fn test_e2e_redis_cache_handles_server_restart_gracefully() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config
     println!("\nPhase 4: Creating proxy config...");
@@ -11054,17 +11603,31 @@ cache:
     let client = reqwest::Client::new();
     let url = proxy.url("/files/test-file.txt");
 
-    let response1 = client.get(&url).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], file_data);
     println!("✅ Initial request completed (cache populated)");
 
     // Phase 7: Verify cache is working
     println!("\nPhase 7: Verifying cache is working (cache hit)...");
-    let response2 = client.get(&url).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], file_data);
     println!("✅ Cache hit confirmed");
 
@@ -11090,9 +11653,20 @@ cache:
     println!("\nPhase 9: Making request during Redis restart...");
     println!("   Expected: Request succeeds (falls back to S3)");
 
-    let response3 = client.get(&url).send().await.expect("Failed to send request");
-    assert_eq!(response3.status(), 200, "Proxy should continue serving from S3");
-    let body3 = response3.bytes().await.expect("Failed to read response body");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(
+        response3.status(),
+        200,
+        "Proxy should continue serving from S3"
+    );
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body3[..], file_data, "Data should still be correct");
 
     println!("✅ Request succeeded during Redis restart (S3 fallback)");
@@ -11107,15 +11681,29 @@ cache:
     println!("\nPhase 11: Repopulating cache after Redis restart...");
 
     // Make a request (cache miss after restart, repopulates)
-    let response4 = client.get(&url).send().await.expect("Failed to send request");
+    let response4 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response4.status(), 200);
-    let body4 = response4.bytes().await.expect("Failed to read response body");
+    let body4 = response4
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body4[..], file_data);
 
     // Make another request (should be cache hit)
-    let response5 = client.get(&url).send().await.expect("Failed to send request");
+    let response5 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response5.status(), 200);
-    let body5 = response5.bytes().await.expect("Failed to read response body");
+    let body5 = response5
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body5[..], file_data);
 
     println!("✅ Cache repopulated successfully after restart");
@@ -11186,11 +11774,7 @@ async fn test_e2e_redis_cache_serialization_deserialization_real_data() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -11221,7 +11805,9 @@ async fn test_e2e_redis_cache_serialization_deserialization_real_data() {
         .put_object()
         .bucket(bucket_name)
         .key("binary.bin")
-        .body(aws_sdk_s3::primitives::ByteStream::from(binary_data.clone()))
+        .body(aws_sdk_s3::primitives::ByteStream::from(
+            binary_data.clone(),
+        ))
         .send()
         .await
         .expect("Failed to upload binary file");
@@ -11307,15 +11893,29 @@ cache:
     let url_text = proxy.url("/files/text.txt");
 
     // First request (cache miss, populate cache)
-    let response1 = client.get(&url_text).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url_text)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], text_data, "Text data mismatch on cache miss");
 
     // Second request (cache hit, deserialize from Redis)
-    let response2 = client.get(&url_text).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url_text)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], text_data, "Text data mismatch on cache hit");
 
     println!("✅ Plain text: serialization/deserialization verified");
@@ -11324,15 +11924,37 @@ cache:
     println!("\nPhase 7: Testing binary data serialization/deserialization...");
     let url_binary = proxy.url("/files/binary.bin");
 
-    let response3 = client.get(&url_binary).send().await.expect("Failed to send request");
+    let response3 = client
+        .get(&url_binary)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response3.status(), 200);
-    let body3 = response3.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body3[..], &binary_data[..], "Binary data mismatch on cache miss");
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body3[..],
+        &binary_data[..],
+        "Binary data mismatch on cache miss"
+    );
 
-    let response4 = client.get(&url_binary).send().await.expect("Failed to send request");
+    let response4 = client
+        .get(&url_binary)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response4.status(), 200);
-    let body4 = response4.bytes().await.expect("Failed to read response body");
-    assert_eq!(&body4[..], &binary_data[..], "Binary data mismatch on cache hit");
+    let body4 = response4
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        &body4[..],
+        &binary_data[..],
+        "Binary data mismatch on cache hit"
+    );
 
     // Verify all 256 byte values are preserved
     for (i, &byte) in body4.iter().enumerate() {
@@ -11345,14 +11967,28 @@ cache:
     println!("\nPhase 8: Testing UTF-8 with special characters...");
     let url_utf8 = proxy.url("/files/utf8.txt");
 
-    let response5 = client.get(&url_utf8).send().await.expect("Failed to send request");
+    let response5 = client
+        .get(&url_utf8)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response5.status(), 200);
-    let body5 = response5.bytes().await.expect("Failed to read response body");
+    let body5 = response5
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body5[..], utf8_data, "UTF-8 data mismatch on cache miss");
 
-    let response6 = client.get(&url_utf8).send().await.expect("Failed to send request");
+    let response6 = client
+        .get(&url_utf8)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response6.status(), 200);
-    let body6 = response6.bytes().await.expect("Failed to read response body");
+    let body6 = response6
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body6[..], utf8_data, "UTF-8 data mismatch on cache hit");
 
     // Verify UTF-8 decoding works
@@ -11367,14 +12003,28 @@ cache:
     println!("\nPhase 9: Testing JSON data serialization/deserialization...");
     let url_json = proxy.url("/files/data.json");
 
-    let response7 = client.get(&url_json).send().await.expect("Failed to send request");
+    let response7 = client
+        .get(&url_json)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response7.status(), 200);
-    let body7 = response7.bytes().await.expect("Failed to read response body");
+    let body7 = response7
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body7[..], json_data, "JSON data mismatch on cache miss");
 
-    let response8 = client.get(&url_json).send().await.expect("Failed to send request");
+    let response8 = client
+        .get(&url_json)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response8.status(), 200);
-    let body8 = response8.bytes().await.expect("Failed to read response body");
+    let body8 = response8
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body8[..], json_data, "JSON data mismatch on cache hit");
 
     // Verify JSON is valid
@@ -11386,15 +12036,37 @@ cache:
     println!("\nPhase 10: Testing empty file serialization/deserialization...");
     let url_empty = proxy.url("/files/empty.txt");
 
-    let response9 = client.get(&url_empty).send().await.expect("Failed to send request");
+    let response9 = client
+        .get(&url_empty)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response9.status(), 200);
-    let body9 = response9.bytes().await.expect("Failed to read response body");
-    assert_eq!(body9.len(), 0, "Empty file should have 0 bytes on cache miss");
+    let body9 = response9
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        body9.len(),
+        0,
+        "Empty file should have 0 bytes on cache miss"
+    );
 
-    let response10 = client.get(&url_empty).send().await.expect("Failed to send request");
+    let response10 = client
+        .get(&url_empty)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response10.status(), 200);
-    let body10 = response10.bytes().await.expect("Failed to read response body");
-    assert_eq!(body10.len(), 0, "Empty file should have 0 bytes on cache hit");
+    let body10 = response10
+        .bytes()
+        .await
+        .expect("Failed to read response body");
+    assert_eq!(
+        body10.len(),
+        0,
+        "Empty file should have 0 bytes on cache hit"
+    );
 
     println!("✅ Empty file: correctly handled");
 
@@ -11475,11 +12147,7 @@ async fn test_e2e_tiered_cache_memory_hit_fastest_path() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -11502,7 +12170,10 @@ async fn test_e2e_tiered_cache_memory_hit_fastest_path() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config with all cache layers enabled
     println!("\nPhase 4: Creating proxy config with tiered cache (Memory + Disk + Redis)...");
@@ -11562,11 +12233,18 @@ cache:
     let url = proxy.url("/files/test-file.txt");
 
     let start1 = std::time::Instant::now();
-    let response1 = client.get(&url).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration1 = start1.elapsed();
 
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], file_data);
 
     println!("✅ First request completed in {:?}", duration1);
@@ -11577,11 +12255,18 @@ cache:
     // Phase 7: Make second request (memory hit - fastest path)
     println!("\nPhase 7: Making second request (should be memory hit - fastest path)...");
     let start2 = std::time::Instant::now();
-    let response2 = client.get(&url).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration2 = start2.elapsed();
 
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], file_data);
 
     println!("✅ Second request completed in {:?}", duration2);
@@ -11598,24 +12283,43 @@ cache:
     println!("   Speedup ratio:          {:.2}x", speedup_ratio);
 
     if speedup_ratio > 5.0 {
-        println!("✅ Excellent speedup ({:.2}x) - memory cache is significantly faster", speedup_ratio);
+        println!(
+            "✅ Excellent speedup ({:.2}x) - memory cache is significantly faster",
+            speedup_ratio
+        );
     } else if speedup_ratio > 2.0 {
-        println!("✅ Good speedup ({:.2}x) - memory cache providing benefit", speedup_ratio);
+        println!(
+            "✅ Good speedup ({:.2}x) - memory cache providing benefit",
+            speedup_ratio
+        );
     } else {
-        println!("⚠️  Low speedup ({:.2}x) - may indicate memory cache not working", speedup_ratio);
+        println!(
+            "⚠️  Low speedup ({:.2}x) - may indicate memory cache not working",
+            speedup_ratio
+        );
     }
 
     // Phase 9: Make third request to verify memory cache is stable
     println!("\nPhase 9: Making third request (verify consistent memory hits)...");
     let start3 = std::time::Instant::now();
-    let response3 = client.get(&url).send().await.expect("Failed to send request");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration3 = start3.elapsed();
 
     assert_eq!(response3.status(), 200);
-    let body3 = response3.bytes().await.expect("Failed to read response body");
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body3[..], file_data);
 
-    println!("✅ Third request completed in {:?} (consistent memory hit)", duration3);
+    println!(
+        "✅ Third request completed in {:?} (consistent memory hit)",
+        duration3
+    );
 
     // Phase 10: Stop proxy
     println!("\nPhase 10: Stopping proxy...");
@@ -11632,7 +12336,10 @@ cache:
     println!("================");
     println!("Cache Architecture:  3-tier (Memory → Disk → Redis → S3)");
     println!("Request 1 (S3):      {:?}", duration1);
-    println!("Request 2 (Memory):  {:?} ({:.2}x faster)", duration2, speedup_ratio);
+    println!(
+        "Request 2 (Memory):  {:?} ({:.2}x faster)",
+        duration2, speedup_ratio
+    );
     println!("Request 3 (Memory):  {:?} (consistent)", duration3);
     println!("Data integrity:      ✅ All bytes verified correct");
 
@@ -11683,11 +12390,7 @@ async fn test_e2e_tiered_cache_memory_miss_disk_hit_promotion() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -11710,7 +12413,10 @@ async fn test_e2e_tiered_cache_memory_miss_disk_hit_promotion() {
         .await
         .expect("Failed to upload file");
 
-    println!("✅ Uploaded test file to s3://{}/{}", bucket_name, object_key);
+    println!(
+        "✅ Uploaded test file to s3://{}/{}",
+        bucket_name, object_key
+    );
 
     // Phase 4: Create proxy config with all cache layers enabled
     println!("\nPhase 4: Creating proxy config with tiered cache...");
@@ -11766,9 +12472,16 @@ cache:
     let client = reqwest::Client::new();
     let url = proxy.url("/files/test-file.txt");
 
-    let response1 = client.get(&url).send().await.expect("Failed to send request");
+    let response1 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     assert_eq!(response1.status(), 200);
-    let body1 = response1.bytes().await.expect("Failed to read response body");
+    let body1 = response1
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body1[..], file_data);
 
     println!("✅ First request completed");
@@ -11803,11 +12516,18 @@ cache:
     // Phase 9: Make second request (memory miss → disk hit → promote)
     println!("\nPhase 9: Making second request (memory miss → disk hit → promotion)...");
     let start2 = std::time::Instant::now();
-    let response2 = client.get(&url).send().await.expect("Failed to send request");
+    let response2 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration2 = start2.elapsed();
 
     assert_eq!(response2.status(), 200);
-    let body2 = response2.bytes().await.expect("Failed to read response body");
+    let body2 = response2
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body2[..], file_data);
 
     println!("✅ Second request completed in {:?}", duration2);
@@ -11820,11 +12540,18 @@ cache:
     // Phase 10: Make third request (should be memory hit after promotion)
     println!("\nPhase 10: Making third request (verify promotion - should be memory hit)...");
     let start3 = std::time::Instant::now();
-    let response3 = client.get(&url).send().await.expect("Failed to send request");
+    let response3 = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
     let duration3 = start3.elapsed();
 
     assert_eq!(response3.status(), 200);
-    let body3 = response3.bytes().await.expect("Failed to read response body");
+    let body3 = response3
+        .bytes()
+        .await
+        .expect("Failed to read response body");
     assert_eq!(&body3[..], file_data);
 
     println!("✅ Third request completed in {:?}", duration3);
@@ -11837,8 +12564,12 @@ cache:
     println!("\nPhase 11: Analyzing performance to verify promotion...");
 
     if duration3 < duration2 {
-        let improvement = ((duration2.as_secs_f64() - duration3.as_secs_f64()) / duration2.as_secs_f64() * 100.0);
-        println!("✅ Third request faster than second ({:.1}% improvement)", improvement);
+        let improvement =
+            ((duration2.as_secs_f64() - duration3.as_secs_f64()) / duration2.as_secs_f64() * 100.0);
+        println!(
+            "✅ Third request faster than second ({:.1}% improvement)",
+            improvement
+        );
         println!("   Second (disk hit):   {:?}", duration2);
         println!("   Third (memory hit):  {:?}", duration3);
         println!("   This indicates successful promotion from disk to memory");
@@ -11932,11 +12663,7 @@ async fn test_e2e_tiered_cache_memory_disk_miss_redis_hit_promotion() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -11963,7 +12690,10 @@ async fn test_e2e_tiered_cache_memory_disk_miss_redis_hit_promotion() {
         .expect("Failed to upload file");
 
     println!("   ✅ Bucket created: test-tiered-redis-promo");
-    println!("   ✅ File uploaded: promotion-test.bin ({}KB)", file_size / 1024);
+    println!(
+        "   ✅ File uploaded: promotion-test.bin ({}KB)",
+        file_size / 1024
+    );
 
     // Phase 4: Create tiered cache config with all layers
     println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
@@ -12016,7 +12746,10 @@ cache:
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     println!("   ✅ Config created with tiered cache:");
     println!("      • Memory: 100 items, 50MB");
-    println!("      • Disk: 1000 items, 500MB, path: {}", disk_cache_path.display());
+    println!(
+        "      • Disk: 1000 items, 500MB, path: {}",
+        disk_cache_path.display()
+    );
     println!("      • Redis: 10MB item limit, 300s TTL");
 
     // Phase 5: Start proxy
@@ -12041,7 +12774,11 @@ cache:
 
     assert_eq!(body1.len(), file_size, "First request: incorrect file size");
     assert_eq!(&body1[..], &test_data[..], "First request: data mismatch");
-    println!("   ✅ First request: {} bytes, {:?}", body1.len(), duration1);
+    println!(
+        "   ✅ First request: {} bytes, {:?}",
+        body1.len(),
+        duration1
+    );
     println!("      (All cache layers populated: Memory → Disk → Redis)");
 
     // Phase 7: Clear Memory and Disk caches (keep Redis)
@@ -12072,9 +12809,17 @@ cache:
     let duration2 = start.elapsed();
     let body2 = response2.bytes().await.expect("Failed to read body");
 
-    assert_eq!(body2.len(), file_size, "Second request: incorrect file size");
+    assert_eq!(
+        body2.len(),
+        file_size,
+        "Second request: incorrect file size"
+    );
     assert_eq!(&body2[..], &test_data[..], "Second request: data mismatch");
-    println!("   ✅ Second request: {} bytes, {:?}", body2.len(), duration2);
+    println!(
+        "   ✅ Second request: {} bytes, {:?}",
+        body2.len(),
+        duration2
+    );
     println!("      (Redis hit → async promotion to Disk+Memory)");
 
     // Phase 9: Third request - should be Memory hit (proves Memory promotion)
@@ -12090,19 +12835,29 @@ cache:
 
     assert_eq!(body3.len(), file_size, "Third request: incorrect file size");
     assert_eq!(&body3[..], &test_data[..], "Third request: data mismatch");
-    println!("   ✅ Third request: {} bytes, {:?}", body3.len(), duration3);
+    println!(
+        "   ✅ Third request: {} bytes, {:?}",
+        body3.len(),
+        duration3
+    );
 
     // Phase 10: Analyze Memory promotion
     println!("\n📊 Phase 10: Analyzing Memory promotion performance...");
     if duration3 < duration2 {
-        let improvement = ((duration2.as_secs_f64() - duration3.as_secs_f64())
-            / duration2.as_secs_f64() * 100.0);
-        println!("   ✅ Third request faster than second ({:.1}% improvement)", improvement);
+        let improvement =
+            ((duration2.as_secs_f64() - duration3.as_secs_f64()) / duration2.as_secs_f64() * 100.0);
+        println!(
+            "   ✅ Third request faster than second ({:.1}% improvement)",
+            improvement
+        );
         println!("      Second (Redis hit):  {:?}", duration2);
         println!("      Third (Memory hit):  {:?}", duration3);
         println!("      This indicates successful promotion from Redis to Memory");
     } else {
-        println!("   ℹ️  Third request not significantly faster ({:?} vs {:?})", duration3, duration2);
+        println!(
+            "   ℹ️  Third request not significantly faster ({:?} vs {:?})",
+            duration3, duration2
+        );
         println!("      Both may be cache hits (expected once cache is integrated)");
     }
 
@@ -12126,15 +12881,29 @@ cache:
     let duration4 = start.elapsed();
     let body4 = response4.bytes().await.expect("Failed to read body");
 
-    assert_eq!(body4.len(), file_size, "Fourth request: incorrect file size");
+    assert_eq!(
+        body4.len(),
+        file_size,
+        "Fourth request: incorrect file size"
+    );
     assert_eq!(&body4[..], &test_data[..], "Fourth request: data mismatch");
-    println!("   ✅ Fourth request: {} bytes, {:?}", body4.len(), duration4);
+    println!(
+        "   ✅ Fourth request: {} bytes, {:?}",
+        body4.len(),
+        duration4
+    );
 
     // Phase 13: Analyze Disk promotion
     println!("\n📊 Phase 13: Analyzing complete promotion path...");
     println!("   Request progression:");
-    println!("   1. First:  {:?} (S3 fetch, populate all layers)", duration1);
-    println!("   2. Second: {:?} (Redis hit, promote to Disk+Memory)", duration2);
+    println!(
+        "   1. First:  {:?} (S3 fetch, populate all layers)",
+        duration1
+    );
+    println!(
+        "   2. Second: {:?} (Redis hit, promote to Disk+Memory)",
+        duration2
+    );
     println!("   3. Third:  {:?} (Memory hit after promotion)", duration3);
     println!("   4. Fourth: {:?} (Disk hit after restart)", duration4);
 
@@ -12145,7 +12914,9 @@ cache:
         println!("      Redis (medium):   {:?}", duration2);
         println!("      S3 (slowest):     {:?}", duration1);
     } else {
-        println!("\n   ℹ️  Performance pattern documented (will be enforced once cache integrated)");
+        println!(
+            "\n   ℹ️  Performance pattern documented (will be enforced once cache integrated)"
+        );
     }
 
     // Verify data integrity across all requests
@@ -12217,11 +12988,7 @@ async fn test_e2e_tiered_cache_all_layers_miss_s3_populate() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -12248,7 +13015,10 @@ async fn test_e2e_tiered_cache_all_layers_miss_s3_populate() {
         .expect("Failed to upload file");
 
     println!("   ✅ Bucket created: test-tiered-coldstart");
-    println!("   ✅ File uploaded: coldstart.bin ({}KB)", file_size / 1024);
+    println!(
+        "   ✅ File uploaded: coldstart.bin ({}KB)",
+        file_size / 1024
+    );
 
     // Phase 4: Create tiered cache config with all layers
     println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
@@ -12301,7 +13071,10 @@ cache:
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     println!("   ✅ Config created with tiered cache:");
     println!("      • Memory: 100 items, 50MB (empty at start)");
-    println!("      • Disk: 1000 items, 500MB, path: {} (empty at start)", disk_cache_path.display());
+    println!(
+        "      • Disk: 1000 items, 500MB, path: {} (empty at start)",
+        disk_cache_path.display()
+    );
     println!("      • Redis: 10MB item limit, 300s TTL (empty at start)");
     println!("      • All layers are COLD (empty) - first request will populate");
 
@@ -12327,7 +13100,11 @@ cache:
 
     assert_eq!(body1.len(), file_size, "First request: incorrect file size");
     assert_eq!(&body1[..], &test_data[..], "First request: data mismatch");
-    println!("   ✅ First request: {} bytes, {:?}", body1.len(), duration1);
+    println!(
+        "   ✅ First request: {} bytes, {:?}",
+        body1.len(),
+        duration1
+    );
     println!("      (S3 fetch complete, all cache layers now populated)");
 
     // Phase 7: Second request - should hit cache (Memory layer)
@@ -12341,9 +13118,17 @@ cache:
     let duration2 = start.elapsed();
     let body2 = response2.bytes().await.expect("Failed to read body");
 
-    assert_eq!(body2.len(), file_size, "Second request: incorrect file size");
+    assert_eq!(
+        body2.len(),
+        file_size,
+        "Second request: incorrect file size"
+    );
     assert_eq!(&body2[..], &test_data[..], "Second request: data mismatch");
-    println!("   ✅ Second request: {} bytes, {:?}", body2.len(), duration2);
+    println!(
+        "   ✅ Second request: {} bytes, {:?}",
+        body2.len(),
+        duration2
+    );
 
     // Phase 8: Third request - verify cache persistence
     println!("\n📥 Phase 8: Third request (verify cache persistence)...");
@@ -12358,12 +13143,19 @@ cache:
 
     assert_eq!(body3.len(), file_size, "Third request: incorrect file size");
     assert_eq!(&body3[..], &test_data[..], "Third request: data mismatch");
-    println!("   ✅ Third request: {} bytes, {:?}", body3.len(), duration3);
+    println!(
+        "   ✅ Third request: {} bytes, {:?}",
+        body3.len(),
+        duration3
+    );
 
     // Phase 9: Analyze cache population performance
     println!("\n📊 Phase 9: Analyzing cache population performance...");
     println!("   Request progression:");
-    println!("   1. First:  {:?} (S3 fetch, populate Memory+Disk+Redis)", duration1);
+    println!(
+        "   1. First:  {:?} (S3 fetch, populate Memory+Disk+Redis)",
+        duration1
+    );
     println!("   2. Second: {:?} (Memory cache hit)", duration2);
     println!("   3. Third:  {:?} (Memory cache hit)", duration3);
 
@@ -12375,7 +13167,9 @@ cache:
         println!("      Third request {:.1}x faster than first", speedup3);
         println!("      This indicates successful cache population from S3");
     } else {
-        println!("\n   ℹ️  Performance pattern documented (will be enforced once cache integrated)");
+        println!(
+            "\n   ℹ️  Performance pattern documented (will be enforced once cache integrated)"
+        );
         println!("      Expected: Second and third requests should be significantly faster");
     }
 
@@ -12468,11 +13262,7 @@ async fn test_e2e_tiered_cache_promotion_is_async() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -12499,7 +13289,10 @@ async fn test_e2e_tiered_cache_promotion_is_async() {
         .expect("Failed to upload file");
 
     println!("   ✅ Bucket created: test-tiered-async");
-    println!("   ✅ File uploaded: async-test.bin ({}KB)", file_size / 1024);
+    println!(
+        "   ✅ File uploaded: async-test.bin ({}KB)",
+        file_size / 1024
+    );
 
     // Phase 4: Create tiered cache config
     println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
@@ -12574,7 +13367,11 @@ cache:
 
     assert_eq!(body1.len(), file_size, "First request: incorrect file size");
     assert_eq!(&body1[..], &test_data[..], "First request: data mismatch");
-    println!("   ✅ First request: {} bytes, {:?}", body1.len(), duration1);
+    println!(
+        "   ✅ First request: {} bytes, {:?}",
+        body1.len(),
+        duration1
+    );
     println!("      (All layers populated: Memory, Disk, Redis)");
 
     // Phase 7: Restart proxy to clear Memory cache (Disk and Redis persist)
@@ -12598,9 +13395,17 @@ cache:
     let duration2 = start.elapsed();
     let body2 = response2.bytes().await.expect("Failed to read body");
 
-    assert_eq!(body2.len(), file_size, "Second request: incorrect file size");
+    assert_eq!(
+        body2.len(),
+        file_size,
+        "Second request: incorrect file size"
+    );
     assert_eq!(&body2[..], &test_data[..], "Second request: data mismatch");
-    println!("   ✅ Second request: {} bytes, {:?}", body2.len(), duration2);
+    println!(
+        "   ✅ Second request: {} bytes, {:?}",
+        body2.len(),
+        duration2
+    );
     println!("      (Disk hit, async promotion to Memory in background)");
 
     // Phase 9: Small delay to allow async promotion to complete
@@ -12621,7 +13426,11 @@ cache:
 
     assert_eq!(body3.len(), file_size, "Third request: incorrect file size");
     assert_eq!(&body3[..], &test_data[..], "Third request: data mismatch");
-    println!("   ✅ Third request: {} bytes, {:?}", body3.len(), duration3);
+    println!(
+        "   ✅ Third request: {} bytes, {:?}",
+        body3.len(),
+        duration3
+    );
 
     // Phase 11: Analyze async promotion behavior
     println!("\n📊 Phase 11: Analyzing async promotion behavior...");
@@ -12631,8 +13440,8 @@ cache:
     println!("   3. Third:  {:?} (Memory hit)", duration3);
 
     if duration3 < duration2 {
-        let improvement = ((duration2.as_secs_f64() - duration3.as_secs_f64())
-            / duration2.as_secs_f64() * 100.0);
+        let improvement =
+            ((duration2.as_secs_f64() - duration3.as_secs_f64()) / duration2.as_secs_f64() * 100.0);
         println!("\n   ✅ Async promotion successful:");
         println!("      Third request {:.1}% faster than second", improvement);
         println!("      This indicates promotion completed in background");
@@ -12723,11 +13532,7 @@ async fn test_e2e_tiered_cache_promotion_failures_dont_fail_request() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -12754,7 +13559,10 @@ async fn test_e2e_tiered_cache_promotion_failures_dont_fail_request() {
         .expect("Failed to upload file");
 
     println!("   ✅ Bucket created: test-tiered-resilience");
-    println!("   ✅ File uploaded: resilience-test.bin ({}KB)", file_size / 1024);
+    println!(
+        "   ✅ File uploaded: resilience-test.bin ({}KB)",
+        file_size / 1024
+    );
 
     // Phase 4: Create tiered cache config
     println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
@@ -12873,7 +13681,11 @@ cache:
     let status = response2.status();
     let body2 = response2.bytes().await.expect("Failed to read body");
 
-    println!("   ✅ Request completed: {} {}", status.as_u16(), status.canonical_reason().unwrap_or(""));
+    println!(
+        "   ✅ Request completed: {} {}",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or("")
+    );
     println!("   ✅ Response time: {:?}", duration2);
     println!("   ✅ Body size: {} bytes", body2.len());
 
@@ -12881,7 +13693,11 @@ cache:
     println!("\n✅ Phase 10: Verifying request succeeded despite promotion failure...");
     assert_eq!(status.as_u16(), 200, "Request should succeed with 200 OK");
     assert_eq!(body2.len(), file_size, "Response should have correct size");
-    assert_eq!(&body2[..], &test_data[..], "Response data should be correct");
+    assert_eq!(
+        &body2[..],
+        &test_data[..],
+        "Response data should be correct"
+    );
     println!("   ✅ Status: 200 OK (request succeeded)");
     println!("   ✅ Data integrity: All bytes verified correct");
     println!("   ✅ Client unaffected by cache promotion failure");
@@ -12985,11 +13801,7 @@ async fn test_e2e_tiered_cache_delete_removes_from_all_layers() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -13016,7 +13828,10 @@ async fn test_e2e_tiered_cache_delete_removes_from_all_layers() {
         .expect("Failed to upload file");
 
     println!("   ✅ Bucket created: test-tiered-delete");
-    println!("   ✅ File uploaded: delete-test.bin ({}KB)", file_size / 1024);
+    println!(
+        "   ✅ File uploaded: delete-test.bin ({}KB)",
+        file_size / 1024
+    );
 
     // Phase 4: Create tiered cache config
     println!("\n⚙️  Phase 4: Creating tiered cache configuration...");
@@ -13093,7 +13908,11 @@ cache:
     assert_eq!(status1.as_u16(), 200, "First request should succeed");
     assert_eq!(body1.len(), file_size);
     assert_eq!(&body1[..], &test_data[..]);
-    println!("   ✅ First request: 200 OK, {} bytes, {:?}", body1.len(), duration1);
+    println!(
+        "   ✅ First request: 200 OK, {} bytes, {:?}",
+        body1.len(),
+        duration1
+    );
     println!("      (All cache layers populated: Memory, Disk, Redis)");
 
     // Phase 7: Second request - verify caching (should be faster)
@@ -13110,7 +13929,11 @@ cache:
 
     assert_eq!(status2.as_u16(), 200);
     assert_eq!(body2.len(), file_size);
-    println!("   ✅ Second request: 200 OK, {} bytes, {:?}", body2.len(), duration2);
+    println!(
+        "   ✅ Second request: 200 OK, {} bytes, {:?}",
+        body2.len(),
+        duration2
+    );
 
     if duration2 < duration1 {
         let speedup = duration1.as_secs_f64() / duration2.as_secs_f64();
@@ -13146,7 +13969,11 @@ cache:
         .expect("Failed to make third request");
     let status3 = response3.status();
 
-    println!("   Response status: {} {}", status3.as_u16(), status3.canonical_reason().unwrap_or(""));
+    println!(
+        "   Response status: {} {}",
+        status3.as_u16(),
+        status3.canonical_reason().unwrap_or("")
+    );
 
     // Phase 11: Verify deletion was successful
     println!("\n✅ Phase 11: Verifying deletion removed from all cache layers...");
@@ -13157,7 +13984,10 @@ cache:
         println!("   ✅ File not served from Redis cache");
         println!("   ✅ Deletion cascaded through all layers successfully");
     } else {
-        println!("   ℹ️  Got status: {} (expected 404 after cache integration)", status3.as_u16());
+        println!(
+            "   ℹ️  Got status: {} (expected 404 after cache integration)",
+            status3.as_u16()
+        );
         println!("      Currently: Cache may still serve old data");
         println!("      Expected: Cache should be invalidated, returning 404");
     }
@@ -13176,7 +14006,10 @@ cache:
 
     println!("\n📊 Phase 13: Test summary:");
     println!("   Request progression:");
-    println!("   1. First:  200 OK ({:?}) - S3 fetch, populate caches", duration1);
+    println!(
+        "   1. First:  200 OK ({:?}) - S3 fetch, populate caches",
+        duration1
+    );
     println!("   2. Second: 200 OK ({:?}) - Cache hit", duration2);
     println!("   3. S3 deletion performed");
     println!("   4. Cache purge performed");
@@ -13249,11 +14082,7 @@ async fn test_e2e_tiered_cache_clear_clears_all_layers() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -13268,9 +14097,9 @@ async fn test_e2e_tiered_cache_clear_clears_all_layers() {
 
     // Create 3 test files of different sizes
     let files = vec![
-        ("file1.bin", 50 * 1024),   // 50KB
-        ("file2.bin", 100 * 1024),  // 100KB
-        ("file3.bin", 150 * 1024),  // 150KB
+        ("file1.bin", 50 * 1024),  // 50KB
+        ("file2.bin", 100 * 1024), // 100KB
+        ("file3.bin", 150 * 1024), // 150KB
     ];
 
     for (filename, size) in &files {
@@ -13366,7 +14195,12 @@ cache:
         assert_eq!(status.as_u16(), 200);
         assert_eq!(body.len(), *size);
         first_durations.push(duration);
-        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+        println!(
+            "   ✅ {}: 200 OK, {} bytes, {:?}",
+            filename,
+            body.len(),
+            duration
+        );
     }
     println!("      (All files cached in Memory, Disk, and Redis)");
 
@@ -13389,12 +14223,23 @@ cache:
         assert_eq!(status.as_u16(), 200);
         assert_eq!(body.len(), *size);
         second_durations.push(duration);
-        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+        println!(
+            "   ✅ {}: 200 OK, {} bytes, {:?}",
+            filename,
+            body.len(),
+            duration
+        );
     }
 
     // Analyze speedup
-    let total_speedup = first_durations.iter().sum::<std::time::Duration>().as_secs_f64()
-        / second_durations.iter().sum::<std::time::Duration>().as_secs_f64();
+    let total_speedup = first_durations
+        .iter()
+        .sum::<std::time::Duration>()
+        .as_secs_f64()
+        / second_durations
+            .iter()
+            .sum::<std::time::Duration>()
+            .as_secs_f64();
     println!("      Cache hits: {:.1}x faster overall", total_speedup);
 
     // Phase 8: Clear entire cache
@@ -13426,7 +14271,12 @@ cache:
         assert_eq!(status.as_u16(), 200);
         assert_eq!(body.len(), *size);
         third_durations.push(duration);
-        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+        println!(
+            "   ✅ {}: 200 OK, {} bytes, {:?}",
+            filename,
+            body.len(),
+            duration
+        );
     }
 
     // Phase 10: Analyze clear() effectiveness
@@ -13436,14 +14286,20 @@ cache:
     let total2: std::time::Duration = second_durations.iter().sum();
     let total3: std::time::Duration = third_durations.iter().sum();
 
-    println!("   1. First requests:  {:?} (S3 fetch, populate caches)", total1);
+    println!(
+        "   1. First requests:  {:?} (S3 fetch, populate caches)",
+        total1
+    );
     println!("   2. Second requests: {:?} (Cache hits)", total2);
     println!("   3. Cache clear performed");
     println!("   4. Third requests:  {:?} (After clear)", total3);
 
     if total3 > total2 {
         let slowdown = total3.as_secs_f64() / total2.as_secs_f64();
-        println!("\n   ✅ Third requests {:.1}x slower than second requests", slowdown);
+        println!(
+            "\n   ✅ Third requests {:.1}x slower than second requests",
+            slowdown
+        );
         println!("      This indicates cache was cleared successfully");
         println!("      All layers (Memory, Disk, Redis) were emptied");
     } else {
@@ -13457,12 +14313,20 @@ cache:
     println!("   Individual file analysis:");
     for i in 0..files.len() {
         let (filename, _) = files[i];
-        let speedup_before_clear = first_durations[i].as_secs_f64() / second_durations[i].as_secs_f64();
-        let slowdown_after_clear = third_durations[i].as_secs_f64() / second_durations[i].as_secs_f64();
+        let speedup_before_clear =
+            first_durations[i].as_secs_f64() / second_durations[i].as_secs_f64();
+        let slowdown_after_clear =
+            third_durations[i].as_secs_f64() / second_durations[i].as_secs_f64();
 
         println!("   • {}", filename);
-        println!("     Before clear: {:.1}x speedup (cache working)", speedup_before_clear);
-        println!("     After clear:  {:.1}x slowdown (cache cleared)", slowdown_after_clear);
+        println!(
+            "     Before clear: {:.1}x speedup (cache working)",
+            speedup_before_clear
+        );
+        println!(
+            "     After clear:  {:.1}x slowdown (cache cleared)",
+            slowdown_after_clear
+        );
     }
     println!("   ✅ All files affected by clear() operation");
 
@@ -13562,11 +14426,7 @@ async fn test_e2e_tiered_cache_stats_aggregated_correctly() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -13581,8 +14441,8 @@ async fn test_e2e_tiered_cache_stats_aggregated_correctly() {
 
     // Create 2 test files
     let files = vec![
-        ("stats1.bin", 100 * 1024),  // 100KB
-        ("stats2.bin", 200 * 1024),  // 200KB
+        ("stats1.bin", 100 * 1024), // 100KB
+        ("stats2.bin", 200 * 1024), // 200KB
     ];
 
     for (filename, size) in &files {
@@ -13733,7 +14593,10 @@ cache:
     // Try to parse as JSON
     if let Ok(stats_json) = serde_json::from_str::<serde_json::Value>(&updated_stats_text) {
         println!("   ✅ Stats returned as JSON");
-        println!("   JSON structure: {}", serde_json::to_string_pretty(&stats_json).unwrap_or_default());
+        println!(
+            "   JSON structure: {}",
+            serde_json::to_string_pretty(&stats_json).unwrap_or_default()
+        );
 
         // Check for common stat fields
         if stats_json.get("total_hits").is_some() {
@@ -13839,11 +14702,7 @@ async fn test_e2e_tiered_cache_purge_api_clears_all_layers() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -13858,8 +14717,8 @@ async fn test_e2e_tiered_cache_purge_api_clears_all_layers() {
 
     // Create 2 test files
     let files = vec![
-        ("purge1.bin", 100 * 1024),  // 100KB
-        ("purge2.bin", 150 * 1024),  // 150KB
+        ("purge1.bin", 100 * 1024), // 100KB
+        ("purge2.bin", 150 * 1024), // 150KB
     ];
 
     for (filename, size) in &files {
@@ -13955,7 +14814,12 @@ cache:
         assert_eq!(status.as_u16(), 200);
         assert_eq!(body.len(), *size);
         first_durations.push(duration);
-        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+        println!(
+            "   ✅ {}: 200 OK, {} bytes, {:?}",
+            filename,
+            body.len(),
+            duration
+        );
     }
     println!("      (All files cached in Memory, Disk, and Redis)");
 
@@ -13978,7 +14842,12 @@ cache:
         assert_eq!(status.as_u16(), 200);
         assert_eq!(body.len(), *size);
         second_durations.push(duration);
-        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+        println!(
+            "   ✅ {}: 200 OK, {} bytes, {:?}",
+            filename,
+            body.len(),
+            duration
+        );
     }
 
     // Calculate speedup
@@ -14000,16 +14869,33 @@ cache:
     let purge_body = purge_response.text().await.unwrap_or_default();
 
     println!("   Purge API response:");
-    println!("   • Status: {} {}", purge_status.as_u16(), purge_status.canonical_reason().unwrap_or(""));
-    println!("   • Body: {}", if purge_body.is_empty() { "(empty)" } else { &purge_body });
+    println!(
+        "   • Status: {} {}",
+        purge_status.as_u16(),
+        purge_status.canonical_reason().unwrap_or("")
+    );
+    println!(
+        "   • Body: {}",
+        if purge_body.is_empty() {
+            "(empty)"
+        } else {
+            &purge_body
+        }
+    );
 
     // Phase 9: Verify purge API returned success
     println!("\n✅ Phase 9: Verifying Purge API response...");
     if purge_status.is_success() {
-        println!("   ✅ Purge API returned success status: {}", purge_status.as_u16());
+        println!(
+            "   ✅ Purge API returned success status: {}",
+            purge_status.as_u16()
+        );
         println!("      (200 OK or 204 No Content expected)");
     } else {
-        println!("   ℹ️  Purge API returned status: {} (expected 2xx)", purge_status.as_u16());
+        println!(
+            "   ℹ️  Purge API returned status: {} (expected 2xx)",
+            purge_status.as_u16()
+        );
         println!("      Will be successful once cache purge API is integrated");
     }
 
@@ -14032,7 +14918,12 @@ cache:
         assert_eq!(status.as_u16(), 200);
         assert_eq!(body.len(), *size);
         third_durations.push(duration);
-        println!("   ✅ {}: 200 OK, {} bytes, {:?}", filename, body.len(), duration);
+        println!(
+            "   ✅ {}: 200 OK, {} bytes, {:?}",
+            filename,
+            body.len(),
+            duration
+        );
     }
 
     // Phase 11: Analyze purge effectiveness
@@ -14040,7 +14931,10 @@ cache:
     let total3: std::time::Duration = third_durations.iter().sum();
 
     println!("   Request progression:");
-    println!("   1. First requests:  {:?} (S3 fetch, populate caches)", total1);
+    println!(
+        "   1. First requests:  {:?} (S3 fetch, populate caches)",
+        total1
+    );
     println!("   2. Second requests: {:?} (Cache hits)", total2);
     println!("   3. POST /cache/purge called");
     println!("   4. Third requests:  {:?} (After purge)", total3);
@@ -14136,11 +15030,7 @@ async fn test_e2e_tiered_cache_per_layer_metrics_tracked() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -14312,7 +15202,10 @@ cache:
         .send()
         .await
         .expect("Failed to fetch metrics");
-    let metrics_text = metrics_response.text().await.expect("Failed to read metrics");
+    let metrics_text = metrics_response
+        .text()
+        .await
+        .expect("Failed to read metrics");
 
     println!("   Metrics response:");
     println!("{}", metrics_text);
@@ -14413,11 +15306,7 @@ async fn test_e2e_tiered_cache_write_through_strategy() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -14524,7 +15413,11 @@ cache:
     assert_eq!(status1.as_u16(), 200);
     assert_eq!(body1.len(), file_size);
     assert_eq!(&body1[..], &test_data[..]);
-    println!("   ✅ First request: 200 OK, {} bytes, {:?}", body1.len(), duration1);
+    println!(
+        "   ✅ First request: 200 OK, {} bytes, {:?}",
+        body1.len(),
+        duration1
+    );
     println!("      Write-through: All layers should now contain this file");
 
     // Phase 7: Verify Memory layer has data (should be fastest)
@@ -14542,7 +15435,11 @@ cache:
     assert_eq!(status2.as_u16(), 200);
     assert_eq!(body2.len(), file_size);
     assert_eq!(&body2[..], &test_data[..]);
-    println!("   ✅ Second request: 200 OK, {} bytes, {:?}", body2.len(), duration2);
+    println!(
+        "   ✅ Second request: 200 OK, {} bytes, {:?}",
+        body2.len(),
+        duration2
+    );
 
     if duration2 < duration1 {
         let speedup = duration1.as_secs_f64() / duration2.as_secs_f64();
@@ -14574,7 +15471,11 @@ cache:
     assert_eq!(status3.as_u16(), 200);
     assert_eq!(body3.len(), file_size);
     assert_eq!(&body3[..], &test_data[..]);
-    println!("   ✅ Third request: 200 OK, {} bytes, {:?}", body3.len(), duration3);
+    println!(
+        "   ✅ Third request: 200 OK, {} bytes, {:?}",
+        body3.len(),
+        duration3
+    );
 
     if duration3 < duration1 {
         let speedup = duration1.as_secs_f64() / duration3.as_secs_f64();
@@ -14608,7 +15509,11 @@ cache:
     assert_eq!(status4.as_u16(), 200);
     assert_eq!(body4.len(), file_size);
     assert_eq!(&body4[..], &test_data[..]);
-    println!("   ✅ Fourth request: 200 OK, {} bytes, {:?}", body4.len(), duration4);
+    println!(
+        "   ✅ Fourth request: 200 OK, {} bytes, {:?}",
+        body4.len(),
+        duration4
+    );
 
     if duration4 < duration1 {
         let speedup = duration1.as_secs_f64() / duration4.as_secs_f64();
@@ -14620,20 +15525,45 @@ cache:
 
     // Phase 12: Verify data consistency across all layers
     println!("\n🔍 Phase 12: Verifying data consistency across all layers...");
-    assert_eq!(&body1[..], &test_data[..], "First request (S3) data mismatch");
-    assert_eq!(&body2[..], &test_data[..], "Second request (Memory) data mismatch");
-    assert_eq!(&body3[..], &test_data[..], "Third request (Disk) data mismatch");
-    assert_eq!(&body4[..], &test_data[..], "Fourth request (Redis) data mismatch");
+    assert_eq!(
+        &body1[..],
+        &test_data[..],
+        "First request (S3) data mismatch"
+    );
+    assert_eq!(
+        &body2[..],
+        &test_data[..],
+        "Second request (Memory) data mismatch"
+    );
+    assert_eq!(
+        &body3[..],
+        &test_data[..],
+        "Third request (Disk) data mismatch"
+    );
+    assert_eq!(
+        &body4[..],
+        &test_data[..],
+        "Fourth request (Redis) data mismatch"
+    );
     println!("   ✅ Data integrity: All 4 requests returned identical data");
     println!("   ✅ All layers contain the same file content");
 
     // Phase 13: Summary
     println!("\n📊 Phase 13: Write-through strategy verification:");
     println!("   Request sequence:");
-    println!("   1. First:  {:?} - S3 fetch, write to Memory+Disk+Redis", duration1);
+    println!(
+        "   1. First:  {:?} - S3 fetch, write to Memory+Disk+Redis",
+        duration1
+    );
     println!("   2. Second: {:?} - Memory hit", duration2);
-    println!("   3. Third:  {:?} - Disk hit (after Memory cleared)", duration3);
-    println!("   4. Fourth: {:?} - Redis hit (after Memory+Disk cleared)", duration4);
+    println!(
+        "   3. Third:  {:?} - Disk hit (after Memory cleared)",
+        duration3
+    );
+    println!(
+        "   4. Fourth: {:?} - Redis hit (after Memory+Disk cleared)",
+        duration4
+    );
     println!("");
     println!("   ✅ All layers populated from single S3 fetch (write-through)");
     println!("   ✅ No lazy loading (all layers written immediately)");
@@ -14704,11 +15634,7 @@ async fn test_e2e_tiered_cache_consistency_across_layers() {
         .region(aws_config::Region::new("us-east-1"))
         .endpoint_url(&s3_endpoint)
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -14723,10 +15649,21 @@ async fn test_e2e_tiered_cache_consistency_across_layers() {
 
     // Create diverse test files with different patterns
     let test_files = vec![
-        ("binary.bin", vec![(0..256).map(|i| i as u8).collect::<Vec<u8>>(); 100].concat()), // 25.6KB binary
-        ("text.txt", "Hello World! This is a consistency test.\n".repeat(1000).into_bytes()), // ~43KB text
+        (
+            "binary.bin",
+            vec![(0..256).map(|i| i as u8).collect::<Vec<u8>>(); 100].concat(),
+        ), // 25.6KB binary
+        (
+            "text.txt",
+            "Hello World! This is a consistency test.\n"
+                .repeat(1000)
+                .into_bytes(),
+        ), // ~43KB text
         ("zeros.dat", vec![0u8; 50 * 1024]), // 50KB zeros
-        ("pattern.bin", (0..100*1024).map(|i| ((i * 7) % 256) as u8).collect()), // 100KB pattern
+        (
+            "pattern.bin",
+            (0..100 * 1024).map(|i| ((i * 7) % 256) as u8).collect(),
+        ), // 100KB pattern
     ];
 
     for (filename, data) in &test_files {
@@ -14838,8 +15775,13 @@ cache:
                 .expect(&format!("Failed to fetch {}", filename));
             let body = response.bytes().await.expect("Failed to read body");
 
-            assert_eq!(&body[..], &expected_data[..],
-                "Memory consistency check failed for {} (attempt {})", filename, attempt);
+            assert_eq!(
+                &body[..],
+                &expected_data[..],
+                "Memory consistency check failed for {} (attempt {})",
+                filename,
+                attempt
+            );
         }
         println!("   ✅ {}: 3 reads consistent from Memory", filename);
     }
@@ -14863,8 +15805,13 @@ cache:
                 .expect(&format!("Failed to fetch {}", filename));
             let body = response.bytes().await.expect("Failed to read body");
 
-            assert_eq!(&body[..], &expected_data[..],
-                "Disk consistency check failed for {} (attempt {})", filename, attempt);
+            assert_eq!(
+                &body[..],
+                &expected_data[..],
+                "Disk consistency check failed for {} (attempt {})",
+                filename,
+                attempt
+            );
         }
         println!("   ✅ {}: 3 reads consistent from Disk", filename);
     }
@@ -14890,8 +15837,13 @@ cache:
                 .expect(&format!("Failed to fetch {}", filename));
             let body = response.bytes().await.expect("Failed to read body");
 
-            assert_eq!(&body[..], &expected_data[..],
-                "Redis consistency check failed for {} (attempt {})", filename, attempt);
+            assert_eq!(
+                &body[..],
+                &expected_data[..],
+                "Redis consistency check failed for {} (attempt {})",
+                filename,
+                attempt
+            );
         }
         println!("   ✅ {}: 3 reads consistent from Redis", filename);
     }
@@ -14912,9 +15864,16 @@ cache:
     let total_bytes: usize = original_data.iter().map(|(_, d)| d.len()).sum();
     let total_reads = original_data.len() * 3 * 3; // 4 files × 3 attempts × 3 layers
     println!("   Total files tested: {}", original_data.len());
-    println!("   Total bytes verified: {} ({:.1} KB)", total_bytes, total_bytes as f64 / 1024.0);
+    println!(
+        "   Total bytes verified: {} ({:.1} KB)",
+        total_bytes,
+        total_bytes as f64 / 1024.0
+    );
     println!("   Total reads performed: {}", total_reads);
-    println!("   Consistency checks: {}/{} passed", total_reads, total_reads);
+    println!(
+        "   Consistency checks: {}/{} passed",
+        total_reads, total_reads
+    );
     println!("   ✅ 100% data consistency across all cache layers");
 
     println!("\n📝 Note: This test documents expected cache consistency behavior.");
@@ -14973,19 +15932,14 @@ async fn test_e2e_tiered_cache_large_files_bypass_all_layers() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     println!("   ✅ LocalStack started on port {}", s3_port);
 
     // Start Redis
-    let redis_container = docker.run(testcontainers::GenericImage::new(
-        "redis",
-        "7-alpine",
-    ));
+    let redis_container = docker.run(testcontainers::GenericImage::new("redis", "7-alpine"));
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
     println!("   ✅ Redis started on port {}", redis_port);
@@ -14993,21 +15947,14 @@ async fn test_e2e_tiered_cache_large_files_bypass_all_layers() {
     // Create disk cache directory
     let disk_cache_path = format!("/tmp/yatagarasu-test-large-bypass-{}", uuid::Uuid::new_v4());
     std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
-    println!(
-        "   ✅ Disk cache directory created: {}",
-        disk_cache_path
-    );
+    println!("   ✅ Disk cache directory created: {}", disk_cache_path);
 
     // Create S3 bucket
     let config = aws_config::from_env()
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -15133,10 +16080,7 @@ buckets:
         &large_file_data[..],
         "Large file content mismatch"
     );
-    println!(
-        "   ✅ Large file served correctly ({} bytes)",
-        body.len()
-    );
+    println!("   ✅ Large file served correctly ({} bytes)", body.len());
     println!();
 
     // Phase 6: Check cache stats
@@ -15183,17 +16127,14 @@ buckets:
     let disk_files = std::fs::read_dir(&disk_cache_path)
         .expect("Failed to read disk cache directory")
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_type()
-                .map(|ft| ft.is_file())
-                .unwrap_or(false)
-        })
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .collect::<Vec<_>>();
 
     let large_file_cached = disk_files.iter().any(|entry| {
         let metadata = entry.metadata().ok();
-        metadata.map(|m| m.len() == large_file_size as u64).unwrap_or(false)
+        metadata
+            .map(|m| m.len() == large_file_size as u64)
+            .unwrap_or(false)
     });
 
     assert!(
@@ -15258,9 +16199,7 @@ buckets:
         "Large file size mismatch on second request"
     );
     println!("   ✅ Second request also served from S3 (not cached)");
-    println!(
-        "   • Both requests took similar time (no cache speedup)"
-    );
+    println!("   • Both requests took similar time (no cache speedup)");
     println!("   • Large file consistently bypasses all cache layers");
     println!();
 
@@ -15341,19 +16280,14 @@ async fn test_e2e_tiered_cache_range_requests_bypass_all_layers() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     println!("   ✅ LocalStack started on port {}", s3_port);
 
     // Start Redis
-    let redis_container = docker.run(testcontainers::GenericImage::new(
-        "redis",
-        "7-alpine",
-    ));
+    let redis_container = docker.run(testcontainers::GenericImage::new("redis", "7-alpine"));
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
     println!("   ✅ Redis started on port {}", redis_port);
@@ -15361,21 +16295,14 @@ async fn test_e2e_tiered_cache_range_requests_bypass_all_layers() {
     // Create disk cache directory
     let disk_cache_path = format!("/tmp/yatagarasu-test-range-bypass-{}", uuid::Uuid::new_v4());
     std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
-    println!(
-        "   ✅ Disk cache directory created: {}",
-        disk_cache_path
-    );
+    println!("   ✅ Disk cache directory created: {}", disk_cache_path);
 
     // Create S3 bucket
     let config = aws_config::from_env()
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -15471,7 +16398,11 @@ buckets:
     let status = response.status();
     let body = response.bytes().await.expect("Failed to read body");
 
-    println!("   ✅ Full file response: {} ({} bytes)", status, body.len());
+    println!(
+        "   ✅ Full file response: {} ({} bytes)",
+        status,
+        body.len()
+    );
     println!();
 
     // Phase 5: Verify full file cached
@@ -15530,10 +16461,7 @@ buckets:
         content_range.is_some(),
         "Expected Content-Range header in response"
     );
-    let expected_content_range = format!(
-        "bytes {}-{}/{}",
-        range_start, range_end, file_size
-    );
+    let expected_content_range = format!("bytes {}-{}/{}", range_start, range_end, file_size);
     assert!(
         content_range
             .as_ref()
@@ -15558,7 +16486,10 @@ buckets:
         expected_data,
         "Range response data mismatch"
     );
-    println!("   ✅ Returned data matches expected subset ({} bytes)", expected_len);
+    println!(
+        "   ✅ Returned data matches expected subset ({} bytes)",
+        expected_len
+    );
     println!();
 
     // Phase 10: Verify Range response NOT cached in Memory (via proxy restart)
@@ -15599,12 +16530,7 @@ buckets:
     let disk_files = std::fs::read_dir(&disk_cache_path)
         .expect("Failed to read disk cache directory")
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_type()
-                .map(|ft| ft.is_file())
-                .unwrap_or(false)
-        })
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .collect::<Vec<_>>();
 
     // Check if any file has the range size
@@ -15615,10 +16541,7 @@ buckets:
             .unwrap_or(false)
     });
 
-    assert!(
-        !range_cached,
-        "Range response should NOT be cached on disk"
-    );
+    assert!(!range_cached, "Range response should NOT be cached on disk");
     println!("   ✅ Confirmed: Range response NOT in Disk cache");
     println!();
 
@@ -15822,41 +16745,32 @@ async fn test_integration_memory_to_disk_fallback() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     println!("   ✅ LocalStack started on port {}", s3_port);
 
     // Start Redis
-    let redis_container = docker.run(testcontainers::GenericImage::new(
-        "redis",
-        "7-alpine",
-    ));
+    let redis_container = docker.run(testcontainers::GenericImage::new("redis", "7-alpine"));
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
     println!("   ✅ Redis started on port {}", redis_port);
 
     // Create disk cache directory
-    let disk_cache_path = format!("/tmp/yatagarasu-test-mem-disk-fallback-{}", uuid::Uuid::new_v4());
-    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
-    println!(
-        "   ✅ Disk cache directory created: {}",
-        disk_cache_path
+    let disk_cache_path = format!(
+        "/tmp/yatagarasu-test-mem-disk-fallback-{}",
+        uuid::Uuid::new_v4()
     );
+    std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
+    println!("   ✅ Disk cache directory created: {}", disk_cache_path);
 
     // Create S3 bucket
     let config = aws_config::from_env()
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -15903,7 +16817,10 @@ buckets:
         proxy_port, s3_endpoint, disk_cache_path, redis_url
     );
 
-    let config_path = format!("/tmp/yatagarasu-mem-disk-fallback-{}.yaml", uuid::Uuid::new_v4());
+    let config_path = format!(
+        "/tmp/yatagarasu-mem-disk-fallback-{}.yaml",
+        uuid::Uuid::new_v4()
+    );
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     println!("   ✅ Proxy config written (Memory max_size_mb: 0 = DISABLED)");
 
@@ -15915,9 +16832,7 @@ buckets:
     // Phase 2: Create test file (500KB)
     println!("Phase 2: Creating test file (500KB)...");
     let file_size = 500 * 1024; // 500KB (cacheable size)
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 23) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 23) % 256) as u8).collect();
     let file_name = "document.pdf";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -15985,12 +16900,7 @@ buckets:
     let disk_files = std::fs::read_dir(&disk_cache_path)
         .expect("Failed to read disk cache directory")
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_type()
-                .map(|ft| ft.is_file())
-                .unwrap_or(false)
-        })
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .collect::<Vec<_>>();
 
     let file_in_disk = disk_files.iter().any(|entry| {
@@ -16171,19 +17081,14 @@ async fn test_integration_disk_to_redis_fallback() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     println!("   ✅ LocalStack started on port {}", s3_port);
 
     // Start Redis
-    let redis_container = docker.run(testcontainers::GenericImage::new(
-        "redis",
-        "7-alpine",
-    ));
+    let redis_container = docker.run(testcontainers::GenericImage::new("redis", "7-alpine"));
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
     println!("   ✅ Redis started on port {}", redis_port);
@@ -16193,11 +17098,7 @@ async fn test_integration_disk_to_redis_fallback() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -16241,7 +17142,10 @@ buckets:
         proxy_port, s3_endpoint, redis_url
     );
 
-    let config_path = format!("/tmp/yatagarasu-disk-redis-fallback-{}.yaml", uuid::Uuid::new_v4());
+    let config_path = format!(
+        "/tmp/yatagarasu-disk-redis-fallback-{}.yaml",
+        uuid::Uuid::new_v4()
+    );
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     println!("   ✅ Proxy config written (Disk cache OMITTED = DISABLED)");
 
@@ -16253,9 +17157,7 @@ buckets:
     // Phase 2: Create test file (800KB)
     println!("Phase 2: Creating test file (800KB)...");
     let file_size = 800 * 1024; // 800KB (cacheable size)
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 29) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 29) % 256) as u8).collect();
     let file_name = "archive.tar.gz";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -16459,7 +17361,9 @@ buckets:
     println!("   • No errors or failures when Disk unavailable");
     println!("   • Cache hierarchy adapts to available layers");
     println!("   • Persistent cache (Redis) works across restarts");
-    println!("   • Performance degradation graceful (Redis slower than Disk/Memory, but faster than S3)");
+    println!(
+        "   • Performance degradation graceful (Redis slower than Disk/Memory, but faster than S3)"
+    );
     println!("   • Network-based cache (Redis) accessible across multiple proxy instances");
 
     println!("\n✅ Test completed - Disk → Redis fallback behavior documented");
@@ -16510,19 +17414,14 @@ async fn test_integration_mixed_memory_redis_no_disk() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     println!("   ✅ LocalStack started on port {}", s3_port);
 
     // Start Redis
-    let redis_container = docker.run(testcontainers::GenericImage::new(
-        "redis",
-        "7-alpine",
-    ));
+    let redis_container = docker.run(testcontainers::GenericImage::new("redis", "7-alpine"));
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
     println!("   ✅ Redis started on port {}", redis_port);
@@ -16532,11 +17431,7 @@ async fn test_integration_mixed_memory_redis_no_disk() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -16580,7 +17475,10 @@ buckets:
         proxy_port, s3_endpoint, redis_url
     );
 
-    let config_path = format!("/tmp/yatagarasu-mixed-mem-redis-{}.yaml", uuid::Uuid::new_v4());
+    let config_path = format!(
+        "/tmp/yatagarasu-mixed-mem-redis-{}.yaml",
+        uuid::Uuid::new_v4()
+    );
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     println!("   ✅ Proxy config written (Memory+Redis only, no Disk)");
 
@@ -16592,9 +17490,7 @@ buckets:
     // Phase 2: Create test file (600KB)
     println!("Phase 2: Creating test file (600KB)...");
     let file_size = 600 * 1024; // 600KB (cacheable size)
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 31) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 31) % 256) as u8).collect();
     let file_name = "image.jpg";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -16653,9 +17549,15 @@ buckets:
     let duration_mem = start.elapsed();
 
     if duration_mem.as_millis() < 50 {
-        println!("   ✅ Very fast response ({}ms) - likely from Memory cache", duration_mem.as_millis());
+        println!(
+            "   ✅ Very fast response ({}ms) - likely from Memory cache",
+            duration_mem.as_millis()
+        );
     } else {
-        println!("   ⚠️  Response slower than expected ({}ms) - may not be from Memory", duration_mem.as_millis());
+        println!(
+            "   ⚠️  Response slower than expected ({}ms) - may not be from Memory",
+            duration_mem.as_millis()
+        );
     }
     println!();
 
@@ -16680,7 +17582,10 @@ buckets:
         val.map(|v| v.len() == file_size).unwrap_or(false)
     });
 
-    assert!(file_in_redis, "File should be in Redis cache (backup layer)");
+    assert!(
+        file_in_redis,
+        "File should be in Redis cache (backup layer)"
+    );
     println!("   ✅ File found in Redis cache");
     println!("   • Both Memory and Redis populated (two-layer hierarchy)");
     println!();
@@ -16712,7 +17617,10 @@ buckets:
 
     // Memory should be fastest
     if duration2.as_millis() < 50 {
-        println!("   ✅ Very fast response ({}ms) - Memory cache hit", duration2.as_millis());
+        println!(
+            "   ✅ Very fast response ({}ms) - Memory cache hit",
+            duration2.as_millis()
+        );
     } else {
         println!(
             "   ⚠️  Response slower than expected ({}ms) - timing varies",
@@ -16797,10 +17705,16 @@ buckets:
     );
 
     if duration4 < duration3 && duration4.as_millis() < 50 {
-        println!("   ✅ Faster than previous ({}ms vs {}ms) - promoted to Memory",
-            duration4.as_millis(), duration3.as_millis());
+        println!(
+            "   ✅ Faster than previous ({}ms vs {}ms) - promoted to Memory",
+            duration4.as_millis(),
+            duration3.as_millis()
+        );
     } else {
-        println!("   • Response time: {}ms (promotion timing varies)", duration4.as_millis());
+        println!(
+            "   • Response time: {}ms (promotion timing varies)",
+            duration4.as_millis()
+        );
     }
     println!();
 
@@ -16877,9 +17791,7 @@ async fn test_integration_single_layer_memory_only() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
@@ -16890,11 +17802,7 @@ async fn test_integration_single_layer_memory_only() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -16936,7 +17844,10 @@ buckets:
         proxy_port, s3_endpoint
     );
 
-    let config_path = format!("/tmp/yatagarasu-single-memory-{}.yaml", uuid::Uuid::new_v4());
+    let config_path = format!(
+        "/tmp/yatagarasu-single-memory-{}.yaml",
+        uuid::Uuid::new_v4()
+    );
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     println!("   ✅ Proxy config written (Memory only, no Disk/Redis)");
 
@@ -16948,9 +17859,7 @@ buckets:
     // Phase 2: Create test file (400KB)
     println!("Phase 2: Creating test file (400KB)...");
     let file_size = 400 * 1024; // 400KB (cacheable size)
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 37) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 37) % 256) as u8).collect();
     let file_name = "data.json";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -17206,9 +18115,7 @@ async fn test_integration_single_layer_disk_only() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
@@ -17217,21 +18124,14 @@ async fn test_integration_single_layer_disk_only() {
     // Create disk cache directory
     let disk_cache_path = format!("/tmp/yatagarasu-test-single-disk-{}", uuid::Uuid::new_v4());
     std::fs::create_dir_all(&disk_cache_path).expect("Failed to create disk cache directory");
-    println!(
-        "   ✅ Disk cache directory created: {}",
-        disk_cache_path
-    );
+    println!("   ✅ Disk cache directory created: {}", disk_cache_path);
 
     // Create S3 bucket
     let config = aws_config::from_env()
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -17286,9 +18186,7 @@ buckets:
     // Phase 2: Create test file (700KB)
     println!("Phase 2: Creating test file (700KB)...");
     let file_size = 700 * 1024; // 700KB (cacheable size)
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 41) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 41) % 256) as u8).collect();
     let file_name = "report.pdf";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -17436,12 +18334,7 @@ buckets:
     let disk_files = std::fs::read_dir(&disk_cache_path)
         .expect("Failed to read disk cache directory")
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_type()
-                .map(|ft| ft.is_file())
-                .unwrap_or(false)
-        })
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .collect::<Vec<_>>();
 
     let file_in_disk = disk_files.iter().any(|entry| {
@@ -17526,19 +18419,14 @@ async fn test_integration_single_layer_redis_only() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     println!("   ✅ LocalStack started on port {}", s3_port);
 
     // Start Redis
-    let redis_container = docker.run(testcontainers::GenericImage::new(
-        "redis",
-        "7-alpine",
-    ));
+    let redis_container = docker.run(testcontainers::GenericImage::new("redis", "7-alpine"));
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
     println!("   ✅ Redis started on port {}", redis_port);
@@ -17548,11 +18436,7 @@ async fn test_integration_single_layer_redis_only() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -17607,9 +18491,7 @@ buckets:
     // Phase 2: Create test file (900KB)
     println!("Phase 2: Creating test file (900KB)...");
     let file_size = 900 * 1024; // 900KB (cacheable size)
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 43) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 43) % 256) as u8).collect();
     let file_name = "database.sql";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -17847,9 +18729,7 @@ async fn test_integration_all_caches_disabled() {
         testcontainers::GenericImage::new("localstack/localstack", "latest")
             .with_env_var("SERVICES", "s3")
             .with_env_var("DEFAULT_REGION", "us-east-1")
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Ready.",
-            )),
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout("Ready.")),
     );
     let s3_port = localstack.get_host_port_ipv4(4566);
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
@@ -17860,11 +18740,7 @@ async fn test_integration_all_caches_disabled() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "static",
+            "test", "test", None, None, "static",
         ))
         .load()
         .await;
@@ -17912,9 +18788,7 @@ buckets:
     // Phase 2: Create test file (300KB)
     println!("Phase 2: Creating test file (300KB)...");
     let file_size = 300 * 1024; // 300KB
-    let file_data: Vec<u8> = (0..file_size)
-        .map(|i| ((i * 47) % 256) as u8)
-        .collect();
+    let file_data: Vec<u8> = (0..file_size).map(|i| ((i * 47) % 256) as u8).collect();
     let file_name = "config.xml";
     println!(
         "   ✅ Test file created: {} ({:.2} KB)",
@@ -18125,8 +18999,8 @@ async fn test_integration_cache_warmup_on_startup() {
 
     println!("   ✓ LocalStack S3 started on port {}", s3_port);
 
-    let redis_image = testcontainers::GenericImage::new("redis", "7-alpine")
-        .with_exposed_port(6379);
+    let redis_image =
+        testcontainers::GenericImage::new("redis", "7-alpine").with_exposed_port(6379);
     let redis_container = docker.run(redis_image);
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
@@ -18138,11 +19012,7 @@ async fn test_integration_cache_warmup_on_startup() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_credential_types::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -18171,7 +19041,9 @@ async fn test_integration_cache_warmup_on_startup() {
             .put_object()
             .bucket("test-bucket")
             .key(*filename)
-            .body(aws_sdk_s3::primitives::ByteStream::from(content.as_bytes().to_vec()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                content.as_bytes().to_vec(),
+            ))
             .send()
             .await
             .expect("Failed to upload file");
@@ -18254,7 +19126,10 @@ buckets:
         assert_eq!(&body, expected_content, "Content mismatch for {}", filename);
 
         initial_timings.push((filename, duration));
-        println!("   ✓ Fetched {} in {:?} (cache miss → S3)", filename, duration);
+        println!(
+            "   ✓ Fetched {} in {:?} (cache miss → S3)",
+            filename, duration
+        );
     }
 
     // ============================================================================
@@ -18275,7 +19150,10 @@ buckets:
         let body = response.text().await.expect("Failed to read body");
         assert_eq!(&body, expected_content);
 
-        println!("   ✓ Fetched {} in {:?} (cache hit from memory)", filename, duration);
+        println!(
+            "   ✓ Fetched {} in {:?} (cache hit from memory)",
+            filename, duration
+        );
         assert!(
             duration.as_millis() < 100,
             "Cache hit should be fast, got {:?}",
@@ -18292,7 +19170,10 @@ buckets:
     // In real implementation, we'd check metrics or logs
     // For now, we know it should be exactly 4 (one per file, first fetch only)
     let s3_requests_before = files.len();
-    println!("   ✓ S3 requests so far: {} (one per file)", s3_requests_before);
+    println!(
+        "   ✓ S3 requests so far: {} (one per file)",
+        s3_requests_before
+    );
 
     // ============================================================================
     // Phase 6: Stop proxy (memory cache is lost, disk/redis persist)
@@ -18337,7 +19218,12 @@ buckets:
             .expect("Failed to fetch file");
         let duration = start.elapsed();
 
-        assert_eq!(response.status(), 200, "File {} not found after restart", filename);
+        assert_eq!(
+            response.status(),
+            200,
+            "File {} not found after restart",
+            filename
+        );
         let body = response.text().await.expect("Failed to read body");
         assert_eq!(&body, expected_content, "Content mismatch after restart");
 
@@ -18362,7 +19248,10 @@ buckets:
             filename,
             duration
         );
-        println!("   ✓ {} served in {:?} (from persistent cache)", filename, duration);
+        println!(
+            "   ✓ {} served in {:?} (from persistent cache)",
+            filename, duration
+        );
     }
 
     println!("\n   📈 Warmup effectiveness:");
@@ -18391,7 +19280,8 @@ buckets:
     // ============================================================================
     println!("\n🔴 Phase 11: Verify Redis cache persistence...");
 
-    let redis_client = redis::Client::open(redis_url.as_str()).expect("Failed to create Redis client");
+    let redis_client =
+        redis::Client::open(redis_url.as_str()).expect("Failed to create Redis client");
     let mut redis_conn = redis_client
         .get_connection()
         .expect("Failed to connect to Redis");
@@ -18420,7 +19310,9 @@ buckets:
         .put_object()
         .bucket("test-bucket")
         .key("newfile.txt")
-        .body(aws_sdk_s3::primitives::ByteStream::from(b"New file after restart".to_vec()))
+        .body(aws_sdk_s3::primitives::ByteStream::from(
+            b"New file after restart".to_vec(),
+        ))
         .send()
         .await
         .expect("Failed to upload new file");
@@ -18514,8 +19406,8 @@ async fn test_integration_graceful_degradation_on_failure() {
 
     println!("   ✓ LocalStack S3 started on port {}", s3_port);
 
-    let redis_image = testcontainers::GenericImage::new("redis", "7-alpine")
-        .with_exposed_port(6379);
+    let redis_image =
+        testcontainers::GenericImage::new("redis", "7-alpine").with_exposed_port(6379);
     let redis_container = docker.run(redis_image);
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
@@ -18527,11 +19419,7 @@ async fn test_integration_graceful_degradation_on_failure() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_credential_types::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -18674,7 +19562,11 @@ buckets:
         .expect("Failed to fetch file after Redis failure");
     let duration = start.elapsed();
 
-    assert_eq!(response.status(), 200, "Proxy should still work without Redis");
+    assert_eq!(
+        response.status(),
+        200,
+        "Proxy should still work without Redis"
+    );
     let body = response.text().await.expect("Failed to read body");
     assert_eq!(body, "Content of file 1");
 
@@ -18743,8 +19635,7 @@ buckets:
             .expect("Failed to get cache dir metadata")
             .permissions();
         perms.set_mode(0o444); // Read-only
-        std::fs::set_permissions(&cache_path, perms)
-            .expect("Failed to set cache dir read-only");
+        std::fs::set_permissions(&cache_path, perms).expect("Failed to set cache dir read-only");
         println!("   ✓ Cache directory set to read-only");
     }
 
@@ -18778,7 +19669,10 @@ buckets:
     let body = response.text().await.expect("Failed to read body");
     assert_eq!(body, "Content of file 1");
 
-    println!("   ✓ Fetched file1.txt in {:?} (from memory cache)", duration);
+    println!(
+        "   ✓ Fetched file1.txt in {:?} (from memory cache)",
+        duration
+    );
     println!("   • Proxy gracefully degraded to memory layer only");
 
     // ============================================================================
@@ -18934,8 +19828,8 @@ async fn test_integration_metrics_consistency_across_configs() {
 
     println!("   ✓ LocalStack S3 started on port {}", s3_port);
 
-    let redis_image = testcontainers::GenericImage::new("redis", "7-alpine")
-        .with_exposed_port(6379);
+    let redis_image =
+        testcontainers::GenericImage::new("redis", "7-alpine").with_exposed_port(6379);
     let redis_container = docker.run(redis_image);
     let redis_port = redis_container.get_host_port_ipv4(6379);
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
@@ -18947,11 +19841,7 @@ async fn test_integration_metrics_consistency_across_configs() {
         .endpoint_url(&s3_endpoint)
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_credential_types::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "test",
+            "test", "test", None, None, "test",
         ))
         .load()
         .await;
@@ -19049,10 +19939,7 @@ buckets:
     // Make requests: 1 miss + 3 hits = 75% hit rate
     for i in 0..4 {
         let response = client
-            .get(&format!(
-                "http://127.0.0.1:{}/metrics-test.txt",
-                proxy_port
-            ))
+            .get(&format!("http://127.0.0.1:{}/metrics-test.txt", proxy_port))
             .send()
             .await
             .expect("Failed to fetch file");
@@ -19125,10 +20012,7 @@ buckets:
     // Make requests: 1 miss + 4 hits = 80% hit rate
     for i in 0..5 {
         let response = client
-            .get(&format!(
-                "http://127.0.0.1:{}/metrics-test.txt",
-                proxy_port
-            ))
+            .get(&format!("http://127.0.0.1:{}/metrics-test.txt", proxy_port))
             .send()
             .await
             .expect("Failed to fetch file");
@@ -19203,10 +20087,7 @@ buckets:
     // Make requests: 1 miss + 2 hits = 66.7% hit rate
     for i in 0..3 {
         let response = client
-            .get(&format!(
-                "http://127.0.0.1:{}/metrics-test.txt",
-                proxy_port
-            ))
+            .get(&format!("http://127.0.0.1:{}/metrics-test.txt", proxy_port))
             .send()
             .await
             .expect("Failed to fetch file");
@@ -19276,10 +20157,7 @@ buckets:
     // Make requests: 1 miss + 3 hits = 75% hit rate
     for i in 0..4 {
         let response = client
-            .get(&format!(
-                "http://127.0.0.1:{}/metrics-test.txt",
-                proxy_port
-            ))
+            .get(&format!("http://127.0.0.1:{}/metrics-test.txt", proxy_port))
             .send()
             .await
             .expect("Failed to fetch file");
@@ -19345,10 +20223,7 @@ buckets:
     // Make requests: all are S3 fetches (0% hit rate)
     for i in 0..3 {
         let response = client
-            .get(&format!(
-                "http://127.0.0.1:{}/metrics-test.txt",
-                proxy_port
-            ))
+            .get(&format!("http://127.0.0.1:{}/metrics-test.txt", proxy_port))
             .send()
             .await
             .expect("Failed to fetch file");
@@ -19450,10 +20325,7 @@ buckets:
                 "{} should have at least 1 cache miss (cold start)",
                 metrics.config_name
             );
-            println!(
-                "   ✓ {} has expected cold start miss",
-                metrics.config_name
-            );
+            println!("   ✓ {} has expected cold start miss", metrics.config_name);
         }
     }
 
@@ -19490,7 +20362,10 @@ buckets:
     println!("   ─────────────────────────────────────────────────");
 
     println!("\n   ✅ Metrics verification passed:");
-    println!("   • All configurations tested: {} configurations", all_metrics.len());
+    println!(
+        "   • All configurations tested: {} configurations",
+        all_metrics.len()
+    );
     println!("   • Internal consistency verified: hits + misses = total");
     println!("   • Hit rate calculations correct across all configs");
     println!("   • Expected behavior patterns confirmed:");
@@ -19503,12 +20378,9 @@ buckets:
         .iter()
         .filter(|m| m.config_name != "No cache")
         .collect();
-    let avg_hit_rate: f64 = with_cache.iter().map(|m| m.hit_rate).sum::<f64>()
-        / with_cache.len() as f64;
-    println!(
-        "   • Average hit rate (with cache): {:.1}%",
-        avg_hit_rate
-    );
+    let avg_hit_rate: f64 =
+        with_cache.iter().map(|m| m.hit_rate).sum::<f64>() / with_cache.len() as f64;
+    println!("   • Average hit rate (with cache): {:.1}%", avg_hit_rate);
     println!("   • No-cache hit rate: 0.0%");
     println!(
         "   • Performance improvement: {:.1}% fewer S3 requests with caching",

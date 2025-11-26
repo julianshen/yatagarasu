@@ -1,18 +1,25 @@
 # Yatagarasu v1.1.0 Implementation Plan
 
-**Last Updated**: 2025-11-15
-**Current Status**: Planning Phase - v1.0.0 Complete, Starting v1.1.0
-**Target Release**: Q1 2026 (8-10 weeks)
+**Last Updated**: 2025-11-26
+**Current Status**: Phase 30 COMPLETE - Ready for Phase 31 (Advanced JWT)
+**Target Release**: When it's right, not when it's fast
 
 ---
 
 ## 🎯 v1.1.0 Goals
 
 **Primary Goal**: Cost optimization through intelligent caching (80%+ reduction in S3 costs)
+
 **Secondary Goals**:
 - Enhanced authentication (RS256/ES256 JWT, JWKS support)
+- **OPA (Open Policy Agent) integration** for flexible policy-based authorization
 - Audit logging for compliance (SOC2, GDPR, HIPAA)
 - Enhanced observability and security
+
+**Key Design Principles**:
+- **Configurable cache thresholds**: Users decide what file sizes to cache (not hardcoded)
+- **Policy-based authorization**: Use OPA instead of limited built-in operators
+- **Graceful degradation**: Cache failures never fail requests
 
 **Success Metrics**:
 - ✅ Demonstrate 80%+ reduction in S3 costs for typical workload
@@ -20,6 +27,13 @@
 - ✅ P95 latency <50ms (cached), <200ms (uncached)
 - ✅ Backward compatible with v1.0.0 configurations
 - ✅ All v1.0.0 performance targets maintained or exceeded
+
+**Authorization Evolution**:
+| Version | Approach | Capability |
+|---------|----------|------------|
+| v1.0 | Built-in operators (equals only) | Basic claim matching |
+| **v1.1** | **OPA (Open Policy Agent)** | Flexible policy rules via Rego |
+| v1.2 | OpenFGA | Relationship-based access control (user↔group↔bucket↔uri) |
 
 ---
 
@@ -31,46 +45,56 @@
 **Status**: ✅ COMPLETE - Phase 26: COMPLETE (164 tests) | Phase 27: COMPLETE (117 tests, 268 total cache tests)
 
 ### 🔴 Milestone 2: Persistent Cache (Phase 28-29) - CRITICAL
-**Deliverable**: Disk OR Redis cache layer operational
+**Deliverable**: Disk AND Redis cache layers operational
 **Verification**: Cache persists across restarts, handles failures gracefully
-**Status**: ⏳ NOT STARTED
+**Status**: ✅ COMPLETE - Phase 28: COMPLETE (Disk cache) | Phase 29: COMPLETE (Redis cache, 39 integration tests)
 
 ### 🔴 Milestone 3: Cache Management API (Phase 30) - CRITICAL
-**Deliverable**: Cache purge/stats endpoints working
-**Verification**: Can purge cache, retrieve statistics via API
-**Status**: ⏳ NOT STARTED
+**Deliverable**: Cache purge/stats endpoints working, TieredCache integrated into proxy
+**Verification**: Can purge cache, retrieve statistics via API, cache actually used in request flow
+**Status**: ✅ COMPLETE - RedisCache implements Cache trait, TieredCache integrates Redis, Proxy initializes cache via init_cache(), bucket/object-level purge endpoints added
 
 ### 🟡 Milestone 4: Advanced JWT (Phase 31) - HIGH
 **Deliverable**: RS256/ES256 JWT validation, JWKS support
 **Verification**: Can validate RSA/ECDSA signed JWTs, fetch keys from JWKS
 **Status**: ⏳ NOT STARTED
 
-### 🟡 Milestone 5: Audit Logging (Phase 32) - HIGH
-**Deliverable**: Comprehensive audit logging operational
-**Verification**: All requests logged with correlation IDs, exportable to S3/syslog
+### 🟡 Milestone 5: OPA Integration (Phase 32) - HIGH ⭐ NEW
+**Deliverable**: Open Policy Agent integration for flexible authorization
+**Verification**: Can evaluate Rego policies, replaces limited built-in operators
 **Status**: ⏳ NOT STARTED
 
-### 🟢 Milestone 6: Enhanced Observability (Phase 33) - MEDIUM
+### 🟡 Milestone 6: Audit Logging (Phase 33) - HIGH
+**Deliverable**: Comprehensive audit logging operational
+**Verification**: All requests logged with correlation IDs, exportable to file/syslog/S3
+**Status**: ⏳ NOT STARTED
+
+### 🟢 Milestone 7: Enhanced Observability (Phase 34) - MEDIUM
 **Deliverable**: OpenTelemetry tracing, slow query logging
 **Verification**: Traces exported to Jaeger/Zipkin, slow queries logged
 **Status**: ⏳ NOT STARTED
 
-### 🟢 Milestone 7: Advanced Security (Phase 34) - MEDIUM
-**Deliverable**: IP allowlist/blocklist, advanced rate limiting
-**Verification**: IP filtering works, token bucket rate limiting operational
+### 🟢 Milestone 8: Advanced Security (Phase 35) - MEDIUM
+**Deliverable**: IP allowlist/blocklist, token bucket rate limiting
+**Verification**: IP filtering works, advanced rate limiting operational
 **Status**: ⏳ NOT STARTED
 
-### 🔴 Milestone 8: Performance Validation (Phase 35-38) - CRITICAL
+### 🔴 Milestone 9: Performance Validation (Phase 36-38) - CRITICAL
 **Deliverable**: All performance targets met or exceeded
 **Verification**: K6 tests pass for cold/hot cache, large files, 10K+ concurrent users
 **Status**: ⏳ NOT STARTED
 
-### 🔴 Milestone 9: Production Ready (Phase 39-40) - CRITICAL
+### 🔴 Milestone 10: Production Ready (Phase 39-40) - CRITICAL
 **Deliverable**: Chaos testing complete, operational tests pass
 **Verification**: Survives S3 failures, cache failures, hot reload, graceful shutdown
 **Status**: ⏳ NOT STARTED
 
-**Target**: Milestone 9 = v1.1.0 production release
+**Target**: Milestone 10 = v1.1.0 production release
+
+### 🔮 v1.2.0 Preview: OpenFGA Integration
+**Future Deliverable**: Relationship-based access control via OpenFGA
+**Capability**: Define relationships between users, groups, buckets, and URIs
+**Example**: "user:alice can read documents in bucket:engineering if user:alice is member of group:engineers"
 
 ---
 
@@ -2021,13 +2045,284 @@ buckets:
 
 ---
 
-# PHASE 32: Audit Logging (Week 4)
+# PHASE 32: OPA Integration (Open Policy Agent)
+
+**Goal**: Replace limited built-in operators with flexible OPA policy evaluation
+**Deliverable**: OPA integration for authorization decisions
+**Verification**: Can evaluate Rego policies for access control decisions
+**Reference**: https://www.openpolicyagent.org/
+
+**Why OPA?**
+- Industry-standard policy engine used by Kubernetes, Envoy, Kafka, etc.
+- Rego language enables complex authorization rules
+- Decouples policy from code (policies can be updated without redeployment)
+- Supports caching for high-performance policy evaluation
+- Replaces limited v1.0 operators (equals only) with full policy flexibility
+
+---
+
+## 32.1: OPA Configuration Schema
+
+### Basic OPA Configuration
+- [ ] Test: Add `authorization` section to bucket config
+- [ ] Test: Can parse `type: opa` authorization type
+- [ ] Test: Can parse `opa_url` (OPA REST API endpoint)
+- [ ] Test: Can parse `opa_policy_path` (e.g., "yatagarasu/authz/allow")
+- [ ] Test: Can parse `opa_timeout_ms` (default: 100ms)
+- [ ] Test: Can parse `opa_cache_ttl_seconds` (default: 60)
+- [ ] Test: Validates OPA URL format
+- [ ] Test: Rejects invalid OPA configuration
+
+### Environment Variable Substitution
+- [ ] Test: Can substitute ${OPA_URL} in opa_url
+- [ ] Test: Handles missing OPA env vars gracefully
+
+### Example Configuration
+```yaml
+buckets:
+  - name: products
+    path_prefix: /products
+    jwt:
+      enabled: true
+      secret: ${JWT_SECRET}
+    authorization:
+      type: opa
+      opa_url: http://localhost:8181
+      opa_policy_path: yatagarasu/authz/allow
+      opa_timeout_ms: 100
+      opa_cache_ttl_seconds: 60
+```
+
+- [ ] Test: Can parse complete OPA config example
+
+---
+
+## 32.2: OPA Client Implementation
+
+### OPA HTTP Client
+- [ ] Test: Can create OpaClient struct
+- [ ] Test: OpaClient contains HTTP client (reqwest)
+- [ ] Test: OpaClient contains config (URL, timeout, cache TTL)
+- [ ] Test: OpaClient is Send + Sync
+- [ ] Test: Can create OpaClient::new(config)
+
+### OPA Request/Response Types
+- [ ] Test: Can create OpaInput struct (request context)
+- [ ] Test: OpaInput contains jwt_claims (JSON object)
+- [ ] Test: OpaInput contains bucket name
+- [ ] Test: OpaInput contains request_path
+- [ ] Test: OpaInput contains http_method (GET/HEAD)
+- [ ] Test: OpaInput contains client_ip
+- [ ] Test: OpaInput serializes to JSON correctly
+- [ ] Test: Can parse OpaResponse (allow: bool, reason: Option<String>)
+
+### OPA Request Format
+```json
+{
+  "input": {
+    "jwt_claims": {
+      "sub": "user123",
+      "roles": ["admin", "viewer"],
+      "department": "engineering"
+    },
+    "bucket": "products",
+    "path": "/products/secret/file.txt",
+    "method": "GET",
+    "client_ip": "192.168.1.100"
+  }
+}
+```
+
+- [ ] Test: Request format matches OPA REST API specification
+
+---
+
+## 32.3: OPA Policy Evaluation
+
+### Basic Evaluation
+- [ ] Test: Can call evaluate(input) -> Result<bool, OpaError>
+- [ ] Test: Sends POST to {opa_url}/v1/data/{policy_path}
+- [ ] Test: Returns true when OPA returns {"result": true}
+- [ ] Test: Returns false when OPA returns {"result": false}
+- [ ] Test: Returns false when OPA returns empty result (undefined)
+- [ ] Test: Handles OPA server unreachable gracefully
+
+### Error Handling
+- [ ] Test: Returns OpaError::Timeout on timeout
+- [ ] Test: Returns OpaError::ConnectionFailed on network error
+- [ ] Test: Returns OpaError::PolicyError on OPA error response
+- [ ] Test: Returns OpaError::InvalidResponse on malformed response
+- [ ] Test: Logs errors with request context
+
+### Timeout Handling
+- [ ] Test: Enforces configured timeout (opa_timeout_ms)
+- [ ] Test: Default timeout is 100ms
+- [ ] Test: Timeout error includes policy path for debugging
+
+---
+
+## 32.4: OPA Response Caching
+
+### Cache Implementation
+- [ ] Test: Caches OPA responses by input hash
+- [ ] Test: Cache TTL configurable (opa_cache_ttl_seconds)
+- [ ] Test: Cache hit returns cached decision without OPA call
+- [ ] Test: Cache miss calls OPA and stores result
+- [ ] Test: Cache evicts expired entries
+
+### Cache Key Generation
+- [ ] Test: Cache key based on hash of OpaInput
+- [ ] Test: Same input produces same cache key
+- [ ] Test: Different inputs produce different cache keys
+- [ ] Test: Cache key is deterministic
+
+### Cache Metrics
+- [ ] Test: Tracks opa_cache_hits counter
+- [ ] Test: Tracks opa_cache_misses counter
+- [ ] Test: Tracks opa_evaluation_duration histogram
+
+---
+
+## 32.5: Authorization Integration
+
+### Proxy Integration
+- [ ] Test: Authorization checked after JWT validation
+- [ ] Test: OPA called with validated JWT claims
+- [ ] Test: Request allowed if OPA returns true
+- [ ] Test: Request denied (403) if OPA returns false
+- [ ] Test: Request fails (500) if OPA unreachable (configurable: fail-open vs fail-closed)
+
+### Fail-Open vs Fail-Closed Configuration
+- [ ] Test: Can parse `opa_fail_mode: open` (allow on OPA failure)
+- [ ] Test: Can parse `opa_fail_mode: closed` (deny on OPA failure, default)
+- [ ] Test: Fail-open allows request when OPA unreachable
+- [ ] Test: Fail-closed denies request when OPA unreachable
+- [ ] Test: Logs warning on fail-open decisions
+
+### Backward Compatibility
+- [ ] Test: Buckets without `authorization` section work as before
+- [ ] Test: Can still use JWT-only authentication (no OPA)
+- [ ] Test: v1.0 configs without `authorization` are valid
+
+---
+
+## 32.6: Example Rego Policies
+
+### Basic Allow Policy
+```rego
+# yatagarasu/authz/allow.rego
+package yatagarasu.authz
+
+default allow = false
+
+# Allow admins to access everything
+allow {
+    input.jwt_claims.roles[_] == "admin"
+}
+
+# Allow users to access their own department's files
+allow {
+    input.jwt_claims.department == path_department
+}
+
+path_department = dept {
+    parts := split(input.path, "/")
+    dept := parts[2]  # e.g., /products/engineering/file.txt -> "engineering"
+}
+```
+
+- [ ] Test: Basic admin role policy works
+- [ ] Test: Department-based policy works
+
+### Complex Policy Examples
+```rego
+# Time-based access (business hours only)
+allow {
+    input.jwt_claims.roles[_] == "contractor"
+    is_business_hours
+}
+
+is_business_hours {
+    now := time.now_ns()
+    hour := time.clock(now)[0]
+    hour >= 9
+    hour < 17
+}
+
+# IP-based restrictions
+allow {
+    input.jwt_claims.roles[_] == "internal"
+    net.cidr_contains("10.0.0.0/8", input.client_ip)
+}
+```
+
+- [ ] Test: Time-based policy documented
+- [ ] Test: IP-based policy documented
+
+---
+
+## 32.7: OPA Deployment Guide
+
+### Docker Compose Example
+```yaml
+services:
+  opa:
+    image: openpolicyagent/opa:latest
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policies"]
+    volumes:
+      - ./policies:/policies
+    ports:
+      - "8181:8181"
+
+  yatagarasu:
+    image: yatagarasu:latest
+    environment:
+      - OPA_URL=http://opa:8181
+    depends_on:
+      - opa
+```
+
+- [ ] Test: Docker Compose example works
+- [ ] Test: OPA container starts and accepts requests
+
+### Policy Management
+- [ ] Doc: How to load policies into OPA
+- [ ] Doc: How to test policies with OPA REPL
+- [ ] Doc: How to update policies without restart (OPA API)
+
+---
+
+## 32.8: Testing & Validation
+
+### Unit Tests
+- [ ] Test: OpaClient creation and configuration
+- [ ] Test: OpaInput serialization
+- [ ] Test: OpaResponse parsing
+- [ ] Test: Cache key generation
+- [ ] Test: Error handling for all error types
+
+### Integration Tests (with real OPA)
+- [ ] Test: End-to-end request with OPA allow
+- [ ] Test: End-to-end request with OPA deny
+- [ ] Test: Cache hit/miss behavior
+- [ ] Test: Timeout handling
+- [ ] Test: Fail-open behavior
+- [ ] Test: Fail-closed behavior
+
+### Performance Tests
+- [ ] Test: OPA evaluation adds <10ms latency (P95)
+- [ ] Test: Cache hit adds <1ms latency
+- [ ] Test: Can handle 1000+ OPA evaluations/second
+
+---
+
+# PHASE 33: Audit Logging
 
 **Goal**: Implement comprehensive audit logging for compliance
 **Deliverable**: All requests logged with correlation IDs, exportable to multiple destinations
 **Verification**: Audit logs complete and accurate under load
 
-## 32.1: Audit Log Configuration
+## 33.1: Audit Log Configuration
 
 ### Configuration Schema
 - [ ] Test: Add audit_log section to config
@@ -2054,7 +2349,7 @@ buckets:
 
 ---
 
-## 32.2: Audit Log Entry Structure
+## 33.2: Audit Log Entry Structure
 
 ### AuditLogEntry Fields
 - [ ] Test: Can create AuditLogEntry struct
@@ -2087,7 +2382,7 @@ buckets:
 
 ---
 
-## 32.3: Audit Logging Integration
+## 33.3: Audit Logging Integration
 
 ### Request Context Enrichment
 - [ ] Test: Generate correlation_id on request start
@@ -2110,7 +2405,7 @@ buckets:
 
 ---
 
-## 32.4: File-Based Audit Logging
+## 33.4: File-Based Audit Logging
 
 ### File Writer
 - [ ] Test: Can create audit log file
@@ -2133,7 +2428,7 @@ buckets:
 
 ---
 
-## 32.5: Syslog Audit Logging
+## 33.5: Syslog Audit Logging
 
 ### Syslog Integration
 - [ ] Test: Can connect to syslog server (TCP)
@@ -2149,7 +2444,7 @@ buckets:
 
 ---
 
-## 32.6: S3 Export for Audit Logs
+## 33.6: S3 Export for Audit Logs
 
 ### Batching Logic
 - [ ] Test: Batches audit entries in memory
@@ -2170,7 +2465,7 @@ buckets:
 
 ---
 
-## 32.7: Correlation ID Propagation
+## 33.7: Correlation ID Propagation
 
 ### Correlation ID Generation
 - [ ] Test: Generates UUID v4 for each request
@@ -2183,7 +2478,7 @@ buckets:
 
 ---
 
-## 32.8: Testing & Validation
+## 33.8: Testing & Validation
 
 ### Unit Tests
 - [ ] Test: AuditLogEntry serialization
@@ -2206,11 +2501,11 @@ buckets:
 
 ---
 
-# PHASES 33-40: Additional Features & Testing (Week 5-8)
+# PHASES 34-41: Additional Features & Testing
 
 **Note**: These phases are more concise as they follow similar patterns to previous phases.
 
-## PHASE 33: Enhanced Observability (Week 5) - MEDIUM PRIORITY
+## PHASE 34: Enhanced Observability - MEDIUM PRIORITY
 
 ### OpenTelemetry Tracing
 - [ ] Test: Add opentelemetry dependencies
@@ -2237,7 +2532,7 @@ buckets:
 
 ---
 
-## PHASE 34: Advanced Security (Week 5-6) - MEDIUM PRIORITY
+## PHASE 35: Advanced Security - MEDIUM PRIORITY
 
 ### IP Allowlist/Blocklist
 - [ ] Test: Add ip_allowlist to bucket config
@@ -2258,7 +2553,7 @@ buckets:
 
 ---
 
-## PHASE 35: Comprehensive Cache Benchmarks - Comparative Analysis (Week 7)
+## PHASE 36: Comprehensive Cache Benchmarks - Comparative Analysis
 
 **Goal**: Benchmark all cache implementations (memory, disk, redis, tiered) for comparative analysis
 **Deliverable**: Performance report with recommendations for each use case
@@ -2472,7 +2767,7 @@ buckets:
 
 ---
 
-## PHASE 36: Load Testing - All Cache Implementations (Week 7)
+## PHASE 37: Load Testing - All Cache Implementations
 
 **Goal**: Validate cache performance under realistic production load
 **Tools**: k6, hey, wrk, or custom Rust load generator
@@ -2616,7 +2911,7 @@ buckets:
 
 ---
 
-## PHASE 37: Stress & Endurance Testing (Week 7)
+## PHASE 38: Stress & Endurance Testing
 
 **Goal**: Push caches to their limits, identify breaking points
 
@@ -2705,7 +3000,7 @@ buckets:
 
 ---
 
-## PHASE 38: Large File Streaming Tests (Week 7)
+## PHASE 39: Large File Streaming Tests
 
 **Goal**: Verify constant memory usage for large files (bypass cache)
 
@@ -2767,7 +3062,7 @@ buckets:
 
 ---
 
-## PHASE 39: Extreme Concurrency & Scalability Tests (Week 7)
+## PHASE 40: Extreme Concurrency & Scalability Tests
 
 **Goal**: Test maximum concurrent connections and identify scalability limits
 
@@ -2840,7 +3135,7 @@ buckets:
 
 ---
 
-## PHASE 40: Chaos & Resilience Testing (Week 7-8)
+## PHASE 41: Chaos & Resilience Testing
 
 ### S3 Backend Failures
 - [ ] Test: S3 503 errors → circuit breaker opens
@@ -2862,7 +3157,7 @@ buckets:
 
 ---
 
-## PHASE 41: Operational Testing (Week 8)
+## PHASE 42: Operational Testing
 
 ### Hot Reload Under Load
 - [ ] Test: Config reload while serving 100+ req/s
@@ -2892,26 +3187,28 @@ buckets:
 ### 🔴 CRITICAL - Must Have
 - [x] Phase 26: Cache configuration and abstractions
 - [x] Phase 27: In-memory LRU cache implementation
-- [x] Phase 28 OR 29: Disk cache OR Redis cache (at least one)
-- [x] Phase 30: Cache hierarchy and management API
-- [x] Phase 35-38: All performance tests pass
-- [x] Phase 40: Cache validation tests pass
+- [x] Phase 28: Disk cache implementation
+- [x] Phase 29: Redis cache implementation
+- [x] Phase 30: Cache hierarchy and management API (with proxy integration)
+- [ ] Phase 36-40: All performance tests pass
+- [ ] Phase 41-42: Chaos & operational tests pass
 
 ### 🟡 HIGH - Must Have
-- [x] Phase 31: RS256/ES256 JWT support
-- [x] Phase 32: Audit logging
+- [ ] Phase 31: RS256/ES256 JWT + JWKS support
+- [ ] Phase 32: OPA (Open Policy Agent) integration
+- [ ] Phase 33: Audit logging
 
 ### 🟢 MEDIUM - Nice to Have
-- [ ] Phase 33: OpenTelemetry tracing
-- [ ] Phase 34: Advanced security features
-- [ ] Phase 39: Chaos engineering tests (full suite)
+- [ ] Phase 34: OpenTelemetry tracing
+- [ ] Phase 35: Advanced security features (IP filtering, token bucket)
 - [ ] 24-hour soak test
 
 ### Documentation Requirements
 - [ ] Update README.md with v1.1 features
 - [ ] Create docs/CACHING.md
-- [ ] Create docs/ADVANCED_AUTH.md
+- [ ] Create docs/ADVANCED_AUTH.md (JWT + OPA)
 - [ ] Create docs/AUDIT_LOGGING.md
+- [ ] Create docs/OPA_POLICIES.md (example Rego policies)
 - [ ] Create MIGRATION_v1.0_to_v1.1.md
 
 ### Final Quality Gates
@@ -2924,9 +3221,78 @@ buckets:
 
 ---
 
-**Total Test Count**: 400+ tests across 15 phases
-**Estimated Timeline**: 6-8 weeks development + 2 weeks testing = 8-10 weeks total
-**Target Release**: Q1 2026
+**Total Test Count**: 500+ tests across 17 phases
+**Target Release**: When it's right, not when it's fast
 
-**Last Updated**: 2025-11-15
-**Status**: Ready to begin Phase 26 implementation
+**Last Updated**: 2025-11-26
+**Status**: Phase 30 COMPLETE - Ready for Phase 31 (Advanced JWT)
+
+---
+
+# v1.2.0 Roadmap Preview: OpenFGA Integration
+
+**Goal**: Relationship-based access control via OpenFGA
+**Reference**: https://openfga.dev/
+
+## Why OpenFGA for v1.2?
+
+While OPA (v1.1) provides flexible policy-based authorization, OpenFGA adds **relationship-based access control (ReBAC)**:
+
+| Feature | OPA (v1.1) | OpenFGA (v1.2) |
+|---------|------------|----------------|
+| Policy language | Rego | DSL/JSON |
+| Decision model | Rule-based | Relationship graph |
+| Use case | "Is this allowed by policy?" | "Does user have relationship to resource?" |
+| Example | "Admins can access /admin/*" | "Alice can read doc.pdf because she's in engineering group" |
+
+## v1.2 OpenFGA Features (Preview)
+
+### Configuration
+```yaml
+buckets:
+  - name: documents
+    path_prefix: /documents
+    authorization:
+      type: openfga
+      openfga_url: http://localhost:8080
+      store_id: ${OPENFGA_STORE_ID}
+      model_id: ${OPENFGA_MODEL_ID}
+```
+
+### Authorization Model
+```
+type user
+
+type group
+  relations
+    define member: [user]
+
+type bucket
+  relations
+    define viewer: [user, group#member]
+    define editor: [user, group#member]
+    define admin: [user, group#member]
+
+type document
+  relations
+    define parent: [bucket]
+    define can_read: viewer from parent
+    define can_write: editor from parent
+```
+
+### Check Flow
+```
+Request: GET /documents/engineering/roadmap.pdf
+User: alice (from JWT sub claim)
+Check: openfga.Check(user:alice, document:/documents/engineering/roadmap.pdf, can_read)
+```
+
+### Benefits
+- **Fine-grained access**: Per-document permissions
+- **Group inheritance**: Users inherit permissions from groups
+- **Audit trail**: OpenFGA tracks relationship changes
+- **Scalable**: Designed for billions of relationships
+
+---
+
+**v1.2 Target**: After v1.1 stabilizes in production
