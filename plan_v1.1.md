@@ -59,10 +59,10 @@
 **Verification**: Can validate RSA/ECDSA signed JWTs, fetch keys from JWKS
 **Status**: ⏳ NOT STARTED
 
-### 🟡 Milestone 5: OPA Integration (Phase 32) - HIGH ⭐ NEW
+### 🟢 Milestone 5: OPA Integration (Phase 32) - HIGH ⭐ CORE COMPLETE
 **Deliverable**: Open Policy Agent integration for flexible authorization
 **Verification**: Can evaluate Rego policies, replaces limited built-in operators
-**Status**: ⏳ NOT STARTED
+**Status**: ✅ Core implementation complete (32.1-32.5, 32.8 unit tests). Documentation & integration tests pending.
 
 ### 🟡 Milestone 6: Audit Logging (Phase 33) - HIGH
 **Deliverable**: Comprehensive audit logging operational
@@ -2064,12 +2064,12 @@ buckets:
 ## 32.1: OPA Configuration Schema
 
 ### Basic OPA Configuration
-- [ ] Test: Add `authorization` section to bucket config
-- [ ] Test: Can parse `type: opa` authorization type
-- [ ] Test: Can parse `opa_url` (OPA REST API endpoint)
-- [ ] Test: Can parse `opa_policy_path` (e.g., "yatagarasu/authz/allow")
-- [ ] Test: Can parse `opa_timeout_ms` (default: 100ms)
-- [ ] Test: Can parse `opa_cache_ttl_seconds` (default: 60)
+- [x] Test: Add `authorization` section to bucket config
+- [x] Test: Can parse `type: opa` authorization type
+- [x] Test: Can parse `opa_url` (OPA REST API endpoint)
+- [x] Test: Can parse `opa_policy_path` (e.g., "yatagarasu/authz/allow")
+- [x] Test: Can parse `opa_timeout_ms` (default: 100ms)
+- [x] Test: Can parse `opa_cache_ttl_seconds` (default: 60)
 - [ ] Test: Validates OPA URL format
 - [ ] Test: Rejects invalid OPA configuration
 
@@ -2093,28 +2093,28 @@ buckets:
       opa_cache_ttl_seconds: 60
 ```
 
-- [ ] Test: Can parse complete OPA config example
+- [x] Test: Can parse complete OPA config example
 
 ---
 
 ## 32.2: OPA Client Implementation
 
 ### OPA HTTP Client
-- [ ] Test: Can create OpaClient struct
-- [ ] Test: OpaClient contains HTTP client (reqwest)
-- [ ] Test: OpaClient contains config (URL, timeout, cache TTL)
-- [ ] Test: OpaClient is Send + Sync
-- [ ] Test: Can create OpaClient::new(config)
+- [x] Test: Can create OpaClient struct
+- [x] Test: OpaClient contains HTTP client (reqwest)
+- [x] Test: OpaClient contains config (URL, timeout, cache TTL)
+- [x] Test: OpaClient is Send + Sync
+- [x] Test: Can create OpaClient::new(config)
 
 ### OPA Request/Response Types
-- [ ] Test: Can create OpaInput struct (request context)
-- [ ] Test: OpaInput contains jwt_claims (JSON object)
-- [ ] Test: OpaInput contains bucket name
-- [ ] Test: OpaInput contains request_path
-- [ ] Test: OpaInput contains http_method (GET/HEAD)
-- [ ] Test: OpaInput contains client_ip
-- [ ] Test: OpaInput serializes to JSON correctly
-- [ ] Test: Can parse OpaResponse (allow: bool, reason: Option<String>)
+- [x] Test: Can create OpaInput struct (request context)
+- [x] Test: OpaInput contains jwt_claims (JSON object)
+- [x] Test: OpaInput contains bucket name
+- [x] Test: OpaInput contains request_path
+- [x] Test: OpaInput contains http_method (GET/HEAD)
+- [x] Test: OpaInput contains client_ip
+- [x] Test: OpaInput serializes to JSON correctly
+- [x] Test: Can parse OpaResponse (allow: bool, reason: Option<String>)
 
 ### OPA Request Format
 ```json
@@ -2133,48 +2133,48 @@ buckets:
 }
 ```
 
-- [ ] Test: Request format matches OPA REST API specification
+- [x] Test: Request format matches OPA REST API specification
 
 ---
 
 ## 32.3: OPA Policy Evaluation
 
 ### Basic Evaluation
-- [ ] Test: Can call evaluate(input) -> Result<bool, OpaError>
-- [ ] Test: Sends POST to {opa_url}/v1/data/{policy_path}
-- [ ] Test: Returns true when OPA returns {"result": true}
-- [ ] Test: Returns false when OPA returns {"result": false}
-- [ ] Test: Returns false when OPA returns empty result (undefined)
-- [ ] Test: Handles OPA server unreachable gracefully
+- [x] Test: Can call evaluate(input) -> Result<bool, OpaError>
+- [x] Test: Sends POST to {opa_url}/v1/data/{policy_path}
+- [x] Test: Returns true when OPA returns {"result": true}
+- [x] Test: Returns false when OPA returns {"result": false}
+- [x] Test: Returns false when OPA returns empty result (undefined)
+- [x] Test: Handles OPA server unreachable gracefully
 
 ### Error Handling
-- [ ] Test: Returns OpaError::Timeout on timeout
-- [ ] Test: Returns OpaError::ConnectionFailed on network error
-- [ ] Test: Returns OpaError::PolicyError on OPA error response
-- [ ] Test: Returns OpaError::InvalidResponse on malformed response
+- [x] Test: Returns OpaError::Timeout on timeout
+- [x] Test: Returns OpaError::ConnectionFailed on network error
+- [x] Test: Returns OpaError::PolicyError on OPA error response
+- [x] Test: Returns OpaError::InvalidResponse on malformed response
 - [ ] Test: Logs errors with request context
 
 ### Timeout Handling
-- [ ] Test: Enforces configured timeout (opa_timeout_ms)
-- [ ] Test: Default timeout is 100ms
-- [ ] Test: Timeout error includes policy path for debugging
+- [x] Test: Enforces configured timeout (opa_timeout_ms)
+- [x] Test: Default timeout is 100ms
+- [x] Test: Timeout error includes policy path for debugging
 
 ---
 
 ## 32.4: OPA Response Caching
 
 ### Cache Implementation
-- [ ] Test: Caches OPA responses by input hash
-- [ ] Test: Cache TTL configurable (opa_cache_ttl_seconds)
-- [ ] Test: Cache hit returns cached decision without OPA call
-- [ ] Test: Cache miss calls OPA and stores result
-- [ ] Test: Cache evicts expired entries
+- [x] Test: Caches OPA responses by input hash
+- [x] Test: Cache TTL configurable (opa_cache_ttl_seconds)
+- [x] Test: Cache hit returns cached decision without OPA call
+- [x] Test: Cache miss calls OPA and stores result
+- [x] Test: Cache evicts expired entries
 
 ### Cache Key Generation
-- [ ] Test: Cache key based on hash of OpaInput
-- [ ] Test: Same input produces same cache key
-- [ ] Test: Different inputs produce different cache keys
-- [ ] Test: Cache key is deterministic
+- [x] Test: Cache key based on hash of OpaInput
+- [x] Test: Same input produces same cache key
+- [x] Test: Different inputs produce different cache keys
+- [x] Test: Cache key is deterministic
 
 ### Cache Metrics
 - [ ] Test: Tracks opa_cache_hits counter
@@ -2186,23 +2186,23 @@ buckets:
 ## 32.5: Authorization Integration
 
 ### Proxy Integration
-- [ ] Test: Authorization checked after JWT validation
-- [ ] Test: OPA called with validated JWT claims
-- [ ] Test: Request allowed if OPA returns true
-- [ ] Test: Request denied (403) if OPA returns false
-- [ ] Test: Request fails (500) if OPA unreachable (configurable: fail-open vs fail-closed)
+- [x] Test: Authorization checked after JWT validation
+- [x] Test: OPA called with validated JWT claims
+- [x] Test: Request allowed if OPA returns true
+- [x] Test: Request denied (403) if OPA returns false
+- [x] Test: Request fails (500) if OPA unreachable (configurable: fail-open vs fail-closed)
 
 ### Fail-Open vs Fail-Closed Configuration
-- [ ] Test: Can parse `opa_fail_mode: open` (allow on OPA failure)
-- [ ] Test: Can parse `opa_fail_mode: closed` (deny on OPA failure, default)
-- [ ] Test: Fail-open allows request when OPA unreachable
-- [ ] Test: Fail-closed denies request when OPA unreachable
-- [ ] Test: Logs warning on fail-open decisions
+- [x] Test: Can parse `opa_fail_mode: open` (allow on OPA failure)
+- [x] Test: Can parse `opa_fail_mode: closed` (deny on OPA failure, default)
+- [x] Test: Fail-open allows request when OPA unreachable
+- [x] Test: Fail-closed denies request when OPA unreachable
+- [x] Test: Logs warning on fail-open decisions
 
 ### Backward Compatibility
-- [ ] Test: Buckets without `authorization` section work as before
-- [ ] Test: Can still use JWT-only authentication (no OPA)
-- [ ] Test: v1.0 configs without `authorization` are valid
+- [x] Test: Buckets without `authorization` section work as before
+- [x] Test: Can still use JWT-only authentication (no OPA)
+- [x] Test: v1.0 configs without `authorization` are valid
 
 ---
 
@@ -2295,11 +2295,11 @@ services:
 ## 32.8: Testing & Validation
 
 ### Unit Tests
-- [ ] Test: OpaClient creation and configuration
-- [ ] Test: OpaInput serialization
-- [ ] Test: OpaResponse parsing
-- [ ] Test: Cache key generation
-- [ ] Test: Error handling for all error types
+- [x] Test: OpaClient creation and configuration
+- [x] Test: OpaInput serialization
+- [x] Test: OpaResponse parsing
+- [x] Test: Cache key generation
+- [x] Test: Error handling for all error types
 
 ### Integration Tests (with real OPA)
 - [ ] Test: End-to-end request with OPA allow
@@ -3195,7 +3195,7 @@ services:
 
 ### 🟡 HIGH - Must Have
 - [ ] Phase 31: RS256/ES256 JWT + JWKS support
-- [ ] Phase 32: OPA (Open Policy Agent) integration
+- [x] Phase 32: OPA (Open Policy Agent) integration (core complete, docs pending)
 - [ ] Phase 33: Audit logging
 
 ### 🟢 MEDIUM - Nice to Have
