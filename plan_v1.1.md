@@ -2072,7 +2072,7 @@ buckets:
 - [x] Test: Can parse `opa_timeout_ms` (default: 100ms)
 - [x] Test: Can parse `opa_cache_ttl_seconds` (default: 60)
 - [x] Test: Validates OPA URL format
-- [ ] Test: Rejects invalid OPA configuration
+- [x] Test: Rejects invalid OPA configuration
 
 ### Environment Variable Substitution
 - [ ] Test: Can substitute ${OPA_URL} in opa_url

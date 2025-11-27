@@ -158,8 +158,34 @@ impl Config {
 
             // Validate authorization configuration if present (Phase 32: OPA Integration)
             if let Some(auth_config) = &bucket.authorization {
-                // Validate OPA URL format when type is "opa"
+                // Validate authorization type
+                const VALID_AUTH_TYPES: &[&str] = &["opa"];
+                if !VALID_AUTH_TYPES.contains(&auth_config.auth_type.as_str()) {
+                    return Err(format!(
+                        "Bucket '{}': Invalid authorization type '{}'. Supported types: {}",
+                        bucket.name, auth_config.auth_type, VALID_AUTH_TYPES.join(", ")
+                    ));
+                }
+
+                // Validate OPA-specific configuration when type is "opa"
                 if auth_config.auth_type == "opa" {
+                    // opa_url is required
+                    if auth_config.opa_url.is_none() {
+                        return Err(format!(
+                            "Bucket '{}': opa_url is required when authorization type is 'opa'",
+                            bucket.name
+                        ));
+                    }
+
+                    // opa_policy_path is required
+                    if auth_config.opa_policy_path.is_none() {
+                        return Err(format!(
+                            "Bucket '{}': opa_policy_path is required when authorization type is 'opa'",
+                            bucket.name
+                        ));
+                    }
+
+                    // Validate URL format
                     if let Some(url) = &auth_config.opa_url {
                         if !url.starts_with("http://") && !url.starts_with("https://") {
                             return Err(format!(
@@ -2164,6 +2190,110 @@ buckets:
             result.is_ok(),
             "Config with valid https:// OPA URL should pass validation: {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_rejects_opa_config_without_url() {
+        // Test: OPA authorization type requires opa_url
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "protected"
+    path_prefix: "/protected"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: opa
+      opa_policy_path: "yatagarasu/authz/allow"
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let result = config.validate();
+
+        assert!(
+            result.is_err(),
+            "OPA config without opa_url should fail validation"
+        );
+        let error_msg = result.unwrap_err();
+        assert!(
+            error_msg.contains("opa_url") && error_msg.contains("required"),
+            "Error should mention opa_url is required: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_rejects_opa_config_without_policy_path() {
+        // Test: OPA authorization type requires opa_policy_path
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "protected"
+    path_prefix: "/protected"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: opa
+      opa_url: "http://localhost:8181"
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let result = config.validate();
+
+        assert!(
+            result.is_err(),
+            "OPA config without opa_policy_path should fail validation"
+        );
+        let error_msg = result.unwrap_err();
+        assert!(
+            error_msg.contains("opa_policy_path") && error_msg.contains("required"),
+            "Error should mention opa_policy_path is required: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_rejects_unknown_authorization_type() {
+        // Test: Unknown authorization types should be rejected
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "protected"
+    path_prefix: "/protected"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: unknown_type
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let result = config.validate();
+
+        assert!(
+            result.is_err(),
+            "Unknown authorization type should fail validation"
+        );
+        let error_msg = result.unwrap_err();
+        assert!(
+            error_msg.contains("unknown_type") || error_msg.contains("authorization type"),
+            "Error should mention invalid authorization type: {}",
+            error_msg
         );
     }
 }
