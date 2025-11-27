@@ -1186,8 +1186,8 @@ Benchmark data proves that:
 - [x] Test: Constructor creates ConnectionManager
 - [x] Test: ConnectionManager handles connection multiplexing
 - [x] Test: Constructor connects to Redis server
-- [ ] Test: Constructor authenticates with password if provided (defer to Phase 29.11)
-- [ ] Test: Constructor selects database number (Redis SELECT) (defer to Phase 29.11)
+- [x] Test: Constructor authenticates with password if provided
+- [x] Test: Constructor selects database number (Redis SELECT)
 - [ ] Test: Constructor validates connection (Redis PING) (defer to Phase 29.2 Health Check)
 - [x] Test: Returns CacheError::ConnectionFailed if unreachable
 - [x] Test: Returns CacheError::ConfigurationError if redis_url missing
@@ -1639,9 +1639,9 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Returns total cache size (sum of all layers)
 
 ### Per-Bucket Stats
-- [ ] Test: Can track stats per bucket
-- [ ] Test: Can retrieve stats for specific bucket
-- [ ] Test: Can aggregate stats across all buckets
+- [x] Test: Can track stats per bucket
+- [x] Test: Can retrieve stats for specific bucket
+- [x] Test: Can aggregate stats across all buckets
 
 ---
 
@@ -1657,10 +1657,10 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [ ] Test: Returns 403 without admin claim (DEFERRED - no admin claim check yet)
 
 ### POST /admin/cache/purge/:bucket (Purge Bucket)
-- [ ] Test: Endpoint accepts bucket name parameter
-- [ ] Test: Purges only entries for that bucket
-- [ ] Test: Returns success message with count
-- [ ] Test: Returns 404 if bucket unknown
+- [x] Test: Endpoint accepts bucket name parameter
+- [x] Test: Purges only entries for that bucket
+- [x] Test: Returns success message with count
+- [ ] Test: Returns 404 if bucket unknown (Note: bucket validation not implemented)
 
 ### POST /admin/cache/purge/:bucket/*path (Purge Object)
 - [ ] Test: Endpoint accepts bucket and object path
@@ -1674,12 +1674,12 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Returns JSON with cache stats
 - [x] Test: Includes hits, misses, hit_rate
 - [x] Test: Includes current_size, max_size
-- [ ] Test: Includes per-bucket breakdown (deferred - requires per-bucket stats infrastructure)
+- [ ] Test: Includes per-bucket breakdown (Note: per-bucket stats available via /admin/cache/stats/:bucket)
 
 ### GET /admin/cache/stats/:bucket (Bucket Stats)
-- [ ] Test: Endpoint accepts bucket name parameter
-- [ ] Test: Returns stats for that bucket only
-- [ ] Test: Returns 404 if bucket unknown
+- [x] Test: Endpoint accepts bucket name parameter
+- [x] Test: Returns stats for that bucket only
+- [ ] Test: Returns 404 if bucket unknown (Note: returns empty stats for unknown bucket)
 
 ---
 

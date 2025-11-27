@@ -725,8 +725,16 @@ pub trait Cache: Send + Sync {
     /// Clear all cache entries
     async fn clear(&self) -> Result<(), CacheError>;
 
+    /// Clear all cache entries for a specific bucket
+    /// Returns the number of entries deleted
+    async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError>;
+
     /// Get cache statistics
     async fn stats(&self) -> Result<CacheStats, CacheError>;
+
+    /// Get cache statistics for a specific bucket
+    /// Returns partial stats (item count and size) for the bucket
+    async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError>;
 
     /// Run pending async tasks (for caches that use async backends like moka)
     /// Default implementation is a no-op
@@ -936,8 +944,51 @@ impl Cache for MemoryCache {
         Ok(())
     }
 
+    async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError> {
+        // Iterate through all keys and delete those matching the bucket
+        // Note: moka's iter() returns Arc<K>, so we need to dereference
+        let keys_to_delete: Vec<CacheKey> = self
+            .cache
+            .iter()
+            .filter(|(k, _)| k.bucket == bucket)
+            .map(|(k, _)| (*k).clone())
+            .collect();
+
+        let count = keys_to_delete.len();
+        for key in keys_to_delete {
+            self.cache.invalidate(&key).await;
+        }
+
+        // Run pending tasks to ensure invalidations complete
+        self.cache.run_pending_tasks().await;
+
+        Ok(count)
+    }
+
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(self.get_stats())
+    }
+
+    async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError> {
+        // Calculate stats for a specific bucket by iterating entries
+        let mut size_bytes: u64 = 0;
+        let mut item_count: u64 = 0;
+
+        for (key, entry) in self.cache.iter() {
+            if key.bucket == bucket {
+                size_bytes += entry.size_bytes() as u64;
+                item_count += 1;
+            }
+        }
+
+        Ok(CacheStats {
+            hits: 0,      // Not tracked per-bucket
+            misses: 0,    // Not tracked per-bucket
+            evictions: 0, // Not tracked per-bucket
+            current_size_bytes: size_bytes,
+            current_item_count: item_count,
+            max_size_bytes: self.max_item_size_bytes, // Overall max
+        })
     }
 
     async fn run_pending_tasks(&self) {
@@ -970,6 +1021,11 @@ impl Cache for NullCache {
         Ok(())
     }
 
+    async fn clear_bucket(&self, _bucket: &str) -> Result<usize, CacheError> {
+        // NullCache has no entries, so nothing to clear
+        Ok(0)
+    }
+
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(CacheStats {
             hits: 0,
@@ -979,6 +1035,11 @@ impl Cache for NullCache {
             current_item_count: 0,
             max_size_bytes: 0,
         })
+    }
+
+    async fn stats_bucket(&self, _bucket: &str) -> Result<CacheStats, CacheError> {
+        // NullCache has no entries
+        Ok(CacheStats::default())
     }
 }
 
@@ -2947,7 +3008,15 @@ max_item_size_mb: 5
             Ok(())
         }
 
+        async fn clear_bucket(&self, _bucket: &str) -> Result<usize, CacheError> {
+            Ok(0)
+        }
+
         async fn stats(&self) -> Result<CacheStats, CacheError> {
+            Ok(CacheStats::default())
+        }
+
+        async fn stats_bucket(&self, _bucket: &str) -> Result<CacheStats, CacheError> {
             Ok(CacheStats::default())
         }
     }

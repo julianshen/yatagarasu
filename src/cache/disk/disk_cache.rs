@@ -197,6 +197,19 @@ impl Cache for DiskCache {
         Ok(())
     }
 
+    async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError> {
+        // Find all keys belonging to this bucket
+        let keys_to_delete = self.index.keys_for_bucket(bucket);
+        let count = keys_to_delete.len();
+
+        // Delete each key
+        for key in keys_to_delete {
+            let _ = self.delete(&key).await;
+        }
+
+        Ok(count)
+    }
+
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(CacheStats {
             hits: 0,   // TODO: Track hits
@@ -205,6 +218,19 @@ impl Cache for DiskCache {
             current_size_bytes: self.index.total_size(),
             current_item_count: self.index.entry_count() as u64,
             max_size_bytes: self.max_size_bytes,
+        })
+    }
+
+    async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError> {
+        let (size_bytes, item_count) = self.index.stats_for_bucket(bucket);
+
+        Ok(CacheStats {
+            hits: 0,      // Not tracked per-bucket
+            misses: 0,    // Not tracked per-bucket
+            evictions: 0, // Not tracked per-bucket
+            current_size_bytes: size_bytes,
+            current_item_count: item_count,
+            max_size_bytes: self.max_size_bytes, // Overall max
         })
     }
 }

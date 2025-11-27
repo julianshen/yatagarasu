@@ -289,6 +289,52 @@ impl Cache for TieredCache {
         Ok(())
     }
 
+    async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError> {
+        // Clear bucket from all layers and aggregate the count
+        // We return the maximum count across layers (since items may be duplicated)
+
+        let mut max_deleted = 0;
+        let mut first_error: Option<CacheError> = None;
+
+        for layer in &self.layers {
+            match layer.clear_bucket(bucket).await {
+                Ok(count) => {
+                    // Track the maximum count (since same items may be in multiple layers)
+                    if count > max_deleted {
+                        max_deleted = count;
+                    }
+                }
+                Err(e) => {
+                    // Record first error but continue clearing other layers
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        // If any layer failed, return the first error
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
+        // Flush pending async tasks after clear
+        for layer in &self.layers {
+            layer.run_pending_tasks().await;
+        }
+
+        // Update metrics
+        if max_deleted > 0 {
+            let metrics = Metrics::global();
+            if let Ok(stats) = self.stats().await {
+                metrics.set_cache_size_bytes(stats.current_size_bytes);
+                metrics.set_cache_items(stats.current_item_count);
+            }
+        }
+
+        Ok(max_deleted)
+    }
+
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         // Aggregate stats across all layers
 
@@ -331,6 +377,46 @@ impl Cache for TieredCache {
             hits: total_hits,
             misses: total_misses,
             evictions: total_evictions,
+            current_size_bytes: total_size_bytes,
+            current_item_count: total_item_count,
+            max_size_bytes,
+        })
+    }
+
+    async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError> {
+        // Aggregate per-bucket stats across all layers
+        // Note: Item counts/sizes are summed across layers (items may be duplicated)
+
+        let mut total_size_bytes: u64 = 0;
+        let mut total_item_count: u64 = 0;
+        let mut max_size_bytes: u64 = 0;
+        let mut first_error: Option<CacheError> = None;
+
+        for layer in &self.layers {
+            match layer.stats_bucket(bucket).await {
+                Ok(layer_stats) => {
+                    total_size_bytes += layer_stats.current_size_bytes;
+                    total_item_count += layer_stats.current_item_count;
+                    if layer_stats.max_size_bytes > max_size_bytes {
+                        max_size_bytes = layer_stats.max_size_bytes;
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
+        Ok(CacheStats {
+            hits: 0,      // Not tracked per-bucket
+            misses: 0,    // Not tracked per-bucket
+            evictions: 0, // Not tracked per-bucket
             current_size_bytes: total_size_bytes,
             current_item_count: total_item_count,
             max_size_bytes,
@@ -432,8 +518,33 @@ mod tests {
             Ok(())
         }
 
+        async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError> {
+            let mut entries = self.entries.lock().await;
+            let prefix = format!("{}/", bucket);
+            let keys_to_remove: Vec<String> = entries
+                .keys()
+                .filter(|k| k.starts_with(&prefix))
+                .cloned()
+                .collect();
+            let count = keys_to_remove.len();
+            for key in keys_to_remove {
+                entries.remove(&key);
+            }
+            Ok(count)
+        }
+
         async fn stats(&self) -> Result<CacheStats, CacheError> {
             Ok(CacheStats::default())
+        }
+
+        async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError> {
+            let entries = self.entries.lock().await;
+            let prefix = format!("{}/", bucket);
+            let item_count = entries.keys().filter(|k| k.starts_with(&prefix)).count() as u64;
+            Ok(CacheStats {
+                current_item_count: item_count,
+                ..Default::default()
+            })
         }
     }
 

@@ -94,6 +94,57 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
+    /// Builds a Redis connection URL with authentication and database selection
+    ///
+    /// Takes the base URL and incorporates password and database number from config.
+    /// URL format: redis://[:password@]host[:port][/db]
+    ///
+    /// # Examples
+    ///
+    /// - Base URL: `redis://localhost:6379`, password: `secret`, db: `1`
+    ///   Result: `redis://:secret@localhost:6379/1`
+    fn build_connection_url(base_url: &str, config: &RedisConfig) -> Result<String, CacheError> {
+        // Validate scheme first (redis:// or rediss://)
+        let (scheme, rest) = if base_url.starts_with("rediss://") {
+            ("rediss://", base_url.strip_prefix("rediss://").unwrap())
+        } else if base_url.starts_with("redis://") {
+            ("redis://", base_url.strip_prefix("redis://").unwrap())
+        } else {
+            return Err(CacheError::ConfigurationError(format!(
+                "Invalid Redis URL scheme. Expected 'redis://' or 'rediss://', got: {}",
+                base_url
+            )));
+        };
+
+        // If no password and db is 0, just return the base URL as-is
+        if config.redis_password.is_none() && config.redis_db == 0 {
+            return Ok(base_url.to_string());
+        }
+
+        // Extract host:port (ignore any existing path/db in the URL)
+        let host_port = rest.split('/').next().unwrap_or(rest);
+
+        // Build URL with optional password and database
+        let mut url = scheme.to_string();
+
+        // Add password if provided
+        if let Some(ref password) = config.redis_password {
+            // URL-encode the password to handle special characters
+            let encoded_password = urlencoding::encode(password);
+            url.push_str(&format!(":{}@", encoded_password));
+        }
+
+        // Add host and port
+        url.push_str(host_port);
+
+        // Add database number if non-zero
+        if config.redis_db > 0 {
+            url.push_str(&format!("/{}", config.redis_db));
+        }
+
+        Ok(url)
+    }
+
     /// Creates a new RedisCache instance
     ///
     /// # Arguments
@@ -118,8 +169,11 @@ impl RedisCache {
             .as_ref()
             .ok_or_else(|| CacheError::ConfigurationError("redis_url is required".to_string()))?;
 
+        // Build connection URL with authentication if password is provided
+        let connection_url = Self::build_connection_url(redis_url, &config)?;
+
         // Create Redis client
-        let client = Client::open(redis_url.as_str())
+        let client = Client::open(connection_url.as_str())
             .map_err(|e| CacheError::RedisConnectionFailed(format!("Invalid Redis URL: {}", e)))?;
 
         // Create connection manager (handles connection pooling and reconnection)
@@ -427,6 +481,85 @@ impl RedisCache {
         Ok(total_deleted)
     }
 
+    /// Clears all entries for a specific bucket from the Redis cache
+    ///
+    /// Uses Redis SCAN for safe iteration (non-blocking) and deletes keys in batches.
+    /// This operation is safe for production use and won't block the Redis server.
+    ///
+    /// # Arguments
+    ///
+    /// * `bucket` - The bucket name to clear
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of keys deleted
+    ///
+    /// # Errors
+    ///
+    /// Returns `CacheError` on Redis connection errors
+    ///
+    /// # Note
+    ///
+    /// This method only clears keys matching the pattern `{prefix}:{bucket}:*`.
+    /// Keys that were hashed due to length (format: `{prefix}:hash:{sha256}`)
+    /// are not cleared as the bucket information is embedded in the hash.
+    pub async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError> {
+        // Start timing the operation
+        let _timer = RedisCacheMetrics::global().start_operation_timer("clear_bucket");
+
+        let mut conn = self.connection.clone();
+        let mut cursor: u64 = 0;
+        let mut total_deleted = 0;
+        let batch_size = 100;
+
+        // Pattern to match all keys for this bucket
+        // Format: {prefix}:{bucket}:*
+        let pattern = format!("{}:{}:*", self.key_prefix, bucket);
+
+        loop {
+            // Use SCAN with pattern matching
+            // SCAN cursor MATCH pattern COUNT batch_size
+            let scan_result: (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(&pattern)
+                .arg("COUNT")
+                .arg(batch_size)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| {
+                    RedisCacheMetrics::global().errors.inc();
+                    CacheError::RedisError(format!("Redis SCAN failed: {}", e))
+                })?;
+
+            cursor = scan_result.0;
+            let keys = scan_result.1;
+
+            // Delete the batch of keys if any were found
+            if !keys.is_empty() {
+                let deleted: usize = conn.del(&keys).await.map_err(|e| {
+                    RedisCacheMetrics::global().errors.inc();
+                    CacheError::RedisError(format!("Redis DEL failed: {}", e))
+                })?;
+
+                total_deleted += deleted;
+
+                // Update eviction counter for each deleted key
+                for _ in 0..deleted {
+                    self.stats.increment_evictions();
+                    RedisCacheMetrics::global().evictions.inc();
+                }
+            }
+
+            // SCAN returns 0 when iteration is complete
+            if cursor == 0 {
+                break;
+            }
+        }
+
+        Ok(total_deleted)
+    }
+
     /// Returns a snapshot of current cache statistics
     ///
     /// # Returns
@@ -440,6 +573,53 @@ impl RedisCache {
     /// - max_size_bytes: 0 (not applicable to Redis)
     pub fn stats(&self) -> CacheStats {
         self.stats.snapshot()
+    }
+
+    /// Returns statistics for a specific bucket
+    ///
+    /// Uses Redis SCAN to count entries for the bucket.
+    /// Note: This is an expensive operation for large datasets.
+    pub async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError> {
+        let _timer = RedisCacheMetrics::global().start_operation_timer("stats_bucket");
+
+        let mut conn = self.connection.clone();
+        let mut cursor: u64 = 0;
+        let mut item_count: u64 = 0;
+        let batch_size = 100;
+
+        // Pattern to match all keys for this bucket
+        let pattern = format!("{}:{}:*", self.key_prefix, bucket);
+
+        loop {
+            let scan_result: (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(&pattern)
+                .arg("COUNT")
+                .arg(batch_size)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| {
+                    RedisCacheMetrics::global().errors.inc();
+                    CacheError::RedisError(format!("Redis SCAN failed: {}", e))
+                })?;
+
+            cursor = scan_result.0;
+            item_count += scan_result.1.len() as u64;
+
+            if cursor == 0 {
+                break;
+            }
+        }
+
+        Ok(CacheStats {
+            hits: 0,               // Not tracked per-bucket
+            misses: 0,             // Not tracked per-bucket
+            evictions: 0,          // Not tracked per-bucket
+            current_size_bytes: 0, // Redis doesn't track size locally
+            current_item_count: item_count,
+            max_size_bytes: 0, // Not applicable to Redis
+        })
     }
 }
 
@@ -486,9 +666,19 @@ impl Cache for RedisCache {
         Ok(())
     }
 
+    async fn clear_bucket(&self, bucket: &str) -> Result<usize, CacheError> {
+        // Delegate to the inherent method
+        RedisCache::clear_bucket(self, bucket).await
+    }
+
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         // Delegate to the inherent method (which is sync, wrap in Ok)
         Ok(RedisCache::stats(self))
+    }
+
+    async fn stats_bucket(&self, bucket: &str) -> Result<CacheStats, CacheError> {
+        // Delegate to the inherent method
+        RedisCache::stats_bucket(self, bucket).await
     }
 
     async fn run_pending_tasks(&self) {
@@ -589,5 +779,107 @@ mod tests {
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.hits, 2);
         assert_eq!(snapshot.misses, 1);
+    }
+
+    // ============================================================
+    // Phase 29.2: Redis Authentication Tests
+    // ============================================================
+
+    #[test]
+    fn test_build_connection_url_no_password_no_db() {
+        // Test: URL unchanged when no password and db=0
+        let config = RedisConfig {
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_password: None,
+            redis_db: 0,
+            ..Default::default()
+        };
+
+        let url = RedisCache::build_connection_url("redis://localhost:6379", &config).unwrap();
+        assert_eq!(url, "redis://localhost:6379");
+    }
+
+    #[test]
+    fn test_build_connection_url_with_password() {
+        // Test: Constructor authenticates with password if provided
+        let config = RedisConfig {
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_password: Some("mysecret".to_string()),
+            redis_db: 0,
+            ..Default::default()
+        };
+
+        let url = RedisCache::build_connection_url("redis://localhost:6379", &config).unwrap();
+        assert_eq!(url, "redis://:mysecret@localhost:6379");
+    }
+
+    #[test]
+    fn test_build_connection_url_with_database() {
+        // Test: Constructor selects database number (Redis SELECT)
+        let config = RedisConfig {
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_password: None,
+            redis_db: 5,
+            ..Default::default()
+        };
+
+        let url = RedisCache::build_connection_url("redis://localhost:6379", &config).unwrap();
+        assert_eq!(url, "redis://localhost:6379/5");
+    }
+
+    #[test]
+    fn test_build_connection_url_with_password_and_database() {
+        // Test: Both password and database number
+        let config = RedisConfig {
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_password: Some("secret123".to_string()),
+            redis_db: 3,
+            ..Default::default()
+        };
+
+        let url = RedisCache::build_connection_url("redis://localhost:6379", &config).unwrap();
+        assert_eq!(url, "redis://:secret123@localhost:6379/3");
+    }
+
+    #[test]
+    fn test_build_connection_url_password_with_special_chars() {
+        // Test: Password with special characters gets URL-encoded
+        let config = RedisConfig {
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_password: Some("p@ss:word/test".to_string()),
+            redis_db: 0,
+            ..Default::default()
+        };
+
+        let url = RedisCache::build_connection_url("redis://localhost:6379", &config).unwrap();
+        // Special characters should be URL-encoded
+        assert!(url.contains("p%40ss%3Aword%2Ftest"));
+        assert!(url.starts_with("redis://:"));
+    }
+
+    #[test]
+    fn test_build_connection_url_rediss_scheme() {
+        // Test: TLS/SSL connection (rediss://)
+        let config = RedisConfig {
+            redis_url: Some("rediss://secure.redis.io:6380".to_string()),
+            redis_password: Some("tls_pass".to_string()),
+            redis_db: 1,
+            ..Default::default()
+        };
+
+        let url =
+            RedisCache::build_connection_url("rediss://secure.redis.io:6380", &config).unwrap();
+        assert_eq!(url, "rediss://:tls_pass@secure.redis.io:6380/1");
+    }
+
+    #[test]
+    fn test_build_connection_url_invalid_scheme() {
+        // Test: Invalid URL scheme returns error
+        let config = RedisConfig::default();
+
+        let result = RedisCache::build_connection_url("http://localhost:6379", &config);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, CacheError::ConfigurationError(_)));
     }
 }

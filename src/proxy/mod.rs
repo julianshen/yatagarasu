@@ -1641,21 +1641,19 @@ impl ProxyHttp for YatagarasuProxy {
                     }
                 } else {
                     // Purge entire bucket: /admin/cache/purge/:bucket
-                    // Note: This requires iterating through cache - currently we just clear the entire cache
-                    // TODO: Implement bucket-specific purge when Cache trait supports it
-                    tracing::warn!(
+                    tracing::info!(
                         request_id = %ctx.request_id(),
                         bucket = %bucket_name,
-                        "Bucket-level purge not yet fully implemented, clearing entire cache"
+                        "Purging all cache entries for bucket"
                     );
 
-                    match cache.clear().await {
-                        Ok(()) => {
+                    match cache.clear_bucket(bucket_name).await {
+                        Ok(deleted_count) => {
                             let response_json = serde_json::json!({
                                 "status": "success",
-                                "message": "Cache cleared (bucket-specific purge not yet implemented)",
+                                "message": format!("Purged {} cache entries for bucket", deleted_count),
                                 "bucket": bucket_name,
-                                "note": "Currently clears entire cache. Bucket-specific purge coming soon.",
+                                "entries_deleted": deleted_count,
                             });
                             let response_body = response_json.to_string();
 
@@ -1895,6 +1893,127 @@ impl ProxyHttp for YatagarasuProxy {
                 self.metrics.increment_status_count(404);
 
                 return Ok(true); // Short-circuit
+            }
+        }
+
+        // Special handling for /admin/cache/stats/:bucket endpoint (Phase 30.5: Per-Bucket Stats)
+        if path.starts_with("/admin/cache/stats/")
+            && method == "GET"
+            && path != "/admin/cache/stats"
+        {
+            // Extract bucket name from path
+            let bucket_name = path.strip_prefix("/admin/cache/stats/").unwrap_or("");
+
+            if bucket_name.is_empty() {
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Bucket name is required",
+                });
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(400, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+                self.metrics.increment_status_count(400);
+                return Ok(true);
+            }
+
+            if let Some(ref cache) = self.cache {
+                // Get bucket-specific statistics
+                match cache.stats_bucket(bucket_name).await {
+                    Ok(stats) => {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket_name,
+                            current_size_bytes = stats.current_size_bytes,
+                            current_item_count = stats.current_item_count,
+                            "Bucket cache stats retrieved successfully"
+                        );
+
+                        let response_json = serde_json::json!({
+                            "status": "success",
+                            "bucket": bucket_name,
+                            "data": {
+                                "current_size_bytes": stats.current_size_bytes,
+                                "current_item_count": stats.current_item_count,
+                            },
+                            "timestamp": std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(200, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+                        self.metrics.increment_status_count(200);
+                        return Ok(true);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket_name,
+                            error = %e,
+                            "Failed to retrieve bucket cache stats"
+                        );
+
+                        let response_json = serde_json::json!({
+                            "status": "error",
+                            "message": format!("Failed to retrieve bucket cache stats: {}", e),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(500, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+                        self.metrics.increment_status_count(500);
+                        return Ok(true);
+                    }
+                }
+            } else {
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Cache is not enabled",
+                });
+
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(404, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+                self.metrics.increment_status_count(404);
+                return Ok(true);
             }
         }
 

@@ -74,6 +74,32 @@ impl CacheIndex {
             .map(|(k, v)| (k.clone(), v.clone()))
     }
 
+    /// Find all keys belonging to a specific bucket
+    pub fn keys_for_bucket(&self, bucket: &str) -> Vec<CacheKey> {
+        self.entries
+            .read()
+            .keys()
+            .filter(|k| k.bucket == bucket)
+            .cloned()
+            .collect()
+    }
+
+    /// Calculate stats for a specific bucket
+    pub fn stats_for_bucket(&self, bucket: &str) -> (u64, u64) {
+        let entries = self.entries.read();
+        let mut size_bytes: u64 = 0;
+        let mut item_count: u64 = 0;
+
+        for (key, metadata) in entries.iter() {
+            if key.bucket == bucket {
+                size_bytes += metadata.size_bytes;
+                item_count += 1;
+            }
+        }
+
+        (size_bytes, item_count)
+    }
+
     /// Save index to JSON file
     #[allow(dead_code)] // Will be called in Phase 28.8 (Recovery & Startup)
     pub async fn save_to_file<B: DiskBackend>(
