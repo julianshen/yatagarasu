@@ -2373,10 +2373,10 @@ services:
 - [x] Test: Can parse syslog_facility
 
 ### S3 Export Configuration
-- [ ] Test: Can parse s3_export section
-- [ ] Test: Can parse s3_bucket for audit logs
-- [ ] Test: Can parse s3_path_prefix
-- [ ] Test: Can parse export_interval_seconds
+- [x] Test: Can parse s3_export section
+- [x] Test: Can parse s3_bucket for audit logs
+- [x] Test: Can parse s3_path_prefix
+- [x] Test: Can parse export_interval_seconds
 
 ---
 

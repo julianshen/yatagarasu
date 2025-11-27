@@ -130,6 +130,29 @@ pub struct AuditSyslogConfig {
     pub facility: SyslogFacility,
 }
 
+/// Default export interval in seconds (60s = 1 minute)
+fn default_export_interval_seconds() -> u64 {
+    60
+}
+
+/// S3 export configuration for audit logs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditS3ExportConfig {
+    /// S3 bucket name for audit log export
+    pub bucket: String,
+
+    /// AWS region for the bucket
+    pub region: String,
+
+    /// Path prefix for audit log files in S3
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_prefix: Option<String>,
+
+    /// Export interval in seconds (default: 60)
+    #[serde(default = "default_export_interval_seconds")]
+    pub export_interval_seconds: u64,
+}
+
 /// Phase 33: Audit log configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditLogConfig {
@@ -152,6 +175,10 @@ pub struct AuditLogConfig {
     /// Syslog output configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub syslog: Option<AuditSyslogConfig>,
+
+    /// S3 export configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_export: Option<AuditS3ExportConfig>,
 }
 
 impl Config {
@@ -3040,6 +3067,170 @@ audit_log:
             syslog_config.facility,
             SyslogFacility::Local0,
             "default facility should be local0"
+        );
+    }
+
+    // S3 Export Configuration Tests
+    // ==============================
+
+    #[test]
+    fn test_can_parse_s3_export_section() {
+        // Test: Can parse s3_export section
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - s3
+  s3_export:
+    bucket: audit-logs-bucket
+    region: us-east-1
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        assert!(audit.s3_export.is_some(), "s3_export section should exist");
+    }
+
+    #[test]
+    fn test_can_parse_s3_bucket_for_audit_logs() {
+        // Test: Can parse s3_bucket for audit logs
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - s3
+  s3_export:
+    bucket: my-audit-logs
+    region: us-east-1
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let s3_config = audit.s3_export.as_ref().unwrap();
+        assert_eq!(s3_config.bucket, "my-audit-logs");
+        assert_eq!(s3_config.region, "us-east-1");
+    }
+
+    #[test]
+    fn test_can_parse_s3_path_prefix() {
+        // Test: Can parse s3_path_prefix
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - s3
+  s3_export:
+    bucket: audit-logs
+    region: us-east-1
+    path_prefix: /logs/yatagarasu/
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let s3_config = audit.s3_export.as_ref().unwrap();
+        assert_eq!(s3_config.path_prefix, Some("/logs/yatagarasu/".to_string()));
+    }
+
+    #[test]
+    fn test_can_parse_export_interval_seconds() {
+        // Test: Can parse export_interval_seconds
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - s3
+  s3_export:
+    bucket: audit-logs
+    region: us-east-1
+    export_interval_seconds: 300
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let s3_config = audit.s3_export.as_ref().unwrap();
+        assert_eq!(s3_config.export_interval_seconds, 300);
+    }
+
+    #[test]
+    fn test_s3_export_config_defaults() {
+        // Test: S3 export config has sensible defaults
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - s3
+  s3_export:
+    bucket: audit-logs
+    region: us-east-1
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let s3_config = audit.s3_export.as_ref().unwrap();
+
+        // Verify defaults
+        assert_eq!(
+            s3_config.path_prefix, None,
+            "default path_prefix should be None"
+        );
+        assert_eq!(
+            s3_config.export_interval_seconds, 60,
+            "default export_interval_seconds should be 60"
         );
     }
 }
