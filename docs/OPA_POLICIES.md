@@ -550,3 +550,112 @@ This will log:
 - OPA response status and result
 - Cache hit/miss events
 - Timing information
+
+## Load Testing with OPA
+
+Yatagarasu includes k6 load test scripts for testing OPA authorization performance.
+
+### Prerequisites
+
+1. **Start OPA server**:
+```bash
+docker run -d -p 8181:8181 --name opa \
+  openpolicyagent/opa:latest run --server --addr=0.0.0.0:8181
+```
+
+2. **Load test policy**:
+```bash
+curl -X PUT http://localhost:8181/v1/policies/authz \
+  -H "Content-Type: text/plain" \
+  --data-binary @policies/loadtest-authz.rego
+```
+
+3. **Start MinIO** (or use existing S3):
+```bash
+docker run -d -p 9000:9000 --name minio \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin \
+  minio/minio server /data
+```
+
+4. **Create test buckets and files**:
+```bash
+# Install mc (MinIO client)
+mc alias set local http://localhost:9000 minioadmin minioadmin
+mc mb local/test-opa
+mc cp /path/to/test-file.txt local/test-opa/
+```
+
+5. **Start proxy with OPA config**:
+```bash
+cargo run -- --config config.loadtest-opa.yaml
+```
+
+### Running Load Tests
+
+**Basic OPA load test**:
+```bash
+k6 run k6-opa.js
+```
+
+**With custom options**:
+```bash
+k6 run k6-opa.js \
+  --env BASE_URL=http://localhost:8080 \
+  --env ADMIN_TOKEN="<your-admin-jwt>" \
+  --env USER_TOKEN="<your-user-jwt>"
+```
+
+### Test Scenarios
+
+The OPA load test (`k6-opa.js`) includes four scenarios:
+
+| Scenario | Description | Target |
+|----------|-------------|--------|
+| `opa_constant_rate` | 500 req/s for 30s | Measure baseline throughput |
+| `opa_ramping` | 10→100→50 VUs | Find saturation point |
+| `opa_cache_hit` | 1000 req/s, same user | Test cache effectiveness |
+| `opa_cache_miss` | 200 req/s, unique paths | Test OPA without cache |
+
+### Performance Targets
+
+| Metric | Target | Notes |
+|--------|--------|-------|
+| P95 latency | <200ms | With OPA + S3 backend |
+| Auth latency (P95) | <50ms | OPA evaluation only |
+| Error rate | <1% | All responses |
+| Throughput | >500 req/s | With OPA enabled |
+
+### Comparing With and Without OPA
+
+To measure OPA overhead:
+
+```bash
+# Test without OPA (JWT only)
+k6 run k6-baseline.js
+
+# Test with OPA
+k6 run k6-opa.js
+
+# Compare results
+```
+
+Expected overhead from OPA:
+- First request: +10-50ms (OPA evaluation)
+- Cached requests: +1-5ms (cache lookup)
+
+### Generating Test JWTs
+
+Use the following script to generate valid test JWTs:
+
+```bash
+# Generate admin token
+jwt encode --secret "test-secret-key-for-load-testing-only" \
+  '{"sub":"admin","roles":["admin"],"exp":1900000000}'
+
+# Generate user token
+jwt encode --secret "test-secret-key-for-load-testing-only" \
+  '{"sub":"user1","roles":["user"],"allowed_bucket":"test-opa","exp":1900000000}'
+```
+
+Or use online JWT tools with these payloads.
