@@ -5,6 +5,7 @@
 #[allow(unused)]
 #[allow(clippy::all)]
 mod integration {
+    mod audit_s3_export_test; // Phase 33.6: S3 Export for Audit Logs
     mod cache_e2e_test;
     mod circuit_breaker_test;
     mod concurrency_test;

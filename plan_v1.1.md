@@ -2484,15 +2484,15 @@ services:
 - [x] Test: Each line is one JSON audit entry (src/audit/mod.rs::test_each_line_is_one_json_audit_entry)
 
 ### S3 Upload
-- [ ] Test: Uploads batch file to S3
+- [x] Test: Uploads batch file to S3 (tests/integration/audit_s3_export_test.rs::test_uploads_batch_file_to_s3)
 - [x] Test: Uses configured bucket and prefix (src/audit/mod.rs::test_exporter_uses_configured_bucket_and_prefix)
-- [ ] Test: Handles S3 upload failures (retries)
-- [ ] Test: Keeps local copy until upload succeeds
+- [x] Test: Handles S3 upload failures (retries) (tests/integration/audit_s3_export_test.rs::test_handles_s3_upload_failures_with_retries)
+- [x] Test: Keeps local copy until upload succeeds (tests/integration/audit_s3_export_test.rs::test_keeps_local_copy_until_upload_succeeds)
 
 ### Async Export
-- [ ] Test: Export runs in background task
-- [ ] Test: Does not block request processing
-- [ ] Test: Flushes remaining entries on shutdown
+- [x] Test: Export runs in background task (tests/integration/audit_s3_export_test.rs::test_export_runs_in_background_task)
+- [x] Test: Does not block request processing (tests/integration/audit_s3_export_test.rs::test_does_not_block_request_processing)
+- [x] Test: Flushes remaining entries on shutdown (tests/integration/audit_s3_export_test.rs::test_flushes_remaining_entries_on_shutdown)
 
 ---
 

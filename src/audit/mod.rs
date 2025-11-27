@@ -1330,6 +1330,291 @@ impl S3AuditExporter {
         self.running
             .store(running, std::sync::atomic::Ordering::Relaxed);
     }
+
+    /// Get max retries
+    pub fn max_retries(&self) -> u32 {
+        self.config.max_retries
+    }
+}
+
+/// Result of an S3 upload attempt
+#[derive(Debug)]
+pub struct S3UploadResult {
+    /// Whether the upload succeeded
+    pub success: bool,
+    /// Number of attempts made
+    pub attempts: u32,
+    /// Error message if failed
+    pub error: Option<String>,
+    /// S3 object key that was uploaded
+    pub object_key: String,
+}
+
+/// S3 upload client for audit logs
+///
+/// Wraps AWS SDK client with retry logic for audit log uploads.
+pub struct S3AuditUploader {
+    /// S3 client
+    client: aws_sdk_s3::Client,
+    /// Maximum number of retries
+    max_retries: u32,
+    /// Local backup directory for failed uploads
+    backup_dir: Option<std::path::PathBuf>,
+}
+
+impl std::fmt::Debug for S3AuditUploader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3AuditUploader")
+            .field("max_retries", &self.max_retries)
+            .field("backup_dir", &self.backup_dir)
+            .finish()
+    }
+}
+
+impl S3AuditUploader {
+    /// Create a new S3 audit uploader
+    pub fn new(client: aws_sdk_s3::Client, max_retries: u32) -> Self {
+        Self {
+            client,
+            max_retries,
+            backup_dir: None,
+        }
+    }
+
+    /// Set the local backup directory for failed uploads
+    pub fn with_backup_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.backup_dir = Some(dir);
+        self
+    }
+
+    /// Upload a batch to S3 with retry logic
+    pub async fn upload_batch(
+        &self,
+        batch: &AuditBatch,
+        bucket: &str,
+        object_key: &str,
+    ) -> S3UploadResult {
+        let content = batch.to_jsonl();
+        let mut attempts = 0;
+        let mut last_error = None;
+
+        while attempts < self.max_retries {
+            attempts += 1;
+
+            match self
+                .client
+                .put_object()
+                .bucket(bucket)
+                .key(object_key)
+                .content_type("application/x-ndjson")
+                .body(content.clone().into_bytes().into())
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    return S3UploadResult {
+                        success: true,
+                        attempts,
+                        error: None,
+                        object_key: object_key.to_string(),
+                    };
+                }
+                Err(e) => {
+                    last_error = Some(format!("{:?}", e));
+                    // Exponential backoff: 100ms, 200ms, 400ms, ...
+                    if attempts < self.max_retries {
+                        let delay = std::time::Duration::from_millis(100 * (1 << (attempts - 1)));
+                        tokio::time::sleep(delay).await;
+                    }
+                }
+            }
+        }
+
+        // All retries failed - save locally if backup dir configured
+        if let Some(ref backup_dir) = self.backup_dir {
+            let backup_path = backup_dir.join(object_key.replace('/', "_"));
+            if let Err(e) = std::fs::create_dir_all(backup_dir) {
+                tracing::error!("Failed to create backup directory: {}", e);
+            } else if let Err(e) = std::fs::write(&backup_path, &content) {
+                tracing::error!("Failed to write backup file: {}", e);
+            } else {
+                tracing::info!("Saved failed upload to backup: {:?}", backup_path);
+            }
+        }
+
+        S3UploadResult {
+            success: false,
+            attempts,
+            error: last_error,
+            object_key: object_key.to_string(),
+        }
+    }
+
+    /// Upload JSONL content directly to S3
+    pub async fn upload_content(
+        &self,
+        content: &str,
+        bucket: &str,
+        object_key: &str,
+    ) -> S3UploadResult {
+        let mut attempts = 0;
+        let mut last_error = None;
+
+        while attempts < self.max_retries {
+            attempts += 1;
+
+            match self
+                .client
+                .put_object()
+                .bucket(bucket)
+                .key(object_key)
+                .content_type("application/x-ndjson")
+                .body(content.to_string().into_bytes().into())
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    return S3UploadResult {
+                        success: true,
+                        attempts,
+                        error: None,
+                        object_key: object_key.to_string(),
+                    };
+                }
+                Err(e) => {
+                    last_error = Some(format!("{:?}", e));
+                    if attempts < self.max_retries {
+                        let delay = std::time::Duration::from_millis(100 * (1 << (attempts - 1)));
+                        tokio::time::sleep(delay).await;
+                    }
+                }
+            }
+        }
+
+        S3UploadResult {
+            success: false,
+            attempts,
+            error: last_error,
+            object_key: object_key.to_string(),
+        }
+    }
+}
+
+/// Async S3 audit export service
+///
+/// Runs in the background to periodically export audit batches to S3.
+pub struct AsyncS3AuditExportService {
+    /// Exporter instance
+    exporter: Arc<S3AuditExporter>,
+    /// S3 uploader
+    uploader: Arc<S3AuditUploader>,
+    /// Shutdown signal sender
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Handle to the background task
+    task_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for AsyncS3AuditExportService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncS3AuditExportService")
+            .field("exporter", &self.exporter)
+            .field("uploader", &self.uploader)
+            .finish()
+    }
+}
+
+impl AsyncS3AuditExportService {
+    /// Create a new async export service (not started)
+    pub fn new(exporter: Arc<S3AuditExporter>, uploader: Arc<S3AuditUploader>) -> Self {
+        Self {
+            exporter,
+            uploader,
+            shutdown_tx: None,
+            task_handle: None,
+        }
+    }
+
+    /// Start the background export task
+    pub fn start(&mut self) {
+        if self.task_handle.is_some() {
+            return; // Already running
+        }
+
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        let exporter = Arc::clone(&self.exporter);
+        let uploader = Arc::clone(&self.uploader);
+
+        self.task_handle = Some(tokio::spawn(async move {
+            exporter.set_running(true);
+
+            let interval_secs = exporter.export_interval_secs();
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        // Export current batch
+                        if let Some(batch) = exporter.rotate_batch() {
+                            if !batch.is_empty() {
+                                let object_key = exporter.generate_object_key(&batch);
+                                let bucket = exporter.bucket().to_string();
+                                let result = uploader.upload_batch(&batch, &bucket, &object_key).await;
+                                if !result.success {
+                                    tracing::error!(
+                                        "Failed to upload audit batch after {} attempts: {:?}",
+                                        result.attempts,
+                                        result.error
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    _ = &mut shutdown_rx => {
+                        // Shutdown requested - flush remaining entries
+                        let batches = exporter.get_all_batches();
+                        for batch in batches {
+                            if !batch.is_empty() {
+                                let object_key = exporter.generate_object_key(&batch);
+                                let bucket = exporter.bucket().to_string();
+                                let result = uploader.upload_batch(&batch, &bucket, &object_key).await;
+                                if !result.success {
+                                    tracing::error!(
+                                        "Failed to upload final audit batch: {:?}",
+                                        result.error
+                                    );
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            exporter.set_running(false);
+        }));
+    }
+
+    /// Shutdown the export service gracefully
+    pub async fn shutdown(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.task_handle.take() {
+            let _ = handle.await;
+        }
+    }
+
+    /// Check if the service is running
+    pub fn is_running(&self) -> bool {
+        self.exporter.is_running()
+    }
+
+    /// Add an entry (delegates to exporter)
+    pub fn add_entry(&self, entry: AuditLogEntry) {
+        self.exporter.add_entry(entry);
+    }
 }
 
 #[cfg(test)]
