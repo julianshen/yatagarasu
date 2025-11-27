@@ -131,6 +131,45 @@ impl AuditLogEntry {
 }
 
 // ============================================================================
+// Correlation ID Constants and Utilities
+// ============================================================================
+
+/// Standard header name for correlation ID
+pub const X_CORRELATION_ID_HEADER: &str = "X-Correlation-ID";
+
+/// Validate that a string is a valid correlation ID format
+///
+/// Accepts UUID format or any non-empty alphanumeric string with hyphens/underscores
+pub fn is_valid_correlation_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 128 {
+        return false;
+    }
+    // Accept valid UUIDs
+    if Uuid::parse_str(id).is_ok() {
+        return true;
+    }
+    // Accept alphanumeric with hyphens and underscores
+    id.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Generate a new correlation ID (UUID v4)
+pub fn generate_correlation_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// Extract or generate correlation ID from request header
+///
+/// If a valid X-Correlation-ID header is present, use it.
+/// Otherwise, generate a new UUID v4.
+pub fn correlation_id_from_header(header_value: Option<&str>) -> String {
+    match header_value {
+        Some(id) if is_valid_correlation_id(id) => id.to_string(),
+        _ => generate_correlation_id(),
+    }
+}
+
+// ============================================================================
 // Request Context for Audit Logging
 // ============================================================================
 
@@ -182,7 +221,7 @@ impl RequestContext {
     /// Create a new request context with generated correlation_id and start time
     pub fn new() -> Self {
         Self {
-            correlation_id: Uuid::new_v4().to_string(),
+            correlation_id: generate_correlation_id(),
             start_time: std::time::Instant::now(),
             client_ip: None,
             user: None,
@@ -196,6 +235,52 @@ impl RequestContext {
             user_agent: None,
             referer: None,
         }
+    }
+
+    /// Create a new request context with correlation ID from request header
+    ///
+    /// If the header contains a valid correlation ID, use it.
+    /// Otherwise, generate a new UUID v4.
+    pub fn with_correlation_id_header(header_value: Option<&str>) -> Self {
+        Self {
+            correlation_id: correlation_id_from_header(header_value),
+            start_time: std::time::Instant::now(),
+            client_ip: None,
+            user: None,
+            bucket: None,
+            object_key: None,
+            http_method: None,
+            request_path: None,
+            response_status: None,
+            response_size_bytes: None,
+            cache_status: None,
+            user_agent: None,
+            referer: None,
+        }
+    }
+
+    /// Create a new request context with a specific correlation ID
+    pub fn with_correlation_id(correlation_id: String) -> Self {
+        Self {
+            correlation_id,
+            start_time: std::time::Instant::now(),
+            client_ip: None,
+            user: None,
+            bucket: None,
+            object_key: None,
+            http_method: None,
+            request_path: None,
+            response_status: None,
+            response_size_bytes: None,
+            cache_status: None,
+            user_agent: None,
+            referer: None,
+        }
+    }
+
+    /// Get the correlation ID for including in response headers
+    pub fn get_correlation_id(&self) -> &str {
+        &self.correlation_id
     }
 
     /// Set client IP from socket address
@@ -3444,5 +3529,187 @@ mod tests {
             empty_rotation.is_none(),
             "Empty batch rotation should return None"
         );
+    }
+
+    // ============================================================================
+    // Phase 33.7: Correlation ID Propagation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_generates_uuid_v4_for_each_request() {
+        // Test: Generates UUID v4 for each request
+        let ctx1 = RequestContext::new();
+        let ctx2 = RequestContext::new();
+
+        // Both should have valid UUIDs
+        assert!(
+            Uuid::parse_str(&ctx1.correlation_id).is_ok(),
+            "correlation_id should be valid UUID"
+        );
+        assert!(
+            Uuid::parse_str(&ctx2.correlation_id).is_ok(),
+            "correlation_id should be valid UUID"
+        );
+
+        // They should be different
+        assert_ne!(
+            ctx1.correlation_id, ctx2.correlation_id,
+            "Each request should have unique correlation_id"
+        );
+
+        // Test the generate function directly
+        let id1 = generate_correlation_id();
+        let id2 = generate_correlation_id();
+        assert!(Uuid::parse_str(&id1).is_ok());
+        assert!(Uuid::parse_str(&id2).is_ok());
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_uses_existing_x_correlation_id_header_if_present() {
+        // Test: Uses existing X-Correlation-ID header if present
+        let existing_id = "existing-correlation-id-123";
+
+        // Create context with existing header
+        let ctx = RequestContext::with_correlation_id_header(Some(existing_id));
+
+        assert_eq!(
+            ctx.correlation_id, existing_id,
+            "Should use existing correlation ID from header"
+        );
+
+        // Test with valid UUID from header
+        let uuid_id = "550e8400-e29b-41d4-a716-446655440000";
+        let ctx2 = RequestContext::with_correlation_id_header(Some(uuid_id));
+        assert_eq!(ctx2.correlation_id, uuid_id);
+
+        // Test with None header - should generate new ID
+        let ctx3 = RequestContext::with_correlation_id_header(None);
+        assert!(
+            Uuid::parse_str(&ctx3.correlation_id).is_ok(),
+            "Should generate new UUID when header is None"
+        );
+
+        // Test with empty header - should generate new ID
+        let ctx4 = RequestContext::with_correlation_id_header(Some(""));
+        assert!(
+            Uuid::parse_str(&ctx4.correlation_id).is_ok(),
+            "Should generate new UUID when header is empty"
+        );
+
+        // Test with invalid header (special chars) - should generate new ID
+        let ctx5 = RequestContext::with_correlation_id_header(Some("invalid!@#$%"));
+        assert!(
+            Uuid::parse_str(&ctx5.correlation_id).is_ok(),
+            "Should generate new UUID when header has invalid chars"
+        );
+    }
+
+    #[test]
+    fn test_includes_correlation_id_in_all_log_entries() {
+        // Test: Includes correlation ID in all log entries
+        let specific_id = "my-specific-correlation-id";
+        let mut ctx = RequestContext::with_correlation_id(specific_id.to_string());
+
+        // Set up the context
+        ctx.bucket = Some("test-bucket".to_string());
+        ctx.object_key = Some("test-key".to_string());
+        ctx.http_method = Some("GET".to_string());
+        ctx.request_path = Some("/test".to_string());
+        ctx.client_ip = Some("192.168.1.1".to_string());
+        ctx.set_response_status(200);
+        ctx.set_response_size(1024);
+
+        // Convert to audit entry
+        let entry = ctx.to_audit_entry();
+
+        // Verify correlation ID is in the entry
+        assert_eq!(
+            entry.correlation_id, specific_id,
+            "Audit entry should contain the correlation ID"
+        );
+
+        // Verify it serializes correctly
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains(specific_id),
+            "Serialized JSON should contain correlation ID"
+        );
+    }
+
+    #[test]
+    fn test_correlation_id_header_constant() {
+        // Test: Header name constant
+        assert_eq!(
+            X_CORRELATION_ID_HEADER, "X-Correlation-ID",
+            "Header constant should be correct"
+        );
+    }
+
+    #[test]
+    fn test_is_valid_correlation_id() {
+        // Test: Validation of correlation ID format
+        // Valid UUIDs
+        assert!(is_valid_correlation_id(
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(is_valid_correlation_id(
+            "123e4567-e89b-12d3-a456-426614174000"
+        ));
+
+        // Valid alphanumeric with hyphens/underscores
+        assert!(is_valid_correlation_id("request-123"));
+        assert!(is_valid_correlation_id("trace_id_456"));
+        assert!(is_valid_correlation_id("abc123"));
+        assert!(is_valid_correlation_id("ABC-123_xyz"));
+
+        // Invalid - empty
+        assert!(!is_valid_correlation_id(""));
+
+        // Invalid - too long (> 128 chars)
+        let long_id = "a".repeat(129);
+        assert!(!is_valid_correlation_id(&long_id));
+
+        // Invalid - special characters
+        assert!(!is_valid_correlation_id("id!@#$"));
+        assert!(!is_valid_correlation_id("id with spaces"));
+        assert!(!is_valid_correlation_id("id\nwith\nnewlines"));
+    }
+
+    #[test]
+    fn test_get_correlation_id_for_response_header() {
+        // Test: Can get correlation ID for response headers
+        let ctx = RequestContext::with_correlation_id("response-header-test-id".to_string());
+
+        // get_correlation_id should return the ID for use in response headers
+        assert_eq!(ctx.get_correlation_id(), "response-header-test-id");
+
+        // Also test with generated ID
+        let ctx2 = RequestContext::new();
+        let id = ctx2.get_correlation_id();
+        assert!(!id.is_empty());
+        assert!(Uuid::parse_str(id).is_ok());
+    }
+
+    #[test]
+    fn test_correlation_id_from_header_function() {
+        // Test: correlation_id_from_header utility function
+        // With valid header
+        assert_eq!(
+            correlation_id_from_header(Some("my-trace-id")),
+            "my-trace-id"
+        );
+
+        // With None - should generate UUID
+        let generated = correlation_id_from_header(None);
+        assert!(Uuid::parse_str(&generated).is_ok());
+
+        // With empty string - should generate UUID
+        let generated2 = correlation_id_from_header(Some(""));
+        assert!(Uuid::parse_str(&generated2).is_ok());
+
+        // With invalid chars - should generate UUID
+        let generated3 = correlation_id_from_header(Some("bad!id"));
+        assert!(Uuid::parse_str(&generated3).is_ok());
     }
 }

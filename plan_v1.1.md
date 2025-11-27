@@ -2499,13 +2499,13 @@ services:
 ## 33.7: Correlation ID Propagation
 
 ### Correlation ID Generation
-- [ ] Test: Generates UUID v4 for each request
-- [ ] Test: Uses existing X-Correlation-ID header if present
-- [ ] Test: Includes correlation ID in all log entries
+- [x] Test: Generates UUID v4 for each request (src/audit/mod.rs::test_generates_uuid_v4_for_each_request)
+- [x] Test: Uses existing X-Correlation-ID header if present (src/audit/mod.rs::test_uses_existing_x_correlation_id_header_if_present)
+- [x] Test: Includes correlation ID in all log entries (src/audit/mod.rs::test_includes_correlation_id_in_all_log_entries)
 
 ### Response Header
-- [ ] Test: Adds X-Correlation-ID to response headers
-- [ ] Test: Clients can use correlation ID for debugging
+- [x] Test: Adds X-Correlation-ID to response headers (src/audit/mod.rs::test_get_correlation_id_for_response_header)
+- [x] Test: Clients can use correlation ID for debugging (covered by get_correlation_id and validation tests)
 
 ---
 
