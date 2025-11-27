@@ -1169,6 +1169,15 @@ yatagarasu/
 - [ ] Execute: Streaming latency test (TTFB < 100ms) with K6
 - [ ] Execute: Stability test (1 hour under load) with K6
 
+### OPA Authorization Load Tests (Requires OPA Server)
+- [ ] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput)
+- [ ] Execute: `opa_ramping` - 10→100→50 VUs (find saturation point)
+- [ ] Execute: `opa_cache_hit` - 1000 req/s same user (cache effectiveness)
+- [ ] Execute: `opa_cache_miss` - 200 req/s unique paths (uncached evaluation)
+- [ ] Verify: P95 latency <200ms, auth latency P95 <50ms, error rate <1%
+
+**OPA Load Test Infrastructure**: `k6-opa.js`, `config.loadtest-opa.yaml`, `policies/loadtest-authz.rego`
+
 ### Memory & Resource Testing
 - [ ] Memory: Usage stays constant during streaming (no memory leaks)
 - [ ] Memory: Baseline usage < 50MB (idle proxy)

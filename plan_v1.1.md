@@ -2317,6 +2317,36 @@ services:
 
 ---
 
+## 32.9: OPA Load Testing (K6)
+
+**Goal**: Measure OPA authorization overhead and throughput under realistic load
+**Infrastructure**: `k6-opa.js`, `config.loadtest-opa.yaml`, `policies/loadtest-authz.rego`
+
+### Load Test Infrastructure
+- [x] Create K6 load test script (`k6-opa.js`)
+- [x] Create load test configuration (`config.loadtest-opa.yaml`)
+- [x] Create load test policy (`policies/loadtest-authz.rego`)
+- [x] Document load testing in `docs/OPA_POLICIES.md`
+
+### Load Test Scenarios
+- [ ] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput)
+- [ ] Execute: `opa_ramping` - 10→100→50 VUs (find saturation point)
+- [ ] Execute: `opa_cache_hit` - 1000 req/s same user (cache effectiveness)
+- [ ] Execute: `opa_cache_miss` - 200 req/s unique paths (uncached evaluation)
+
+### Performance Targets
+- [ ] Verify: P95 latency <200ms (with OPA + S3 backend)
+- [ ] Verify: Auth latency P95 <50ms (OPA evaluation only)
+- [ ] Verify: Error rate <1%
+- [ ] Verify: Throughput >500 req/s with OPA enabled
+
+### OPA Overhead Analysis
+- [ ] Document: Compare baseline (JWT-only) vs OPA-enabled latency
+- [ ] Document: Cache hit rate under realistic workload
+- [ ] Document: OPA saturation point
+
+---
+
 # PHASE 33: Audit Logging
 
 **Goal**: Implement comprehensive audit logging for compliance
