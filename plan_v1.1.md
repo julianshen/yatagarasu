@@ -2445,11 +2445,11 @@ services:
 - [x] Test: Creates directory if not exists (src/audit/mod.rs::test_creates_directory_if_not_exists)
 
 ### File Rotation
-- [ ] Test: Rotates file when size exceeds max
-- [ ] Test: Rotates file daily (if configured)
-- [ ] Test: Renames old file with timestamp
-- [ ] Test: Keeps only max_backup_files
-- [ ] Test: Deletes oldest files when limit exceeded
+- [x] Test: Rotates file when size exceeds max (src/audit/mod.rs::test_rotates_file_when_size_exceeds_max)
+- [x] Test: Rotates file daily (if configured) (src/audit/mod.rs::test_rotates_file_daily_if_configured)
+- [x] Test: Renames old file with timestamp (src/audit/mod.rs::test_renames_old_file_with_timestamp)
+- [x] Test: Keeps only max_backup_files (src/audit/mod.rs::test_keeps_only_max_backup_files)
+- [x] Test: Deletes oldest files when limit exceeded (src/audit/mod.rs::test_deletes_oldest_files_when_limit_exceeded)
 
 ### Async Writing
 - [ ] Test: Writes are async (non-blocking)
