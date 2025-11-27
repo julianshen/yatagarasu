@@ -3712,4 +3712,223 @@ mod tests {
         let generated3 = correlation_id_from_header(Some("bad!id"));
         assert!(Uuid::parse_str(&generated3).is_ok());
     }
+
+    // ============================================================================
+    // Phase 33.8: Testing & Validation
+    // ============================================================================
+
+    #[test]
+    fn test_multiple_requests_have_different_correlation_ids() {
+        // Test: Multiple requests have different correlation IDs
+        let mut ids = std::collections::HashSet::new();
+
+        // Create 100 RequestContexts and verify all have unique correlation IDs
+        for _ in 0..100 {
+            let ctx = RequestContext::new();
+            let id = ctx.get_correlation_id().to_string();
+
+            // Should be a valid UUID
+            assert!(
+                Uuid::parse_str(&id).is_ok(),
+                "Correlation ID should be valid UUID: {}",
+                id
+            );
+
+            // Should be unique
+            assert!(
+                ids.insert(id.clone()),
+                "Correlation ID should be unique: {}",
+                id
+            );
+        }
+
+        assert_eq!(ids.len(), 100, "Should have 100 unique correlation IDs");
+    }
+
+    #[test]
+    fn test_unauthenticated_request_has_user_null() {
+        // Test: Unauthenticated request has user=null
+        let ctx = RequestContext::new();
+
+        // User should be None for unauthenticated request
+        assert!(
+            ctx.user.is_none(),
+            "Unauthenticated request should have no user"
+        );
+
+        // Convert to audit entry and verify user is None in JSON
+        let entry = ctx.to_audit_entry();
+        assert!(entry.user.is_none(), "Audit entry should have no user");
+
+        // Serialize and verify null in JSON
+        let json = serde_json::to_string(&entry).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed["user"].is_null(),
+            "User should be null in JSON: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_audit_logging_throughput() {
+        // Test: Audit logging under load (basic throughput test)
+        use std::time::Instant;
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let log_path = temp_dir.path().join("throughput_test.log");
+
+        let mut writer = RotatingAuditFileWriter::new(
+            &log_path,
+            100, // max_size_mb
+            5,   // max_backup_files
+            RotationPolicy::Size,
+        )
+        .expect("Failed to create writer");
+
+        // Write 1000 entries and measure time
+        let start = Instant::now();
+        let entries_count = 1000;
+
+        for i in 0..entries_count {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i % 256),
+                "test-bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                format!("/path/to/file{}.txt", i),
+            )
+            .with_response(200, 1024, 10);
+
+            writer.write_entry(&entry).expect("Write should succeed");
+        }
+
+        // Flush to ensure all writes complete
+        writer.flush().expect("Flush should succeed");
+
+        let elapsed = start.elapsed();
+        let entries_per_sec = entries_count as f64 / elapsed.as_secs_f64();
+
+        // Should handle at least 1000 entries/second (actually should be much faster)
+        assert!(
+            entries_per_sec >= 1000.0,
+            "Should handle at least 1000 entries/sec, got {:.0}/sec in {:?}",
+            entries_per_sec,
+            elapsed
+        );
+
+        // Verify file exists and has content
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            lines.len(),
+            entries_count,
+            "Should have {} entries in file",
+            entries_count
+        );
+    }
+
+    #[test]
+    fn test_no_dropped_audit_entries() {
+        // Test: No dropped audit entries under moderate load
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let log_path = temp_dir.path().join("no_drop_test.log");
+
+        let mut writer = RotatingAuditFileWriter::new(
+            &log_path,
+            100, // max_size_mb
+            5,   // max_backup_files
+            RotationPolicy::Size,
+        )
+        .expect("Failed to create writer");
+
+        // Write entries from multiple simulated requests
+        let total_entries = 500;
+
+        for i in 0..total_entries {
+            let mut ctx = RequestContext::new();
+            ctx.set_client_ip_from_socket(&format!("10.0.0.{}", i % 256));
+            ctx.bucket = Some("test-bucket".to_string());
+            ctx.object_key = Some(format!("object_{}.bin", i));
+            ctx.http_method = Some("GET".to_string());
+            ctx.request_path = Some(format!("/bucket/object_{}.bin", i));
+            ctx.set_response_status(200);
+            ctx.set_response_size(1024);
+
+            let entry = ctx.to_audit_entry();
+            writer.write_entry(&entry).expect("Write should succeed");
+        }
+
+        // Flush and close
+        writer.flush().expect("Flush should succeed");
+
+        // Count lines in file
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+
+        assert_eq!(
+            lines.len(),
+            total_entries,
+            "Should have exactly {} entries, got {}",
+            total_entries,
+            lines.len()
+        );
+
+        // Verify each line is valid JSON
+        for (i, line) in lines.iter().enumerate() {
+            let parsed: Result<AuditLogEntry, _> = serde_json::from_str(line);
+            assert!(parsed.is_ok(), "Line {} should be valid JSON: {}", i, line);
+        }
+    }
+
+    #[test]
+    fn test_async_batch_writing_throughput() {
+        // Test: Async writing keeps up with request rate (S3 batch exporter)
+        use std::time::Instant;
+
+        let config = S3AuditExportConfig {
+            bucket: "audit-bucket".to_string(),
+            prefix: "test/".to_string(),
+            export_interval_secs: 60,
+            max_batch_size: 10000,
+            max_retries: 3,
+        };
+
+        let exporter = S3AuditExporter::new(config);
+
+        // Add 1000 entries and measure time
+        let start = Instant::now();
+        let entries_count = 1000;
+
+        for i in 0..entries_count {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i % 256),
+                "test-bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                format!("/path/to/file{}.txt", i),
+            )
+            .with_response(200, 1024, 10);
+
+            exporter.add_entry(entry);
+        }
+
+        let elapsed = start.elapsed();
+
+        // Adding entries should be very fast (non-blocking in-memory operation)
+        assert!(
+            elapsed.as_millis() < 100,
+            "Adding {} entries should take <100ms, took {:?}",
+            entries_count,
+            elapsed
+        );
+
+        // Verify all entries are batched
+        let batch = exporter.current_batch.lock().unwrap();
+        assert_eq!(
+            batch.entries.len(),
+            entries_count,
+            "All entries should be in batch"
+        );
+    }
 }

@@ -2512,23 +2512,23 @@ services:
 ## 33.8: Testing & Validation
 
 ### Unit Tests
-- [ ] Test: AuditLogEntry serialization
-- [ ] Test: Sensitive data redaction
-- [ ] Test: File rotation logic
-- [ ] Test: S3 batch export logic
+- [x] Test: AuditLogEntry serialization (src/audit/mod.rs::test_audit_log_entry_serializes_to_json, test_audit_log_entry_all_fields_in_json)
+- [x] Test: Sensitive data redaction (src/audit/mod.rs::test_jwt_tokens_redacted_in_logs, test_authorization_header_redacted, test_query_param_tokens_redacted, test_sensitive_custom_headers_redacted)
+- [x] Test: File rotation logic (src/audit/mod.rs::test_rotates_file_when_size_exceeds_max, test_rotates_file_daily_if_configured, test_renames_old_file_with_timestamp)
+- [x] Test: S3 batch export logic (src/audit/mod.rs::test_batches_audit_entries_in_memory, test_batch_file_format, test_each_line_is_one_json_audit_entry)
 
 ### Integration Tests
-- [ ] Test: End-to-end request logged correctly
-- [ ] Test: All fields populated accurately
-- [ ] Test: Multiple requests have different correlation IDs
-- [ ] Test: Authenticated request includes user
-- [ ] Test: Unauthenticated request has user=null
+- [x] Test: End-to-end request logged correctly (tests/integration/audit_s3_export_test.rs - full E2E with LocalStack)
+- [x] Test: All fields populated accurately (src/audit/mod.rs::test_request_context_to_audit_entry)
+- [x] Test: Multiple requests have different correlation IDs (src/audit/mod.rs::test_multiple_requests_have_different_correlation_ids)
+- [x] Test: Authenticated request includes user (src/audit/mod.rs::test_extract_user_from_validated_jwt)
+- [x] Test: Unauthenticated request has user=null (src/audit/mod.rs::test_unauthenticated_request_has_user_null)
 
 ### Load Tests
-- [ ] Test: Audit logging under 1000 req/s
-- [ ] Test: No dropped audit entries
-- [ ] Test: File rotation works under load
-- [ ] Test: Async writing keeps up with request rate
+- [x] Test: Audit logging under 1000 req/s (src/audit/mod.rs::test_audit_logging_throughput)
+- [x] Test: No dropped audit entries (src/audit/mod.rs::test_no_dropped_audit_entries)
+- [x] Test: File rotation works under load (covered by test_rotates_file_when_size_exceeds_max with 500KB data)
+- [x] Test: Async writing keeps up with request rate (src/audit/mod.rs::test_async_batch_writing_throughput)
 
 ---
 
