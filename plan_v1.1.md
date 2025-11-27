@@ -2075,8 +2075,8 @@ buckets:
 - [x] Test: Rejects invalid OPA configuration
 
 ### Environment Variable Substitution
-- [ ] Test: Can substitute ${OPA_URL} in opa_url
-- [ ] Test: Handles missing OPA env vars gracefully
+- [x] Test: Can substitute ${OPA_URL} in opa_url
+- [x] Test: Handles missing OPA env vars gracefully
 
 ### Example Configuration
 ```yaml

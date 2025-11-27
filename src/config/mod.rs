@@ -163,7 +163,9 @@ impl Config {
                 if !VALID_AUTH_TYPES.contains(&auth_config.auth_type.as_str()) {
                     return Err(format!(
                         "Bucket '{}': Invalid authorization type '{}'. Supported types: {}",
-                        bucket.name, auth_config.auth_type, VALID_AUTH_TYPES.join(", ")
+                        bucket.name,
+                        auth_config.auth_type,
+                        VALID_AUTH_TYPES.join(", ")
                     ));
                 }
 
@@ -2293,6 +2295,77 @@ buckets:
         assert!(
             error_msg.contains("unknown_type") || error_msg.contains("authorization type"),
             "Error should mention invalid authorization type: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_can_substitute_env_var_in_opa_url() {
+        // Test: Can substitute ${OPA_URL} in opa_url
+        std::env::set_var("OPA_URL", "http://opa.example.com:8181");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "protected"
+    path_prefix: "/protected"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: opa
+      opa_url: ${OPA_URL}
+      opa_policy_path: "yatagarasu/authz/allow"
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let result = config.validate();
+        assert!(result.is_ok(), "Config should validate: {:?}", result);
+
+        // Verify the substitution happened
+        let auth = config.buckets[0].authorization.as_ref().unwrap();
+        assert_eq!(
+            auth.opa_url,
+            Some("http://opa.example.com:8181".to_string())
+        );
+
+        std::env::remove_var("OPA_URL");
+    }
+
+    #[test]
+    fn test_handles_missing_opa_env_vars_gracefully() {
+        // Test: Handles missing OPA env vars gracefully
+        // Make sure OPA_URL_MISSING is not set
+        std::env::remove_var("OPA_URL_MISSING");
+
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "protected"
+    path_prefix: "/protected"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: opa
+      opa_url: ${OPA_URL_MISSING}
+      opa_policy_path: "yatagarasu/authz/allow"
+"#;
+
+        let result = Config::from_yaml_with_env(yaml);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(
+            error_msg.contains("OPA_URL_MISSING") && error_msg.contains("not set"),
+            "Error should mention missing env var: {}",
             error_msg
         );
     }
