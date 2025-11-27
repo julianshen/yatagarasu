@@ -2368,9 +2368,9 @@ services:
 - [x] Test: Can parse rotation policy (size, daily)
 
 ### Syslog Configuration
-- [ ] Test: Can parse syslog_address
-- [ ] Test: Can parse syslog_protocol (TCP/UDP)
-- [ ] Test: Can parse syslog_facility
+- [x] Test: Can parse syslog_address
+- [x] Test: Can parse syslog_protocol (TCP/UDP)
+- [x] Test: Can parse syslog_facility
 
 ### S3 Export Configuration
 - [ ] Test: Can parse s3_export section

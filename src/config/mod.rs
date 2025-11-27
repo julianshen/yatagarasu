@@ -81,6 +81,55 @@ pub struct AuditFileConfig {
     pub rotation_policy: RotationPolicy,
 }
 
+/// Syslog transport protocol
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SyslogProtocol {
+    /// UDP transport (default)
+    #[default]
+    Udp,
+    /// TCP transport
+    Tcp,
+}
+
+/// Syslog facility
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SyslogFacility {
+    /// Local use 0 (default)
+    #[default]
+    Local0,
+    /// Local use 1
+    Local1,
+    /// Local use 2
+    Local2,
+    /// Local use 3
+    Local3,
+    /// Local use 4
+    Local4,
+    /// Local use 5
+    Local5,
+    /// Local use 6
+    Local6,
+    /// Local use 7
+    Local7,
+}
+
+/// Syslog output configuration for audit logs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditSyslogConfig {
+    /// Syslog server address (host:port)
+    pub address: String,
+
+    /// Transport protocol (default: udp)
+    #[serde(default)]
+    pub protocol: SyslogProtocol,
+
+    /// Syslog facility (default: local0)
+    #[serde(default)]
+    pub facility: SyslogFacility,
+}
+
 /// Phase 33: Audit log configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditLogConfig {
@@ -99,6 +148,10 @@ pub struct AuditLogConfig {
     /// File output configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<AuditFileConfig>,
+
+    /// Syslog output configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub syslog: Option<AuditSyslogConfig>,
 }
 
 impl Config {
@@ -2829,6 +2882,164 @@ audit_log:
             file_config.rotation_policy,
             RotationPolicy::Size,
             "default rotation_policy should be Size"
+        );
+    }
+
+    // Syslog Configuration Tests
+    // ==========================
+
+    #[test]
+    fn test_can_parse_syslog_address() {
+        // Test: Can parse syslog_address
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - syslog
+  syslog:
+    address: "localhost:514"
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let syslog_config = audit.syslog.as_ref().expect("syslog config should exist");
+        assert_eq!(syslog_config.address, "localhost:514");
+    }
+
+    #[test]
+    fn test_can_parse_syslog_protocol() {
+        // Test: Can parse syslog_protocol (TCP/UDP)
+        let yaml_tcp = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - syslog
+  syslog:
+    address: "localhost:514"
+    protocol: tcp
+"#;
+
+        let config = Config::from_yaml_with_env(yaml_tcp).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let syslog_config = audit.syslog.as_ref().unwrap();
+        assert_eq!(syslog_config.protocol, SyslogProtocol::Tcp);
+
+        let yaml_udp = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - syslog
+  syslog:
+    address: "localhost:514"
+    protocol: udp
+"#;
+
+        let config = Config::from_yaml_with_env(yaml_udp).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let syslog_config = audit.syslog.as_ref().unwrap();
+        assert_eq!(syslog_config.protocol, SyslogProtocol::Udp);
+    }
+
+    #[test]
+    fn test_can_parse_syslog_facility() {
+        // Test: Can parse syslog_facility
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - syslog
+  syslog:
+    address: "localhost:514"
+    facility: local0
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let syslog_config = audit.syslog.as_ref().unwrap();
+        assert_eq!(syslog_config.facility, SyslogFacility::Local0);
+    }
+
+    #[test]
+    fn test_syslog_config_defaults() {
+        // Test: Syslog config has sensible defaults
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - syslog
+  syslog:
+    address: "localhost:514"
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let syslog_config = audit.syslog.as_ref().unwrap();
+
+        // Verify defaults
+        assert_eq!(
+            syslog_config.protocol,
+            SyslogProtocol::Udp,
+            "default protocol should be UDP"
+        );
+        assert_eq!(
+            syslog_config.facility,
+            SyslogFacility::Local0,
+            "default facility should be local0"
         );
     }
 }
