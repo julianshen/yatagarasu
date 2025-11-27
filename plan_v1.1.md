@@ -2358,8 +2358,8 @@ services:
 ### Configuration Schema
 - [x] Test: Add audit_log section to config
 - [x] Test: Can parse enabled field (default false)
-- [ ] Test: Can parse output destinations (file, syslog, s3)
-- [ ] Test: Can parse log_level (default info)
+- [x] Test: Can parse output destinations (file, syslog, s3)
+- [x] Test: Can parse log_level (default info)
 
 ### File Output Configuration
 - [ ] Test: Can parse file_path for audit log

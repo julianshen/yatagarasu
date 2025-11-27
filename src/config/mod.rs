@@ -21,12 +21,40 @@ pub struct Config {
     pub generation: u64, // Config version, increments on reload
 }
 
+/// Audit output destination types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuditOutput {
+    File,
+    Syslog,
+    S3,
+}
+
+/// Audit log level
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AuditLogLevel {
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
 /// Phase 33: Audit log configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditLogConfig {
     /// Enable/disable audit logging (default: false)
     #[serde(default)]
     pub enabled: bool,
+
+    /// Output destinations (file, syslog, s3)
+    #[serde(default)]
+    pub outputs: Vec<AuditOutput>,
+
+    /// Log level (default: info)
+    #[serde(default)]
+    pub log_level: AuditLogLevel,
 }
 
 impl Config {
@@ -2465,5 +2493,107 @@ buckets:
             config.audit_log.is_none(),
             "audit_log section should be None when not specified"
         );
+    }
+
+    #[test]
+    fn test_can_parse_audit_log_output_destinations() {
+        // Test: Can parse output destinations (file, syslog, s3)
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+    - syslog
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        assert_eq!(audit.outputs.len(), 2);
+        assert!(audit.outputs.contains(&AuditOutput::File));
+        assert!(audit.outputs.contains(&AuditOutput::Syslog));
+    }
+
+    #[test]
+    fn test_audit_log_outputs_default_empty() {
+        // Test: outputs defaults to empty when not specified
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        assert!(audit.outputs.is_empty(), "outputs should default to empty");
+    }
+
+    #[test]
+    fn test_can_parse_audit_log_level() {
+        // Test: Can parse log_level (default info)
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  log_level: debug
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        assert_eq!(audit.log_level, AuditLogLevel::Debug);
+    }
+
+    #[test]
+    fn test_audit_log_level_defaults_to_info() {
+        // Test: log_level defaults to info
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        assert_eq!(audit.log_level, AuditLogLevel::Info);
     }
 }
