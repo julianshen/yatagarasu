@@ -2178,9 +2178,9 @@ buckets:
 - [x] Test: Cache key is deterministic
 
 ### Cache Metrics
-- [ ] Test: Tracks opa_cache_hits counter
-- [ ] Test: Tracks opa_cache_misses counter
-- [ ] Test: Tracks opa_evaluation_duration histogram
+- [x] Test: Tracks opa_cache_hits counter
+- [x] Test: Tracks opa_cache_misses counter
+- [x] Test: Tracks opa_evaluation_duration histogram
 
 ---
 

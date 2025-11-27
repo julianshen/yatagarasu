@@ -105,6 +105,11 @@ pub struct Metrics {
     cache_items: AtomicU64,               // Phase 30.8: current cached items gauge
     cache_get_durations: Mutex<Vec<u64>>, // microseconds
     cache_set_durations: Mutex<Vec<u64>>, // microseconds
+
+    // Phase 32: OPA authorization metrics
+    opa_cache_hits: AtomicU64,
+    opa_cache_misses: AtomicU64,
+    opa_evaluation_durations: Mutex<Vec<u64>>, // microseconds
 }
 
 /// Global singleton instance of metrics
@@ -159,6 +164,10 @@ impl Metrics {
             cache_items: AtomicU64::new(0),
             cache_get_durations: Mutex::new(Vec::new()),
             cache_set_durations: Mutex::new(Vec::new()),
+            // Phase 32: OPA metrics
+            opa_cache_hits: AtomicU64::new(0),
+            opa_cache_misses: AtomicU64::new(0),
+            opa_evaluation_durations: Mutex::new(Vec::new()),
         }
     }
 
@@ -245,6 +254,27 @@ impl Metrics {
     /// Update cache items gauge (Phase 30.8)
     pub fn set_cache_items(&self, item_count: u64) {
         self.cache_items.store(item_count, Ordering::Relaxed);
+    }
+
+    // =========================================================================
+    // Phase 32: OPA Authorization Metrics
+    // =========================================================================
+
+    /// Increment OPA cache hit counter
+    pub fn increment_opa_cache_hit(&self) {
+        self.opa_cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment OPA cache miss counter
+    pub fn increment_opa_cache_miss(&self) {
+        self.opa_cache_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record OPA evaluation duration in microseconds
+    pub fn record_opa_evaluation_duration(&self, duration_us: u64) {
+        if let Ok(mut durations) = self.opa_evaluation_durations.lock() {
+            durations.push(duration_us);
+        }
     }
 
     /// Get current request count (for testing)
@@ -448,6 +478,30 @@ impl Metrics {
             .ok()
             .map(|d| d.clone())
             .unwrap_or_default()
+    }
+
+    /// Get OPA cache hit count (Phase 32)
+    pub fn get_opa_cache_hit_count(&self) -> u64 {
+        self.opa_cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Get OPA cache miss count (Phase 32)
+    pub fn get_opa_cache_miss_count(&self) -> u64 {
+        self.opa_cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Get OPA evaluation duration histogram (Phase 32)
+    pub fn get_opa_evaluation_histogram(&self) -> Histogram {
+        self.opa_evaluation_durations
+            .lock()
+            .ok()
+            .map(|durations| calculate_histogram(&durations))
+            .unwrap_or(Histogram {
+                p50: 0.0,
+                p90: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            })
     }
 
     /// Increment counter for a specific S3 operation
@@ -2182,6 +2236,59 @@ mod tests {
         assert!(
             output.contains("# TYPE replica_health gauge"),
             "Should have TYPE annotation for replica health"
+        );
+    }
+
+    // ============================================================================
+    // Phase 32.4: OPA Cache Metrics Tests
+    // ============================================================================
+
+    #[test]
+    fn test_tracks_opa_cache_hits_counter() {
+        // Test: Tracks opa_cache_hits counter
+        let metrics = Metrics::new();
+
+        assert_eq!(metrics.get_opa_cache_hit_count(), 0);
+
+        metrics.increment_opa_cache_hit();
+        assert_eq!(metrics.get_opa_cache_hit_count(), 1);
+
+        metrics.increment_opa_cache_hit();
+        metrics.increment_opa_cache_hit();
+        assert_eq!(metrics.get_opa_cache_hit_count(), 3);
+    }
+
+    #[test]
+    fn test_tracks_opa_cache_misses_counter() {
+        // Test: Tracks opa_cache_misses counter
+        let metrics = Metrics::new();
+
+        assert_eq!(metrics.get_opa_cache_miss_count(), 0);
+
+        metrics.increment_opa_cache_miss();
+        assert_eq!(metrics.get_opa_cache_miss_count(), 1);
+
+        metrics.increment_opa_cache_miss();
+        metrics.increment_opa_cache_miss();
+        assert_eq!(metrics.get_opa_cache_miss_count(), 3);
+    }
+
+    #[test]
+    fn test_tracks_opa_evaluation_duration_histogram() {
+        // Test: Tracks opa_evaluation_duration histogram
+        let metrics = Metrics::new();
+
+        // Record some OPA evaluation durations (in microseconds)
+        metrics.record_opa_evaluation_duration(10_000); // 10ms
+        metrics.record_opa_evaluation_duration(20_000); // 20ms
+        metrics.record_opa_evaluation_duration(15_000); // 15ms
+
+        let histogram = metrics.get_opa_evaluation_histogram();
+        // With 3 samples: 10ms, 15ms, 20ms
+        // p50 should be around 15ms (15000us)
+        assert!(
+            histogram.p50 > 0.0,
+            "P50 should be non-zero after recording durations"
         );
     }
 }
