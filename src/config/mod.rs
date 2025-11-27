@@ -41,6 +41,46 @@ pub enum AuditLogLevel {
     Error,
 }
 
+/// Log rotation policy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RotationPolicy {
+    /// Rotate when file reaches max size
+    #[default]
+    Size,
+    /// Rotate daily
+    Daily,
+}
+
+/// Default max file size for audit logs (50 MB)
+fn default_max_file_size_mb() -> u64 {
+    50
+}
+
+/// Default max backup files to keep
+fn default_max_backup_files() -> u32 {
+    5
+}
+
+/// File output configuration for audit logs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditFileConfig {
+    /// Path to the audit log file
+    pub path: String,
+
+    /// Maximum file size in MB before rotation (default: 50)
+    #[serde(default = "default_max_file_size_mb")]
+    pub max_file_size_mb: u64,
+
+    /// Maximum number of backup files to keep (default: 5)
+    #[serde(default = "default_max_backup_files")]
+    pub max_backup_files: u32,
+
+    /// Rotation policy (default: size)
+    #[serde(default)]
+    pub rotation_policy: RotationPolicy,
+}
+
 /// Phase 33: Audit log configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditLogConfig {
@@ -55,6 +95,10 @@ pub struct AuditLogConfig {
     /// Log level (default: info)
     #[serde(default)]
     pub log_level: AuditLogLevel,
+
+    /// File output configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<AuditFileConfig>,
 }
 
 impl Config {
@@ -2595,5 +2639,196 @@ audit_log:
         let config = Config::from_yaml_with_env(yaml).unwrap();
         let audit = config.audit_log.as_ref().unwrap();
         assert_eq!(audit.log_level, AuditLogLevel::Info);
+    }
+
+    // File Output Configuration Tests
+    // ================================
+
+    #[test]
+    fn test_can_parse_audit_log_file_path() {
+        // Test: Can parse file_path for audit log
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+  file:
+    path: /var/log/yatagarasu/audit.log
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let file_config = audit.file.as_ref().expect("file config should exist");
+        assert_eq!(file_config.path, "/var/log/yatagarasu/audit.log");
+    }
+
+    #[test]
+    fn test_can_parse_audit_log_max_file_size_mb() {
+        // Test: Can parse max_file_size_mb
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+  file:
+    path: /var/log/audit.log
+    max_file_size_mb: 100
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let file_config = audit.file.as_ref().unwrap();
+        assert_eq!(file_config.max_file_size_mb, 100);
+    }
+
+    #[test]
+    fn test_can_parse_audit_log_max_backup_files() {
+        // Test: Can parse max_backup_files
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+  file:
+    path: /var/log/audit.log
+    max_backup_files: 10
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let file_config = audit.file.as_ref().unwrap();
+        assert_eq!(file_config.max_backup_files, 10);
+    }
+
+    #[test]
+    fn test_can_parse_audit_log_rotation_policy() {
+        // Test: Can parse rotation policy (size, daily)
+        let yaml_size = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+  file:
+    path: /var/log/audit.log
+    rotation_policy: size
+"#;
+
+        let config = Config::from_yaml_with_env(yaml_size).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let file_config = audit.file.as_ref().unwrap();
+        assert_eq!(file_config.rotation_policy, RotationPolicy::Size);
+
+        let yaml_daily = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+  file:
+    path: /var/log/audit.log
+    rotation_policy: daily
+"#;
+
+        let config = Config::from_yaml_with_env(yaml_daily).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let file_config = audit.file.as_ref().unwrap();
+        assert_eq!(file_config.rotation_policy, RotationPolicy::Daily);
+    }
+
+    #[test]
+    fn test_audit_log_file_config_defaults() {
+        // Test: File config has sensible defaults
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+  outputs:
+    - file
+  file:
+    path: /var/log/audit.log
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        let audit = config.audit_log.as_ref().unwrap();
+        let file_config = audit.file.as_ref().unwrap();
+
+        // Verify defaults
+        assert_eq!(
+            file_config.max_file_size_mb, 50,
+            "default max_file_size_mb should be 50"
+        );
+        assert_eq!(
+            file_config.max_backup_files, 5,
+            "default max_backup_files should be 5"
+        );
+        assert_eq!(
+            file_config.rotation_policy,
+            RotationPolicy::Size,
+            "default rotation_policy should be Size"
+        );
     }
 }

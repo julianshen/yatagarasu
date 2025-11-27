@@ -2362,10 +2362,10 @@ services:
 - [x] Test: Can parse log_level (default info)
 
 ### File Output Configuration
-- [ ] Test: Can parse file_path for audit log
-- [ ] Test: Can parse max_file_size_mb
-- [ ] Test: Can parse max_backup_files
-- [ ] Test: Can parse rotation policy (size, daily)
+- [x] Test: Can parse file_path for audit log
+- [x] Test: Can parse max_file_size_mb
+- [x] Test: Can parse max_backup_files
+- [x] Test: Can parse rotation policy (size, daily)
 
 ### Syslog Configuration
 - [ ] Test: Can parse syslog_address
