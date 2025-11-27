@@ -128,6 +128,98 @@ impl AuditLogEntry {
     }
 }
 
+// ============================================================================
+// Sensitive Data Redaction Functions
+// ============================================================================
+
+/// Redact JWT tokens in a string
+///
+/// JWT tokens follow the format: header.payload.signature (base64 encoded)
+/// This function detects and redacts them.
+pub fn redact_jwt_token(value: &str) -> String {
+    // JWT pattern: base64url.base64url.base64url (at minimum header.payload)
+    // Header typically starts with "eyJ" (base64 for '{"')
+    if value.starts_with("eyJ") && value.contains('.') {
+        "[JWT_REDACTED]".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+/// Redact Authorization header value
+///
+/// Preserves the auth scheme (Bearer, Basic, etc.) but redacts the credential
+pub fn redact_authorization_header(value: &str) -> String {
+    if value.is_empty() {
+        return value.to_string();
+    }
+
+    // Split on first space to get scheme and credential
+    if let Some(space_idx) = value.find(' ') {
+        let scheme = &value[..space_idx];
+        format!("{} [REDACTED]", scheme)
+    } else {
+        // No space, likely just a token - redact entirely
+        "[REDACTED]".to_string()
+    }
+}
+
+/// Redact sensitive query parameters from a URL path
+///
+/// Replaces values of specified parameter names with [REDACTED]
+pub fn redact_query_params(url: &str, sensitive_params: &[&str]) -> String {
+    // Split URL into path and query parts
+    if let Some(query_start) = url.find('?') {
+        let path = &url[..query_start];
+        let query = &url[query_start + 1..];
+
+        // Parse and redact query params
+        let redacted_params: Vec<String> = query
+            .split('&')
+            .map(|param| {
+                if let Some(eq_idx) = param.find('=') {
+                    let key = &param[..eq_idx];
+                    // Case-insensitive comparison for sensitive params
+                    if sensitive_params.iter().any(|s| s.eq_ignore_ascii_case(key)) {
+                        format!("{}=[REDACTED]", key)
+                    } else {
+                        param.to_string()
+                    }
+                } else {
+                    param.to_string()
+                }
+            })
+            .collect();
+
+        format!("{}?{}", path, redacted_params.join("&"))
+    } else {
+        url.to_string()
+    }
+}
+
+/// Redact sensitive headers from a list of header key-value pairs
+///
+/// Returns a new list with sensitive header values replaced with [REDACTED]
+pub fn redact_headers(
+    headers: &[(&str, &str)],
+    sensitive_headers: &[&str],
+) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(key, value)| {
+            // Case-insensitive comparison for header names
+            if sensitive_headers
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(key))
+            {
+                (key.to_string(), "[REDACTED]".to_string())
+            } else {
+                (key.to_string(), value.to_string())
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +645,97 @@ mod tests {
             "Should deserialize successfully: {:?}",
             deserialized
         );
+    }
+
+    // ============================================================================
+    // Sensitive Data Redaction Tests
+    // ============================================================================
+
+    #[test]
+    fn test_jwt_tokens_redacted_in_logs() {
+        // Test: JWT tokens redacted in logs
+        let jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
+        let redacted = redact_jwt_token(jwt_token);
+        assert_eq!(redacted, "[JWT_REDACTED]");
+
+        // Partial JWT should also be redacted
+        let partial = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.incomplete";
+        let redacted_partial = redact_jwt_token(partial);
+        assert_eq!(redacted_partial, "[JWT_REDACTED]");
+
+        // Non-JWT should not be redacted
+        let non_jwt = "not-a-jwt-token";
+        let not_redacted = redact_jwt_token(non_jwt);
+        assert_eq!(not_redacted, non_jwt);
+    }
+
+    #[test]
+    fn test_authorization_header_redacted() {
+        // Test: Authorization header redacted (show "Bearer [REDACTED]")
+        let auth_header = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
+        let redacted = redact_authorization_header(auth_header);
+        assert_eq!(redacted, "Bearer [REDACTED]");
+
+        // Basic auth should also be redacted
+        let basic_auth = "Basic dXNlcm5hbWU6cGFzc3dvcmQ=";
+        let redacted_basic = redact_authorization_header(basic_auth);
+        assert_eq!(redacted_basic, "Basic [REDACTED]");
+
+        // Empty or invalid should stay as is
+        let empty = "";
+        assert_eq!(redact_authorization_header(empty), "");
+    }
+
+    #[test]
+    fn test_query_param_tokens_redacted() {
+        // Test: Query param tokens redacted
+        let url_with_token = "/api/files?token=secret123&file=doc.pdf";
+        let redacted = redact_query_params(url_with_token, &["token", "api_key", "access_token"]);
+        assert_eq!(redacted, "/api/files?token=[REDACTED]&file=doc.pdf");
+
+        // Multiple sensitive params
+        let url_multi = "/api?token=abc&api_key=xyz&name=test";
+        let redacted_multi = redact_query_params(url_multi, &["token", "api_key"]);
+        assert_eq!(
+            redacted_multi,
+            "/api?token=[REDACTED]&api_key=[REDACTED]&name=test"
+        );
+
+        // No sensitive params
+        let url_clean = "/api/files?file=doc.pdf&page=1";
+        let not_redacted = redact_query_params(url_clean, &["token"]);
+        assert_eq!(not_redacted, "/api/files?file=doc.pdf&page=1");
+    }
+
+    #[test]
+    fn test_sensitive_custom_headers_redacted() {
+        // Test: Sensitive custom headers redacted
+        let headers = vec![
+            ("X-API-Key", "secret-api-key-123"),
+            ("X-Request-ID", "req-123"),
+            ("X-Auth-Token", "auth-token-value"),
+            ("Content-Type", "application/json"),
+        ];
+
+        let sensitive_headers = ["x-api-key", "x-auth-token"];
+        let redacted = redact_headers(&headers, &sensitive_headers);
+
+        // Check that sensitive headers are redacted
+        assert!(redacted
+            .iter()
+            .any(|(k, v)| k == "X-API-Key" && v == "[REDACTED]"));
+        assert!(redacted
+            .iter()
+            .any(|(k, v)| k == "X-Auth-Token" && v == "[REDACTED]"));
+
+        // Check that non-sensitive headers are preserved
+        assert!(redacted
+            .iter()
+            .any(|(k, v)| k == "X-Request-ID" && v == "req-123"));
+        assert!(redacted
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v == "application/json"));
     }
 }

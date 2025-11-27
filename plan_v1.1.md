@@ -2400,10 +2400,10 @@ services:
 - [x] Test: Contains referer (from request headers)
 
 ### Sensitive Data Redaction
-- [ ] Test: JWT tokens redacted in logs
-- [ ] Test: Authorization header redacted (show "Bearer [REDACTED]")
-- [ ] Test: Query param tokens redacted
-- [ ] Test: Sensitive custom headers redacted
+- [x] Test: JWT tokens redacted in logs
+- [x] Test: Authorization header redacted (show "Bearer [REDACTED]")
+- [x] Test: Query param tokens redacted
+- [x] Test: Sensitive custom headers redacted
 
 ### JSON Serialization
 - [x] Test: AuditLogEntry serializes to JSON
