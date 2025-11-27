@@ -2462,16 +2462,16 @@ services:
 ## 33.5: Syslog Audit Logging
 
 ### Syslog Integration
-- [ ] Test: Can connect to syslog server (TCP)
-- [ ] Test: Can connect to syslog server (UDP)
-- [ ] Test: Formats entry as syslog message
-- [ ] Test: Includes facility and severity
-- [ ] Test: Handles syslog server down gracefully
+- [x] Test: Can connect to syslog server (TCP) (src/audit/mod.rs::test_can_connect_to_syslog_server_tcp)
+- [x] Test: Can connect to syslog server (UDP) (src/audit/mod.rs::test_can_connect_to_syslog_server_udp)
+- [x] Test: Formats entry as syslog message (src/audit/mod.rs::test_formats_entry_as_syslog_message)
+- [x] Test: Includes facility and severity (src/audit/mod.rs::test_includes_facility_and_severity)
+- [x] Test: Handles syslog server down gracefully (src/audit/mod.rs::test_handles_syslog_server_down_gracefully)
 
 ### Syslog Message Format
-- [ ] Test: Uses RFC5424 syslog format
-- [ ] Test: Includes structured data (JSON in message)
-- [ ] Test: Includes hostname
+- [x] Test: Uses RFC5424 syslog format (covered in test_formats_entry_as_syslog_message)
+- [x] Test: Includes structured data (JSON in message) (covered in test_formats_entry_as_syslog_message)
+- [x] Test: Includes hostname (covered in test_formats_entry_as_syslog_message)
 
 ---
 

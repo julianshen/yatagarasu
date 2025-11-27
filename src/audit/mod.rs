@@ -636,7 +636,88 @@ impl RotatingAuditFileWriter {
 // Async Audit File Writer (Phase 33.4 - Async Writing)
 // ============================================================================
 
+use std::net::{TcpStream, UdpSocket};
 use std::sync::mpsc;
+
+// ============================================================================
+// Syslog Types (Phase 33.5)
+// ============================================================================
+
+/// Syslog protocol for connection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyslogProtocol {
+    /// TCP connection (reliable)
+    Tcp,
+    /// UDP connection (faster, but unreliable)
+    Udp,
+}
+
+/// Syslog facility codes (RFC 5424)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyslogFacility {
+    /// Kernel messages
+    Kern = 0,
+    /// User-level messages
+    User = 1,
+    /// Mail system
+    Mail = 2,
+    /// System daemons
+    Daemon = 3,
+    /// Security/authorization messages
+    Auth = 4,
+    /// Messages generated internally by syslogd
+    Syslog = 5,
+    /// Line printer subsystem
+    Lpr = 6,
+    /// Network news subsystem
+    News = 7,
+    /// UUCP subsystem
+    Uucp = 8,
+    /// Clock daemon
+    Cron = 9,
+    /// Security/authorization messages (private)
+    AuthPriv = 10,
+    /// FTP daemon
+    Ftp = 11,
+    /// Local use 0
+    Local0 = 16,
+    /// Local use 1
+    Local1 = 17,
+    /// Local use 2
+    Local2 = 18,
+    /// Local use 3
+    Local3 = 19,
+    /// Local use 4
+    Local4 = 20,
+    /// Local use 5
+    Local5 = 21,
+    /// Local use 6
+    Local6 = 22,
+    /// Local use 7
+    Local7 = 23,
+}
+
+/// Syslog severity levels (RFC 5424)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyslogSeverity {
+    /// System is unusable
+    Emergency = 0,
+    /// Action must be taken immediately
+    Alert = 1,
+    /// Critical conditions
+    Critical = 2,
+    /// Error conditions
+    Error = 3,
+    /// Warning conditions
+    Warning = 4,
+    /// Normal but significant condition
+    Notice = 5,
+    /// Informational messages
+    Info = 6,
+    /// Debug-level messages
+    Debug = 7,
+}
 
 /// Command sent to the async writer background thread
 enum WriterCommand {
@@ -824,6 +905,205 @@ impl Drop for AsyncAuditFileWriter {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+// ============================================================================
+// Syslog Audit Writer (Phase 33.5)
+// ============================================================================
+
+/// Syslog connection type
+enum SyslogConnection {
+    /// TCP connection
+    Tcp(TcpStream),
+    /// UDP socket
+    Udp(UdpSocket, std::net::SocketAddr),
+}
+
+/// Syslog audit writer that sends audit entries to a syslog server
+///
+/// Supports both TCP (reliable) and UDP (faster) protocols.
+/// Messages are formatted according to RFC 5424 (modern syslog format).
+pub struct SyslogWriter {
+    /// Connection to syslog server
+    connection: Option<SyslogConnection>,
+    /// Server address
+    server_addr: String,
+    /// Protocol (TCP or UDP)
+    protocol: SyslogProtocol,
+    /// Syslog facility
+    facility: SyslogFacility,
+    /// Application name for syslog messages
+    app_name: String,
+    /// Hostname for syslog messages
+    hostname: String,
+}
+
+impl std::fmt::Debug for SyslogWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyslogWriter")
+            .field("server_addr", &self.server_addr)
+            .field("protocol", &self.protocol)
+            .field("facility", &self.facility)
+            .field("app_name", &self.app_name)
+            .field("hostname", &self.hostname)
+            .field("connected", &self.is_connected())
+            .finish()
+    }
+}
+
+impl SyslogWriter {
+    /// Create a new syslog writer and connect to the server
+    ///
+    /// - `server_addr`: Address of syslog server (e.g., "127.0.0.1:514")
+    /// - `protocol`: TCP or UDP
+    /// - `facility`: Syslog facility (e.g., Local0 for custom applications)
+    /// - `app_name`: Application name to include in syslog messages
+    pub fn new(
+        server_addr: &str,
+        protocol: SyslogProtocol,
+        facility: SyslogFacility,
+        app_name: &str,
+    ) -> io::Result<Self> {
+        // Get hostname
+        let hostname = hostname::get()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let mut writer = Self {
+            connection: None,
+            server_addr: server_addr.to_string(),
+            protocol,
+            facility,
+            app_name: app_name.to_string(),
+            hostname,
+        };
+
+        // Connect to the server
+        writer.connect()?;
+
+        Ok(writer)
+    }
+
+    /// Connect to the syslog server
+    pub fn connect(&mut self) -> io::Result<()> {
+        match self.protocol {
+            SyslogProtocol::Tcp => {
+                let stream = TcpStream::connect(&self.server_addr)?;
+                stream.set_nodelay(true)?; // Disable Nagle's algorithm for low latency
+                self.connection = Some(SyslogConnection::Tcp(stream));
+            }
+            SyslogProtocol::Udp => {
+                let socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
+                let addr: std::net::SocketAddr = self.server_addr.parse().map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("Invalid address: {}", e),
+                    )
+                })?;
+                self.connection = Some(SyslogConnection::Udp(socket, addr));
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if connected to syslog server
+    pub fn is_connected(&self) -> bool {
+        self.connection.is_some()
+    }
+
+    /// Calculate syslog priority value
+    ///
+    /// Priority = Facility * 8 + Severity
+    fn calculate_priority(&self, severity: SyslogSeverity) -> u8 {
+        (self.facility as u8) * 8 + (severity as u8)
+    }
+
+    /// Format audit entry as RFC 5424 syslog message
+    ///
+    /// Format: <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG
+    pub fn format_syslog_message(&self, entry: &AuditLogEntry, severity: SyslogSeverity) -> String {
+        let priority = self.calculate_priority(severity);
+        let timestamp = entry.timestamp.format("%Y-%m-%dT%H:%M:%S%.6fZ");
+        let procid = std::process::id();
+        let msgid = &entry.correlation_id[..8]; // Use first 8 chars of correlation_id
+
+        // Format the message as JSON
+        let msg = serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_string());
+
+        // RFC 5424 format
+        format!(
+            "<{}>1 {} {} {} {} {} - {}",
+            priority, timestamp, self.hostname, self.app_name, procid, msgid, msg
+        )
+    }
+
+    /// Map HTTP response status to syslog severity
+    pub fn severity_from_status(status: u16) -> SyslogSeverity {
+        match status {
+            200..=299 => SyslogSeverity::Info,
+            300..=399 => SyslogSeverity::Notice,
+            400..=499 => SyslogSeverity::Warning,
+            500..=599 => SyslogSeverity::Error,
+            _ => SyslogSeverity::Debug,
+        }
+    }
+
+    /// Write an audit log entry to syslog
+    ///
+    /// Automatically determines severity from response status.
+    pub fn write_entry(&mut self, entry: &AuditLogEntry) -> io::Result<()> {
+        let severity = Self::severity_from_status(entry.response_status);
+        self.write_entry_with_severity(entry, severity)
+    }
+
+    /// Write an audit log entry with explicit severity
+    pub fn write_entry_with_severity(
+        &mut self,
+        entry: &AuditLogEntry,
+        severity: SyslogSeverity,
+    ) -> io::Result<()> {
+        let message = self.format_syslog_message(entry, severity);
+
+        match &mut self.connection {
+            Some(SyslogConnection::Tcp(stream)) => {
+                // TCP syslog uses newline as message delimiter
+                writeln!(stream, "{}", message)?;
+                stream.flush()?;
+            }
+            Some(SyslogConnection::Udp(socket, addr)) => {
+                // UDP syslog sends each message as a single packet
+                socket.send_to(message.as_bytes(), *addr)?;
+            }
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "Not connected to syslog server",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Close the connection
+    pub fn close(&mut self) {
+        self.connection = None;
+    }
+
+    /// Get the protocol being used
+    pub fn protocol(&self) -> SyslogProtocol {
+        self.protocol
+    }
+
+    /// Get the facility being used
+    pub fn facility(&self) -> SyslogFacility {
+        self.facility
+    }
+
+    /// Get the server address
+    pub fn server_addr(&self) -> &str {
+        &self.server_addr
     }
 }
 
@@ -2123,5 +2403,260 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    // ============================================================================
+    // Phase 33.5: Syslog Audit Logging Tests
+    // ============================================================================
+
+    #[test]
+    fn test_can_connect_to_syslog_server_tcp() {
+        // Test: Can connect to syslog server (TCP)
+        use std::net::TcpListener;
+
+        // Start a mock TCP syslog server
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Should bind to port");
+        let port = listener.local_addr().unwrap().port();
+        let server_addr = format!("127.0.0.1:{}", port);
+
+        // Accept connection in a thread
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("Should accept connection");
+            // Keep the connection open for a moment
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(stream);
+        });
+
+        // Connect to the mock server
+        let writer = SyslogWriter::new(
+            &server_addr,
+            SyslogProtocol::Tcp,
+            SyslogFacility::Local0,
+            "yatagarasu",
+        );
+
+        assert!(writer.is_ok(), "Should connect to TCP syslog server");
+        let writer = writer.unwrap();
+        assert!(writer.is_connected(), "Should be connected");
+        assert_eq!(writer.protocol(), SyslogProtocol::Tcp);
+
+        // Wait for server thread
+        handle.join().expect("Server thread should finish");
+    }
+
+    #[test]
+    fn test_can_connect_to_syslog_server_udp() {
+        // Test: Can connect to syslog server (UDP)
+        // Note: UDP is connectionless, so we just create the socket
+        // and verify it's bound. The "connection" is just storing the target address.
+
+        // Create a UDP socket to simulate a syslog server
+        let server = std::net::UdpSocket::bind("127.0.0.1:0").expect("Should bind UDP socket");
+        let port = server.local_addr().unwrap().port();
+        let server_addr = format!("127.0.0.1:{}", port);
+
+        // Create syslog writer with UDP
+        let writer = SyslogWriter::new(
+            &server_addr,
+            SyslogProtocol::Udp,
+            SyslogFacility::Local0,
+            "yatagarasu",
+        );
+
+        assert!(writer.is_ok(), "Should create UDP syslog writer");
+        let writer = writer.unwrap();
+        assert!(
+            writer.is_connected(),
+            "UDP writer should report as connected"
+        );
+        assert_eq!(writer.protocol(), SyslogProtocol::Udp);
+    }
+
+    #[test]
+    fn test_formats_entry_as_syslog_message() {
+        // Test: Formats entry as syslog message
+        // We don't need an actual connection for format testing
+
+        // Create a mock server to allow writer creation
+        let server = std::net::UdpSocket::bind("127.0.0.1:0").expect("Should bind");
+        let port = server.local_addr().unwrap().port();
+        let server_addr = format!("127.0.0.1:{}", port);
+
+        let writer = SyslogWriter::new(
+            &server_addr,
+            SyslogProtocol::Udp,
+            SyslogFacility::Local0,
+            "yatagarasu-test",
+        )
+        .expect("Should create writer");
+
+        let entry = AuditLogEntry::new(
+            "192.168.1.100".to_string(),
+            "my-bucket".to_string(),
+            "path/to/file.txt".to_string(),
+            "GET".to_string(),
+            "/my-bucket/path/to/file.txt".to_string(),
+        )
+        .with_response(200, 1024, 50)
+        .with_cache_status(CacheStatus::Hit);
+
+        let message = writer.format_syslog_message(&entry, SyslogSeverity::Info);
+
+        // Verify RFC 5424 format components
+        // <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG
+
+        // Priority for Local0 (16) + Info (6) = 16*8 + 6 = 134
+        assert!(
+            message.starts_with("<134>1 "),
+            "Should start with priority 134 (Local0.Info), got: {}",
+            &message[..20]
+        );
+
+        // Should contain app name
+        assert!(
+            message.contains("yatagarasu-test"),
+            "Should contain app name"
+        );
+
+        // Should contain JSON message body
+        assert!(
+            message.contains("\"client_ip\":\"192.168.1.100\""),
+            "Should contain JSON entry"
+        );
+        assert!(
+            message.contains("\"response_status\":200"),
+            "Should contain response status"
+        );
+
+        // Should have timestamp in ISO format
+        let timestamp_pattern = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}").unwrap();
+        assert!(
+            timestamp_pattern.is_match(&message),
+            "Should contain ISO timestamp"
+        );
+    }
+
+    #[test]
+    fn test_includes_facility_and_severity() {
+        // Test: Includes facility and severity
+        let server = std::net::UdpSocket::bind("127.0.0.1:0").expect("Should bind");
+        let port = server.local_addr().unwrap().port();
+        let server_addr = format!("127.0.0.1:{}", port);
+
+        // Test different facility/severity combinations
+        let test_cases = vec![
+            (SyslogFacility::Kern, SyslogSeverity::Emergency, 0 * 8 + 0), // 0
+            (SyslogFacility::User, SyslogSeverity::Info, 1 * 8 + 6),      // 14
+            (SyslogFacility::Daemon, SyslogSeverity::Warning, 3 * 8 + 4), // 28
+            (SyslogFacility::Auth, SyslogSeverity::Error, 4 * 8 + 3),     // 35
+            (SyslogFacility::Local0, SyslogSeverity::Debug, 16 * 8 + 7),  // 135
+            (SyslogFacility::Local7, SyslogSeverity::Critical, 23 * 8 + 2), // 186
+        ];
+
+        for (facility, severity, expected_pri) in test_cases {
+            let writer = SyslogWriter::new(&server_addr, SyslogProtocol::Udp, facility, "test")
+                .expect("Should create writer");
+
+            let entry = AuditLogEntry::new(
+                "192.168.1.1".to_string(),
+                "bucket".to_string(),
+                "key".to_string(),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+
+            let message = writer.format_syslog_message(&entry, severity);
+            let expected_start = format!("<{}>1 ", expected_pri);
+
+            assert!(
+                message.starts_with(&expected_start),
+                "Facility {:?} + Severity {:?} should give priority {}, got: {}",
+                facility,
+                severity,
+                expected_pri,
+                &message[..10]
+            );
+        }
+
+        // Test severity_from_status mapping
+        assert_eq!(
+            SyslogWriter::severity_from_status(200),
+            SyslogSeverity::Info
+        );
+        assert_eq!(
+            SyslogWriter::severity_from_status(301),
+            SyslogSeverity::Notice
+        );
+        assert_eq!(
+            SyslogWriter::severity_from_status(404),
+            SyslogSeverity::Warning
+        );
+        assert_eq!(
+            SyslogWriter::severity_from_status(500),
+            SyslogSeverity::Error
+        );
+    }
+
+    #[test]
+    fn test_handles_syslog_server_down_gracefully() {
+        // Test: Handles syslog server down gracefully
+        // Try to connect to a port that's not listening
+        let result = SyslogWriter::new(
+            "127.0.0.1:59999", // Unlikely to have a server on this port
+            SyslogProtocol::Tcp,
+            SyslogFacility::Local0,
+            "yatagarasu",
+        );
+
+        // Should return an error, not panic
+        assert!(
+            result.is_err(),
+            "Should fail gracefully when server is down"
+        );
+
+        // Error should be a connection error
+        let err = result.unwrap_err();
+        assert!(
+            err.kind() == std::io::ErrorKind::ConnectionRefused
+                || err.kind() == std::io::ErrorKind::TimedOut
+                || err.kind() == std::io::ErrorKind::Other,
+            "Should be connection-related error: {:?}",
+            err.kind()
+        );
+
+        // UDP "connection" should work even without server (connectionless)
+        // But write should not panic
+        let udp_writer = SyslogWriter::new(
+            "127.0.0.1:59998",
+            SyslogProtocol::Udp,
+            SyslogFacility::Local0,
+            "yatagarasu",
+        );
+        assert!(
+            udp_writer.is_ok(),
+            "UDP writer should create without server"
+        );
+
+        // Test write to closed connection
+        let mut writer = udp_writer.unwrap();
+        writer.close();
+
+        let entry = AuditLogEntry::new(
+            "192.168.1.1".to_string(),
+            "bucket".to_string(),
+            "key".to_string(),
+            "GET".to_string(),
+            "/path".to_string(),
+        );
+
+        let write_result = writer.write_entry(&entry);
+        assert!(
+            write_result.is_err(),
+            "Writing to closed connection should error"
+        );
+        assert_eq!(
+            write_result.unwrap_err().kind(),
+            std::io::ErrorKind::NotConnected
+        );
     }
 }
