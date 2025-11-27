@@ -67,7 +67,7 @@
 ### 🟡 Milestone 6: Audit Logging (Phase 33) - HIGH
 **Deliverable**: Comprehensive audit logging operational
 **Verification**: All requests logged with correlation IDs, exportable to file/syslog/S3
-**Status**: ⏳ NOT STARTED
+**Status**: ✅ COMPLETE - All sub-phases (33.1-33.8) done. 68 audit tests, 6 LocalStack integration tests.
 
 ### 🟢 Milestone 7: Enhanced Observability (Phase 34) - MEDIUM
 **Deliverable**: OpenTelemetry tracing, slow query logging
@@ -2644,6 +2644,12 @@ services:
 - [ ] Benchmark: Concurrent operations (10 parallel) - Target: >500,000 ops/s
 - [ ] Benchmark: Concurrent operations (100 parallel) - Target: >1,000,000 ops/s
 - [ ] Verify: No lock contention at high concurrency
+
+#### Hit Rate Validation (Deferred from Phase 27.10)
+- [ ] Benchmark: TinyLFU vs LRU comparison (moka vs std HashMap+LRU) - Verify TinyLFU advantage
+- [ ] Benchmark: Hit rate under Zipfian access pattern - Target: >80% hit rate
+- [ ] Benchmark: Hit rate adaptation when access pattern changes (hot set rotation)
+- [ ] Benchmark: Hit rate calculation accuracy (compare moka stats vs manual tracking)
 
 ---
 
