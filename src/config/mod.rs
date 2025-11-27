@@ -15,8 +15,18 @@ pub struct Config {
     pub jwt: Option<JwtConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<CacheConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audit_log: Option<AuditLogConfig>,
     #[serde(skip)]
     pub generation: u64, // Config version, increments on reload
+}
+
+/// Phase 33: Audit log configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuditLogConfig {
+    /// Enable/disable audit logging (default: false)
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 impl Config {
@@ -2367,6 +2377,93 @@ buckets:
             error_msg.contains("OPA_URL_MISSING") && error_msg.contains("not set"),
             "Error should mention missing env var: {}",
             error_msg
+        );
+    }
+
+    // ============================================================================
+    // Phase 33: Audit Logging Configuration Tests
+    // ============================================================================
+
+    #[test]
+    fn test_can_parse_audit_log_section() {
+        // Test: Add audit_log section to config
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log:
+  enabled: true
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert!(
+            config.audit_log.is_some(),
+            "audit_log section should be parsed"
+        );
+        assert!(
+            config.audit_log.as_ref().unwrap().enabled,
+            "enabled should be true"
+        );
+    }
+
+    #[test]
+    fn test_audit_log_enabled_defaults_to_false() {
+        // Test: Can parse enabled field (default false)
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+audit_log: {}
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert!(
+            config.audit_log.is_some(),
+            "audit_log section should be parsed"
+        );
+        assert!(
+            !config.audit_log.as_ref().unwrap().enabled,
+            "enabled should default to false"
+        );
+    }
+
+    #[test]
+    fn test_audit_log_section_is_optional() {
+        // Config without audit_log section should work
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: test
+    path_prefix: /test
+    s3:
+      bucket: test-bucket
+      region: us-west-2
+      access_key: test
+      secret_key: test
+"#;
+
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+        assert!(
+            config.audit_log.is_none(),
+            "audit_log section should be None when not specified"
         );
     }
 }

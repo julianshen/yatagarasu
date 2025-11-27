@@ -2356,8 +2356,8 @@ services:
 ## 33.1: Audit Log Configuration
 
 ### Configuration Schema
-- [ ] Test: Add audit_log section to config
-- [ ] Test: Can parse enabled field (default false)
+- [x] Test: Add audit_log section to config
+- [x] Test: Can parse enabled field (default false)
 - [ ] Test: Can parse output destinations (file, syslog, s3)
 - [ ] Test: Can parse log_level (default info)
 
