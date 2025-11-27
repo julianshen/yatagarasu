@@ -39,12 +39,14 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - ✅ **171 library tests passing** with 98.43% coverage
 
 **🚀 What's Coming in v1.1** (Future Enhancements):
-- 🎯 **Caching Layer**: Disk-based and Redis caching
+- ✅ **OPA Integration**: Policy-based authorization with Open Policy Agent (Phase 32 complete!)
+- ✅ **Caching Layer**: Multi-tier caching with disk and Redis support (Phase 30 complete!)
 - 🎯 **Advanced JWT**: ES256/RS256 algorithm support
-- 🎯 **Distributed Caching**: Multi-node cache coordination
 - 🚧 **Optional**: Chaos engineering tests (Toxiproxy integration)
 
-**✅ Recently Completed** (v1.0.0):
+**✅ Recently Completed** (v1.1.0):
+- ✅ **Phase 32**: OPA Integration - Policy-based authorization with Open Policy Agent, Rego policy evaluation, decision caching, fail-open/fail-closed modes, testcontainers-based testing (15 tests passing)
+- ✅ **Phase 30**: Multi-tier Caching - Heap, mmap, disk, and Redis caching with LRU eviction, async cache writes, conditional requests (ETag/Last-Modified)
 - ✅ **K6 Load Testing** (v1.0.0): Comprehensive performance verification - Throughput (726 req/s, P95 6.7ms), Concurrent connections (100 VUs, P95 15.95ms), Streaming TTFB (P95 24.45ms), 1-hour stability test (115GB transferred, 0 crashes, 0.00% errors) - **ALL TARGETS EXCEEDED!** See [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - ✅ **Phase 25**: Read-Only Enforcement - HTTP method validation (GET/HEAD/OPTIONS only), 405 responses for unsafe methods (PUT/POST/DELETE/PATCH), CORS support for browser clients (15/15 tests passing)
 - ✅ **Phase 24** (v0.4.0): Docker Images & CI/CD Automation - Production-ready multi-stage Dockerfile (41.2MB distroless image), docker-compose for local development, GitHub Actions CI with automated testing and coverage (36/36 tests passing)
@@ -68,6 +70,8 @@ Yatagarasu is a reimplementation of [s3-envoy-proxy](https://github.com/juliansh
 - 🗂️ **Multi-Bucket Routing**: Map different S3 buckets to different URL paths with isolated credentials
 - 🔐 **Flexible JWT Auth**: Optional authentication with multiple token sources (header, query, custom)
 - 🎯 **Custom Claims**: Verify JWT claims with configurable logic (role, tenant, etc.)
+- 🛡️ **OPA Authorization**: Policy-based access control with Open Policy Agent and Rego policies
+- 💾 **Multi-Tier Caching**: Heap, mmap, disk, and Redis caching with LRU eviction
 - 📊 **Observable**: Prometheus metrics and structured JSON logging
 - 🔄 **Hot Reload**: Update configuration without downtime
 - 🧪 **Well-Tested**: >90% test coverage following TDD principles
@@ -373,13 +377,18 @@ yatagarasu/
 - [x] **Startup Validation**: Configuration validation, --test mode, clear error messages ✅
 - [x] **Performance Tuning**: Connection pooling, timeouts, circuit breaker ✅
 
-### 🎯 Future: Advanced Features (v1.0+)
+### ✅ v1.1 Features (Complete)
 
-- [ ] **Caching Layer**: Memory cache for small files (<10MB)
-- [ ] **Cache Management**: Invalidation API, conditional requests
+- [x] **OPA Authorization**: Policy-based access control with Open Policy Agent
+- [x] **Multi-Tier Caching**: Heap, mmap, disk, and Redis caching with LRU eviction
+- [x] **Cache Management**: Conditional requests (ETag/Last-Modified), async writes
+- [x] **Rate Limiting**: Global, per-IP, and per-bucket rate limits
+
+### 🎯 Future: Advanced Features (v1.2+)
+
 - [ ] **Advanced Auth**: RS256/ES256 algorithms, token introspection
-- [ ] **Rate Limiting**: Per-client request throttling
-- [ ] **Multi-Region**: S3 failover across regions
+- [ ] **Cache Invalidation API**: Programmatic cache purge endpoints
+- [ ] **Distributed Caching**: Multi-node cache coordination
 
 ### 🐳 Docker & CI/CD (v0.4.0)
 
@@ -751,6 +760,72 @@ jwt:
 - ✅ Ensure secret is at least 32 characters for HS256
 - ✅ Use environment variables for secrets (never commit secrets to config files)
 
+### OPA Authorization Configuration (v1.1+)
+
+Enable policy-based authorization using Open Policy Agent:
+
+```yaml
+buckets:
+  - name: "protected"
+    path_prefix: "/protected"
+    s3:
+      bucket: "protected-bucket"
+      region: "us-east-1"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+      jwt:
+        secret: "${JWT_SECRET}"
+        algorithm: "HS256"
+    # OPA Authorization (requires JWT validation first)
+    authorization:
+      type: opa
+      url: "http://localhost:8181"           # OPA server URL
+      policy_path: "yatagarasu/authz/allow"  # Rego policy path
+      timeout_ms: 100                        # Fast fail (default: 100ms)
+      cache_ttl_seconds: 60                  # Cache decisions (default: 60s)
+      fail_mode: closed                      # Deny on OPA failure (default)
+```
+
+**OPA Input Format** (sent to OPA for each request):
+```json
+{
+  "input": {
+    "jwt_claims": { "sub": "user123", "roles": ["admin"] },
+    "bucket": "protected",
+    "path": "/protected/file.txt",
+    "method": "GET",
+    "client_ip": "192.168.1.100"
+  }
+}
+```
+
+**Example Rego Policy** (`policies/authz.rego`):
+```rego
+package yatagarasu.authz
+
+default allow = false
+
+# Allow admins to access everything
+allow if {
+    input.jwt_claims.roles[_] == "admin"
+}
+
+# Allow users to access their department's files
+allow if {
+    input.jwt_claims.department == path_department
+}
+
+path_department := dept if {
+    parts := split(input.path, "/")
+    count(parts) > 2
+    dept := parts[2]
+}
+```
+
+See [docs/OPA_POLICIES.md](docs/OPA_POLICIES.md) for comprehensive OPA configuration, policy examples, and load testing.
+
 ### Logging Configuration
 
 ```yaml
@@ -892,6 +967,8 @@ kill -TERM $(pgrep yatagarasu)
 - **[spec.md](spec.md)** - Product specification (what we're building)
 - **[plan.md](plan.md)** - Implementation plan (what's next)
 - **[README.md](README.md)** - This project overview (where to start)
+- **[docs/OPA_POLICIES.md](docs/OPA_POLICIES.md)** - OPA integration guide and Rego policy examples
+- **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)** - Performance testing guide and load test results
 - **[STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md)** - Detailed streaming and caching architecture
 - **[QUICK_REFERENCE_STREAMING.md](QUICK_REFERENCE_STREAMING.md)** - Quick ASCII diagrams for data flow
 
@@ -910,14 +987,14 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 
 ## Project Status
 
-**Current Phase**: Phase 22 - Graceful Shutdown & Observability (📋 NOT STARTED)
+**Current Phase**: v1.1 Feature Complete - OPA & Caching ✅
 
 **Progress**:
 
 - **Tests written**: 500+ tests
-- **Tests passing**: 128 library tests (100%)
-- **Test coverage**: High coverage across all modules
-- **Phases complete**: Library layer 100% (Phases 1-5 ✅), Server layer 100% (Phases 12-21 ✅)
+- **Tests passing**: 171+ library tests (100%)
+- **Test coverage**: 98.43% across all modules
+- **Phases complete**: Library layer (Phases 1-5 ✅), Server layer (Phases 12-25 ✅), v1.1 Features (Phases 30, 32 ✅)
 
 **Completed Milestones**:
 - ✅ Phase 1-2: Foundation and Configuration (50 tests)
@@ -934,14 +1011,18 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 - ✅ Phase 19: Prometheus metrics endpoint
 - ✅ Phase 20: Circuit breaker and retry logic
 - ✅ Phase 21: Security hardening (SQL injection, path traversal, rate limiting - 8/8 security tests passing)
+- ✅ Phase 22: Graceful shutdown & observability (health endpoints, request correlation)
+- ✅ Phase 23: High availability bucket replication (multi-replica failover)
+- ✅ Phase 24: Docker images & CI/CD automation
+- ✅ Phase 25: Read-only enforcement (HTTP method validation)
+- ✅ Phase 30: Multi-tier caching (heap, mmap, disk, Redis)
+- ✅ Phase 32: OPA integration (policy-based authorization with Rego)
 
-**Current Sprint**: Operational Excellence & Observability
-- **Phase 22**: Health endpoints, graceful shutdown, structured logging, chaos testing
+**Current Status**: v1.1 Feature Complete ✅
 
 **Next Milestones**:
-- Phase 22: Health/ready endpoints, graceful shutdown, request correlation
-- Phase 23-24: Docker images and CI/CD
-- Phase 25+: Caching layer and advanced features
+- Phase 33: Audit logging
+- Phase 34+: Advanced JWT algorithms (RS256/ES256)
 
 **Production Readiness**:
 - ✅ Security: Body/header/URI limits, SQL injection detection, path traversal protection
@@ -949,9 +1030,10 @@ For detailed guidelines, see [CLAUDE.md](CLAUDE.md).
 - ✅ Circuit Breaker: Automatic failure detection and recovery
 - ✅ Metrics: Prometheus endpoint with comprehensive metrics
 - ✅ Logging: Structured JSON with credential redaction
-- 📋 Health Endpoints: Phase 22 in progress
-- 📋 Graceful Shutdown: Phase 22 in progress
-- 📋 Request Correlation: Phase 22 in progress
+- ✅ Health Endpoints: /health (liveness) and /ready (readiness)
+- ✅ Graceful Shutdown: Pingora built-in SIGTERM handling
+- ✅ OPA Authorization: Policy-based access control with caching
+- ✅ Multi-Tier Caching: Heap, mmap, disk, and Redis support
 
 See [plan.md](plan.md) for detailed test checklist and [ROADMAP.md](ROADMAP.md) for implementation roadmap.
 
