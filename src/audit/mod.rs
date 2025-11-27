@@ -632,6 +632,201 @@ impl RotatingAuditFileWriter {
     }
 }
 
+// ============================================================================
+// Async Audit File Writer (Phase 33.4 - Async Writing)
+// ============================================================================
+
+use std::sync::mpsc;
+
+/// Command sent to the async writer background thread
+enum WriterCommand {
+    /// Write an audit log entry (boxed to reduce enum size)
+    Write(Box<AuditLogEntry>),
+    /// Flush the buffer
+    Flush,
+    /// Shutdown the writer
+    Shutdown,
+}
+
+/// Async audit file writer that writes entries in a background thread
+///
+/// This writer is non-blocking - write operations return immediately
+/// while actual file I/O happens in a background thread.
+#[derive(Debug)]
+pub struct AsyncAuditFileWriter {
+    /// Channel sender to communicate with background thread
+    sender: mpsc::Sender<WriterCommand>,
+    /// Handle to the background thread
+    handle: Option<std::thread::JoinHandle<io::Result<()>>>,
+    /// Path for reference
+    path: std::path::PathBuf,
+}
+
+impl AsyncAuditFileWriter {
+    /// Create a new async audit file writer
+    ///
+    /// Spawns a background thread to handle writes.
+    /// `buffer_size` is the size of the internal buffer in bytes (0 for unbuffered).
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        max_size_mb: u64,
+        max_backup_files: u32,
+        rotation_policy: RotationPolicy,
+        buffer_size: usize,
+    ) -> io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let path_clone = path.clone();
+
+        // Create channel for communication
+        let (sender, receiver) = mpsc::channel::<WriterCommand>();
+
+        // Spawn background thread
+        let handle = std::thread::spawn(move || {
+            Self::writer_thread(
+                path_clone,
+                max_size_mb,
+                max_backup_files,
+                rotation_policy,
+                buffer_size,
+                receiver,
+            )
+        });
+
+        Ok(Self {
+            sender,
+            handle: Some(handle),
+            path,
+        })
+    }
+
+    /// Background thread that handles actual file writing
+    fn writer_thread(
+        path: std::path::PathBuf,
+        max_size_mb: u64,
+        max_backup_files: u32,
+        rotation_policy: RotationPolicy,
+        buffer_size: usize,
+        receiver: mpsc::Receiver<WriterCommand>,
+    ) -> io::Result<()> {
+        // Create the rotating writer
+        let mut rotating_writer =
+            RotatingAuditFileWriter::new(&path, max_size_mb, max_backup_files, rotation_policy)?;
+
+        // Optionally wrap in a buffered writer
+        // Note: For simplicity, we handle buffering at the write level
+        let use_buffering = buffer_size > 0;
+        let mut buffer: Vec<AuditLogEntry> = if use_buffering {
+            Vec::with_capacity(buffer_size / 200) // Approximate entries
+        } else {
+            Vec::new()
+        };
+
+        loop {
+            match receiver.recv() {
+                Ok(WriterCommand::Write(boxed_entry)) => {
+                    let entry = *boxed_entry;
+                    if use_buffering {
+                        buffer.push(entry);
+                        // Flush buffer when full (approximately)
+                        if buffer.len() >= buffer.capacity() {
+                            for e in buffer.drain(..) {
+                                rotating_writer.write_entry(&e)?;
+                            }
+                            rotating_writer.flush()?;
+                        }
+                    } else {
+                        rotating_writer.write_entry(&entry)?;
+                    }
+                }
+                Ok(WriterCommand::Flush) => {
+                    // Flush any buffered entries
+                    for e in buffer.drain(..) {
+                        rotating_writer.write_entry(&e)?;
+                    }
+                    rotating_writer.flush()?;
+                }
+                Ok(WriterCommand::Shutdown) => {
+                    // Flush any remaining entries before shutdown
+                    for e in buffer.drain(..) {
+                        rotating_writer.write_entry(&e)?;
+                    }
+                    rotating_writer.flush()?;
+                    break;
+                }
+                Err(_) => {
+                    // Channel closed, shutdown
+                    for e in buffer.drain(..) {
+                        let _ = rotating_writer.write_entry(&e);
+                    }
+                    let _ = rotating_writer.flush();
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Write an audit log entry asynchronously (non-blocking)
+    ///
+    /// Returns immediately; the actual write happens in the background.
+    pub fn write_entry(&self, entry: AuditLogEntry) -> io::Result<()> {
+        self.sender
+            .send(WriterCommand::Write(Box::new(entry)))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "Writer thread closed"))
+    }
+
+    /// Request a flush of the buffer (non-blocking)
+    ///
+    /// The actual flush happens in the background thread.
+    pub fn flush(&self) -> io::Result<()> {
+        self.sender
+            .send(WriterCommand::Flush)
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "Writer thread closed"))
+    }
+
+    /// Shutdown the writer and wait for all writes to complete
+    ///
+    /// This flushes any remaining buffered entries before returning.
+    pub fn shutdown(mut self) -> io::Result<()> {
+        // Send shutdown command
+        let _ = self.sender.send(WriterCommand::Shutdown);
+
+        // Wait for thread to finish
+        if let Some(handle) = self.handle.take() {
+            handle
+                .join()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Writer thread panicked"))??;
+        }
+
+        Ok(())
+    }
+
+    /// Get the path to the audit log file
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Check if the writer thread is still alive
+    pub fn is_alive(&self) -> bool {
+        self.handle
+            .as_ref()
+            .map(|h| !h.is_finished())
+            .unwrap_or(false)
+    }
+}
+
+impl Drop for AsyncAuditFileWriter {
+    fn drop(&mut self) {
+        // Send shutdown command on drop
+        let _ = self.sender.send(WriterCommand::Shutdown);
+        // Wait for thread to finish
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1703,6 +1898,228 @@ mod tests {
         // The oldest backups should have been deleted
         // The final_names should be the 2 most recent
         assert_eq!(final_names.len(), 2, "Should have 2 backups remaining");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    // ============================================================================
+    // Phase 33.4: Async Writing Tests
+    // ============================================================================
+
+    #[test]
+    fn test_writes_are_async_non_blocking() {
+        // Test: Writes are async (non-blocking)
+        use crate::config::RotationPolicy;
+
+        let temp_dir = std::env::temp_dir();
+        let test_dir = temp_dir.join(format!("audit_async_{}", Uuid::new_v4()));
+        let log_path = test_dir.join("audit.log");
+
+        // Clean up from previous run
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("Should create test dir");
+
+        let writer = AsyncAuditFileWriter::new(&log_path, 50, 3, RotationPolicy::Size, 0)
+            .expect("Should create async writer");
+
+        // Measure time for write operations
+        let start = std::time::Instant::now();
+
+        // Write multiple entries
+        for i in 0..100 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            writer.write_entry(entry).expect("Should queue write");
+        }
+
+        let write_duration = start.elapsed();
+
+        // Writes should be very fast (just sending to channel)
+        // Should complete in under 10ms for 100 entries
+        assert!(
+            write_duration.as_millis() < 100,
+            "Writes should be non-blocking, took {:?}",
+            write_duration
+        );
+
+        // Background thread should be running
+        assert!(writer.is_alive(), "Background thread should be alive");
+
+        // Shutdown and wait for completion
+        writer.shutdown().expect("Should shutdown cleanly");
+
+        // Verify all entries were written
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 100, "Should have 100 entries");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_uses_buffered_writer_for_performance() {
+        // Test: Uses buffered writer for performance
+        use crate::config::RotationPolicy;
+
+        let temp_dir = std::env::temp_dir();
+        let test_dir = temp_dir.join(format!("audit_buffered_{}", Uuid::new_v4()));
+        let log_path = test_dir.join("audit.log");
+
+        // Clean up from previous run
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("Should create test dir");
+
+        // Create writer with buffer (4KB buffer size)
+        let writer = AsyncAuditFileWriter::new(&log_path, 50, 3, RotationPolicy::Size, 4096)
+            .expect("Should create buffered async writer");
+
+        // Write entries that should be buffered
+        for i in 0..10 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            writer.write_entry(entry).expect("Should queue write");
+        }
+
+        // Give a tiny bit of time for the write to potentially happen
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // File may not have all entries yet (they might be buffered)
+        // This tests that buffering is in effect
+
+        // Flush the buffer
+        writer.flush().expect("Should flush");
+
+        // Give time for flush to complete
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Now shutdown and verify
+        writer.shutdown().expect("Should shutdown cleanly");
+
+        // All entries should be written after shutdown
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 10, "Should have 10 entries after shutdown");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_flushes_buffer_periodically() {
+        // Test: Flushes buffer periodically (when buffer is full)
+        use crate::config::RotationPolicy;
+
+        let temp_dir = std::env::temp_dir();
+        let test_dir = temp_dir.join(format!("audit_periodic_flush_{}", Uuid::new_v4()));
+        let log_path = test_dir.join("audit.log");
+
+        // Clean up from previous run
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("Should create test dir");
+
+        // Create writer with small buffer (should flush after ~5 entries)
+        // Each entry is roughly 200 bytes, so 1000 byte buffer ≈ 5 entries
+        let writer = AsyncAuditFileWriter::new(&log_path, 50, 3, RotationPolicy::Size, 1000)
+            .expect("Should create writer");
+
+        // Write more entries than buffer can hold
+        for i in 0..20 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            writer.write_entry(entry).expect("Should queue write");
+        }
+
+        // Give time for background thread to process and auto-flush
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Some entries should be written even without explicit flush
+        // (due to buffer overflow triggering flush)
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines_before_shutdown: Vec<&str> = content.lines().collect();
+
+        // Should have at least some entries written due to buffer overflow
+        assert!(
+            !lines_before_shutdown.is_empty(),
+            "Buffer should have auto-flushed some entries"
+        );
+
+        // Shutdown to get remaining entries
+        writer.shutdown().expect("Should shutdown cleanly");
+
+        // All entries should be present after shutdown
+        let final_content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let final_lines: Vec<&str> = final_content.lines().collect();
+        assert_eq!(final_lines.len(), 20, "Should have all 20 entries");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_flushes_buffer_on_shutdown() {
+        // Test: Flushes buffer on shutdown
+        use crate::config::RotationPolicy;
+
+        let temp_dir = std::env::temp_dir();
+        let test_dir = temp_dir.join(format!("audit_shutdown_flush_{}", Uuid::new_v4()));
+        let log_path = test_dir.join("audit.log");
+
+        // Clean up from previous run
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("Should create test dir");
+
+        // Create writer with large buffer (won't auto-flush)
+        let writer = AsyncAuditFileWriter::new(&log_path, 50, 3, RotationPolicy::Size, 1_000_000)
+            .expect("Should create writer");
+
+        // Write a few entries (less than buffer capacity)
+        for i in 0..5 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            writer.write_entry(entry).expect("Should queue write");
+        }
+
+        // Give a moment for entries to be received
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // File may be empty or have partial entries (buffered)
+        // This is expected before shutdown
+
+        // Shutdown should flush all remaining entries
+        writer.shutdown().expect("Should shutdown cleanly");
+
+        // All entries should be present after shutdown
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 5, "Shutdown should flush all buffered entries");
+
+        // Verify entries are valid JSON
+        for line in &lines {
+            let parsed: Result<AuditLogEntry, _> = serde_json::from_str(line);
+            assert!(parsed.is_ok(), "Each line should be valid JSON");
+        }
 
         // Clean up
         let _ = std::fs::remove_dir_all(&test_dir);

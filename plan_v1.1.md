@@ -2452,10 +2452,10 @@ services:
 - [x] Test: Deletes oldest files when limit exceeded (src/audit/mod.rs::test_deletes_oldest_files_when_limit_exceeded)
 
 ### Async Writing
-- [ ] Test: Writes are async (non-blocking)
-- [ ] Test: Uses buffered writer for performance
-- [ ] Test: Flushes buffer periodically
-- [ ] Test: Flushes buffer on shutdown
+- [x] Test: Writes are async (non-blocking) (src/audit/mod.rs::test_writes_are_async_non_blocking)
+- [x] Test: Uses buffered writer for performance (src/audit/mod.rs::test_uses_buffered_writer_for_performance)
+- [x] Test: Flushes buffer periodically (src/audit/mod.rs::test_flushes_buffer_periodically)
+- [x] Test: Flushes buffer on shutdown (src/audit/mod.rs::test_flushes_buffer_on_shutdown)
 
 ---
 
