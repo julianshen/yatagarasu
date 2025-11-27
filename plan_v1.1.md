@@ -2071,7 +2071,7 @@ buckets:
 - [x] Test: Can parse `opa_policy_path` (e.g., "yatagarasu/authz/allow")
 - [x] Test: Can parse `opa_timeout_ms` (default: 100ms)
 - [x] Test: Can parse `opa_cache_ttl_seconds` (default: 60)
-- [ ] Test: Validates OPA URL format
+- [x] Test: Validates OPA URL format
 - [ ] Test: Rejects invalid OPA configuration
 
 ### Environment Variable Substitution
