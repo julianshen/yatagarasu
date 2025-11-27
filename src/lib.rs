@@ -9,6 +9,7 @@ pub mod config;
 pub mod error;
 pub mod logging;
 pub mod metrics; // Phase 18: Prometheus Metrics
+pub mod observability; // Phase 34: Enhanced Observability
 pub mod opa; // Phase 32: OPA Integration
 pub mod pipeline; // Phase 13: Request Pipeline Integration
 pub mod proxy;

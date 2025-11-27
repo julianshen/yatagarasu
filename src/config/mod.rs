@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::cache::{BucketCacheOverride, CacheConfig};
+use crate::observability::ObservabilityConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -17,6 +18,9 @@ pub struct Config {
     pub cache: Option<CacheConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audit_log: Option<AuditLogConfig>,
+    /// Observability configuration (tracing, request logging, slow queries)
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
     #[serde(skip)]
     pub generation: u64, // Config version, increments on reload
 }
@@ -3232,5 +3236,86 @@ audit_log:
             s3_config.export_interval_seconds, 60,
             "default export_interval_seconds should be 60"
         );
+    }
+
+    #[test]
+    fn test_config_has_observability_section() {
+        // Test 1: Config without observability should use defaults
+        let yaml_without_observability = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml_without_observability).unwrap();
+
+        // Should use defaults
+        assert!(
+            !config.observability.tracing.enabled,
+            "tracing should be disabled by default"
+        );
+        assert!(
+            !config.observability.request_logging.log_requests,
+            "request logging should be disabled by default"
+        );
+        assert!(
+            !config.observability.slow_query.enabled,
+            "slow query logging should be disabled by default"
+        );
+    }
+
+    #[test]
+    fn test_config_can_parse_observability_section() {
+        let yaml_with_observability = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+observability:
+  tracing:
+    enabled: true
+    exporter: otlp
+    otlp_endpoint: "http://localhost:4317"
+    service_name: my-proxy
+    sampling_ratio: 0.5
+  request_logging:
+    log_requests: true
+    log_responses: true
+    exclude_paths:
+      - "/health"
+      - "/metrics"
+    redact_headers:
+      - authorization
+  slow_query:
+    enabled: true
+    threshold_ms: 500
+    include_breakdown: true
+"#;
+        let config = Config::from_yaml_with_env(yaml_with_observability).unwrap();
+
+        // Verify tracing config
+        assert!(config.observability.tracing.enabled);
+        assert_eq!(config.observability.tracing.exporter, "otlp");
+        assert_eq!(
+            config.observability.tracing.otlp_endpoint,
+            Some("http://localhost:4317".to_string())
+        );
+        assert_eq!(config.observability.tracing.service_name, "my-proxy");
+        assert!((config.observability.tracing.sampling_ratio - 0.5).abs() < f64::EPSILON);
+
+        // Verify request logging config
+        assert!(config.observability.request_logging.log_requests);
+        assert!(config.observability.request_logging.log_responses);
+        assert_eq!(config.observability.request_logging.exclude_paths.len(), 2);
+        assert!(config
+            .observability
+            .request_logging
+            .redact_headers
+            .contains(&"authorization".to_string()));
+
+        // Verify slow query config
+        assert!(config.observability.slow_query.enabled);
+        assert_eq!(config.observability.slow_query.threshold_ms, 500);
+        assert!(config.observability.slow_query.include_breakdown);
     }
 }

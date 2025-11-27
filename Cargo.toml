@@ -84,6 +84,12 @@ reqwest = { version = "0.11", features = ["json"] }
 # System utilities
 hostname = "0.4"
 
+# OpenTelemetry (Phase 34: Enhanced Observability)
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["tonic", "grpc-tonic"] }
+tracing-opentelemetry = "0.28"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Using low-level io-uring instead of tokio-uring
 # tokio-uring has !Send futures (uses Rc<T>) which conflicts with async_trait

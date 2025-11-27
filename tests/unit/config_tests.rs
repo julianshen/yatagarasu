@@ -2,6 +2,7 @@
 // Extracted from src/config/mod.rs for improved readability
 
 use yatagarasu::config::*;
+use yatagarasu::observability::ObservabilityConfig;
 
 fn test_can_create_empty_config_struct() {
     let _config = Config {
@@ -17,6 +18,7 @@ fn test_can_create_empty_config_struct() {
         jwt: None,
         cache: None,
         audit_log: None,
+        observability: ObservabilityConfig::default(),
         generation: 0,
     };
 }
