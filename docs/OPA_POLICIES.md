@@ -85,6 +85,10 @@ Yatagarasu sends the following input to OPA for each authorization decision:
 
 ## Example Rego Policies
 
+> **Note:** These examples use modern Rego v1 syntax which requires the `if` keyword
+> before rule bodies. Older Rego syntax without `if` is deprecated and will not work
+> with recent OPA versions (0.55+). See the [OPA Rego v1 migration guide](https://www.openpolicyagent.org/docs/latest/opa-1/) for details.
+
 ### Basic Admin Role Policy
 
 ```rego
@@ -94,7 +98,7 @@ package yatagarasu.authz
 default allow = false
 
 # Allow admins to access everything
-allow {
+allow if {
     input.jwt_claims.roles[_] == "admin"
 }
 ```
@@ -107,12 +111,12 @@ package yatagarasu.authz
 default allow = false
 
 # Allow users to access their own department's files
-allow {
+allow if {
     input.jwt_claims.department == path_department
 }
 
 # Extract department from path: /products/{department}/file.txt
-path_department = dept {
+path_department := dept if {
     parts := split(input.path, "/")
     count(parts) > 2
     dept := parts[2]
@@ -127,21 +131,21 @@ package yatagarasu.authz
 default allow = false
 
 # Admins can access everything
-allow {
+allow if {
     input.jwt_claims.roles[_] == "admin"
 }
 
 # Users can access their department's files
-allow {
+allow if {
     input.jwt_claims.department == path_department
 }
 
 # Managers can access any department
-allow {
+allow if {
     input.jwt_claims.roles[_] == "manager"
 }
 
-path_department = dept {
+path_department := dept if {
     parts := split(input.path, "/")
     count(parts) > 2
     dept := parts[2]
@@ -156,12 +160,12 @@ package yatagarasu.authz
 default allow = false
 
 # Contractors can only access during business hours (9 AM - 5 PM)
-allow {
+allow if {
     input.jwt_claims.roles[_] == "contractor"
     is_business_hours
 }
 
-is_business_hours {
+is_business_hours if {
     now := time.now_ns()
     [hour, _, _] := time.clock(now)
     hour >= 9
@@ -169,7 +173,7 @@ is_business_hours {
 }
 
 # Full-time employees have 24/7 access
-allow {
+allow if {
     input.jwt_claims.employment_type == "full-time"
 }
 ```
@@ -182,21 +186,21 @@ package yatagarasu.authz
 default allow = false
 
 # Internal users must access from internal network
-allow {
+allow if {
     input.jwt_claims.roles[_] == "internal"
     is_internal_ip
 }
 
-is_internal_ip {
+is_internal_ip if {
     net.cidr_contains("10.0.0.0/8", input.client_ip)
 }
 
-is_internal_ip {
+is_internal_ip if {
     net.cidr_contains("192.168.0.0/16", input.client_ip)
 }
 
 # External users can access from anywhere
-allow {
+allow if {
     input.jwt_claims.roles[_] == "external"
 }
 ```
@@ -209,18 +213,18 @@ package yatagarasu.authz
 default allow = false
 
 # Public bucket - allow all authenticated users
-allow {
+allow if {
     input.bucket == "public-assets"
 }
 
 # Private bucket - admins only
-allow {
+allow if {
     input.bucket == "private-data"
     input.jwt_claims.roles[_] == "admin"
 }
 
 # Products bucket - product team members
-allow {
+allow if {
     input.bucket == "products"
     input.jwt_claims.team == "product"
 }
@@ -234,22 +238,22 @@ package yatagarasu.authz
 default allow = false
 
 # Allow access to public directories
-allow {
+allow if {
     startswith(input.path, "/public/")
 }
 
 # Block access to hidden files
-deny {
+deny if {
     contains(input.path, "/.")
 }
 
 # Final decision
-allow {
+allow if {
     not deny
     some_positive_rule
 }
 
-some_positive_rule {
+some_positive_rule if {
     input.jwt_claims.authenticated == true
 }
 ```
@@ -259,13 +263,13 @@ some_positive_rule {
 ```rego
 package yatagarasu.authz
 
-default allow = {
+default allow := {
     "allowed": false,
     "reason": "No matching policy rule"
 }
 
 # Admin access
-allow = result {
+allow := result if {
     input.jwt_claims.roles[_] == "admin"
     result := {
         "allowed": true,
@@ -274,7 +278,7 @@ allow = result {
 }
 
 # Department access
-allow = result {
+allow := result if {
     input.jwt_claims.department == path_department
     result := {
         "allowed": true,
@@ -282,7 +286,7 @@ allow = result {
     }
 }
 
-path_department = dept {
+path_department := dept if {
     parts := split(input.path, "/")
     count(parts) > 2
     dept := parts[2]
@@ -453,7 +457,7 @@ Create `_test.rego` files alongside your policies:
 # policies/authz_test.rego
 package yatagarasu.authz
 
-test_admin_allowed {
+test_admin_allowed if {
     allow with input as {
         "jwt_claims": {"roles": ["admin"]},
         "bucket": "products",
@@ -462,7 +466,7 @@ test_admin_allowed {
     }
 }
 
-test_non_admin_denied {
+test_non_admin_denied if {
     not allow with input as {
         "jwt_claims": {"roles": ["user"]},
         "bucket": "products",

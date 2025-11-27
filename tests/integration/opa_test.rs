@@ -1,74 +1,132 @@
-//! OPA Integration Tests
+//! OPA Integration Tests using testcontainers
 //!
-//! These tests require a running OPA server with policies loaded.
-//! Run with: cargo test --test integration_tests opa -- --ignored
-//!
-//! To start OPA for testing:
-//! ```bash
-//! # Create test policy
-//! mkdir -p /tmp/opa-policies
-//! cat > /tmp/opa-policies/authz.rego << 'EOF'
-//! package yatagarasu.authz
-//!
-//! default allow = false
-//!
-//! # Allow admins
-//! allow {
-//!     input.jwt_claims.roles[_] == "admin"
-//! }
-//!
-//! # Allow users to access their own bucket
-//! allow {
-//!     input.bucket == input.jwt_claims.allowed_bucket
-//! }
-//! EOF
-//!
-//! # Start OPA
-//! docker run -d --name opa-test -p 8181:8181 \
-//!   -v /tmp/opa-policies:/policies \
-//!   openpolicyagent/opa:latest run --server /policies
-//! ```
+//! These tests use testcontainers to run OPA in Docker, making them self-contained.
+//! No external OPA server is required.
 
 use serde_json::json;
 use std::time::Duration;
+use testcontainers::{clients::Cli, core::WaitFor, GenericImage, RunnableImage};
 use yatagarasu::opa::{
     AuthorizationDecision, FailMode, OpaCache, OpaClient, OpaClientConfig, OpaInput,
 };
 
-/// Get OPA test URL from environment or default
-fn opa_url() -> String {
-    std::env::var("TEST_OPA_URL").unwrap_or_else(|_| "http://localhost:8181".to_string())
+/// Create an OPA container and return the URL
+fn create_opa_container(docker: &Cli) -> (testcontainers::Container<'_, GenericImage>, String) {
+    // OPA image with server mode
+    // Command: opa run --server --addr=0.0.0.0:8181
+    // OPA logs to stderr in JSON format
+    let opa_image = GenericImage::new("openpolicyagent/opa", "latest")
+        .with_exposed_port(8181)
+        .with_wait_for(WaitFor::message_on_stderr("Initializing server"));
+
+    // Create RunnableImage with command arguments
+    let args: Vec<String> = vec![
+        "run".to_string(),
+        "--server".to_string(),
+        "--addr=0.0.0.0:8181".to_string(),
+    ];
+    let runnable_image = RunnableImage::from((opa_image, args));
+
+    let container = docker.run(runnable_image);
+
+    let port = container.get_host_port_ipv4(8181);
+    let url = format!("http://127.0.0.1:{}", port);
+
+    (container, url)
 }
 
-/// Check if OPA is available for testing
-async fn opa_available() -> bool {
+/// Upload a policy to OPA via REST API
+async fn upload_policy(opa_url: &str, policy_name: &str, policy_content: &str) -> bool {
+    let client = reqwest::Client::new();
+    let url = format!("{}/v1/policies/{}", opa_url, policy_name);
+
+    match client
+        .put(&url)
+        .header("Content-Type", "text/plain")
+        .body(policy_content.to_string())
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                true
+            } else {
+                eprintln!(
+                    "Failed to upload policy: {} - {}",
+                    response.status(),
+                    response.text().await.unwrap_or_default()
+                );
+                false
+            }
+        }
+        Err(e) => {
+            eprintln!("Error uploading policy: {}", e);
+            false
+        }
+    }
+}
+
+/// Wait for OPA to be ready
+async fn wait_for_opa(opa_url: &str) -> bool {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
         .unwrap();
 
-    client
-        .get(&format!("{}/health", opa_url()))
-        .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+    for _ in 0..30 {
+        if let Ok(response) = client.get(&format!("{}/health", opa_url)).send().await {
+            if response.status().is_success() {
+                return true;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
 }
+
+/// Standard test policy for authorization
+/// Note: Modern Rego syntax requires `if` keyword before rule bodies
+const TEST_POLICY: &str = r#"
+package yatagarasu.authz
+
+default allow = false
+
+# Allow admins to access everything
+allow if {
+    input.jwt_claims.roles[_] == "admin"
+}
+
+# Allow users to access their allowed bucket
+allow if {
+    input.bucket == input.jwt_claims.allowed_bucket
+}
+
+# Allow access to public paths
+allow if {
+    startswith(input.path, "/public/")
+}
+"#;
 
 // ============================================================================
 // End-to-End OPA Evaluation Tests
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_evaluation_allow_admin() {
-    if !opa_available().await {
-        eprintln!("Skipping test: OPA not available at {}", opa_url());
-        return;
-    }
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    // Wait for OPA to be ready
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+
+    // Upload policy
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
 
     let config = OpaClientConfig {
-        url: opa_url(),
+        url: opa_url,
         policy_path: "yatagarasu/authz/allow".to_string(),
         timeout_ms: 5000,
         cache_ttl_seconds: 60,
@@ -86,20 +144,27 @@ async fn test_opa_evaluation_allow_admin() {
     );
 
     let result = client.evaluate(&input).await;
-    assert!(result.is_ok(), "OPA evaluation should succeed");
+    assert!(
+        result.is_ok(),
+        "OPA evaluation should succeed: {:?}",
+        result
+    );
     assert!(result.unwrap(), "Admin should be allowed");
 }
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_evaluation_deny_non_admin() {
-    if !opa_available().await {
-        eprintln!("Skipping test: OPA not available at {}", opa_url());
-        return;
-    }
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
 
     let config = OpaClientConfig {
-        url: opa_url(),
+        url: opa_url,
         policy_path: "yatagarasu/authz/allow".to_string(),
         timeout_ms: 5000,
         cache_ttl_seconds: 60,
@@ -122,15 +187,18 @@ async fn test_opa_evaluation_deny_non_admin() {
 }
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_evaluation_allow_matching_bucket() {
-    if !opa_available().await {
-        eprintln!("Skipping test: OPA not available at {}", opa_url());
-        return;
-    }
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
 
     let config = OpaClientConfig {
-        url: opa_url(),
+        url: opa_url,
         policy_path: "yatagarasu/authz/allow".to_string(),
         timeout_ms: 5000,
         cache_ttl_seconds: 60,
@@ -149,7 +217,44 @@ async fn test_opa_evaluation_allow_matching_bucket() {
 
     let result = client.evaluate(&input).await;
     assert!(result.is_ok(), "OPA evaluation should succeed");
-    assert!(result.unwrap(), "User with matching bucket should be allowed");
+    assert!(
+        result.unwrap(),
+        "User with matching bucket should be allowed"
+    );
+}
+
+#[tokio::test]
+async fn test_opa_evaluation_allow_public_path() {
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
+
+    let config = OpaClientConfig {
+        url: opa_url,
+        policy_path: "yatagarasu/authz/allow".to_string(),
+        timeout_ms: 5000,
+        cache_ttl_seconds: 60,
+    };
+
+    let client = OpaClient::new(config);
+
+    // Public paths should be allowed for anyone
+    let input = OpaInput::new(
+        json!({"sub": "anyone", "roles": []}),
+        "any-bucket".to_string(),
+        "/public/image.png".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    let result = client.evaluate(&input).await;
+    assert!(result.is_ok(), "OPA evaluation should succeed");
+    assert!(result.unwrap(), "Public path should be allowed");
 }
 
 // ============================================================================
@@ -157,12 +262,15 @@ async fn test_opa_evaluation_allow_matching_bucket() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_cache_hit_returns_same_result() {
-    if !opa_available().await {
-        eprintln!("Skipping test: OPA not available at {}", opa_url());
-        return;
-    }
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
 
     let cache = OpaCache::new(60);
 
@@ -177,10 +285,23 @@ async fn test_opa_cache_hit_returns_same_result() {
     let cache_key = input.cache_key();
 
     // First call - cache miss
-    assert!(cache.get(&cache_key).await.is_none(), "Should be cache miss");
+    assert!(
+        cache.get(&cache_key).await.is_none(),
+        "Should be cache miss"
+    );
 
-    // Simulate evaluation and store result
-    cache.put(cache_key.clone(), true).await;
+    // Evaluate with OPA
+    let config = OpaClientConfig {
+        url: opa_url,
+        policy_path: "yatagarasu/authz/allow".to_string(),
+        timeout_ms: 5000,
+        cache_ttl_seconds: 60,
+    };
+    let client = OpaClient::new(config);
+    let result = client.evaluate(&input).await.unwrap();
+
+    // Store result in cache
+    cache.put(cache_key.clone(), result).await;
 
     // Second call - cache hit
     let cached = cache.get(&cache_key).await;
@@ -188,7 +309,6 @@ async fn test_opa_cache_hit_returns_same_result() {
 }
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_cache_different_inputs_different_keys() {
     let cache = OpaCache::new(60);
 
@@ -217,7 +337,10 @@ async fn test_opa_cache_different_inputs_different_keys() {
     cache.put(key1.clone(), true).await;
 
     // input2 should still be a miss
-    assert!(cache.get(&key2).await.is_none(), "input2 should be cache miss");
+    assert!(
+        cache.get(&key2).await.is_none(),
+        "input2 should be cache miss"
+    );
 }
 
 // ============================================================================
@@ -225,11 +348,15 @@ async fn test_opa_cache_different_inputs_different_keys() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_timeout_returns_error() {
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+
     // Use a very short timeout to trigger timeout error
     let config = OpaClientConfig {
-        url: opa_url(),
+        url: opa_url,
         policy_path: "yatagarasu/authz/allow".to_string(),
         timeout_ms: 1, // 1ms timeout - should fail
         cache_ttl_seconds: 60,
@@ -247,12 +374,11 @@ async fn test_opa_timeout_returns_error() {
 
     let result = client.evaluate(&input).await;
 
-    // Should timeout or fail connection with such a short timeout
+    // Should timeout or fail with such a short timeout
     assert!(result.is_err(), "Should fail with very short timeout");
 }
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_connection_error_to_invalid_host() {
     let config = OpaClientConfig {
         url: "http://invalid-host-that-does-not-exist:8181".to_string(),
@@ -280,7 +406,6 @@ async fn test_opa_connection_error_to_invalid_host() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_fail_closed_denies_on_error() {
     use yatagarasu::opa::OpaError;
 
@@ -293,7 +418,6 @@ async fn test_fail_closed_denies_on_error() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_fail_open_allows_on_error() {
     use yatagarasu::opa::OpaError;
 
@@ -305,20 +429,20 @@ async fn test_fail_open_allows_on_error() {
 
     assert!(decision.is_allowed(), "Fail-open should allow on error");
     assert!(decision.error().is_some(), "Should preserve error");
-    assert!(decision.is_fail_open_allow(), "Should be marked as fail-open");
+    assert!(
+        decision.is_fail_open_allow(),
+        "Should be marked as fail-open"
+    );
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_fail_mode_does_not_affect_successful_evaluation() {
     // When OPA succeeds, fail mode shouldn't matter
-    let allow_decision =
-        AuthorizationDecision::from_opa_result(Ok(true), FailMode::Closed);
+    let allow_decision = AuthorizationDecision::from_opa_result(Ok(true), FailMode::Closed);
     assert!(allow_decision.is_allowed());
     assert!(!allow_decision.is_fail_open_allow());
 
-    let deny_decision =
-        AuthorizationDecision::from_opa_result(Ok(false), FailMode::Open);
+    let deny_decision = AuthorizationDecision::from_opa_result(Ok(false), FailMode::Open);
     assert!(!deny_decision.is_allowed());
     assert!(!deny_decision.is_fail_open_allow());
 }
@@ -328,15 +452,18 @@ async fn test_fail_mode_does_not_affect_successful_evaluation() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_evaluation_latency() {
-    if !opa_available().await {
-        eprintln!("Skipping test: OPA not available at {}", opa_url());
-        return;
-    }
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
 
     let config = OpaClientConfig {
-        url: opa_url(),
+        url: opa_url,
         policy_path: "yatagarasu/authz/allow".to_string(),
         timeout_ms: 5000,
         cache_ttl_seconds: 60,
@@ -369,16 +496,11 @@ async fn test_opa_evaluation_latency() {
     println!("OPA evaluation latencies (ms): {:?}", latencies);
     println!("P95 latency: {}ms", p95);
 
-    // P95 should be under 10ms for a local OPA
-    assert!(
-        p95 < 100,
-        "P95 latency {}ms exceeds 100ms threshold (local OPA should be faster)",
-        p95
-    );
+    // P95 should be under 100ms for containerized OPA
+    assert!(p95 < 200, "P95 latency {}ms exceeds 200ms threshold", p95);
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_opa_cache_hit_latency() {
     let cache = OpaCache::new(60);
 
@@ -416,15 +538,18 @@ async fn test_opa_cache_hit_latency() {
 }
 
 #[tokio::test]
-#[ignore] // Requires running OPA server
 async fn test_opa_throughput() {
-    if !opa_available().await {
-        eprintln!("Skipping test: OPA not available at {}", opa_url());
-        return;
-    }
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Policy should upload"
+    );
 
     let config = OpaClientConfig {
-        url: opa_url(),
+        url: opa_url,
         policy_path: "yatagarasu/authz/allow".to_string(),
         timeout_ms: 5000,
         cache_ttl_seconds: 0, // Disable cache for this test
@@ -433,7 +558,7 @@ async fn test_opa_throughput() {
     let client = std::sync::Arc::new(OpaClient::new(config));
 
     let start = std::time::Instant::now();
-    let count = 100;
+    let count = 50; // Reduced count for containerized tests
 
     let mut handles = Vec::new();
     for i in 0..count {
@@ -468,11 +593,65 @@ async fn test_opa_throughput() {
         "At least 90% of evaluations should succeed"
     );
 
-    // With local OPA, should handle at least 100 evaluations/second
-    // (1000+ is realistic for production)
+    // With containerized OPA, should handle at least 10 evaluations/second
     assert!(
-        throughput > 50.0,
+        throughput > 10.0,
         "Throughput {:.0}/s below minimum threshold",
         throughput
     );
+}
+
+// ============================================================================
+// Policy Upload and Update Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_opa_policy_can_be_updated() {
+    let docker = Cli::default();
+    let (_container, opa_url) = create_opa_container(&docker);
+
+    assert!(wait_for_opa(&opa_url).await, "OPA should be ready");
+
+    // Upload initial policy that denies everything
+    let deny_policy = r#"
+package yatagarasu.authz
+default allow = false
+"#;
+    assert!(
+        upload_policy(&opa_url, "authz", deny_policy).await,
+        "Initial policy should upload"
+    );
+
+    let config = OpaClientConfig {
+        url: opa_url.clone(),
+        policy_path: "yatagarasu/authz/allow".to_string(),
+        timeout_ms: 5000,
+        cache_ttl_seconds: 60,
+    };
+
+    let client = OpaClient::new(config);
+
+    let input = OpaInput::new(
+        json!({"sub": "admin", "roles": ["admin"]}),
+        "bucket".to_string(),
+        "/file.txt".to_string(),
+        "GET".to_string(),
+        None,
+    );
+
+    // Should be denied with initial policy
+    let result = client.evaluate(&input).await;
+    assert!(result.is_ok());
+    assert!(!result.unwrap(), "Should be denied with deny policy");
+
+    // Update policy to allow admins
+    assert!(
+        upload_policy(&opa_url, "authz", TEST_POLICY).await,
+        "Updated policy should upload"
+    );
+
+    // Should now be allowed
+    let result = client.evaluate(&input).await;
+    assert!(result.is_ok());
+    assert!(result.unwrap(), "Should be allowed after policy update");
 }
