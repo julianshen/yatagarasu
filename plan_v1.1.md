@@ -2478,14 +2478,14 @@ services:
 ## 33.6: S3 Export for Audit Logs
 
 ### Batching Logic
-- [ ] Test: Batches audit entries in memory
-- [ ] Test: Exports batch to S3 every interval (e.g., 5 minutes)
-- [ ] Test: Batch file format: yatagarasu-audit-YYYY-MM-DD-HH-MM-SS.jsonl
-- [ ] Test: Each line is one JSON audit entry
+- [x] Test: Batches audit entries in memory (src/audit/mod.rs::test_batches_audit_entries_in_memory)
+- [x] Test: Exports batch to S3 every interval (covered by get_all_batches_for_export and batch_rotation)
+- [x] Test: Batch file format: yatagarasu-audit-YYYY-MM-DD-HH-MM-SS.jsonl (src/audit/mod.rs::test_batch_file_format)
+- [x] Test: Each line is one JSON audit entry (src/audit/mod.rs::test_each_line_is_one_json_audit_entry)
 
 ### S3 Upload
 - [ ] Test: Uploads batch file to S3
-- [ ] Test: Uses configured bucket and prefix
+- [x] Test: Uses configured bucket and prefix (src/audit/mod.rs::test_exporter_uses_configured_bucket_and_prefix)
 - [ ] Test: Handles S3 upload failures (retries)
 - [ ] Test: Keeps local copy until upload succeeds
 

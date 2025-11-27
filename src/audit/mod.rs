@@ -1107,6 +1107,231 @@ impl SyslogWriter {
     }
 }
 
+// ============================================================================
+// S3 Audit Export (Phase 33.6)
+// ============================================================================
+
+use std::sync::{Arc, Mutex};
+
+/// Configuration for S3 audit export
+#[derive(Debug, Clone)]
+pub struct S3AuditExportConfig {
+    /// S3 bucket name for audit logs
+    pub bucket: String,
+    /// Prefix path within the bucket (e.g., "audit-logs/")
+    pub prefix: String,
+    /// Export interval in seconds
+    pub export_interval_secs: u64,
+    /// Maximum entries per batch before forced export
+    pub max_batch_size: usize,
+    /// Number of retries for failed uploads
+    pub max_retries: u32,
+}
+
+impl Default for S3AuditExportConfig {
+    fn default() -> Self {
+        Self {
+            bucket: "audit-logs".to_string(),
+            prefix: "yatagarasu/".to_string(),
+            export_interval_secs: 300, // 5 minutes
+            max_batch_size: 10000,
+            max_retries: 3,
+        }
+    }
+}
+
+/// Audit batch holding entries ready for export
+#[derive(Debug)]
+pub struct AuditBatch {
+    /// Entries in this batch
+    entries: Vec<AuditLogEntry>,
+    /// Timestamp when batch was created
+    created_at: DateTime<Utc>,
+}
+
+impl AuditBatch {
+    /// Create a new empty batch
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Add an entry to the batch
+    pub fn add(&mut self, entry: AuditLogEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Get the number of entries in the batch
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if the batch is empty
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get the entries in this batch
+    pub fn entries(&self) -> &[AuditLogEntry] {
+        &self.entries
+    }
+
+    /// Take all entries from this batch (empties the batch)
+    pub fn take_entries(&mut self) -> Vec<AuditLogEntry> {
+        std::mem::take(&mut self.entries)
+    }
+
+    /// Get the batch creation timestamp
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    /// Format entries as JSONL (one JSON per line)
+    pub fn to_jsonl(&self) -> String {
+        self.entries
+            .iter()
+            .filter_map(|entry| serde_json::to_string(entry).ok())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Generate the S3 object key for this batch
+    ///
+    /// Format: {prefix}yatagarasu-audit-YYYY-MM-DD-HH-MM-SS.jsonl
+    pub fn generate_object_key(&self, prefix: &str) -> String {
+        let timestamp = self.created_at.format("%Y-%m-%d-%H-%M-%S");
+        format!("{}yatagarasu-audit-{}.jsonl", prefix, timestamp)
+    }
+}
+
+impl Default for AuditBatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// S3 audit exporter that batches entries and uploads to S3
+///
+/// Entries are collected in memory and periodically exported to S3
+/// as JSONL files.
+pub struct S3AuditExporter {
+    /// Configuration
+    config: S3AuditExportConfig,
+    /// Current batch being filled
+    current_batch: Arc<Mutex<AuditBatch>>,
+    /// Pending batches waiting for upload
+    pending_batches: Arc<Mutex<Vec<AuditBatch>>>,
+    /// Flag indicating if exporter is running
+    running: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl std::fmt::Debug for S3AuditExporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3AuditExporter")
+            .field("config", &self.config)
+            .field(
+                "running",
+                &self.running.load(std::sync::atomic::Ordering::Relaxed),
+            )
+            .finish()
+    }
+}
+
+impl S3AuditExporter {
+    /// Create a new S3 audit exporter
+    pub fn new(config: S3AuditExportConfig) -> Self {
+        Self {
+            config,
+            current_batch: Arc::new(Mutex::new(AuditBatch::new())),
+            pending_batches: Arc::new(Mutex::new(Vec::new())),
+            running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    /// Add an audit entry to the current batch
+    pub fn add_entry(&self, entry: AuditLogEntry) {
+        let mut batch = self.current_batch.lock().unwrap();
+        batch.add(entry);
+
+        // If batch is full, rotate to pending
+        if batch.len() >= self.config.max_batch_size {
+            let full_batch = std::mem::take(&mut *batch);
+            drop(batch); // Release lock before acquiring pending lock
+            self.pending_batches.lock().unwrap().push(full_batch);
+        }
+    }
+
+    /// Get the number of entries in the current batch
+    pub fn current_batch_size(&self) -> usize {
+        self.current_batch.lock().unwrap().len()
+    }
+
+    /// Get the number of pending batches
+    pub fn pending_batch_count(&self) -> usize {
+        self.pending_batches.lock().unwrap().len()
+    }
+
+    /// Rotate the current batch to pending (for export)
+    pub fn rotate_batch(&self) -> Option<AuditBatch> {
+        let mut batch = self.current_batch.lock().unwrap();
+        if batch.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut *batch))
+    }
+
+    /// Get all pending batches (including current if not empty)
+    pub fn get_all_batches(&self) -> Vec<AuditBatch> {
+        let mut batches = Vec::new();
+
+        // Get pending batches
+        {
+            let mut pending = self.pending_batches.lock().unwrap();
+            batches.append(&mut *pending);
+        }
+
+        // Add current batch if not empty
+        if let Some(current) = self.rotate_batch() {
+            batches.push(current);
+        }
+
+        batches
+    }
+
+    /// Generate the S3 object key for a batch
+    pub fn generate_object_key(&self, batch: &AuditBatch) -> String {
+        batch.generate_object_key(&self.config.prefix)
+    }
+
+    /// Get the configured bucket name
+    pub fn bucket(&self) -> &str {
+        &self.config.bucket
+    }
+
+    /// Get the configured prefix
+    pub fn prefix(&self) -> &str {
+        &self.config.prefix
+    }
+
+    /// Get the export interval in seconds
+    pub fn export_interval_secs(&self) -> u64 {
+        self.config.export_interval_secs
+    }
+
+    /// Check if the exporter is running
+    pub fn is_running(&self) -> bool {
+        self.running.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Mark the exporter as running
+    pub fn set_running(&self, running: bool) {
+        self.running
+            .store(running, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2657,6 +2882,282 @@ mod tests {
         assert_eq!(
             write_result.unwrap_err().kind(),
             std::io::ErrorKind::NotConnected
+        );
+    }
+
+    // ============================================================================
+    // Phase 33.6: S3 Export for Audit Logs Tests
+    // ============================================================================
+
+    #[test]
+    fn test_batches_audit_entries_in_memory() {
+        // Test: Batches audit entries in memory
+        let config = S3AuditExportConfig {
+            bucket: "test-bucket".to_string(),
+            prefix: "audit/".to_string(),
+            export_interval_secs: 300,
+            max_batch_size: 100,
+            max_retries: 3,
+        };
+
+        let exporter = S3AuditExporter::new(config);
+
+        // Add multiple entries
+        for i in 0..10 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            )
+            .with_response(200, 1024, 50);
+
+            exporter.add_entry(entry);
+        }
+
+        // Verify entries are batched
+        assert_eq!(
+            exporter.current_batch_size(),
+            10,
+            "Should have 10 entries batched"
+        );
+        assert_eq!(exporter.pending_batch_count(), 0, "No pending batches yet");
+
+        // Add more entries to trigger batch rotation
+        let config2 = S3AuditExportConfig {
+            max_batch_size: 5, // Small batch size for testing
+            ..Default::default()
+        };
+        let exporter2 = S3AuditExporter::new(config2);
+
+        for i in 0..12 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            exporter2.add_entry(entry);
+        }
+
+        // Should have rotated batches (12 entries with batch size 5 = 2 full batches + 2 in current)
+        assert_eq!(
+            exporter2.pending_batch_count(),
+            2,
+            "Should have 2 pending batches"
+        );
+        assert_eq!(
+            exporter2.current_batch_size(),
+            2,
+            "Should have 2 entries in current batch"
+        );
+    }
+
+    #[test]
+    fn test_batch_file_format() {
+        // Test: Batch file format: yatagarasu-audit-YYYY-MM-DD-HH-MM-SS.jsonl
+        let mut batch = AuditBatch::new();
+
+        // Add an entry
+        let entry = AuditLogEntry::new(
+            "192.168.1.100".to_string(),
+            "bucket".to_string(),
+            "file.txt".to_string(),
+            "GET".to_string(),
+            "/path".to_string(),
+        );
+        batch.add(entry);
+
+        // Generate object key
+        let key = batch.generate_object_key("audit-logs/");
+
+        // Verify format: prefix + yatagarasu-audit-YYYY-MM-DD-HH-MM-SS.jsonl
+        assert!(
+            key.starts_with("audit-logs/yatagarasu-audit-"),
+            "Key should start with prefix and 'yatagarasu-audit-': {}",
+            key
+        );
+        assert!(
+            key.ends_with(".jsonl"),
+            "Key should end with .jsonl: {}",
+            key
+        );
+
+        // Verify timestamp format
+        let timestamp_pattern =
+            regex::Regex::new(r"yatagarasu-audit-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.jsonl$")
+                .unwrap();
+        assert!(
+            timestamp_pattern.is_match(&key),
+            "Key should contain timestamp in YYYY-MM-DD-HH-MM-SS format: {}",
+            key
+        );
+    }
+
+    #[test]
+    fn test_each_line_is_one_json_audit_entry() {
+        // Test: Each line is one JSON audit entry (JSONL format)
+        let mut batch = AuditBatch::new();
+
+        // Add multiple entries
+        for i in 0..3 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i + 1),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            )
+            .with_response(200, 1024 * (i as u64 + 1), 50);
+
+            batch.add(entry);
+        }
+
+        // Convert to JSONL
+        let jsonl = batch.to_jsonl();
+        let lines: Vec<&str> = jsonl.lines().collect();
+
+        // Should have 3 lines
+        assert_eq!(lines.len(), 3, "Should have 3 lines");
+
+        // Each line should be valid JSON
+        for (i, line) in lines.iter().enumerate() {
+            let parsed: Result<AuditLogEntry, _> = serde_json::from_str(line);
+            assert!(parsed.is_ok(), "Line {} should be valid JSON: {}", i, line);
+
+            let entry = parsed.unwrap();
+            assert_eq!(
+                entry.client_ip,
+                format!("192.168.1.{}", i + 1),
+                "Entry {} should have correct client_ip",
+                i
+            );
+        }
+
+        // Lines should NOT contain newlines within them
+        for line in &lines {
+            assert!(
+                !line.contains('\n'),
+                "Individual JSON entries should not contain newlines"
+            );
+        }
+    }
+
+    #[test]
+    fn test_exporter_uses_configured_bucket_and_prefix() {
+        // Test: Uses configured bucket and prefix
+        let config = S3AuditExportConfig {
+            bucket: "my-custom-bucket".to_string(),
+            prefix: "logs/yatagarasu/audit/".to_string(),
+            export_interval_secs: 60,
+            max_batch_size: 1000,
+            max_retries: 5,
+        };
+
+        let exporter = S3AuditExporter::new(config);
+
+        assert_eq!(exporter.bucket(), "my-custom-bucket");
+        assert_eq!(exporter.prefix(), "logs/yatagarasu/audit/");
+        assert_eq!(exporter.export_interval_secs(), 60);
+
+        // Verify object key uses the prefix
+        let mut batch = AuditBatch::new();
+        batch.add(AuditLogEntry::new(
+            "192.168.1.1".to_string(),
+            "bucket".to_string(),
+            "key".to_string(),
+            "GET".to_string(),
+            "/path".to_string(),
+        ));
+
+        let key = exporter.generate_object_key(&batch);
+        assert!(
+            key.starts_with("logs/yatagarasu/audit/yatagarasu-audit-"),
+            "Object key should use configured prefix: {}",
+            key
+        );
+    }
+
+    #[test]
+    fn test_get_all_batches_for_export() {
+        // Test: Can get all batches (pending + current) for export
+        let config = S3AuditExportConfig {
+            max_batch_size: 3,
+            ..Default::default()
+        };
+
+        let exporter = S3AuditExporter::new(config);
+
+        // Add entries to create multiple batches
+        for i in 0..8 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            exporter.add_entry(entry);
+        }
+
+        // Should have 2 pending batches (6 entries) + current batch (2 entries)
+        assert_eq!(exporter.pending_batch_count(), 2);
+        assert_eq!(exporter.current_batch_size(), 2);
+
+        // Get all batches
+        let batches = exporter.get_all_batches();
+
+        // Should have 3 batches total
+        assert_eq!(batches.len(), 3, "Should have 3 batches");
+
+        // Total entries should be 8
+        let total_entries: usize = batches.iter().map(|b| b.len()).sum();
+        assert_eq!(total_entries, 8, "Total entries should be 8");
+
+        // After getting batches, exporter should be empty
+        assert_eq!(exporter.pending_batch_count(), 0);
+        assert_eq!(exporter.current_batch_size(), 0);
+    }
+
+    #[test]
+    fn test_batch_rotation() {
+        // Test: Rotate current batch to pending
+        let config = S3AuditExportConfig::default();
+        let exporter = S3AuditExporter::new(config);
+
+        // Add some entries
+        for i in 0..5 {
+            let entry = AuditLogEntry::new(
+                format!("192.168.1.{}", i),
+                "bucket".to_string(),
+                format!("file{}.txt", i),
+                "GET".to_string(),
+                "/path".to_string(),
+            );
+            exporter.add_entry(entry);
+        }
+
+        assert_eq!(exporter.current_batch_size(), 5);
+
+        // Rotate batch
+        let rotated = exporter.rotate_batch();
+        assert!(rotated.is_some(), "Should have rotated a batch");
+        assert_eq!(
+            rotated.unwrap().len(),
+            5,
+            "Rotated batch should have 5 entries"
+        );
+
+        // Current batch should now be empty
+        assert_eq!(exporter.current_batch_size(), 0);
+
+        // Rotating empty batch returns None
+        let empty_rotation = exporter.rotate_batch();
+        assert!(
+            empty_rotation.is_none(),
+            "Empty batch rotation should return None"
         );
     }
 }
