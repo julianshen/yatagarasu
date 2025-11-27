@@ -7,6 +7,7 @@ use std::path::Path;
 
 use crate::cache::{BucketCacheOverride, CacheConfig};
 use crate::observability::ObservabilityConfig;
+use crate::security::IpFilterConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -558,6 +559,9 @@ pub struct BucketConfig {
     pub cache: Option<BucketCacheOverride>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authorization: Option<AuthorizationConfig>,
+    /// IP filtering configuration (allowlist/blocklist with CIDR support)
+    #[serde(default)]
+    pub ip_filter: IpFilterConfig,
 }
 
 /// S3 Replica configuration (for HA bucket replication)
@@ -3317,5 +3321,119 @@ observability:
         assert!(config.observability.slow_query.enabled);
         assert_eq!(config.observability.slow_query.threshold_ms, 500);
         assert!(config.observability.slow_query.include_breakdown);
+    }
+
+    #[test]
+    fn test_bucket_config_has_ip_filter_section() {
+        // Test: Bucket without ip_filter should use defaults (allow all)
+        let yaml_without_ip_filter = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "test-bucket"
+    path_prefix: "/test"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+"#;
+        let config = Config::from_yaml_with_env(yaml_without_ip_filter).unwrap();
+
+        // Should use defaults (empty allowlist and blocklist)
+        assert!(
+            config.buckets[0].ip_filter.allowlist.is_empty(),
+            "allowlist should be empty by default"
+        );
+        assert!(
+            config.buckets[0].ip_filter.blocklist.is_empty(),
+            "blocklist should be empty by default"
+        );
+    }
+
+    #[test]
+    fn test_bucket_config_can_parse_ip_filter() {
+        let yaml_with_ip_filter = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "protected-bucket"
+    path_prefix: "/protected"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+    ip_filter:
+      allowlist:
+        - "192.168.1.0/24"
+        - "10.0.0.1"
+      blocklist:
+        - "172.16.0.0/12"
+"#;
+        let config = Config::from_yaml_with_env(yaml_with_ip_filter).unwrap();
+
+        // Verify ip_filter config
+        let ip_filter = &config.buckets[0].ip_filter;
+        assert_eq!(ip_filter.allowlist.len(), 2);
+        assert_eq!(ip_filter.blocklist.len(), 1);
+        assert!(ip_filter.allowlist.contains(&"192.168.1.0/24".to_string()));
+        assert!(ip_filter.allowlist.contains(&"10.0.0.1".to_string()));
+        assert!(ip_filter.blocklist.contains(&"172.16.0.0/12".to_string()));
+    }
+
+    #[test]
+    fn test_bucket_config_ip_filter_blocklist_only() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "public-bucket"
+    path_prefix: "/public"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+    ip_filter:
+      blocklist:
+        - "192.168.100.50"
+        - "10.0.0.0/8"
+"#;
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        let ip_filter = &config.buckets[0].ip_filter;
+        assert!(ip_filter.allowlist.is_empty());
+        assert_eq!(ip_filter.blocklist.len(), 2);
+    }
+
+    #[test]
+    fn test_bucket_config_ip_filter_allowlist_only() {
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "internal-bucket"
+    path_prefix: "/internal"
+    s3:
+      bucket: "my-bucket"
+      region: "us-east-1"
+      access_key: "test-key"
+      secret_key: "test-secret"
+    ip_filter:
+      allowlist:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+"#;
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        let ip_filter = &config.buckets[0].ip_filter;
+        assert_eq!(ip_filter.allowlist.len(), 3);
+        assert!(ip_filter.blocklist.is_empty());
     }
 }

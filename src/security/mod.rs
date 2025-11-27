@@ -9,7 +9,11 @@
 //! - 413 Payload Too Large - Request body exceeds limit
 //! - 431 Request Header Fields Too Large - Headers exceed limit
 //! - 400 Bad Request - Malformed input (path traversal, invalid format)
-//! - 403 Forbidden - Malformed JWT (caught and handled gracefully)
+//! - 403 Forbidden - Blocked IP or malformed JWT
+
+pub mod ip_filter;
+
+pub use ip_filter::{IpFilter, IpFilterConfig, IpFilterError, IpRange};
 
 use std::path::Path;
 

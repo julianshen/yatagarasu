@@ -44,7 +44,7 @@ use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-/// Rate limiter manager handling global, per-bucket, and per-IP limits
+/// Rate limiter manager handling global, per-bucket, per-IP, and per-user limits
 pub struct RateLimitManager {
     /// Global rate limiter (all requests)
     global: Option<Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock>>>,
@@ -68,8 +68,20 @@ pub struct RateLimitManager {
             >,
         >,
     >,
+    /// Per-user rate limiters (keyed by user ID from JWT)
+    #[allow(clippy::type_complexity)]
+    users: Arc<
+        RwLock<
+            HashMap<
+                String,
+                Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock>>,
+            >,
+        >,
+    >,
     /// Per-IP rate limit config (requests per second)
     per_ip_rps: Option<NonZeroU32>,
+    /// Per-user rate limit config (requests per second)
+    per_user_rps: Option<NonZeroU32>,
 }
 
 impl RateLimitManager {
@@ -79,17 +91,34 @@ impl RateLimitManager {
     /// * `global_rps` - Global requests per second limit (None = disabled)
     /// * `per_ip_rps` - Per-IP requests per second limit (None = disabled)
     pub fn new(global_rps: Option<u32>, per_ip_rps: Option<u32>) -> Self {
+        Self::with_user_limit(global_rps, per_ip_rps, None)
+    }
+
+    /// Create a new rate limit manager with optional global, per-IP, and per-user limits
+    ///
+    /// # Arguments
+    /// * `global_rps` - Global requests per second limit (None = disabled)
+    /// * `per_ip_rps` - Per-IP requests per second limit (None = disabled)
+    /// * `per_user_rps` - Per-user requests per second limit (None = disabled)
+    pub fn with_user_limit(
+        global_rps: Option<u32>,
+        per_ip_rps: Option<u32>,
+        per_user_rps: Option<u32>,
+    ) -> Self {
         let global = global_rps.and_then(|rps| {
             NonZeroU32::new(rps).map(|nz| Arc::new(RateLimiter::direct(Quota::per_second(nz))))
         });
 
         let per_ip_rps = per_ip_rps.and_then(NonZeroU32::new);
+        let per_user_rps = per_user_rps.and_then(NonZeroU32::new);
 
         Self {
             global,
             buckets: Arc::new(RwLock::new(HashMap::new())),
             ips: Arc::new(RwLock::new(HashMap::new())),
+            users: Arc::new(RwLock::new(HashMap::new())),
             per_ip_rps,
+            per_user_rps,
         }
     }
 
@@ -153,6 +182,31 @@ impl RateLimitManager {
         limiter.check().is_ok()
     }
 
+    /// Check if a request should be allowed for a specific user (from JWT claims)
+    ///
+    /// Returns true if allowed, false if rate limit exceeded
+    pub fn check_user(&self, user_id: &str) -> bool {
+        if self.per_user_rps.is_none() {
+            return true; // No per-user limit configured
+        }
+
+        // Fast path: check if limiter exists
+        {
+            let limiters = self.users.read();
+            if let Some(limiter) = limiters.get(user_id) {
+                return limiter.check().is_ok();
+            }
+        }
+
+        // Slow path: create limiter for new user
+        let mut limiters = self.users.write();
+        let limiter = limiters.entry(user_id.to_string()).or_insert_with(|| {
+            let rps = self.per_user_rps.unwrap(); // Safe: checked above
+            Arc::new(RateLimiter::direct(Quota::per_second(rps)))
+        });
+        limiter.check().is_ok()
+    }
+
     /// Check all rate limits for a request
     ///
     /// Returns Ok(()) if allowed, Err(RateLimitError) with which limit was hit
@@ -160,6 +214,23 @@ impl RateLimitManager {
         &self,
         bucket_name: &str,
         client_ip: Option<IpAddr>,
+    ) -> Result<(), RateLimitError> {
+        self.check_all_with_user(bucket_name, client_ip, None)
+    }
+
+    /// Check all rate limits for a request, including per-user limits
+    ///
+    /// Returns Ok(()) if allowed, Err(RateLimitError) with which limit was hit
+    ///
+    /// # Arguments
+    /// * `bucket_name` - Name of the bucket being accessed
+    /// * `client_ip` - Client IP address (for per-IP limits)
+    /// * `user_id` - User ID from JWT claims (for per-user limits)
+    pub fn check_all_with_user(
+        &self,
+        bucket_name: &str,
+        client_ip: Option<IpAddr>,
+        user_id: Option<&str>,
     ) -> Result<(), RateLimitError> {
         // Check global limit first
         if !self.check_global() {
@@ -170,6 +241,13 @@ impl RateLimitManager {
         if let Some(ip) = client_ip {
             if !self.check_ip(ip) {
                 return Err(RateLimitError::PerIp(ip));
+            }
+        }
+
+        // Check per-user limit (from JWT)
+        if let Some(user) = user_id {
+            if !self.check_user(user) {
+                return Err(RateLimitError::PerUser(user.to_string()));
             }
         }
 
@@ -191,6 +269,11 @@ impl RateLimitManager {
         self.buckets.read().len()
     }
 
+    /// Get count of tracked users (for metrics/monitoring)
+    pub fn tracked_user_count(&self) -> usize {
+        self.users.read().len()
+    }
+
     /// Clean up IP limiters that haven't been used recently
     /// (prevents unbounded memory growth for per-IP tracking)
     ///
@@ -208,6 +291,22 @@ impl RateLimitManager {
             ips.clear();
         }
     }
+
+    /// Clean up user limiters that haven't been used recently
+    /// (prevents unbounded memory growth for per-user tracking)
+    ///
+    /// This should be called periodically (e.g., every 5 minutes)
+    pub fn cleanup_stale_users(&self, max_users: usize) {
+        let mut users = self.users.write();
+        if users.len() > max_users {
+            tracing::info!(
+                user_count = users.len(),
+                max_users = max_users,
+                "Cleaning up per-user rate limiters"
+            );
+            users.clear();
+        }
+    }
 }
 
 /// Error type indicating which rate limit was exceeded
@@ -217,6 +316,8 @@ pub enum RateLimitError {
     Global,
     /// Per-IP rate limit exceeded
     PerIp(IpAddr),
+    /// Per-user rate limit exceeded (user ID from JWT)
+    PerUser(String),
     /// Per-bucket rate limit exceeded
     PerBucket(String),
 }
@@ -226,6 +327,7 @@ impl std::fmt::Display for RateLimitError {
         match self {
             RateLimitError::Global => write!(f, "Global rate limit exceeded"),
             RateLimitError::PerIp(ip) => write!(f, "Rate limit exceeded for IP: {}", ip),
+            RateLimitError::PerUser(user) => write!(f, "Rate limit exceeded for user: {}", user),
             RateLimitError::PerBucket(bucket) => {
                 write!(f, "Rate limit exceeded for bucket: {}", bucket)
             }
@@ -408,7 +510,138 @@ mod tests {
         let err2 = RateLimitError::PerIp(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)));
         assert_eq!(err2.to_string(), "Rate limit exceeded for IP: 1.2.3.4");
 
-        let err3 = RateLimitError::PerBucket("products".to_string());
-        assert_eq!(err3.to_string(), "Rate limit exceeded for bucket: products");
+        let err3 = RateLimitError::PerUser("user123".to_string());
+        assert_eq!(err3.to_string(), "Rate limit exceeded for user: user123");
+
+        let err4 = RateLimitError::PerBucket("products".to_string());
+        assert_eq!(err4.to_string(), "Rate limit exceeded for bucket: products");
+    }
+
+    // ============================================================
+    // Per-User Rate Limiting Tests (Phase 35)
+    // ============================================================
+
+    #[test]
+    fn test_per_user_rate_limit_enforced() {
+        let manager = RateLimitManager::with_user_limit(None, None, Some(3)); // 3 req/s per user
+
+        // First 3 requests should succeed
+        for i in 0..3 {
+            assert!(
+                manager.check_user("user-alice"),
+                "Request {} should be allowed",
+                i + 1
+            );
+        }
+
+        // 4th request should be rate limited
+        assert!(
+            !manager.check_user("user-alice"),
+            "4th request should be rate limited"
+        );
+
+        // Different user should not be affected
+        assert!(manager.check_user("user-bob"));
+    }
+
+    #[test]
+    fn test_per_user_limit_disabled_allows_all() {
+        let manager = RateLimitManager::with_user_limit(None, None, None);
+
+        // All requests should be allowed when per-user limit is not configured
+        for _ in 0..100 {
+            assert!(manager.check_user("any-user"));
+        }
+    }
+
+    #[test]
+    fn test_check_all_with_user_enforces_user_limit() {
+        let manager = RateLimitManager::with_user_limit(Some(100), None, Some(2)); // 2 req/s per user
+        manager.add_bucket_limiter("products".to_string(), 100);
+
+        // First 2 requests should succeed
+        for _ in 0..2 {
+            assert!(manager
+                .check_all_with_user("products", None, Some("user-charlie"))
+                .is_ok());
+        }
+
+        // 3rd request should fail due to user limit
+        let result = manager.check_all_with_user("products", None, Some("user-charlie"));
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RateLimitError::PerUser("user-charlie".to_string())
+        );
+    }
+
+    #[test]
+    fn test_check_all_with_user_no_user_bypasses_user_limit() {
+        let manager = RateLimitManager::with_user_limit(None, None, Some(1));
+
+        // Without user_id, per-user limit should not apply
+        for _ in 0..10 {
+            assert!(manager.check_all_with_user("bucket", None, None).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_tracked_user_count() {
+        let manager = RateLimitManager::with_user_limit(None, None, Some(10));
+
+        assert_eq!(manager.tracked_user_count(), 0);
+
+        manager.check_user("user1");
+        assert_eq!(manager.tracked_user_count(), 1);
+
+        manager.check_user("user2");
+        assert_eq!(manager.tracked_user_count(), 2);
+
+        manager.check_user("user1"); // Same user, no new entry
+        assert_eq!(manager.tracked_user_count(), 2);
+    }
+
+    #[test]
+    fn test_cleanup_stale_users() {
+        let manager = RateLimitManager::with_user_limit(None, None, Some(100));
+
+        // Add many users
+        for i in 0..100 {
+            manager.check_user(&format!("user-{}", i));
+        }
+        assert_eq!(manager.tracked_user_count(), 100);
+
+        // Cleanup with max 50 should clear all
+        manager.cleanup_stale_users(50);
+        assert_eq!(manager.tracked_user_count(), 0);
+    }
+
+    #[test]
+    fn test_user_rate_limit_with_ip_and_bucket() {
+        // Test that all limits work together
+        let manager = RateLimitManager::with_user_limit(Some(100), Some(100), Some(2));
+        manager.add_bucket_limiter("api".to_string(), 100);
+
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+
+        // Per-user limit should be the bottleneck
+        for _ in 0..2 {
+            assert!(manager
+                .check_all_with_user("api", Some(ip), Some("limited-user"))
+                .is_ok());
+        }
+
+        // 3rd request should fail due to user limit
+        let result = manager.check_all_with_user("api", Some(ip), Some("limited-user"));
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RateLimitError::PerUser("limited-user".to_string())
+        );
+
+        // Different user should still work
+        assert!(manager
+            .check_all_with_user("api", Some(ip), Some("other-user"))
+            .is_ok());
     }
 }
