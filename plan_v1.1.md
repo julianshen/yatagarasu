@@ -2416,16 +2416,16 @@ services:
 ## 33.3: Audit Logging Integration
 
 ### Request Context Enrichment
-- [ ] Test: Generate correlation_id on request start
-- [ ] Test: Extract client_ip from request (handle X-Forwarded-For)
-- [ ] Test: Extract user from validated JWT
-- [ ] Test: Track request start time
+- [x] Test: Generate correlation_id on request start
+- [x] Test: Extract client_ip from request (handle X-Forwarded-For)
+- [x] Test: Extract user from validated JWT
+- [x] Test: Track request start time
 
 ### Response Context Enrichment
-- [ ] Test: Capture response status
-- [ ] Test: Capture response size
-- [ ] Test: Calculate duration
-- [ ] Test: Capture cache status (hit/miss/bypass)
+- [x] Test: Capture response status
+- [x] Test: Capture response size
+- [x] Test: Calculate duration
+- [x] Test: Capture cache status (hit/miss/bypass)
 
 ### Audit Log Middleware
 - [ ] Test: Create audit log middleware for Pingora

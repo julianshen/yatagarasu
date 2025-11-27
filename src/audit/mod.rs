@@ -129,6 +129,152 @@ impl AuditLogEntry {
 }
 
 // ============================================================================
+// Request Context for Audit Logging
+// ============================================================================
+
+/// Request context that accumulates information during request processing
+/// and is converted to an AuditLogEntry at the end.
+#[derive(Debug)]
+pub struct RequestContext {
+    /// Unique correlation ID for request tracing
+    pub correlation_id: String,
+
+    /// Request start time for duration calculation
+    pub start_time: std::time::Instant,
+
+    /// Client IP address (from socket or X-Forwarded-For)
+    pub client_ip: Option<String>,
+
+    /// Authenticated user (from JWT)
+    pub user: Option<String>,
+
+    /// S3 bucket name
+    pub bucket: Option<String>,
+
+    /// S3 object key
+    pub object_key: Option<String>,
+
+    /// HTTP method
+    pub http_method: Option<String>,
+
+    /// Original request path
+    pub request_path: Option<String>,
+
+    /// Response status code
+    pub response_status: Option<u16>,
+
+    /// Response body size in bytes
+    pub response_size_bytes: Option<u64>,
+
+    /// Cache status
+    pub cache_status: Option<CacheStatus>,
+
+    /// User agent header
+    pub user_agent: Option<String>,
+
+    /// Referer header
+    pub referer: Option<String>,
+}
+
+impl RequestContext {
+    /// Create a new request context with generated correlation_id and start time
+    pub fn new() -> Self {
+        Self {
+            correlation_id: Uuid::new_v4().to_string(),
+            start_time: std::time::Instant::now(),
+            client_ip: None,
+            user: None,
+            bucket: None,
+            object_key: None,
+            http_method: None,
+            request_path: None,
+            response_status: None,
+            response_size_bytes: None,
+            cache_status: None,
+            user_agent: None,
+            referer: None,
+        }
+    }
+
+    /// Set client IP from socket address
+    pub fn set_client_ip_from_socket(&mut self, ip: &str) {
+        // Only set if not already set by X-Forwarded-For
+        if self.client_ip.is_none() {
+            self.client_ip = Some(ip.to_string());
+        }
+    }
+
+    /// Set client IP from X-Forwarded-For header (takes precedence)
+    ///
+    /// X-Forwarded-For format: "client, proxy1, proxy2, ..."
+    /// The leftmost IP is the original client.
+    pub fn set_client_ip_from_forwarded_for(&mut self, header_value: &str) {
+        // Extract the first (leftmost) IP, which is the original client
+        let client_ip = header_value.split(',').next().map(|s| s.trim().to_string());
+
+        if let Some(ip) = client_ip {
+            if !ip.is_empty() {
+                self.client_ip = Some(ip);
+            }
+        }
+    }
+
+    /// Set authenticated user from JWT
+    pub fn set_user(&mut self, user: Option<String>) {
+        self.user = user;
+    }
+
+    /// Set response status code
+    pub fn set_response_status(&mut self, status: u16) {
+        self.response_status = Some(status);
+    }
+
+    /// Set response body size
+    pub fn set_response_size(&mut self, size: u64) {
+        self.response_size_bytes = Some(size);
+    }
+
+    /// Set cache status
+    pub fn set_cache_status(&mut self, status: CacheStatus) {
+        self.cache_status = Some(status);
+    }
+
+    /// Get elapsed time in milliseconds since request start
+    pub fn elapsed_ms(&self) -> u64 {
+        self.start_time.elapsed().as_millis() as u64
+    }
+
+    /// Convert this context to an AuditLogEntry
+    pub fn to_audit_entry(&self) -> AuditLogEntry {
+        AuditLogEntry {
+            timestamp: Utc::now(),
+            correlation_id: self.correlation_id.clone(),
+            client_ip: self
+                .client_ip
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            user: self.user.clone(),
+            bucket: self.bucket.clone().unwrap_or_default(),
+            object_key: self.object_key.clone().unwrap_or_default(),
+            http_method: self.http_method.clone().unwrap_or_default(),
+            request_path: self.request_path.clone().unwrap_or_default(),
+            response_status: self.response_status.unwrap_or(0),
+            response_size_bytes: self.response_size_bytes.unwrap_or(0),
+            duration_ms: self.elapsed_ms(),
+            cache_status: self.cache_status.clone().unwrap_or(CacheStatus::Miss),
+            user_agent: self.user_agent.clone(),
+            referer: self.referer.clone(),
+        }
+    }
+}
+
+impl Default for RequestContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
 // Sensitive Data Redaction Functions
 // ============================================================================
 
@@ -737,5 +883,164 @@ mod tests {
         assert!(redacted
             .iter()
             .any(|(k, v)| k == "Content-Type" && v == "application/json"));
+    }
+
+    // ============================================================================
+    // Phase 33.3: Request Context Enrichment Tests
+    // ============================================================================
+
+    #[test]
+    fn test_generate_correlation_id_on_request_start() {
+        // Test: Generate correlation_id on request start
+        let ctx = RequestContext::new();
+
+        // Should have a valid UUID correlation_id
+        let parsed = Uuid::parse_str(&ctx.correlation_id);
+        assert!(parsed.is_ok(), "correlation_id should be valid UUID");
+
+        // Each context should have unique correlation_id
+        let ctx2 = RequestContext::new();
+        assert_ne!(ctx.correlation_id, ctx2.correlation_id);
+    }
+
+    #[test]
+    fn test_extract_client_ip_from_request() {
+        // Test: Extract client_ip from request (handle X-Forwarded-For)
+        let mut ctx = RequestContext::new();
+
+        // Direct connection IP
+        ctx.set_client_ip_from_socket("192.168.1.100");
+        assert_eq!(ctx.client_ip, Some("192.168.1.100".to_string()));
+
+        // X-Forwarded-For with single IP
+        let mut ctx2 = RequestContext::new();
+        ctx2.set_client_ip_from_forwarded_for("10.0.0.1");
+        assert_eq!(ctx2.client_ip, Some("10.0.0.1".to_string()));
+
+        // X-Forwarded-For with multiple IPs (leftmost is original client)
+        let mut ctx3 = RequestContext::new();
+        ctx3.set_client_ip_from_forwarded_for("203.0.113.50, 70.41.3.18, 150.172.238.178");
+        assert_eq!(ctx3.client_ip, Some("203.0.113.50".to_string()));
+
+        // X-Forwarded-For takes precedence over socket IP
+        let mut ctx4 = RequestContext::new();
+        ctx4.set_client_ip_from_socket("127.0.0.1");
+        ctx4.set_client_ip_from_forwarded_for("8.8.8.8");
+        assert_eq!(ctx4.client_ip, Some("8.8.8.8".to_string()));
+    }
+
+    #[test]
+    fn test_extract_user_from_validated_jwt() {
+        // Test: Extract user from validated JWT
+        let mut ctx = RequestContext::new();
+
+        // Set user from JWT sub claim
+        ctx.set_user(Some("john.doe@example.com".to_string()));
+        assert_eq!(ctx.user, Some("john.doe@example.com".to_string()));
+
+        // Anonymous user
+        let ctx2 = RequestContext::new();
+        assert!(ctx2.user.is_none());
+    }
+
+    #[test]
+    fn test_track_request_start_time() {
+        // Test: Track request start time
+        let before = std::time::Instant::now();
+        let ctx = RequestContext::new();
+        let after = std::time::Instant::now();
+
+        // Start time should be between before and after
+        assert!(ctx.start_time >= before);
+        assert!(ctx.start_time <= after);
+    }
+
+    // ============================================================================
+    // Phase 33.3: Response Context Enrichment Tests
+    // ============================================================================
+
+    #[test]
+    fn test_capture_response_status() {
+        // Test: Capture response status
+        let mut ctx = RequestContext::new();
+        ctx.set_response_status(200);
+        assert_eq!(ctx.response_status, Some(200));
+
+        ctx.set_response_status(404);
+        assert_eq!(ctx.response_status, Some(404));
+    }
+
+    #[test]
+    fn test_capture_response_size() {
+        // Test: Capture response size
+        let mut ctx = RequestContext::new();
+        ctx.set_response_size(1024);
+        assert_eq!(ctx.response_size_bytes, Some(1024));
+
+        ctx.set_response_size(10_485_760); // 10 MB
+        assert_eq!(ctx.response_size_bytes, Some(10_485_760));
+    }
+
+    #[test]
+    fn test_calculate_duration() {
+        // Test: Calculate duration
+        let ctx = RequestContext::new();
+
+        // Sleep a bit to ensure measurable duration
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let duration_ms = ctx.elapsed_ms();
+        assert!(
+            duration_ms >= 10,
+            "Duration should be at least 10ms, got {}ms",
+            duration_ms
+        );
+    }
+
+    #[test]
+    fn test_capture_cache_status() {
+        // Test: Capture cache status (hit/miss/bypass)
+        let mut ctx = RequestContext::new();
+
+        ctx.set_cache_status(CacheStatus::Hit);
+        assert_eq!(ctx.cache_status, Some(CacheStatus::Hit));
+
+        ctx.set_cache_status(CacheStatus::Miss);
+        assert_eq!(ctx.cache_status, Some(CacheStatus::Miss));
+
+        ctx.set_cache_status(CacheStatus::Bypass);
+        assert_eq!(ctx.cache_status, Some(CacheStatus::Bypass));
+    }
+
+    #[test]
+    fn test_request_context_to_audit_entry() {
+        // Test: Convert RequestContext to AuditLogEntry
+        let mut ctx = RequestContext::new();
+        ctx.set_client_ip_from_socket("192.168.1.100");
+        ctx.set_user(Some("testuser".to_string()));
+        ctx.bucket = Some("my-bucket".to_string());
+        ctx.object_key = Some("path/to/file.txt".to_string());
+        ctx.http_method = Some("GET".to_string());
+        ctx.request_path = Some("/my-bucket/path/to/file.txt".to_string());
+        ctx.set_response_status(200);
+        ctx.set_response_size(1024);
+        ctx.set_cache_status(CacheStatus::Hit);
+        ctx.user_agent = Some("TestAgent/1.0".to_string());
+        ctx.referer = Some("https://example.com".to_string());
+
+        let entry = ctx.to_audit_entry();
+
+        assert_eq!(entry.correlation_id, ctx.correlation_id);
+        assert_eq!(entry.client_ip, "192.168.1.100");
+        assert_eq!(entry.user, Some("testuser".to_string()));
+        assert_eq!(entry.bucket, "my-bucket");
+        assert_eq!(entry.object_key, "path/to/file.txt");
+        assert_eq!(entry.http_method, "GET");
+        assert_eq!(entry.request_path, "/my-bucket/path/to/file.txt");
+        assert_eq!(entry.response_status, 200);
+        assert_eq!(entry.response_size_bytes, 1024);
+        assert_eq!(entry.cache_status, CacheStatus::Hit);
+        assert_eq!(entry.user_agent, Some("TestAgent/1.0".to_string()));
+        assert_eq!(entry.referer, Some("https://example.com".to_string()));
     }
 }
