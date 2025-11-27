@@ -2439,10 +2439,10 @@ services:
 ## 33.4: File-Based Audit Logging
 
 ### File Writer
-- [ ] Test: Can create audit log file
-- [ ] Test: Appends entries to file (one JSON per line)
-- [ ] Test: Handles file write errors gracefully
-- [ ] Test: Creates directory if not exists
+- [x] Test: Can create audit log file (src/audit/mod.rs::test_can_create_audit_log_file)
+- [x] Test: Appends entries to file (one JSON per line) (src/audit/mod.rs::test_appends_entries_to_file_one_json_per_line)
+- [x] Test: Handles file write errors gracefully (src/audit/mod.rs::test_handles_file_write_errors_gracefully)
+- [x] Test: Creates directory if not exists (src/audit/mod.rs::test_creates_directory_if_not_exists)
 
 ### File Rotation
 - [ ] Test: Rotates file when size exceeds max

@@ -5,6 +5,8 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::io::{self, Write};
+use std::path::Path;
 use uuid::Uuid;
 
 /// Cache status for a request
@@ -364,6 +366,76 @@ pub fn redact_headers(
             }
         })
         .collect()
+}
+
+// ============================================================================
+// File-Based Audit Logging (Phase 33.4)
+// ============================================================================
+
+/// Audit file writer that writes JSON log entries to a file
+///
+/// Each entry is written as a single line of JSON (JSONL format).
+#[derive(Debug)]
+pub struct AuditFileWriter {
+    /// Path to the audit log file
+    path: std::path::PathBuf,
+    /// File handle for writing
+    file: Option<std::fs::File>,
+}
+
+impl AuditFileWriter {
+    /// Create a new audit file writer
+    ///
+    /// Creates the file if it doesn't exist, creates parent directories if needed.
+    pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        // Open file in append mode, create if doesn't exist
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    /// Get the path to the audit log file
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Write an audit log entry to the file
+    ///
+    /// Each entry is written as a single line of JSON followed by a newline.
+    pub fn write_entry(&mut self, entry: &AuditLogEntry) -> io::Result<()> {
+        if let Some(ref mut file) = self.file {
+            let json = serde_json::to_string(entry)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            writeln!(file, "{}", json)?;
+            Ok(())
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "File not open"))
+        }
+    }
+
+    /// Flush the file buffer
+    pub fn flush(&mut self) -> io::Result<()> {
+        if let Some(ref mut file) = self.file {
+            file.flush()
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1042,5 +1114,153 @@ mod tests {
         assert_eq!(entry.cache_status, CacheStatus::Hit);
         assert_eq!(entry.user_agent, Some("TestAgent/1.0".to_string()));
         assert_eq!(entry.referer, Some("https://example.com".to_string()));
+    }
+
+    // ============================================================================
+    // Phase 33.4: File-Based Audit Logging Tests
+    // ============================================================================
+
+    #[test]
+    fn test_can_create_audit_log_file() {
+        // Test: Can create audit log file
+        let temp_dir = std::env::temp_dir();
+        let log_path = temp_dir.join(format!("audit_test_{}.log", Uuid::new_v4()));
+
+        // Ensure file doesn't exist before test
+        let _ = std::fs::remove_file(&log_path);
+
+        let writer = AuditFileWriter::new(&log_path);
+        assert!(writer.is_ok(), "Should create audit file writer");
+
+        // File should exist
+        assert!(log_path.exists(), "Log file should be created");
+
+        // Clean up
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn test_appends_entries_to_file_one_json_per_line() {
+        // Test: Appends entries to file (one JSON per line)
+        let temp_dir = std::env::temp_dir();
+        let log_path = temp_dir.join(format!("audit_append_test_{}.log", Uuid::new_v4()));
+
+        // Clean up from previous run
+        let _ = std::fs::remove_file(&log_path);
+
+        let mut writer = AuditFileWriter::new(&log_path).expect("Should create writer");
+
+        // Write first entry
+        let entry1 = AuditLogEntry::new(
+            "192.168.1.1".to_string(),
+            "bucket1".to_string(),
+            "file1.txt".to_string(),
+            "GET".to_string(),
+            "/bucket1/file1.txt".to_string(),
+        )
+        .with_response(200, 1024, 50);
+
+        writer.write_entry(&entry1).expect("Should write entry");
+
+        // Write second entry
+        let entry2 = AuditLogEntry::new(
+            "192.168.1.2".to_string(),
+            "bucket2".to_string(),
+            "file2.txt".to_string(),
+            "GET".to_string(),
+            "/bucket2/file2.txt".to_string(),
+        )
+        .with_response(404, 0, 10);
+
+        writer.write_entry(&entry2).expect("Should write entry");
+        writer.flush().expect("Should flush");
+
+        // Read file and verify JSONL format
+        let content = std::fs::read_to_string(&log_path).expect("Should read file");
+        let lines: Vec<&str> = content.lines().collect();
+
+        assert_eq!(lines.len(), 2, "Should have 2 lines");
+
+        // Each line should be valid JSON
+        let parsed1: AuditLogEntry =
+            serde_json::from_str(lines[0]).expect("First line should be valid JSON");
+        assert_eq!(parsed1.client_ip, "192.168.1.1");
+        assert_eq!(parsed1.response_status, 200);
+
+        let parsed2: AuditLogEntry =
+            serde_json::from_str(lines[1]).expect("Second line should be valid JSON");
+        assert_eq!(parsed2.client_ip, "192.168.1.2");
+        assert_eq!(parsed2.response_status, 404);
+
+        // Clean up
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn test_handles_file_write_errors_gracefully() {
+        // Test: Handles file write errors gracefully
+        // Try to create writer in a non-writable location (on most systems, root is not writable)
+        #[cfg(unix)]
+        {
+            let invalid_path = "/root/nonexistent_dir_12345/audit.log";
+            let result = AuditFileWriter::new(invalid_path);
+
+            // Should return an error, not panic
+            assert!(
+                result.is_err(),
+                "Should fail gracefully for non-writable path"
+            );
+        }
+
+        // Also test that write returns error when file is closed
+        let temp_dir = std::env::temp_dir();
+        let log_path = temp_dir.join(format!("audit_error_test_{}.log", Uuid::new_v4()));
+
+        let mut writer = AuditFileWriter::new(&log_path).expect("Should create writer");
+
+        // Close the file explicitly
+        writer.file = None;
+
+        let entry = AuditLogEntry::new(
+            "192.168.1.1".to_string(),
+            "bucket".to_string(),
+            "file.txt".to_string(),
+            "GET".to_string(),
+            "/path".to_string(),
+        );
+
+        let result = writer.write_entry(&entry);
+        assert!(result.is_err(), "Should return error when file is closed");
+
+        // Clean up
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn test_creates_directory_if_not_exists() {
+        // Test: Creates directory if not exists
+        let temp_dir = std::env::temp_dir();
+        let nested_dir = temp_dir.join(format!("audit_nested_{}", Uuid::new_v4()));
+        let deep_path = nested_dir.join("sub1").join("sub2").join("audit.log");
+
+        // Ensure directories don't exist
+        let _ = std::fs::remove_dir_all(&nested_dir);
+
+        // Parent directories should be created automatically
+        let writer = AuditFileWriter::new(&deep_path);
+        assert!(
+            writer.is_ok(),
+            "Should create nested directories and file: {:?}",
+            writer
+        );
+
+        // File should exist
+        assert!(
+            deep_path.exists(),
+            "File should exist in nested directories"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&nested_dir);
     }
 }
