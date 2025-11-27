@@ -58,7 +58,7 @@ bytes = "1.5"
 futures = "0.3"
 regex = "1.10"
 uuid = { version = "1.6", features = ["v4"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 urlencoding = "2.1"
 signal-hook = "0.3"
 libc = "0.2"

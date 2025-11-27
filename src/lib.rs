@@ -1,6 +1,7 @@
 // Yatagarasu S3 Proxy Library
 // Module declarations will be added as we implement them
 
+pub mod audit; // Phase 33: Audit Logging
 pub mod auth;
 pub mod cache;
 pub mod circuit_breaker; // Phase 21: Circuit Breaker Pattern
