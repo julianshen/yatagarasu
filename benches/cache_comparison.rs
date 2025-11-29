@@ -19,6 +19,26 @@ use yatagarasu::cache::disk::DiskCache;
 use yatagarasu::cache::{Cache, CacheEntry, CacheKey, MemoryCache, MemoryCacheConfig};
 
 // =============================================================================
+// Benchmark Configuration Constants (Phase 36.1)
+// =============================================================================
+
+/// Warm-up duration for benchmarks
+///
+/// Criterion uses time-based warm-up rather than iteration-based.
+/// 1 second ensures at least 5+ warm-up iterations even for slow disk I/O,
+/// while fast memory operations get thousands of warm-up iterations.
+const WARM_UP_TIME_SECS: u64 = 1;
+
+/// Measurement duration for benchmarks
+const MEASUREMENT_TIME_SECS: u64 = 5;
+
+/// Sample size for memory-bound operations (fast)
+const MEMORY_SAMPLE_SIZE: usize = 100;
+
+/// Sample size for I/O-bound operations (slower, need fewer samples)
+const DISK_SAMPLE_SIZE: usize = 50;
+
+// =============================================================================
 // Test Data Generation (Phase 36.1)
 // =============================================================================
 
@@ -344,27 +364,27 @@ fn statistically_rigorous_config() -> Criterion {
 criterion_group! {
     name = memory_benches;
     config = statistically_rigorous_config()
-        .warm_up_time(Duration::from_secs(1))
-        .measurement_time(Duration::from_secs(5))
-        .sample_size(100);
+        .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
+        .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
+        .sample_size(MEMORY_SAMPLE_SIZE);
     targets = bench_memory_cache_set, bench_memory_cache_get, bench_memory_cache_miss
 }
 
 criterion_group! {
     name = disk_benches;
     config = statistically_rigorous_config()
-        .warm_up_time(Duration::from_secs(1))
-        .measurement_time(Duration::from_secs(5))
-        .sample_size(50); // Fewer samples for I/O-bound operations
+        .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
+        .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
+        .sample_size(DISK_SAMPLE_SIZE);
     targets = bench_disk_cache_set, bench_disk_cache_get
 }
 
 criterion_group! {
     name = comparison_benches;
     config = statistically_rigorous_config()
-        .warm_up_time(Duration::from_secs(1))
-        .measurement_time(Duration::from_secs(5))
-        .sample_size(100);
+        .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
+        .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
+        .sample_size(MEMORY_SAMPLE_SIZE);
     targets = bench_cache_comparison
 }
 
