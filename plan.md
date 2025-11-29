@@ -2034,7 +2034,7 @@ Before releasing v0.3.0, verify:
 
 **Goal**: Proxy handles S3 failures, network issues, and resource exhaustion gracefully
 
-**Status**: ⏳ **PENDING**
+**Status**: 🚧 **IN PROGRESS** - Test framework created, Docker-based tests marked #[ignore]
 
 ### Test: S3 backend failures
 - [ ] Test: S3 unreachable returns 502 Bad Gateway
