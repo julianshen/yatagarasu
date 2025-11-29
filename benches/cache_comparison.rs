@@ -1098,6 +1098,29 @@ fn bench_disk_cache_throughput(c: &mut Criterion) {
         });
     });
 
+    // 100 concurrent operations (stress test for load testing feasibility)
+    group.throughput(Throughput::Elements(100));
+    group.bench_function("concurrent_100_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let base = counter;
+            counter += 100;
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(100);
+                for i in 0..100 {
+                    let cache = cache.clone();
+                    let key = create_cache_key("bench", "disk-throughput", (base + i) % 1000);
+                    handles.push(tokio::spawn(async move {
+                        let _result = cache.get(black_box(&key)).await;
+                    }));
+                }
+                for handle in handles {
+                    handle.await.unwrap();
+                }
+            });
+        });
+    });
+
     group.finish();
 }
 

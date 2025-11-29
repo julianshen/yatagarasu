@@ -2694,7 +2694,7 @@ services:
 #### Throughput Benchmarks
 - [x] Benchmark: Sequential operations (baseline) - Target: >200 ops/s
 - [x] Benchmark: Concurrent operations (10 parallel) - Target: >1,000 ops/s
-- [~] Benchmark: Concurrent operations (100 parallel) - Target: >5,000 ops/s - DEFERRED: 100 concurrent too many for disk I/O
+- [x] Benchmark: Concurrent operations (100 parallel) - Target: >5,000 ops/s → `bench_disk_cache_throughput/concurrent_100_get`
 
 ---
 
