@@ -4,12 +4,22 @@
 # This script tests disk cache persistence and recovery after proxy restart.
 #
 # Prerequisites:
-#   - Docker and docker-compose installed
 #   - yatagarasu binary built (cargo build --release)
 #   - MinIO running with test files
+#   - IMPORTANT: Disk cache must be ENABLED in your config:
+#
+#     cache:
+#       layers: ["memory", "disk"]
+#       disk:
+#         enabled: true
+#         cache_dir: "/var/cache/yatagarasu"  # or your custom path
+#         max_disk_cache_size_mb: 1024
 #
 # Usage:
 #   ./scripts/test-disk-cache-recovery.sh
+#
+#   # With custom cache directory:
+#   CACHE_DIR=/path/to/cache ./scripts/test-disk-cache-recovery.sh
 #
 # What it tests:
 #   1. Populate cache with 1000 entries
@@ -25,7 +35,8 @@ set -e
 
 # Configuration
 PROXY_URL="${PROXY_URL:-http://localhost:8080}"
-CACHE_DIR="${CACHE_DIR:-/tmp/yatagarasu-cache}"
+# Default cache directory matches src/cache/mod.rs default_cache_dir()
+CACHE_DIR="${CACHE_DIR:-/var/cache/yatagarasu}"
 PROXY_PID_FILE="/tmp/yatagarasu.pid"
 NUM_ENTRIES=1000
 TEST_FILE="/public/test-1kb.txt"
@@ -201,6 +212,21 @@ main() {
         log_success "Cache files present (${initial_files} files)"
     else
         log_fail "No cache files found in ${CACHE_DIR}"
+        echo ""
+        log_error "Disk cache may not be enabled in your config."
+        echo ""
+        echo "To enable disk cache, add to your config.yaml:"
+        echo ""
+        echo "  cache:"
+        echo "    layers: [\"memory\", \"disk\"]"
+        echo "    disk:"
+        echo "      enabled: true"
+        echo "      cache_dir: \"${CACHE_DIR}\""
+        echo "      max_disk_cache_size_mb: 1024"
+        echo ""
+        echo "Or run with custom cache directory:"
+        echo "  CACHE_DIR=/your/cache/path ./scripts/test-disk-cache-recovery.sh"
+        echo ""
         exit 1
     fi
 
