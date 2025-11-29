@@ -1401,20 +1401,30 @@ fn bench_redis_cache_throughput(c: &mut Criterion) {
 // Comparative Benchmarks (Phase 36.6)
 // =============================================================================
 
-/// Direct comparison: Memory vs Disk cache for same operations
+/// Direct comparison: Memory vs Disk vs Redis cache for same operations
 fn bench_cache_comparison(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let memory_cache = create_memory_cache();
     let temp_dir = TempDir::new().unwrap();
     let disk_cache = create_disk_cache(&temp_dir);
 
-    // Pre-populate both caches
+    // Start Redis container for comparison
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    let redis_config = create_redis_config(redis_url);
+    let redis_cache = rt.block_on(async { RedisCache::new(redis_config).await.unwrap() });
+
+    // Pre-populate all caches
     rt.block_on(async {
         for i in 0..100 {
             let key = create_cache_key("bench", "compare", i);
             let entry = create_cache_entry(SIZE_10KB);
             memory_cache.set(key.clone(), entry.clone()).await.unwrap();
-            disk_cache.set(key, entry).await.unwrap();
+            disk_cache.set(key.clone(), entry.clone()).await.unwrap();
+            redis_cache.set(key, entry).await.unwrap();
         }
     });
 
@@ -1423,7 +1433,7 @@ fn bench_cache_comparison(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(5));
     group.throughput(Throughput::Bytes(SIZE_10KB as u64));
 
-    // Memory cache get
+    // Memory cache get (fastest)
     group.bench_function("memory_get", |b| {
         let mut counter = 0usize;
         b.iter(|| {
@@ -1435,7 +1445,7 @@ fn bench_cache_comparison(c: &mut Criterion) {
         });
     });
 
-    // Disk cache get
+    // Disk cache get (medium)
     group.bench_function("disk_get", |b| {
         let mut counter = 0usize;
         b.iter(|| {
@@ -1443,6 +1453,90 @@ fn bench_cache_comparison(c: &mut Criterion) {
             counter += 1;
             rt.block_on(async {
                 disk_cache.get(black_box(&key)).await.unwrap();
+            });
+        });
+    });
+
+    // Redis cache get (slowest but distributed)
+    group.bench_function("redis_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "compare", counter % 100);
+            counter += 1;
+            rt.block_on(async {
+                let _result = redis_cache.get(black_box(&key)).await;
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Compare set operations across all cache types
+fn bench_cache_comparison_set(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let memory_cache = create_memory_cache();
+    let temp_dir = TempDir::new().unwrap();
+    let disk_cache = create_disk_cache(&temp_dir);
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+    let redis_config = create_redis_config(redis_url);
+    let redis_cache = rt.block_on(async { RedisCache::new(redis_config).await.unwrap() });
+
+    let mut group = c.benchmark_group("cache_comparison_set_10kb");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+
+    // Memory cache set (fastest)
+    group.bench_function("memory_set", |b| {
+        let mut counter = 0u64;
+        b.iter(|| {
+            let key = create_cache_key("bench", "compare-set", counter as usize);
+            counter = counter.wrapping_add(1);
+            let entry = create_cache_entry(SIZE_10KB);
+            rt.block_on(async {
+                memory_cache
+                    .set(black_box(key), black_box(entry))
+                    .await
+                    .unwrap();
+            });
+        });
+    });
+
+    // Disk cache set (medium)
+    group.bench_function("disk_set", |b| {
+        let mut counter = 0u64;
+        b.iter(|| {
+            let key = create_cache_key("bench", "compare-set", counter as usize);
+            counter = counter.wrapping_add(1);
+            let entry = create_cache_entry(SIZE_10KB);
+            rt.block_on(async {
+                disk_cache
+                    .set(black_box(key), black_box(entry))
+                    .await
+                    .unwrap();
+            });
+        });
+    });
+
+    // Redis cache set (slowest but distributed)
+    group.bench_function("redis_set", |b| {
+        let mut counter = 0u64;
+        b.iter(|| {
+            let key = create_cache_key("bench", "compare-set", counter as usize);
+            counter = counter.wrapping_add(1);
+            let entry = create_cache_entry(SIZE_10KB);
+            rt.block_on(async {
+                redis_cache
+                    .set(black_box(key), black_box(entry))
+                    .await
+                    .unwrap();
             });
         });
     });
@@ -1521,7 +1615,7 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
         .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
         .sample_size(MEMORY_SAMPLE_SIZE);
-    targets = bench_cache_comparison
+    targets = bench_cache_comparison, bench_cache_comparison_set
 }
 
 criterion_main!(
