@@ -39,6 +39,7 @@ async fn test_retries_failed_operations_configurable_default_3() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 

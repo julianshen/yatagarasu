@@ -36,6 +36,7 @@ async fn test_metrics_track_cache_hits() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -122,6 +123,7 @@ async fn test_metrics_track_cache_sets() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -168,6 +170,7 @@ async fn test_metrics_track_evictions() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -256,6 +259,7 @@ async fn test_metrics_endpoint_format() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 

@@ -28,6 +28,8 @@ pub struct RequestContext {
     response_content_type: Option<String>,
     /// ETag from S3 response headers
     response_etag: Option<String>,
+    /// Last-Modified from S3 response headers (for If-Modified-Since support)
+    response_last_modified: Option<String>,
     /// Whether to cache this response (based on size, range requests, etc.)
     should_cache_response: bool,
     /// Total response size accumulated so far
@@ -54,6 +56,7 @@ impl RequestContext {
             response_buffer: None,
             response_content_type: None,
             response_etag: None,
+            response_last_modified: None,
             should_cache_response: false,
             total_response_size: 0,
         }
@@ -78,6 +81,7 @@ impl RequestContext {
             response_buffer: None,
             response_content_type: None,
             response_etag: None,
+            response_last_modified: None,
             should_cache_response: false,
             total_response_size: 0,
         }
@@ -106,6 +110,7 @@ impl RequestContext {
             response_buffer: None,
             response_content_type: None,
             response_etag: None,
+            response_last_modified: None,
             should_cache_response: false,
             total_response_size: 0,
         }
@@ -240,6 +245,16 @@ impl RequestContext {
     /// Get response ETag
     pub fn response_etag(&self) -> Option<&str> {
         self.response_etag.as_deref()
+    }
+
+    /// Set response Last-Modified from upstream headers (for If-Modified-Since)
+    pub fn set_response_last_modified(&mut self, last_modified: String) {
+        self.response_last_modified = Some(last_modified);
+    }
+
+    /// Get response Last-Modified
+    pub fn response_last_modified(&self) -> Option<&str> {
+        self.response_last_modified.as_deref()
     }
 
     /// Check if this response should be cached

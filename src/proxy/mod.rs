@@ -2367,6 +2367,45 @@ impl ProxyHttp for YatagarasuProxy {
                                 }
                             }
 
+                            // Phase 36: Check If-Modified-Since header for conditional requests
+                            if let Some(if_modified_since) = headers
+                                .get("If-Modified-Since")
+                                .or_else(|| headers.get("if-modified-since"))
+                            {
+                                // If Last-Modified matches, return 304 Not Modified
+                                if let Some(ref last_modified) = cached_entry.last_modified {
+                                    if if_modified_since == last_modified.as_str() {
+                                        tracing::debug!(
+                                            request_id = %ctx.request_id(),
+                                            bucket = %bucket_config.name,
+                                            object_key = %object_key,
+                                            last_modified = %last_modified,
+                                            "Last-Modified matches If-Modified-Since - returning 304 Not Modified"
+                                        );
+
+                                        let mut header = ResponseHeader::build(304, None)?;
+                                        header.insert_header(
+                                            "Last-Modified",
+                                            last_modified.as_str(),
+                                        )?;
+                                        if !cached_entry.etag.is_empty() {
+                                            header.insert_header(
+                                                "ETag",
+                                                cached_entry.etag.as_str(),
+                                            )?;
+                                        }
+                                        header.insert_header("X-Cache", "HIT")?;
+
+                                        session
+                                            .write_response_header(Box::new(header), true)
+                                            .await?;
+                                        self.metrics.increment_status_count(304);
+                                        self.metrics.increment_cache_hit();
+                                        return Ok(true);
+                                    }
+                                }
+                            }
+
                             tracing::debug!(
                                 request_id = %ctx.request_id(),
                                 bucket = %bucket_config.name,
@@ -2381,6 +2420,10 @@ impl ProxyHttp for YatagarasuProxy {
                                 cached_entry.content_type.as_str(),
                             )?;
                             header.insert_header("ETag", cached_entry.etag.as_str())?;
+                            // Add Last-Modified header if available
+                            if let Some(ref last_modified) = cached_entry.last_modified {
+                                header.insert_header("Last-Modified", last_modified.as_str())?;
+                            }
                             header.insert_header(
                                 "Content-Length",
                                 cached_entry.data.len().to_string(),
@@ -2827,6 +2870,17 @@ impl ProxyHttp for YatagarasuProxy {
                 }
             }
 
+            // Capture Last-Modified header for If-Modified-Since support
+            if let Some(last_modified) = upstream_response
+                .headers
+                .get("last-modified")
+                .or_else(|| upstream_response.headers.get("Last-Modified"))
+            {
+                if let Ok(lm_str) = last_modified.to_str() {
+                    ctx.set_response_last_modified(lm_str.to_string());
+                }
+            }
+
             // Enable response buffering (will be used in response_body_filter)
             ctx.enable_response_buffering();
 
@@ -2891,6 +2945,7 @@ impl ProxyHttp for YatagarasuProxy {
                                 .unwrap_or("application/octet-stream")
                                 .to_string(),
                             ctx.response_etag().unwrap_or("").to_string(),
+                            ctx.response_last_modified().map(|s| s.to_string()),
                             Some(std::time::Duration::from_secs(3600)), // 1 hour TTL
                         );
 

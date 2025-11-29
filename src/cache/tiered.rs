@@ -707,6 +707,7 @@ mod tests {
             Bytes::from("test data from memory"),
             "text/plain".to_string(),
             "etag123".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -747,6 +748,7 @@ mod tests {
             Bytes::from("test data from disk"),
             "text/plain".to_string(),
             "etag456".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -815,6 +817,7 @@ mod tests {
             Bytes::from("data from disk to be promoted"),
             "text/plain".to_string(),
             "etag789".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -880,6 +883,7 @@ mod tests {
             Bytes::from("data written to all layers"),
             "text/plain".to_string(),
             "etag999".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -946,6 +950,7 @@ mod tests {
             Bytes::from("data to be deleted"),
             "text/plain".to_string(),
             "etag111".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -1016,6 +1021,7 @@ mod tests {
                 Bytes::from(format!("data {}", i)),
                 "text/plain".to_string(),
                 format!("etag{}", i),
+                None,
                 Some(Duration::from_secs(3600)),
             );
 

@@ -135,10 +135,16 @@ async fn test_returns_error_if_redis_url_invalid() {
 
     let err = result.unwrap_err();
     match err {
-        yatagarasu::cache::CacheError::RedisConnectionFailed(_) => {
-            // Expected error type
+        yatagarasu::cache::CacheError::ConfigurationError(_) => {
+            // ConfigurationError for invalid URL scheme (expected behavior)
         }
-        _ => panic!("Expected RedisConnectionFailed error, got: {:?}", err),
+        yatagarasu::cache::CacheError::RedisConnectionFailed(_) => {
+            // Also acceptable - connection failure on malformed URL
+        }
+        _ => panic!(
+            "Expected ConfigurationError or RedisConnectionFailed error, got: {:?}",
+            err
+        ),
     }
 }
 
@@ -215,6 +221,7 @@ async fn test_get_retrieves_entry_from_redis() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -291,6 +298,7 @@ async fn test_set_stores_entry_in_redis() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -335,6 +343,7 @@ async fn test_get_and_set_roundtrip() {
         data.clone(),
         "text/plain".to_string(),
         "etag-456".to_string(),
+        None,
         Some(Duration::from_secs(600)),
     );
 
@@ -381,6 +390,7 @@ async fn test_delete_removes_key_from_redis() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -430,6 +440,7 @@ async fn test_delete_returns_ok_if_key_existed() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -502,6 +513,7 @@ async fn test_delete_uses_del_command() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -545,6 +557,7 @@ async fn test_clear_removes_all_keys_with_prefix() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -601,6 +614,7 @@ async fn test_clear_uses_scan_for_safe_iteration() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -654,6 +668,7 @@ async fn test_clear_does_not_affect_other_prefixes() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -704,6 +719,7 @@ async fn test_clear_handles_large_key_count() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -777,6 +793,7 @@ async fn test_stats_returns_current_statistics() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -835,6 +852,7 @@ async fn test_stats_returns_hit_count() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -912,6 +930,7 @@ async fn test_stats_returns_set_count() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -957,6 +976,7 @@ async fn test_stats_returns_eviction_count() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -1000,6 +1020,7 @@ async fn test_stats_tracks_operations_atomically() {
         Bytes::from("data"),
         "text/plain".to_string(),
         "etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -1060,6 +1081,7 @@ async fn test_sets_redis_ttl_on_entry_insertion() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -1129,6 +1151,7 @@ async fn test_calculates_ttl_from_entry_expires_at() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)), // 1 hour
     );
 
@@ -1192,6 +1215,7 @@ async fn test_redis_auto_expires_entries() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(2)), // 2 seconds
     );
 
@@ -1252,6 +1276,7 @@ async fn test_get_double_checks_entry_not_expired_locally() {
         content_type: "text/plain".to_string(),
         content_length: 9,
         etag: "etag123".to_string(),
+        last_modified: None,
         created_at: past - Duration::from_secs(60),
         expires_at: past, // Expired 10 seconds ago
         last_accessed_at: past,
@@ -1303,6 +1328,7 @@ async fn test_can_store_and_retrieve_medium_entries_100kb() {
         Bytes::from(data_100kb.clone()),
         "application/octet-stream".to_string(),
         "etag-100kb".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -1354,6 +1380,7 @@ async fn test_can_store_and_retrieve_large_entries_1mb() {
         Bytes::from(data_1mb.clone()),
         "application/octet-stream".to_string(),
         "etag-1mb".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 

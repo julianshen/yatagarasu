@@ -418,6 +418,8 @@ pub struct CacheEntry {
     pub content_length: usize,
     /// ETag of the cached object (for validation)
     pub etag: String,
+    /// Last-Modified timestamp from S3 (for If-Modified-Since validation)
+    pub last_modified: Option<String>,
     /// When this entry was created
     pub created_at: SystemTime,
     /// When this entry expires (for TTL-based eviction)
@@ -433,11 +435,13 @@ impl CacheEntry {
     /// * `data` - The cached object data
     /// * `content_type` - MIME type of the object
     /// * `etag` - ETag for validation
+    /// * `last_modified` - Last-Modified timestamp from S3 (for If-Modified-Since)
     /// * `ttl` - Time-to-live duration. None uses default (3600s). Zero means no expiration.
     pub fn new(
         data: Bytes,
         content_type: String,
         etag: String,
+        last_modified: Option<String>,
         ttl: Option<std::time::Duration>,
     ) -> Self {
         let now = SystemTime::now();
@@ -462,6 +466,7 @@ impl CacheEntry {
             content_type,
             content_length,
             etag,
+            last_modified,
             created_at: now,
             expires_at,
             last_accessed_at: now,
@@ -2300,6 +2305,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: data.len(),
             etag: "abc123".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2322,6 +2328,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: data.len(),
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2343,6 +2350,7 @@ max_item_size_mb: 5
             content_type: "application/json".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2363,6 +2371,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 1024,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2383,6 +2392,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "my-etag-123".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2403,6 +2413,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: created,
             expires_at: created,
             last_accessed_at: created,
@@ -2425,6 +2436,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: expires,
             last_accessed_at: now,
@@ -2447,6 +2459,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: accessed,
@@ -2470,6 +2483,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 9,
             etag: "etag123".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2493,6 +2507,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: data.len(),
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2517,6 +2532,7 @@ max_item_size_mb: 5
             content_type: "application/json".to_string(),
             content_length: data.len(),
             etag: "abc123".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2546,6 +2562,7 @@ max_item_size_mb: 5
             content_type: "image/png".to_string(),
             content_length: data.len(),
             etag: "small".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2572,6 +2589,7 @@ max_item_size_mb: 5
             content_type: "video/mp4".to_string(),
             content_length: data.len(),
             etag: "large".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: now,
             last_accessed_at: now,
@@ -2602,6 +2620,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: past,
             expires_at: past,
             last_accessed_at: now,
@@ -2615,6 +2634,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: future,
             last_accessed_at: now,
@@ -2637,6 +2657,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: now,
             expires_at: future,
             last_accessed_at: now,
@@ -2659,6 +2680,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at: past,
             expires_at: past,
             last_accessed_at: past,
@@ -2680,6 +2702,7 @@ max_item_size_mb: 5
             data.clone(),
             "text/plain".to_string(),
             "etag123".to_string(),
+            None,
             Some(custom_ttl),
         );
 
@@ -2708,6 +2731,7 @@ max_item_size_mb: 5
             data.clone(),
             "application/json".to_string(),
             "etag456".to_string(),
+            None,
             None, // Use default TTL
         );
 
@@ -2736,6 +2760,7 @@ max_item_size_mb: 5
             data,
             "text/plain".to_string(),
             "etag789".to_string(),
+            None,
             Some(zero_ttl),
         );
 
@@ -2748,6 +2773,45 @@ max_item_size_mb: 5
         // A TTL of 0 should set expires_at to SystemTime::MAX or a very large value
     }
 
+    #[test]
+    fn test_cache_entry_stores_last_modified() {
+        // Test: CacheEntry can store Last-Modified timestamp for If-Modified-Since support
+        use bytes::Bytes;
+
+        let data = Bytes::from("test data");
+        let last_modified = Some("Wed, 21 Oct 2015 07:28:00 GMT".to_string());
+
+        let entry = CacheEntry::new(
+            data.clone(),
+            "text/plain".to_string(),
+            "etag123".to_string(),
+            last_modified.clone(),
+            None,
+        );
+
+        assert_eq!(entry.data, data);
+        assert_eq!(entry.etag, "etag123");
+        assert_eq!(entry.last_modified, last_modified);
+    }
+
+    #[test]
+    fn test_cache_entry_last_modified_none_by_default() {
+        // Test: CacheEntry can have None for last_modified
+        use bytes::Bytes;
+
+        let data = Bytes::from("test data");
+
+        let entry = CacheEntry::new(
+            data,
+            "text/plain".to_string(),
+            "etag123".to_string(),
+            None, // No last_modified
+            None,
+        );
+
+        assert_eq!(entry.last_modified, None);
+    }
+
     // CacheEntry Access Tracking (for LRU) tests
     #[test]
     fn test_cache_entry_can_update_last_accessed_at() {
@@ -2756,7 +2820,13 @@ max_item_size_mb: 5
         use std::time::Duration;
 
         let data = Bytes::from("test");
-        let mut entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
+        let mut entry = CacheEntry::new(
+            data,
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+            None,
+        );
 
         let original_access_time = entry.last_accessed_at;
 
@@ -2775,7 +2845,13 @@ max_item_size_mb: 5
         use std::time::{Duration, SystemTime};
 
         let data = Bytes::from("test");
-        let mut entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
+        let mut entry = CacheEntry::new(
+            data,
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+            None,
+        );
 
         // Wait a bit
         std::thread::sleep(Duration::from_millis(10));
@@ -2801,6 +2877,7 @@ max_item_size_mb: 5
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         std::thread::sleep(Duration::from_millis(10));
@@ -2810,6 +2887,7 @@ max_item_size_mb: 5
             "text/plain".to_string(),
             "etag2".to_string(),
             None,
+            None,
         );
 
         std::thread::sleep(Duration::from_millis(10));
@@ -2818,6 +2896,7 @@ max_item_size_mb: 5
             Bytes::from("data3"),
             "text/plain".to_string(),
             "etag3".to_string(),
+            None,
             None,
         );
 
@@ -2854,6 +2933,7 @@ max_item_size_mb: 5
             "text/plain".to_string(),
             "matching-etag".to_string(),
             None,
+            None,
         );
 
         // Validate against matching ETag
@@ -2873,6 +2953,7 @@ max_item_size_mb: 5
             "application/json".to_string(),
             "abc123def456".to_string(),
             None,
+            None,
         );
 
         assert!(entry.validate_etag("abc123def456"));
@@ -2887,6 +2968,7 @@ max_item_size_mb: 5
             Bytes::from("data"),
             "text/plain".to_string(),
             "original-etag".to_string(),
+            None,
             None,
         );
 
@@ -2910,6 +2992,7 @@ max_item_size_mb: 5
             content_type: "text/plain".to_string(),
             content_length: 4,
             etag: "valid-etag".to_string(),
+            last_modified: None,
             created_at: past,
             expires_at: past, // Already expired
             last_accessed_at: now,
@@ -3046,6 +3129,7 @@ max_item_size_mb: 5
             bytes::Bytes::from("data"),
             "text/plain".to_string(),
             "etag".to_string(),
+            None,
             None,
         );
         let set_result = cache.set(key.clone(), entry).await;
@@ -3497,7 +3581,13 @@ max_item_size_mb: 5
         // Test: Cache module exports CacheEntry
         use bytes::Bytes;
         let data = Bytes::from("test");
-        let _entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
+        let _entry = CacheEntry::new(
+            data,
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+            None,
+        );
         // If this compiles, CacheEntry is exported
     }
 
@@ -3568,7 +3658,13 @@ max_item_size_mb: 5
         // Documentation is verified at compile time
         use bytes::Bytes;
         let data = Bytes::from("test");
-        let _entry = CacheEntry::new(data, "text/plain".to_string(), "etag".to_string(), None);
+        let _entry = CacheEntry::new(
+            data,
+            "text/plain".to_string(),
+            "etag".to_string(),
+            None,
+            None,
+        );
         assert!(true);
     }
 
@@ -4012,6 +4108,7 @@ cache:
             "text/plain".to_string(),
             "etag".to_string(),
             None,
+            None,
         );
         let weight = weigher(&key, &entry);
         assert!(weight >= 100); // At least the data size
@@ -4031,6 +4128,7 @@ cache:
             Bytes::from(vec![0u8; 1000]),
             "text/plain".to_string(),
             "etag123".to_string(),
+            None,
             None,
         );
 
@@ -4053,6 +4151,7 @@ cache:
             data,
             "application/json".to_string(),
             "etag-abc123".to_string(),
+            None,
             None,
         );
 
@@ -4089,6 +4188,7 @@ cache:
             Bytes::from(vec![0u8; 100]),
             "text/plain".to_string(),
             "etag".to_string(),
+            None,
             None,
         );
         let weight = weigher(&key, &entry);
@@ -4135,6 +4235,7 @@ cache:
                 "text/plain".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             cache.insert(key, entry).await;
         }
@@ -4169,6 +4270,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
         cache.insert(key1.clone(), entry1).await;
 
@@ -4183,6 +4285,7 @@ cache:
                 Bytes::from(vec![0u8; 100]),
                 "text/plain".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             cache.insert(key, entry).await;
@@ -4220,6 +4323,7 @@ cache:
             Bytes::from(vec![0u8; 200]),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
         let expected_size = entry.size_bytes();
@@ -4300,6 +4404,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         // Insert directly into moka cache
@@ -4333,6 +4438,7 @@ cache:
             Bytes::from(vec![0u8; 50]),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -4398,6 +4504,7 @@ cache:
             "application/octet-stream".to_string(),
             "etag-abc".to_string(),
             None,
+            None,
         );
 
         cache.cache.insert(key.clone(), entry).await;
@@ -4429,6 +4536,7 @@ cache:
             Bytes::from(vec![0u8; 100]),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -4463,6 +4571,7 @@ cache:
             "application/octet-stream".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         let result = cache.set(key, entry).await;
@@ -4491,6 +4600,7 @@ cache:
             "application/octet-stream".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         let result = cache.set(key, entry).await;
@@ -4517,6 +4627,7 @@ cache:
             Bytes::from(vec![0u8; 1024]), // 1KB - well within limits
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -4550,6 +4661,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
         cache.set(key.clone(), entry1).await.unwrap();
 
@@ -4558,6 +4670,7 @@ cache:
             Bytes::from("updated"),
             "text/html".to_string(),
             "etag2".to_string(),
+            None,
             None,
         );
         cache.set(key.clone(), entry2).await.unwrap();
@@ -4589,6 +4702,7 @@ cache:
             Bytes::from("test data"),
             "text/plain".to_string(),
             "etag123".to_string(),
+            None,
             None,
         );
 
@@ -4625,6 +4739,7 @@ cache:
             Bytes::from("temporary"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -4666,6 +4781,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         cache.set(key.clone(), entry).await.unwrap();
@@ -4702,6 +4818,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -4774,6 +4891,7 @@ cache:
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             let _ = cache.set(key, entry).await;
         }
@@ -4832,6 +4950,7 @@ cache:
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             let _ = cache.set(key, entry).await;
         }
@@ -4887,6 +5006,7 @@ cache:
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             let _ = cache.set(key, entry).await;
         }
@@ -4926,6 +5046,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
         cache.set(key.clone(), entry).await.unwrap();
 
@@ -4960,6 +5081,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -5026,6 +5148,7 @@ cache:
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             let _ = cache.set(key, entry).await;
         }
@@ -5089,6 +5212,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         cache.set(key.clone(), entry).await.unwrap();
@@ -5122,6 +5246,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -5177,6 +5302,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         cache.set(key.clone(), entry).await.unwrap();
@@ -5213,6 +5339,7 @@ cache:
                 Bytes::from(format!("data{}", i)),
                 "text/plain".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             cache.set(key, entry).await.unwrap();
@@ -5255,6 +5382,7 @@ cache:
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             cache.set(key, entry).await.unwrap();
         }
@@ -5289,6 +5417,7 @@ cache:
                 Bytes::from(vec![0u8; 200 * 1024]), // 200KB each
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             let _ = cache.set(key, entry).await;
@@ -5327,6 +5456,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
         let entry_size = entry.size_bytes();
 
@@ -5364,6 +5494,7 @@ cache:
                 "text/plain".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             cache.set(key, entry).await.unwrap();
         }
@@ -5397,6 +5528,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
         cache.set(key.clone(), entry1).await.unwrap();
 
@@ -5409,6 +5541,7 @@ cache:
             Bytes::from("second"),
             "text/html".to_string(),
             "etag2".to_string(),
+            None,
             None,
         );
         cache.set(key.clone(), entry2).await.unwrap();
@@ -5527,6 +5660,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         Cache::set(&cache, key.clone(), entry).await.unwrap();
@@ -5556,6 +5690,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -5591,6 +5726,7 @@ cache:
             "application/octet-stream".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         let result = Cache::set(&cache, key, large_entry).await;
@@ -5619,6 +5755,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         let result = Cache::set(&cache, key, entry).await;
@@ -5645,6 +5782,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -5698,6 +5836,7 @@ cache:
                 "text/plain".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             Cache::set(&cache, key, entry).await.unwrap();
         }
@@ -5726,6 +5865,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -5781,6 +5921,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         // Generate some hits and misses
@@ -5813,6 +5954,7 @@ cache:
             Bytes::from(vec![0u8; 1000]),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -5949,6 +6091,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         cache.set(key.clone(), entry).await.unwrap();
@@ -5980,6 +6123,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -6047,6 +6191,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -6129,6 +6274,7 @@ cache:
                     "text/plain".to_string(),
                     format!("etag{}", i),
                     None,
+                    None,
                 );
                 cache_clone.set(key, entry).await
             });
@@ -6162,6 +6308,7 @@ cache:
                 Bytes::from(format!("data{}", i)),
                 "text/plain".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             cache.set(key, entry).await.unwrap();
@@ -6214,6 +6361,7 @@ cache:
                     "text/plain".to_string(),
                     format!("etag{}", i),
                     None,
+                    None,
                 );
                 cache_clone.set(key, entry).await
             });
@@ -6248,6 +6396,7 @@ cache:
                 "text/plain".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             cache.set(key, entry).await.unwrap();
         }
@@ -6276,6 +6425,7 @@ cache:
                         Bytes::from(format!("newdata{}", i)),
                         "text/plain".to_string(),
                         format!("newetag{}", i),
+                        None,
                         None,
                     );
                     cache_clone.set(key, entry).await.ok();
@@ -6315,6 +6465,7 @@ cache:
                     Bytes::from(format!("data{}", i)),
                     "text/plain".to_string(),
                     format!("etag{}", i),
+                    None,
                     None,
                 );
                 cache_clone.set(key.clone(), entry).await.unwrap();
@@ -6397,6 +6548,7 @@ cache:
                             "text/plain".to_string(),
                             format!("etag-{}-{}", thread_id, op_id),
                             None,
+                            None,
                         );
                         let _ = cache_clone.set(key, entry).await;
                     } else {
@@ -6423,6 +6575,7 @@ cache:
             Bytes::from("test"),
             "text/plain".to_string(),
             "testetag".to_string(),
+            None,
             None,
         );
         assert!(cache.set(key.clone(), entry).await.is_ok());
@@ -6454,6 +6607,7 @@ cache:
                 Bytes::from(format!("data{}", i)),
                 "text/plain".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             cache.set(key, entry).await.unwrap();
@@ -6492,6 +6646,7 @@ cache:
                 Bytes::from(format!("data{}", i)),
                 "text/plain".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             cache.set(key, entry).await.unwrap();
@@ -6538,6 +6693,7 @@ cache:
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             let _ = cache.set(key, entry).await;
         }
@@ -6571,6 +6727,7 @@ cache:
             Bytes::from("data"),
             "text/plain".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -6611,6 +6768,7 @@ cache:
                 "text/plain".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             cache.set(key.clone(), entry).await.unwrap();
 
@@ -6643,6 +6801,7 @@ cache:
             "application/octet-stream".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         let result = cache.set(key, large_entry).await;
@@ -6670,6 +6829,7 @@ cache:
                 Bytes::from(vec![0u8; 100 * 1024]), // 100KB each
                 "application/octet-stream".to_string(),
                 format!("etag{}", i),
+                None,
                 None,
             );
             let _ = cache.set(key, entry).await;
@@ -6703,6 +6863,7 @@ cache:
             "text/plain".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
         let expected_size = entry.size_bytes();
 
@@ -6734,6 +6895,7 @@ cache:
             "application/octet-stream".to_string(),
             "etag1".to_string(),
             None,
+            None,
         );
 
         cache.set(key.clone(), entry).await.unwrap();
@@ -6762,6 +6924,7 @@ cache:
             Bytes::from(large_data),
             "application/octet-stream".to_string(),
             "etag1".to_string(),
+            None,
             None,
         );
 
@@ -6795,6 +6958,7 @@ cache:
                     "application/octet-stream".to_string(),
                     format!("etag{}-{}", cycle, i),
                     None,
+                    None,
                 );
                 let _ = cache.set(key, entry).await;
             }
@@ -6812,6 +6976,7 @@ cache:
             Bytes::from("test"),
             "text/plain".to_string(),
             "testetag".to_string(),
+            None,
             None,
         );
         assert!(cache.set(key.clone(), entry).await.is_ok());
@@ -6843,6 +7008,7 @@ cache:
                 "text/plain".to_string(),
                 format!("etag{}", i),
                 None,
+                None,
             );
             cache.set(key, entry).await.unwrap();
         }
@@ -6871,6 +7037,7 @@ cache:
             Bytes::from("newdata"),
             "text/plain".to_string(),
             "newetag".to_string(),
+            None,
             None,
         );
         assert!(cache.set(key.clone(), entry).await.is_ok());

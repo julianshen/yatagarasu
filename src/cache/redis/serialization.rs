@@ -21,6 +21,9 @@ struct SerializableCacheEntry {
     content_length: usize,
     /// ETag of the cached object (for validation)
     etag: String,
+    /// Last-Modified timestamp from S3 (for If-Modified-Since)
+    #[serde(default)]
+    last_modified: Option<String>,
     /// When this entry was created (seconds since UNIX_EPOCH)
     created_at_secs: u64,
     /// When this entry expires (seconds since UNIX_EPOCH)
@@ -46,6 +49,7 @@ pub fn serialize_entry(entry: &CacheEntry) -> Result<Vec<u8>, CacheError> {
         content_type: entry.content_type.clone(),
         content_length: entry.content_length,
         etag: entry.etag.clone(),
+        last_modified: entry.last_modified.clone(),
         created_at_secs: entry
             .created_at
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -122,6 +126,7 @@ pub fn deserialize_entry(bytes: &[u8]) -> Result<CacheEntry, CacheError> {
         content_type: serializable.content_type,
         content_length: serializable.content_length,
         etag: serializable.etag,
+        last_modified: serializable.last_modified,
         created_at,
         expires_at,
         last_accessed_at,
@@ -138,6 +143,7 @@ mod tests {
             Bytes::from("test data"),
             "text/plain".to_string(),
             "etag123".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         )
     }
@@ -199,6 +205,7 @@ mod tests {
             small_data,
             "text/plain".to_string(),
             "etag".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -216,6 +223,7 @@ mod tests {
             medium_data,
             "application/octet-stream".to_string(),
             "etag".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -234,6 +242,7 @@ mod tests {
             large_data,
             "application/octet-stream".to_string(),
             "etag".to_string(),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -340,6 +349,7 @@ mod tests {
             content_type: "text/plain".to_string(),
             content_length: 0,
             etag: "etag".to_string(),
+            last_modified: None,
             created_at_secs: 1000,
             expires_at_secs: 2000,
             last_accessed_at_secs: 1000,
@@ -366,6 +376,7 @@ mod tests {
             content_type: "text/plain".to_string(),
             content_length: 4,
             etag: String::new(), // Empty!
+            last_modified: None,
             created_at_secs: 1000,
             expires_at_secs: 2000,
             last_accessed_at_secs: 1000,

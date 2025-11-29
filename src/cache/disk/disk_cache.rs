@@ -89,6 +89,7 @@ impl Cache for DiskCache {
             content_type: "application/octet-stream".to_string(), // TODO: Store in metadata
             content_length: data.len(),
             etag: "".to_string(), // TODO: Store in metadata
+            last_modified: None,  // TODO: Store in metadata
             created_at: SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_secs(metadata.created_at),
             expires_at: SystemTime::UNIX_EPOCH

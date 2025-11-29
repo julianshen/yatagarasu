@@ -2007,7 +2007,7 @@ Before releasing v0.3.0, verify:
 - [ ] Test: Stats requires admin authentication
 
 ### Test: Conditional request support
-- [ ] Test: Client If-Modified-Since returns 304 when cache entry matches
+- [x] Test: Client If-Modified-Since returns 304 when cache entry matches - `CacheEntry.last_modified`, proxy/mod.rs:2370-2401
 - [x] Test: Client If-None-Match returns 304 when ETag matches - lines 2337-2362
 - [x] Test: Cache stores Last-Modified and ETag from S3 response - `CacheEntry` includes `etag`
 - [x] Test: 304 response saves bandwidth (no body sent) - line 2356, `end_stream=true`

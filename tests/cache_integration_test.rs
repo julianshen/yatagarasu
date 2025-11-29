@@ -44,6 +44,7 @@ async fn test_end_to_end_cache_hit_flow() {
         Bytes::from("Hello from cache!"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -126,6 +127,7 @@ async fn test_cache_promotion_disk_to_memory() {
         Bytes::from("Data to be promoted"),
         "text/plain".to_string(),
         "etag456".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -194,6 +196,7 @@ async fn test_cache_stats_api_returns_accurate_data() {
             Bytes::from(format!("Content for file {}", i)),
             "text/plain".to_string(),
             format!("etag-{}", i),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -263,6 +266,7 @@ async fn test_cache_clear_api() {
             Bytes::from(format!("Content {}", i)),
             "text/plain".to_string(),
             format!("etag-{}", i),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -320,6 +324,7 @@ async fn test_cache_survives_disk_persistence() {
         Bytes::from("This should persist!"),
         "text/plain".to_string(),
         "etag-persist".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -443,6 +448,7 @@ async fn test_s3_response_populates_cache() {
         Bytes::from("Content fetched from S3"),
         "text/plain".to_string(),
         "etag-auto".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -515,6 +521,7 @@ async fn test_cache_lookup_adds_less_than_1ms_latency() {
         Bytes::from("Performance test data"),
         "text/plain".to_string(),
         "perf-etag".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -588,6 +595,7 @@ async fn test_cache_write_is_non_blocking() {
             Bytes::from(format!("Data {}", i)),
             "text/plain".to_string(),
             format!("etag-{}", i),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
@@ -645,6 +653,7 @@ async fn test_promotion_is_async_and_does_not_slow_response() {
         Bytes::from("Data for promotion performance test"),
         "text/plain".to_string(),
         "etag-promote-perf".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -713,6 +722,7 @@ async fn test_metrics_track_cache_evictions() {
         Bytes::from("test data"),
         "text/plain".to_string(),
         "etag123".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -763,6 +773,7 @@ async fn test_metrics_track_cache_size_bytes() {
         Bytes::from(large_data),
         "application/octet-stream".to_string(),
         "etag456".to_string(),
+        None,
         Some(Duration::from_secs(3600)),
     );
 
@@ -812,6 +823,7 @@ async fn test_metrics_track_cache_items_count() {
             Bytes::from(format!("data {}", i)),
             "text/plain".to_string(),
             format!("etag{}", i),
+            None,
             Some(Duration::from_secs(3600)),
         );
 
