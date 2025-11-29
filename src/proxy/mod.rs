@@ -2765,6 +2765,12 @@ impl ProxyHttp for YatagarasuProxy {
                 e
             })?;
 
+        // Add X-Cache: MISS header for cache miss responses (response from S3)
+        // This complements X-Cache: HIT added in request_filter for cache hits
+        if self.cache.is_some() {
+            upstream_response.insert_header("X-Cache", "MISS").ok();
+        }
+
         // Log successful requests with replica information (Phase 23: HA bucket replication)
         let status = upstream_response.status.as_u16();
         if (200..300).contains(&status) {

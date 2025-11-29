@@ -2020,7 +2020,7 @@ Before releasing v0.3.0, verify:
 - [ ] Test: yatagarasu_cache_purges_total tracks purge operations
 
 ### Test: Cache hit rate validation
-- [ ] Test: 1000 requests for same file = 999 cache hits (first is miss)
+- [x] Test: 1000 requests for same file = 999 cache hits (first is miss) - k6/cache-hit-rate-validation.js
 - [ ] Test: Cache hit rate >95% for repeated requests
 - [ ] Test: Cache hit response time <10ms (vs S3 ~50-100ms)
 
