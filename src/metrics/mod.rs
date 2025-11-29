@@ -101,6 +101,7 @@ pub struct Metrics {
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
     cache_evictions: AtomicU64,           // Phase 30.8: eviction counter
+    cache_purges: AtomicU64,              // Phase 36: purge operation counter
     cache_size_bytes: AtomicU64,          // Phase 30.8: current cache size gauge
     cache_items: AtomicU64,               // Phase 30.8: current cached items gauge
     cache_get_durations: Mutex<Vec<u64>>, // microseconds
@@ -160,6 +161,7 @@ impl Metrics {
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
             cache_evictions: AtomicU64::new(0),
+            cache_purges: AtomicU64::new(0),
             cache_size_bytes: AtomicU64::new(0),
             cache_items: AtomicU64::new(0),
             cache_get_durations: Mutex::new(Vec::new()),
@@ -244,6 +246,11 @@ impl Metrics {
     /// Increment cache eviction counter (Phase 30.8)
     pub fn increment_cache_eviction(&self) {
         self.cache_evictions.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment cache purge counter (Phase 36)
+    pub fn increment_cache_purge(&self) {
+        self.cache_purges.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Update cache size gauge in bytes (Phase 30.8)
@@ -448,6 +455,11 @@ impl Metrics {
     /// Get cache eviction count (Phase 30.8)
     pub fn get_cache_eviction_count(&self) -> u64 {
         self.cache_evictions.load(Ordering::Relaxed)
+    }
+
+    /// Get cache purge count (Phase 36)
+    pub fn get_cache_purge_count(&self) -> u64 {
+        self.cache_purges.load(Ordering::Relaxed)
     }
 
     /// Get cache size in bytes (Phase 30.8)
@@ -1230,6 +1242,35 @@ impl Metrics {
                 }
             }
         }
+
+        // Phase 36: Cache metrics
+        output.push_str("\n# HELP yatagarasu_cache_hits_total Total cache hits\n");
+        output.push_str("# TYPE yatagarasu_cache_hits_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_cache_hits_total {}\n",
+            self.cache_hits.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_cache_misses_total Total cache misses\n");
+        output.push_str("# TYPE yatagarasu_cache_misses_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_cache_misses_total {}\n",
+            self.cache_misses.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_cache_evictions_total Total cache evictions\n");
+        output.push_str("# TYPE yatagarasu_cache_evictions_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_cache_evictions_total {}\n",
+            self.cache_evictions.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_cache_purges_total Total cache purge operations\n");
+        output.push_str("# TYPE yatagarasu_cache_purges_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_cache_purges_total {}\n",
+            self.cache_purges.load(Ordering::Relaxed)
+        ));
 
         output
     }
@@ -2289,6 +2330,68 @@ mod tests {
         assert!(
             histogram.p50 > 0.0,
             "P50 should be non-zero after recording durations"
+        );
+    }
+
+    // ============================================================================
+    // Phase 36: Cache Metrics Tests
+    // ============================================================================
+
+    #[test]
+    fn test_tracks_cache_purges_counter() {
+        // Test: yatagarasu_cache_purges_total tracks purge operations
+        let metrics = Metrics::new();
+
+        assert_eq!(metrics.get_cache_purge_count(), 0);
+
+        metrics.increment_cache_purge();
+        assert_eq!(metrics.get_cache_purge_count(), 1);
+
+        metrics.increment_cache_purge();
+        metrics.increment_cache_purge();
+        assert_eq!(metrics.get_cache_purge_count(), 3);
+    }
+
+    #[test]
+    fn test_prometheus_export_includes_cache_metrics() {
+        // Test: Prometheus export includes all cache metrics
+        let metrics = Metrics::new();
+
+        // Set some cache metrics
+        metrics.increment_cache_hit();
+        metrics.increment_cache_hit();
+        metrics.increment_cache_miss();
+        metrics.increment_cache_eviction();
+        metrics.increment_cache_purge();
+
+        let output = metrics.export_prometheus();
+
+        // Verify all cache metrics are present in output
+        assert!(
+            output.contains("yatagarasu_cache_hits_total 2"),
+            "Should export cache hits"
+        );
+        assert!(
+            output.contains("yatagarasu_cache_misses_total 1"),
+            "Should export cache misses"
+        );
+        assert!(
+            output.contains("yatagarasu_cache_evictions_total 1"),
+            "Should export cache evictions"
+        );
+        assert!(
+            output.contains("yatagarasu_cache_purges_total 1"),
+            "Should export cache purges"
+        );
+
+        // Verify HELP and TYPE lines are present
+        assert!(
+            output.contains("# HELP yatagarasu_cache_purges_total"),
+            "Should have HELP for cache purges"
+        );
+        assert!(
+            output.contains("# TYPE yatagarasu_cache_purges_total counter"),
+            "Should have TYPE for cache purges"
         );
     }
 }

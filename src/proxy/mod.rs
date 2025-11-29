@@ -1439,6 +1439,7 @@ impl ProxyHttp for YatagarasuProxy {
 
                         // Record metrics
                         self.metrics.increment_status_count(200);
+                        self.metrics.increment_cache_purge();
 
                         return Ok(true); // Short-circuit
                     }
@@ -1609,6 +1610,9 @@ impl ProxyHttp for YatagarasuProxy {
                                 .write_response_body(Some(response_body.into()), true)
                                 .await?;
                             self.metrics.increment_status_count(200);
+                            if deleted {
+                                self.metrics.increment_cache_purge();
+                            }
                             return Ok(true);
                         }
                         Err(e) => {

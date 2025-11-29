@@ -2017,12 +2017,12 @@ Before releasing v0.3.0, verify:
 - [x] Test: yatagarasu_cache_misses_total metric increments on miss - `Metrics.cache_misses`
 - [x] Test: yatagarasu_cache_size_bytes metric reflects current size - `Metrics.cache_size_bytes`
 - [ ] Test: yatagarasu_cache_evictions_total tracks evictions
-- [ ] Test: yatagarasu_cache_purges_total tracks purge operations
+- [x] Test: yatagarasu_cache_purges_total tracks purge operations - `Metrics.cache_purges`, `test_tracks_cache_purges_counter`
 
 ### Test: Cache hit rate validation
 - [x] Test: 1000 requests for same file = 999 cache hits (first is miss) - k6/cache-hit-rate-validation.js
-- [ ] Test: Cache hit rate >95% for repeated requests
-- [ ] Test: Cache hit response time <10ms (vs S3 ~50-100ms)
+- [x] Test: Cache hit rate >95% for repeated requests - k6/cache-hit-rate-validation.js (threshold: rate>0.99)
+- [x] Test: Cache hit response time <10ms (vs S3 ~50-100ms) - k6/cache-hit-rate-validation.js (threshold: p95<10ms)
 
 **Expected Outcome**: S3 responses cached in tiered cache, cache management via API
 
