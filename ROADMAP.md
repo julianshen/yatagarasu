@@ -175,37 +175,60 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **Why**: Support enterprise authentication systems that use RSA/ECDSA
 
-#### 3. Enhanced Observability
-**Priority**: MEDIUM  
+#### 3. Enhanced Observability ✅ COMPLETE
+**Priority**: MEDIUM
 **Effort**: MEDIUM (1 week)
+**Status**: ✅ Implemented in Phase 34
 
-- [ ] Distributed tracing (OpenTelemetry)
-- [ ] Request/response logging with filtering
-- [ ] Slow query logging
-- [ ] Enhanced metrics (percentiles, SLOs)
+- [x] Distributed tracing (OpenTelemetry)
+  - OTLP, Jaeger, and Zipkin exporters
+  - Configurable sampling ratio
+  - Trace context propagation
+- [x] Request/response logging with filtering
+  - Path filtering (include/exclude patterns)
+  - Status code filtering
+  - Header redaction for sensitive info
+  - Body truncation with configurable max size
+- [x] Slow query logging
+  - Configurable threshold
+  - Phase timing (auth, cache, S3)
+  - Correlation ID inclusion
+- [ ] Enhanced metrics (percentiles, SLOs) - Partial (percentiles exist, SLOs pending)
 
 **Why**: Better debugging and performance monitoring
 
-#### 4. Audit Logging & Compliance
+#### 4. Audit Logging & Compliance ✅ COMPLETE
 **Priority**: HIGH (Elevated - Critical for security/compliance)
 **Effort**: MEDIUM (3-5 days)
+**Status**: ✅ Implemented in Phase 33
 
-- [ ] Comprehensive audit log for all requests (who, what, when, from where)
-- [ ] Structured JSON audit logs with correlation IDs
-- [ ] Audit log includes: client IP, user (from JWT), bucket, object key, action, response status, timestamp
-- [ ] Configurable audit log retention and rotation
-- [ ] Audit log export to S3, syslog, or external system
-- [ ] Sensitive data redaction (e.g., JWT tokens in logs)
+- [x] Comprehensive audit log for all requests (who, what, when, from where)
+- [x] Structured JSON audit logs with correlation IDs
+- [x] Audit log includes: client IP, user (from JWT), bucket, object key, action, response status, timestamp
+- [x] Configurable audit log retention and rotation
+  - File-based output with rotation support
+  - Async file writer for performance
+- [x] Audit log export to S3, syslog, or external system
+  - Syslog output support
+  - S3 export with batching logic
+- [x] Sensitive data redaction (e.g., JWT tokens in logs)
 
 **Why**: Essential for security audits, compliance (SOC2, GDPR, HIPAA), incident investigation, and access tracking
 
-#### 5. Advanced Security Features
+#### 5. Advanced Security Features ✅ COMPLETE
 **Priority**: MEDIUM
 **Effort**: LOW-MEDIUM (3-5 days)
+**Status**: ✅ Implemented in Phase 35
 
-- [ ] IP allowlist/blocklist per bucket
-- [ ] Advanced rate limiting (token bucket, sliding window algorithms)
-- [ ] Enhanced DDoS protection
+- [x] IP allowlist/blocklist per bucket
+  - IpFilterConfig with allowlist and blocklist support
+  - IpRange for single IP and CIDR notation (IPv4/IPv6)
+  - Precedence logic (allowlist > blocklist)
+- [x] Advanced rate limiting (token bucket, sliding window algorithms)
+  - Per-user rate limiting from JWT claims
+  - check_all_with_user() for comprehensive checks
+  - Memory management with cleanup_stale_users()
+- [ ] Enhanced DDoS protection - Partial (rate limiting covers basic DDoS)
 
 **Why**: Additional security hardening for production environments
 
@@ -226,11 +249,11 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
 
 **HIGH - Must Have**:
 - ✅ RS256/ES256 JWT support
-- ✅ Audit logging (comprehensive request/access tracking)
+- ✅ Audit logging (comprehensive request/access tracking) - Phase 33 COMPLETE
 
-**Nice to Have**:
-- OpenTelemetry tracing
-- Advanced security features (IP allowlists, enhanced rate limiting)
+**Nice to Have** ✅ COMPLETE:
+- ✅ OpenTelemetry tracing (Phase 34)
+- ✅ Advanced security features (IP allowlists, enhanced rate limiting) (Phase 35)
 
 **Timeline**: 6-8 weeks development + 2 weeks testing
 
@@ -289,14 +312,15 @@ curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
   - Metrics remain healthy (no degradation)
 
 **Security & Compliance**:
-- ✅ **Audit log completeness** (if audit logging implemented)
+- ✅ **Audit log completeness** (Phase 33 IMPLEMENTED - needs validation testing)
   - 100% of requests logged (no gaps)
   - Correlation IDs match across all log entries
   - Sensitive data properly redacted
   - Log rotation works under high load (1000+ req/s)
 
-- ✅ **Rate limiting effectiveness**
+- ✅ **Rate limiting effectiveness** (Phase 35 IMPLEMENTED - needs validation testing)
   - Blocks malicious traffic (10,000 req/s from single IP)
+  - Per-user rate limiting from JWT claims
   - Legitimate traffic unaffected
   - Metrics track blocked requests
 
