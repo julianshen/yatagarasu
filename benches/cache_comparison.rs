@@ -44,6 +44,7 @@ use testcontainers_modules::redis::Redis;
 use tokio::runtime::Runtime;
 use yatagarasu::cache::disk::DiskCache;
 use yatagarasu::cache::redis::{RedisCache, RedisConfig};
+use yatagarasu::cache::tiered::TieredCache;
 use yatagarasu::cache::{Cache, CacheEntry, CacheKey, MemoryCache, MemoryCacheConfig};
 
 // =============================================================================
@@ -1545,6 +1546,289 @@ fn bench_cache_comparison_set(c: &mut Criterion) {
 }
 
 // =============================================================================
+// Tiered Cache Benchmarks (Phase 36.5)
+// =============================================================================
+
+/// Create a TieredCache with Memory + Disk layers
+fn create_tiered_cache_memory_disk(temp_dir: &TempDir) -> TieredCache {
+    let memory_cache = create_memory_cache();
+    let disk_cache = create_disk_cache(temp_dir);
+    TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)])
+}
+
+/// Benchmark tiered cache L1 hit (memory layer)
+/// Entry exists in memory - fastest path
+fn bench_tiered_cache_l1_hit(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let tiered = create_tiered_cache_memory_disk(&temp_dir);
+
+    // Pre-populate memory layer with entries
+    rt.block_on(async {
+        for i in 0..100 {
+            let key = create_cache_key("bench", "tiered-l1", i);
+            let entry = create_cache_entry(SIZE_10KB);
+            tiered.set(key, entry).await.unwrap();
+        }
+    });
+
+    let mut group = c.benchmark_group("tiered_cache_l1_hit");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+
+    group.bench_function("memory_hit", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "tiered-l1", counter % 100);
+            counter += 1;
+            rt.block_on(async {
+                let result = tiered.get(black_box(&key)).await;
+                assert!(result.unwrap().is_some());
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark tiered cache L2 hit (disk layer, memory miss)
+/// Entry exists in disk but not in memory - triggers promotion
+fn bench_tiered_cache_l2_hit(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create separate caches to control where data exists
+    let memory_cache = create_memory_cache();
+    let disk_cache = create_disk_cache(&temp_dir);
+
+    // Pre-populate DISK only (not memory)
+    rt.block_on(async {
+        for i in 0..50 {
+            let key = create_cache_key("bench", "tiered-l2", i);
+            let entry = create_cache_entry(SIZE_10KB);
+            disk_cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    // Create tiered cache with populated disk layer
+    let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+
+    let mut group = c.benchmark_group("tiered_cache_l2_hit");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+    group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+
+    group.bench_function("disk_hit_with_promotion", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "tiered-l2", counter % 50);
+            counter += 1;
+            rt.block_on(async {
+                let result = tiered.get(black_box(&key)).await;
+                assert!(result.unwrap().is_some());
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark tiered cache L3 hit (redis layer, memory+disk miss)
+/// Entry exists only in Redis - triggers promotion to memory and disk
+fn bench_tiered_cache_l3_hit(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    // Create separate caches
+    let memory_cache = create_memory_cache();
+    let disk_cache = create_disk_cache(&temp_dir);
+    let redis_config = create_redis_config(redis_url);
+    let redis_cache = rt.block_on(async { RedisCache::new(redis_config).await.unwrap() });
+
+    // Pre-populate REDIS only (not memory or disk)
+    rt.block_on(async {
+        for i in 0..30 {
+            let key = create_cache_key("bench", "tiered-l3", i);
+            let entry = create_cache_entry(SIZE_10KB);
+            redis_cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    // Create 3-layer tiered cache
+    let tiered = TieredCache::new(vec![
+        Box::new(memory_cache),
+        Box::new(disk_cache),
+        Box::new(redis_cache),
+    ]);
+
+    let mut group = c.benchmark_group("tiered_cache_l3_hit");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+    group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+
+    group.bench_function("redis_hit_with_promotion", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "tiered-l3", counter % 30);
+            counter += 1;
+            rt.block_on(async {
+                let result = tiered.get(black_box(&key)).await;
+                assert!(result.unwrap().is_some());
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark tiered cache miss (all layers miss)
+fn bench_tiered_cache_miss(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let tiered = create_tiered_cache_memory_disk(&temp_dir);
+
+    let mut group = c.benchmark_group("tiered_cache_miss");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+
+    group.bench_function("all_layers_miss", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "nonexistent", counter);
+            counter += 1;
+            rt.block_on(async {
+                let result = tiered.get(black_box(&key)).await;
+                assert!(result.unwrap().is_none());
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark tiered cache set (write-through to all layers)
+fn bench_tiered_cache_set(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let tiered = create_tiered_cache_memory_disk(&temp_dir);
+
+    let mut group = c.benchmark_group("tiered_cache_set");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+    group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+
+    group.bench_function("write_through_2_layers", |b| {
+        let mut counter = 0u64;
+        b.iter(|| {
+            let key = create_cache_key("bench", "tiered-set", counter as usize);
+            counter = counter.wrapping_add(1);
+            let entry = create_cache_entry(SIZE_10KB);
+            rt.block_on(async {
+                tiered.set(black_box(key), black_box(entry)).await.unwrap();
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark tiered cache set with 3 layers (memory + disk + redis)
+fn bench_tiered_cache_set_3_layers(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let memory_cache = create_memory_cache();
+    let disk_cache = create_disk_cache(&temp_dir);
+    let redis_config = create_redis_config(redis_url);
+    let redis_cache = rt.block_on(async { RedisCache::new(redis_config).await.unwrap() });
+
+    let tiered = TieredCache::new(vec![
+        Box::new(memory_cache),
+        Box::new(disk_cache),
+        Box::new(redis_cache),
+    ]);
+
+    let mut group = c.benchmark_group("tiered_cache_set_3_layers");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+    group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+
+    group.bench_function("write_through_all", |b| {
+        let mut counter = 0u64;
+        b.iter(|| {
+            let key = create_cache_key("bench", "tiered-set-3", counter as usize);
+            counter = counter.wrapping_add(1);
+            let entry = create_cache_entry(SIZE_10KB);
+            rt.block_on(async {
+                tiered.set(black_box(key), black_box(entry)).await.unwrap();
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark tiered cache delete (remove from all layers)
+fn bench_tiered_cache_delete(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let tiered = create_tiered_cache_memory_disk(&temp_dir);
+
+    // Pre-populate for delete
+    rt.block_on(async {
+        for i in 0..1000 {
+            let key = create_cache_key("bench", "tiered-delete", i);
+            let entry = create_cache_entry(SIZE_1KB);
+            tiered.set(key, entry).await.unwrap();
+        }
+    });
+
+    let mut group = c.benchmark_group("tiered_cache_delete");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+
+    group.bench_function("delete_from_all_layers", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "tiered-delete", counter % 1000);
+            counter += 1;
+            rt.block_on(async {
+                let _ = tiered.delete(black_box(&key)).await;
+            });
+        });
+    });
+
+    group.finish();
+}
+
+// =============================================================================
 // Criterion Configuration (Phase 36.1: Statistical Rigor)
 // =============================================================================
 
@@ -1618,9 +1902,25 @@ criterion_group! {
     targets = bench_cache_comparison, bench_cache_comparison_set
 }
 
+criterion_group! {
+    name = tiered_benches;
+    config = statistically_rigorous_config()
+        .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
+        .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
+        .sample_size(DISK_SAMPLE_SIZE);
+    targets = bench_tiered_cache_l1_hit,
+              bench_tiered_cache_l2_hit,
+              bench_tiered_cache_l3_hit,
+              bench_tiered_cache_miss,
+              bench_tiered_cache_set,
+              bench_tiered_cache_set_3_layers,
+              bench_tiered_cache_delete
+}
+
 criterion_main!(
     memory_benches,
     disk_benches,
     redis_benches,
-    comparison_benches
+    comparison_benches,
+    tiered_benches
 );

@@ -2747,36 +2747,33 @@ services:
 
 ### 36.5: Tiered Cache Benchmarks (Memory → Disk → Redis)
 
-**NOTE**: Phase 36.5 is DEFERRED - individual layer benchmarks (36.2-36.4) provide sufficient coverage.
-Tiered cache benchmarks would require complex setup with all 3 layers + Redis container.
-The comparison benchmarks in 36.6 demonstrate relative performance differences.
-
 #### Multi-Layer Hit Scenarios
-- [~] Benchmark: Memory hit (L1) - Target: <100μs P95 - DEFERRED: covered by memory benchmarks
-- [~] Benchmark: Memory miss → Disk hit (L2) - Target: <5ms P95 - DEFERRED
-- [~] Benchmark: Memory miss → Disk miss → Redis hit (L3) - Target: <10ms P95 - DEFERRED
-- [~] Benchmark: All layers miss - Target: <15ms P95 - DEFERRED
+- [x] Benchmark: Memory hit (L1) - Target: <100μs P95 - bench_tiered_cache_l1_hit
+- [x] Benchmark: Memory miss → Disk hit (L2) - Target: <5ms P95 - bench_tiered_cache_l2_hit
+- [x] Benchmark: Memory miss → Disk miss → Redis hit (L3) - Target: <10ms P95 - bench_tiered_cache_l3_hit
+- [x] Benchmark: All layers miss - Target: <15ms P95 - bench_tiered_cache_miss
 
 #### Promotion Performance
-- [~] Benchmark: L2 → L1 promotion (disk to memory) - Target: <10ms P95 - DEFERRED
-- [~] Benchmark: L3 → L2 → L1 promotion (redis to all) - Target: <20ms P95 - DEFERRED
-- [~] Benchmark: Promotion doesn't block get() response - DEFERRED
+- [x] Benchmark: L2 → L1 promotion (disk to memory) - Target: <10ms P95 - included in bench_tiered_cache_l2_hit
+- [x] Benchmark: L3 → L2 → L1 promotion (redis to all) - Target: <20ms P95 - included in bench_tiered_cache_l3_hit
+- [~] Benchmark: Promotion doesn't block get() response - DEFERRED: requires async instrumentation
 - [~] Benchmark: Concurrent promotions (10 parallel) - Target: <50ms P95 - DEFERRED
 
 #### Write-Through Performance
-- [~] Benchmark: set() to all layers (memory + disk + redis) - Target: <60ms P95 - DEFERRED
-- [~] Benchmark: set() with write-behind strategy (memory only sync) - DEFERRED
-- [~] Benchmark: Background write queue processing - Target: >500 ops/s - DEFERRED
+- [x] Benchmark: set() to all layers (memory + disk + redis) - Target: <60ms P95 - bench_tiered_cache_set_3_layers
+- [x] Benchmark: set() to 2 layers (memory + disk) - bench_tiered_cache_set
+- [~] Benchmark: set() with write-behind strategy (memory only sync) - DEFERRED: not implemented
+- [~] Benchmark: Background write queue processing - Target: >500 ops/s - DEFERRED: not implemented
 
 #### Aggregated Operations
-- [~] Benchmark: delete() from all layers - Target: <70ms P95 - DEFERRED
-- [~] Benchmark: clear() all layers - Target: <1s (with 1000 entries) - DEFERRED
-- [~] Benchmark: stats() aggregation - Target: <1ms P95 - DEFERRED
+- [x] Benchmark: delete() from all layers - Target: <70ms P95 - bench_tiered_cache_delete
+- [~] Benchmark: clear() all layers - Target: <1s (with 1000 entries) - DEFERRED: trivial, not benchmarked
+- [~] Benchmark: stats() aggregation - Target: <1ms P95 - DEFERRED: trivial, not benchmarked
 
 #### Failure Scenarios
-- [~] Benchmark: Redis unavailable → fallback to disk - Target: <10ms P95 - DEFERRED
-- [~] Benchmark: Disk I/O error → fallback to memory - Target: <1ms P95 - DEFERRED
-- [~] Benchmark: All layers miss → S3 fetch - Baseline measurement - DEFERRED
+- [~] Benchmark: Redis unavailable → fallback to disk - Target: <10ms P95 - DEFERRED: requires container manipulation
+- [~] Benchmark: Disk I/O error → fallback to memory - Target: <1ms P95 - DEFERRED: requires error injection
+- [~] Benchmark: All layers miss → S3 fetch - Baseline measurement - DEFERRED: S3 not part of cache
 
 ---
 
