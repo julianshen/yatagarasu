@@ -1207,6 +1207,196 @@ fn bench_redis_cache_get(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark Redis cache concurrent get() operations (10 parallel)
+fn bench_redis_cache_concurrent_get(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = create_redis_config(redis_url);
+    let cache = rt.block_on(async { std::sync::Arc::new(RedisCache::new(config).await.unwrap()) });
+
+    // Pre-populate cache
+    let sizes = [("1kb", SIZE_1KB), ("100kb", SIZE_100KB)];
+
+    rt.block_on(async {
+        for (name, size) in &sizes {
+            for i in 0..30 {
+                let key = create_cache_key("bench", &format!("redis-concurrent-{}", name), i);
+                let entry = create_cache_entry(*size);
+                cache.set(key, entry).await.unwrap();
+            }
+        }
+    });
+
+    let mut group = c.benchmark_group("redis_cache_concurrent_get");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+
+    for (name, size) in sizes {
+        group.throughput(Throughput::Bytes((size * CONCURRENT_THREADS) as u64));
+        group.bench_with_input(
+            BenchmarkId::new("10_threads", name),
+            &(name, size),
+            |b, (name, _)| {
+                let mut counter = 0usize;
+                b.iter(|| {
+                    let base = counter;
+                    counter += CONCURRENT_THREADS;
+                    rt.block_on(async {
+                        let mut handles = Vec::with_capacity(CONCURRENT_THREADS);
+                        for i in 0..CONCURRENT_THREADS {
+                            let cache = cache.clone();
+                            let key = create_cache_key(
+                                "bench",
+                                &format!("redis-concurrent-{}", name),
+                                (base + i) % 30,
+                            );
+                            handles.push(tokio::spawn(async move {
+                                let _result = cache.get(black_box(&key)).await;
+                            }));
+                        }
+                        for handle in handles {
+                            handle.await.unwrap();
+                        }
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark Redis cache concurrent set() operations (10 parallel)
+fn bench_redis_cache_concurrent_set(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = create_redis_config(redis_url);
+    let cache = rt.block_on(async { std::sync::Arc::new(RedisCache::new(config).await.unwrap()) });
+
+    let sizes = [("1kb", SIZE_1KB), ("100kb", SIZE_100KB)];
+
+    let mut group = c.benchmark_group("redis_cache_concurrent_set");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+
+    for (name, size) in sizes {
+        group.throughput(Throughput::Bytes((size * CONCURRENT_THREADS) as u64));
+        group.bench_with_input(BenchmarkId::new("10_threads", name), &size, |b, &size| {
+            let mut counter = 0u64;
+            b.iter(|| {
+                let base = counter;
+                counter += CONCURRENT_THREADS as u64;
+                rt.block_on(async {
+                    let mut handles = Vec::with_capacity(CONCURRENT_THREADS);
+                    for i in 0..CONCURRENT_THREADS {
+                        let cache = cache.clone();
+                        let key = create_cache_key(
+                            "bench",
+                            "redis-concurrent-set",
+                            (base + i as u64) as usize,
+                        );
+                        let entry = create_cache_entry(size);
+                        handles.push(tokio::spawn(async move {
+                            cache.set(black_box(key), black_box(entry)).await.unwrap();
+                        }));
+                    }
+                    for handle in handles {
+                        handle.await.unwrap();
+                    }
+                });
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark Redis cache throughput (operations per second)
+fn bench_redis_cache_throughput(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = create_redis_config(redis_url);
+    let cache = rt.block_on(async { std::sync::Arc::new(RedisCache::new(config).await.unwrap()) });
+
+    // Pre-populate for get operations
+    rt.block_on(async {
+        for i in 0..100 {
+            let key = create_cache_key("bench", "redis-throughput", i);
+            let entry = create_cache_entry(SIZE_1KB);
+            cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    let mut group = c.benchmark_group("redis_cache_throughput");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+
+    // Sequential operations baseline
+    group.throughput(Throughput::Elements(1));
+    group.bench_function("sequential_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "redis-throughput", counter % 100);
+            counter += 1;
+            rt.block_on(async {
+                let _result = cache.get(black_box(&key)).await;
+            });
+        });
+    });
+
+    // 10 concurrent operations
+    group.throughput(Throughput::Elements(10));
+    group.bench_function("concurrent_10_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let base = counter;
+            counter += 10;
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(10);
+                for i in 0..10 {
+                    let cache = cache.clone();
+                    let key = create_cache_key("bench", "redis-throughput", (base + i) % 100);
+                    handles.push(tokio::spawn(async move {
+                        let _result = cache.get(black_box(&key)).await;
+                    }));
+                }
+                for handle in handles {
+                    handle.await.unwrap();
+                }
+            });
+        });
+    });
+
+    group.finish();
+}
+
 // =============================================================================
 // Comparative Benchmarks (Phase 36.6)
 // =============================================================================
@@ -1318,7 +1508,11 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
         .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
         .sample_size(REDIS_SAMPLE_SIZE);
-    targets = bench_redis_cache_set, bench_redis_cache_get
+    targets = bench_redis_cache_set,
+              bench_redis_cache_get,
+              bench_redis_cache_concurrent_get,
+              bench_redis_cache_concurrent_set,
+              bench_redis_cache_throughput
 }
 
 criterion_group! {
