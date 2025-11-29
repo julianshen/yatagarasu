@@ -78,6 +78,7 @@ const SIZE_1KB: usize = 1024;
 const SIZE_10KB: usize = 10 * 1024;
 const SIZE_100KB: usize = 100 * 1024;
 const SIZE_1MB: usize = 1024 * 1024;
+const SIZE_10MB: usize = 10 * 1024 * 1024;
 
 /// Generate test data of specified size with realistic content
 fn generate_test_data(size: usize) -> Bytes {
@@ -85,6 +86,67 @@ fn generate_test_data(size: usize) -> Bytes {
     let pattern: Vec<u8> = (0..256).map(|i| i as u8).collect();
     let data: Vec<u8> = pattern.iter().cycle().take(size).cloned().collect();
     Bytes::from(data)
+}
+
+/// Content types for diverse testing
+#[derive(Clone, Copy)]
+enum ContentType {
+    Binary,
+    Json,
+    Image,
+}
+
+impl ContentType {
+    fn mime_type(&self) -> &'static str {
+        match self {
+            ContentType::Binary => "application/octet-stream",
+            ContentType::Json => "application/json",
+            ContentType::Image => "image/png",
+        }
+    }
+}
+
+/// Generate test data with specific content type characteristics
+fn generate_typed_data(size: usize, content_type: ContentType) -> (Bytes, &'static str) {
+    let data = match content_type {
+        ContentType::Binary => {
+            // Random-ish binary pattern (0-255 repeating)
+            let pattern: Vec<u8> = (0..256).map(|i| i as u8).collect();
+            pattern.iter().cycle().take(size).cloned().collect()
+        }
+        ContentType::Json => {
+            // JSON-like structure (ASCII text with structure)
+            let json_template = r#"{"id":12345,"name":"test-object","data":"#;
+            let json_end = r#"","timestamp":1699999999}"#;
+            let overhead = json_template.len() + json_end.len();
+            let filler_size = size.saturating_sub(overhead);
+            let filler: String = "x".repeat(filler_size);
+            format!("{}{}{}", json_template, filler, json_end).into_bytes()
+        }
+        ContentType::Image => {
+            // PNG-like header + random data (simulates image file)
+            let png_header: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+            let remaining = size.saturating_sub(png_header.len());
+            let pattern: Vec<u8> = (0..256).map(|i| i as u8).collect();
+            let body: Vec<u8> = pattern.iter().cycle().take(remaining).cloned().collect();
+            [png_header, body].concat()
+        }
+    };
+    (Bytes::from(data), content_type.mime_type())
+}
+
+/// Create a CacheEntry with specific content type
+fn create_typed_cache_entry(size: usize, content_type: ContentType) -> CacheEntry {
+    let (data, mime_type) = generate_typed_data(size, content_type);
+    CacheEntry {
+        data: data.clone(),
+        content_type: mime_type.to_string(),
+        content_length: data.len(),
+        etag: format!("\"test-etag-{}-{}\"", size, mime_type.replace('/', "-")),
+        created_at: std::time::SystemTime::now(),
+        expires_at: std::time::SystemTime::now() + Duration::from_secs(3600),
+        last_accessed_at: std::time::SystemTime::now(),
+    }
 }
 
 /// Create a CacheEntry with the given data size
@@ -242,6 +304,74 @@ fn bench_memory_cache_miss(c: &mut Criterion) {
             counter += 1;
             rt.block_on(async {
                 let _result = cache.get(black_box(&key)).await;
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark memory cache with diverse content types (JSON, Image, Binary)
+fn bench_memory_cache_content_types(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let cache = create_memory_cache();
+
+    let mut group = c.benchmark_group("memory_cache_content_types");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
+
+    let content_types = [
+        ("binary", ContentType::Binary),
+        ("json", ContentType::Json),
+        ("image", ContentType::Image),
+    ];
+
+    // Test 10KB entries with different content types
+    for (name, content_type) in content_types {
+        group.throughput(Throughput::Bytes(SIZE_10KB as u64));
+        group.bench_with_input(BenchmarkId::new("set", name), &content_type, |b, &ct| {
+            let mut counter = 0u64;
+            b.iter(|| {
+                let key =
+                    create_cache_key("bench", &format!("content-type-{}", name), counter as usize);
+                counter = counter.wrapping_add(1);
+                let entry = create_typed_cache_entry(SIZE_10KB, ct);
+                rt.block_on(async {
+                    cache.set(black_box(key), black_box(entry)).await.unwrap();
+                });
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark large file operations (10MB - exceeds typical cache limit)
+fn bench_large_file_operations(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let disk_cache = create_disk_cache(&temp_dir);
+
+    let mut group = c.benchmark_group("large_file_10mb");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(10));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(10); // Very few samples for large files
+
+    group.throughput(Throughput::Bytes(SIZE_10MB as u64));
+
+    // Disk cache handles large files
+    group.bench_function("disk_set", |b| {
+        let mut counter = 0u64;
+        b.iter(|| {
+            let key = create_cache_key("bench", "large-file", counter as usize);
+            counter = counter.wrapping_add(1);
+            let entry = create_cache_entry(SIZE_10MB);
+            rt.block_on(async {
+                disk_cache
+                    .set(black_box(key), black_box(entry))
+                    .await
+                    .unwrap();
             });
         });
     });
@@ -521,7 +651,7 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
         .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
         .sample_size(MEMORY_SAMPLE_SIZE);
-    targets = bench_memory_cache_set, bench_memory_cache_get, bench_memory_cache_miss
+    targets = bench_memory_cache_set, bench_memory_cache_get, bench_memory_cache_miss, bench_memory_cache_content_types
 }
 
 criterion_group! {
@@ -530,7 +660,7 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
         .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
         .sample_size(DISK_SAMPLE_SIZE);
-    targets = bench_disk_cache_set, bench_disk_cache_get
+    targets = bench_disk_cache_set, bench_disk_cache_get, bench_large_file_operations
 }
 
 criterion_group! {
@@ -551,4 +681,9 @@ criterion_group! {
     targets = bench_cache_comparison
 }
 
-criterion_main!(memory_benches, disk_benches, redis_benches, comparison_benches);
+criterion_main!(
+    memory_benches,
+    disk_benches,
+    redis_benches,
+    comparison_benches
+);

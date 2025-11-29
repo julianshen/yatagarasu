@@ -2602,13 +2602,13 @@ services:
 - [x] Benchmark: Add benchmark CI job (GitHub Actions)
 
 #### Test Data Generation
-- [ ] Benchmark: Generate 1KB test data (typical small file)
-- [ ] Benchmark: Generate 10KB test data (medium file)
-- [ ] Benchmark: Generate 100KB test data (large cacheable file)
-- [ ] Benchmark: Generate 1MB test data (near max_item_size)
-- [ ] Benchmark: Generate 10MB test data (exceeds cache limit)
-- [ ] Benchmark: Generate diverse content types (JSON, image, binary)
-- [ ] Benchmark: Generate test keys with realistic naming patterns
+- [x] Benchmark: Generate 1KB test data (typical small file)
+- [x] Benchmark: Generate 10KB test data (medium file)
+- [x] Benchmark: Generate 100KB test data (large cacheable file)
+- [x] Benchmark: Generate 1MB test data (near max_item_size)
+- [x] Benchmark: Generate 10MB test data (exceeds cache limit)
+- [x] Benchmark: Generate diverse content types (JSON, image, binary)
+- [x] Benchmark: Generate test keys with realistic naming patterns
 
 ---
 
