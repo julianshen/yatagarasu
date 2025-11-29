@@ -1,0 +1,40 @@
+# Yatagarasu configuration for load testing with disk cache enabled
+# Used by docker-compose.loadtest.yaml
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "public-assets"
+    path_prefix: "/public"
+    s3:
+      bucket: "public-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY_PUBLIC}"
+      secret_key: "${AWS_SECRET_KEY_PUBLIC}"
+    auth:
+      enabled: false
+
+# Cache configuration with disk cache enabled
+cache:
+  layers: ["memory", "disk"]
+
+  memory:
+    enabled: true
+    max_memory_cache_mb: 256
+    max_entry_size_mb: 10
+
+  disk:
+    enabled: true
+    cache_dir: "/var/cache/yatagarasu"
+    max_disk_cache_size_mb: 1024
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

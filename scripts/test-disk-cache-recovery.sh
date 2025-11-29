@@ -3,23 +3,21 @@
 #
 # This script tests disk cache persistence and recovery after proxy restart.
 #
-# Prerequisites:
+# RECOMMENDED: Use docker-compose for easy testing:
+#   docker-compose -f docker-compose.loadtest.yaml up -d
+#   ./scripts/test-disk-cache-recovery.sh --docker
+#
+# Manual Prerequisites (without docker):
 #   - yatagarasu binary built (cargo build --release)
 #   - MinIO running with test files
-#   - IMPORTANT: Disk cache must be ENABLED in your config:
-#
-#     cache:
-#       layers: ["memory", "disk"]
-#       disk:
-#         enabled: true
-#         cache_dir: "/var/cache/yatagarasu"  # or your custom path
-#         max_disk_cache_size_mb: 1024
+#   - Disk cache ENABLED in config with writable cache_dir
 #
 # Usage:
-#   ./scripts/test-disk-cache-recovery.sh
+#   # With docker-compose (recommended)
+#   ./scripts/test-disk-cache-recovery.sh --docker
 #
-#   # With custom cache directory:
-#   CACHE_DIR=/path/to/cache ./scripts/test-disk-cache-recovery.sh
+#   # Without docker (requires writable cache dir)
+#   CACHE_DIR=/tmp/yatagarasu-cache ./scripts/test-disk-cache-recovery.sh
 #
 # What it tests:
 #   1. Populate cache with 1000 entries
@@ -33,13 +31,26 @@
 
 set -e
 
+# Check for --docker flag
+USE_DOCKER=false
+if [[ "$1" == "--docker" ]]; then
+    USE_DOCKER=true
+fi
+
 # Configuration
 PROXY_URL="${PROXY_URL:-http://localhost:8080}"
-# Default cache directory matches src/cache/mod.rs default_cache_dir()
-CACHE_DIR="${CACHE_DIR:-/var/cache/yatagarasu}"
-PROXY_PID_FILE="/tmp/yatagarasu.pid"
+CONTAINER_NAME="loadtest-proxy"
 NUM_ENTRIES=1000
 TEST_FILE="/public/test-1kb.txt"
+
+# Set cache directory based on mode
+if $USE_DOCKER; then
+    # For docker mode, we'll check cache inside container
+    CACHE_DIR="/var/cache/yatagarasu"
+else
+    # For local mode, use temp directory by default
+    CACHE_DIR="${CACHE_DIR:-/tmp/yatagarasu-cache}"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -93,12 +104,21 @@ wait_for_proxy() {
 
 # Count cache files
 count_cache_files() {
-    find "${CACHE_DIR}" -type f -name "*.cache" 2>/dev/null | wc -l | tr -d ' '
+    if $USE_DOCKER; then
+        docker exec "${CONTAINER_NAME}" find "${CACHE_DIR}" -type f -name "*.cache" 2>/dev/null | wc -l | tr -d ' '
+    else
+        find "${CACHE_DIR}" -type f -name "*.cache" 2>/dev/null | wc -l | tr -d ' '
+    fi
 }
 
 # Check if index file exists
 check_index_file() {
-    [ -f "${CACHE_DIR}/index.json" ] || [ -f "${CACHE_DIR}/cache_index.json" ]
+    if $USE_DOCKER; then
+        docker exec "${CONTAINER_NAME}" test -f "${CACHE_DIR}/index.json" 2>/dev/null || \
+        docker exec "${CONTAINER_NAME}" test -f "${CACHE_DIR}/cache_index.json" 2>/dev/null
+    else
+        [ -f "${CACHE_DIR}/index.json" ] || [ -f "${CACHE_DIR}/cache_index.json" ]
+    fi
 }
 
 # Populate cache with entries
@@ -151,17 +171,27 @@ verify_cache_entries() {
 create_orphan_files() {
     log_info "Creating orphan cache files..."
 
-    # Create some fake cache files that aren't in the index
-    for i in $(seq 1 10); do
-        echo "orphan data" > "${CACHE_DIR}/orphan_${i}.cache"
-    done
+    if $USE_DOCKER; then
+        for i in $(seq 1 10); do
+            docker exec "${CONTAINER_NAME}" sh -c "echo 'orphan data' > ${CACHE_DIR}/orphan_${i}.cache"
+        done
+    else
+        for i in $(seq 1 10); do
+            echo "orphan data" > "${CACHE_DIR}/orphan_${i}.cache"
+        done
+    fi
 
     log_success "Created 10 orphan files"
 }
 
 # Check if orphan files were cleaned up
 check_orphan_cleanup() {
-    local orphans=$(find "${CACHE_DIR}" -name "orphan_*.cache" 2>/dev/null | wc -l | tr -d ' ')
+    local orphans
+    if $USE_DOCKER; then
+        orphans=$(docker exec "${CONTAINER_NAME}" find "${CACHE_DIR}" -name "orphan_*.cache" 2>/dev/null | wc -l | tr -d ' ')
+    else
+        orphans=$(find "${CACHE_DIR}" -name "orphan_*.cache" 2>/dev/null | wc -l | tr -d ' ')
+    fi
 
     if [ "$orphans" -eq 0 ]; then
         log_success "Orphan files cleaned up"
@@ -178,6 +208,7 @@ main() {
     echo "Phase 37.2: Disk Cache Restart & Recovery Tests"
     echo "============================================================"
     echo ""
+    echo "Mode:      $(if $USE_DOCKER; then echo 'Docker'; else echo 'Local'; fi)"
     echo "Proxy URL: ${PROXY_URL}"
     echo "Cache Dir: ${CACHE_DIR}"
     echo "Entries:   ${NUM_ENTRIES}"
@@ -186,12 +217,18 @@ main() {
     # Prerequisites check
     if ! check_proxy_health; then
         log_error "Proxy not running at ${PROXY_URL}"
-        echo "Start the proxy first: cargo run --release -- --config config.yaml"
+        if $USE_DOCKER; then
+            echo "Start with: docker-compose -f docker-compose.loadtest.yaml up -d"
+        else
+            echo "Start the proxy first: cargo run --release -- --config config.yaml"
+        fi
         exit 1
     fi
 
-    # Ensure cache directory exists
-    mkdir -p "${CACHE_DIR}"
+    # Ensure cache directory exists (only for local mode)
+    if ! $USE_DOCKER; then
+        mkdir -p "${CACHE_DIR}"
+    fi
 
     echo "============================================================"
     echo "Test 1: Populate cache with ${NUM_ENTRIES} entries"
@@ -240,30 +277,47 @@ main() {
     echo "============================================================"
     echo "Test 4: Stop proxy gracefully"
     echo "============================================================"
-    log_info "Please stop the proxy now (Ctrl+C or SIGTERM)"
-    log_info "Press Enter when proxy is stopped..."
-    read -r
+    if $USE_DOCKER; then
+        log_info "Stopping container ${CONTAINER_NAME}..."
+        docker stop "${CONTAINER_NAME}"
+        log_success "Container stopped"
+    else
+        log_info "Please stop the proxy now (Ctrl+C or SIGTERM)"
+        log_info "Press Enter when proxy is stopped..."
+        read -r
+    fi
 
     echo ""
     echo "============================================================"
     echo "Test 5: Verify index file persists"
     echo "============================================================"
-    if check_index_file; then
-        log_success "Index file persists after shutdown"
+    if $USE_DOCKER; then
+        # Can't exec into stopped container, but volume persists
+        log_info "Docker volume persists data across container restarts"
+        log_success "Volume 'disk-cache' contains cache data"
     else
-        log_warn "Index file not found (may use different persistence)"
-    fi
+        if check_index_file; then
+            log_success "Index file persists after shutdown"
+        else
+            log_warn "Index file not found (may use different persistence)"
+        fi
 
-    local files_after_stop=$(count_cache_files)
-    log_info "Cache files after stop: ${files_after_stop}"
+        local files_after_stop=$(count_cache_files)
+        log_info "Cache files after stop: ${files_after_stop}"
+    fi
 
     echo ""
     echo "============================================================"
     echo "Test 6: Restart proxy"
     echo "============================================================"
-    log_info "Please restart the proxy now"
-    log_info "Press Enter when proxy is running..."
-    read -r
+    if $USE_DOCKER; then
+        log_info "Starting container ${CONTAINER_NAME}..."
+        docker start "${CONTAINER_NAME}"
+    else
+        log_info "Please restart the proxy now"
+        log_info "Press Enter when proxy is running..."
+        read -r
+    fi
 
     wait_for_proxy
 

@@ -1,0 +1,103 @@
+# Docker Compose for Load Testing with Disk Cache
+# Usage:
+#   docker-compose -f docker-compose.loadtest.yaml up -d
+#   k6 run k6/disk-cache-load.js
+#   ./scripts/test-disk-cache-recovery.sh
+
+version: '3.8'
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: loadtest-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - loadtest-net
+
+  # MinIO setup - creates buckets and test files
+  minio-setup:
+    image: minio/mc:latest
+    container_name: loadtest-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Configuring MinIO client...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+
+      echo 'Creating test bucket...';
+      mc mb --ignore-existing myminio/public-assets;
+      mc anonymous set public myminio/public-assets;
+
+      echo 'Creating load test files...';
+      dd if=/dev/urandom of=/tmp/test-1kb.txt bs=1K count=1 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-10kb.txt bs=1K count=10 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-100kb.txt bs=1K count=100 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-1mb.bin bs=1M count=1 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-10mb.bin bs=1M count=10 2>/dev/null;
+
+      mc cp /tmp/test-1kb.txt myminio/public-assets/test-1kb.txt;
+      mc cp /tmp/test-10kb.txt myminio/public-assets/test-10kb.txt;
+      mc cp /tmp/test-100kb.txt myminio/public-assets/test-100kb.txt;
+      mc cp /tmp/test-1mb.bin myminio/public-assets/test-1mb.bin;
+      mc cp /tmp/test-10mb.bin myminio/public-assets/test-10mb.bin;
+
+      echo 'MinIO setup complete!';
+      "
+    networks:
+      - loadtest-net
+
+  # Yatagarasu proxy with disk cache enabled
+  yatagarasu:
+    image: yatagarasu:test
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: loadtest-proxy
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      AWS_ACCESS_KEY_PUBLIC: minioadmin
+      AWS_SECRET_KEY_PUBLIC: minioadmin
+      RUST_LOG: info
+    volumes:
+      - ./config.loadtest-diskcache.yaml:/etc/yatagarasu/config.yaml:ro
+      - disk-cache:/var/cache/yatagarasu
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - loadtest-net
+    restart: unless-stopped
+
+networks:
+  loadtest-net:
+    driver: bridge
+
+volumes:
+  minio-data:
+    driver: local
+  disk-cache:
+    driver: local
