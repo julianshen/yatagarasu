@@ -29,15 +29,25 @@ cmd_deploy() {
     log_info "Building yatagarasu:test image..."
     docker build -t yatagarasu:test "${SCRIPT_DIR}/.."
 
-    log_info "Deploying to Kubernetes..."
-    kubectl apply -k "${K8S_DIR}"
+    # Check if namespace exists - if so, do incremental update
+    if kubectl get namespace "${NAMESPACE}" &>/dev/null; then
+        log_info "Namespace exists, doing incremental update..."
+
+        # Delete jobs first (they're immutable)
+        log_info "Cleaning up old jobs..."
+        kubectl delete job --all -n "${NAMESPACE}" --ignore-not-found
+
+        # Apply updates
+        kubectl apply -k "${K8S_DIR}"
+    else
+        log_info "Creating fresh deployment..."
+        kubectl apply -k "${K8S_DIR}"
+    fi
 
     log_info "Waiting for MinIO to be ready..."
     kubectl wait --for=condition=ready pod -l app=minio -n "${NAMESPACE}" --timeout=120s
 
-    log_info "Running MinIO setup job..."
-    kubectl delete job minio-setup -n "${NAMESPACE}" --ignore-not-found
-    kubectl apply -f "${K8S_DIR}/minio.yaml" -n "${NAMESPACE}"
+    log_info "Waiting for MinIO setup to complete..."
     kubectl wait --for=condition=complete job/minio-setup -n "${NAMESPACE}" --timeout=120s
 
     log_info "Waiting for Yatagarasu to be ready..."
@@ -53,9 +63,67 @@ cmd_test() {
 
     # Delete old job if exists
     kubectl delete job disk-cache-recovery-test -n "${NAMESPACE}" --ignore-not-found
+    sleep 2
 
-    # Apply and wait for job
-    kubectl apply -f "${K8S_DIR}/tests.yaml"
+    # Create test job inline (avoids immutable job issues with kubectl apply)
+    kubectl create -f - <<'TESTJOB'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: disk-cache-recovery-test
+  namespace: yatagarasu-loadtest
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: curlimages/curl:8.4.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "============================================================"
+              echo "K8s Disk Cache Recovery Test"
+              echo "============================================================"
+              PROXY_URL="http://yatagarasu:8080"
+              NUM_ENTRIES=500
+              TEST_FILE="/public/test-1kb.txt"
+              echo "Waiting for proxy..."
+              until curl -sf "$PROXY_URL/health" >/dev/null 2>&1; do sleep 2; done
+              echo "[PASS] Proxy ready"
+              echo ""
+              echo "Populating cache with $NUM_ENTRIES entries..."
+              i=1
+              while [ $i -le $NUM_ENTRIES ]; do
+                curl -sf "$PROXY_URL$TEST_FILE?entry=$i" >/dev/null
+                [ $((i % 100)) -eq 0 ] && echo "  $i entries..."
+                i=$((i + 1))
+              done
+              echo "[PASS] Cache populated"
+              sleep 3
+              echo ""
+              echo "Verifying all entries accessible..."
+              ERRORS=0
+              i=1
+              while [ $i -le $NUM_ENTRIES ]; do
+                curl -sf "$PROXY_URL$TEST_FILE?entry=$i" >/dev/null || ERRORS=$((ERRORS + 1))
+                [ $((i % 100)) -eq 0 ] && echo "  Verified $i..."
+                i=$((i + 1))
+              done
+              if [ $ERRORS -eq 0 ]; then
+                echo "[PASS] All $NUM_ENTRIES entries accessible"
+              else
+                echo "[FAIL] $ERRORS entries failed"
+                exit 1
+              fi
+              echo ""
+              echo "============================================================"
+              echo "Test Complete!"
+              echo "============================================================"
+TESTJOB
 
     log_info "Waiting for test job to start..."
     sleep 3
@@ -80,6 +148,7 @@ cmd_restart() {
     cmd_test
 
     # Restart deployment
+    log_info ""
     log_info "Step 2: Rolling restart of Yatagarasu..."
     kubectl rollout restart deployment/yatagarasu -n "${NAMESPACE}"
 
@@ -87,10 +156,85 @@ cmd_restart() {
     kubectl rollout status deployment/yatagarasu -n "${NAMESPACE}" --timeout=120s
 
     # Run test again
+    log_info ""
     log_info "Step 3: Verify cache after restart..."
     cmd_test
 
     log_info "Restart recovery test complete!"
+}
+
+cmd_k6() {
+    local scenario="${1:-cold_50rps}"
+    local duration="${2:-1m}"
+
+    log_info "Running k6 load test: scenario=${scenario}, duration=${duration}"
+
+    # Delete old job if exists
+    kubectl delete job k6-load-test -n "${NAMESPACE}" --ignore-not-found
+    sleep 2
+
+    # Create k6 job inline
+    kubectl create -f - <<K6JOB
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load-test
+  namespace: yatagarasu-loadtest
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          args:
+            - run
+            - -e
+            - BASE_URL=http://yatagarasu:8080
+            - --duration
+            - "${duration}"
+            - -
+          stdin: true
+          env:
+            - name: K6_SCRIPT
+              value: |
+                import http from 'k6/http';
+                import { check } from 'k6';
+                import { Rate } from 'k6/metrics';
+                const errorRate = new Rate('errors');
+                const BASE_URL = __ENV.BASE_URL;
+                const FILES = ['/public/test-1kb.txt', '/public/test-10kb.txt', '/public/test-100kb.txt'];
+                export const options = {
+                  scenarios: {
+                    load: {
+                      executor: 'constant-arrival-rate',
+                      rate: 50,
+                      timeUnit: '1s',
+                      duration: '${duration}',
+                      preAllocatedVUs: 10,
+                      maxVUs: 50,
+                    },
+                  },
+                  thresholds: {
+                    http_req_duration: ['p(95)<500'],
+                    http_req_failed: ['rate<0.01'],
+                  },
+                };
+                let reqId = 0;
+                export default function() {
+                  const url = BASE_URL + FILES[reqId % FILES.length] + '?id=' + reqId++;
+                  const r = http.get(url);
+                  errorRate.add(!check(r, { 'status 200': (r) => r.status === 200 }));
+                }
+K6JOB
+
+    log_info "Waiting for k6 to start..."
+    sleep 5
+
+    # Follow logs
+    kubectl logs -f job/k6-load-test -n "${NAMESPACE}"
 }
 
 cmd_logs() {
@@ -140,6 +284,9 @@ case "${1:-help}" in
     restart)
         cmd_restart
         ;;
+    k6)
+        cmd_k6 "${2:-cold_50rps}" "${3:-1m}"
+        ;;
     logs)
         cmd_logs
         ;;
@@ -158,12 +305,13 @@ case "${1:-help}" in
         echo "Usage: $0 <command>"
         echo ""
         echo "Commands:"
-        echo "  deploy       Deploy MinIO and Yatagarasu to K8s"
-        echo "  test         Run disk cache recovery test"
-        echo "  restart      Test cache persistence across pod restart"
-        echo "  logs         View Yatagarasu logs"
-        echo "  port-forward Forward ports to localhost"
-        echo "  status       Show pod/service status"
-        echo "  cleanup      Delete all K8s resources"
+        echo "  deploy         Deploy MinIO and Yatagarasu to K8s"
+        echo "  test           Run disk cache recovery test"
+        echo "  restart        Test cache persistence across pod restart"
+        echo "  k6 [duration]  Run k6 load test (default: 1m)"
+        echo "  logs           View Yatagarasu logs"
+        echo "  port-forward   Forward ports to localhost"
+        echo "  status         Show pod/service status"
+        echo "  cleanup        Delete all K8s resources"
         ;;
 esac
