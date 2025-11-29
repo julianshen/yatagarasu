@@ -164,17 +164,53 @@ cmd_restart() {
 }
 
 cmd_k6() {
-    local scenario="${1:-cold_50rps}"
-    local duration="${2:-1m}"
+    local duration="${1:-1m}"
 
-    log_info "Running k6 load test: scenario=${scenario}, duration=${duration}"
+    log_info "Running k6 load test: duration=${duration}"
 
     # Delete old job if exists
     kubectl delete job k6-load-test -n "${NAMESPACE}" --ignore-not-found
     sleep 2
 
-    # Create k6 job inline
-    kubectl create -f - <<K6JOB
+    # Create k6 script configmap
+    kubectl delete configmap k6-inline-script -n "${NAMESPACE}" --ignore-not-found
+    kubectl create configmap k6-inline-script -n "${NAMESPACE}" --from-literal=script.js="
+import http from 'k6/http';
+import { check } from 'k6';
+import { Rate } from 'k6/metrics';
+
+const errorRate = new Rate('errors');
+const BASE_URL = __ENV.BASE_URL || 'http://yatagarasu:8080';
+const FILES = ['/public/test-1kb.txt', '/public/test-10kb.txt', '/public/test-100kb.txt'];
+
+export const options = {
+  scenarios: {
+    load: {
+      executor: 'constant-arrival-rate',
+      rate: 50,
+      timeUnit: '1s',
+      duration: '${duration}',
+      preAllocatedVUs: 10,
+      maxVUs: 50,
+    },
+  },
+  thresholds: {
+    http_req_duration: ['p(95)<500'],
+    http_req_failed: ['rate<0.01'],
+  },
+};
+
+let reqId = 0;
+
+export default function() {
+  const url = BASE_URL + FILES[reqId % FILES.length] + '?id=' + reqId++;
+  const r = http.get(url);
+  errorRate.add(!check(r, { 'status 200': (r) => r.status === 200 }));
+}
+"
+
+    # Create k6 job
+    kubectl create -f - <<'K6JOB'
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -189,45 +225,15 @@ spec:
       containers:
         - name: k6
           image: grafana/k6:latest
-          args:
-            - run
-            - -e
-            - BASE_URL=http://yatagarasu:8080
-            - --duration
-            - "${duration}"
-            - -
-          stdin: true
-          env:
-            - name: K6_SCRIPT
-              value: |
-                import http from 'k6/http';
-                import { check } from 'k6';
-                import { Rate } from 'k6/metrics';
-                const errorRate = new Rate('errors');
-                const BASE_URL = __ENV.BASE_URL;
-                const FILES = ['/public/test-1kb.txt', '/public/test-10kb.txt', '/public/test-100kb.txt'];
-                export const options = {
-                  scenarios: {
-                    load: {
-                      executor: 'constant-arrival-rate',
-                      rate: 50,
-                      timeUnit: '1s',
-                      duration: '${duration}',
-                      preAllocatedVUs: 10,
-                      maxVUs: 50,
-                    },
-                  },
-                  thresholds: {
-                    http_req_duration: ['p(95)<500'],
-                    http_req_failed: ['rate<0.01'],
-                  },
-                };
-                let reqId = 0;
-                export default function() {
-                  const url = BASE_URL + FILES[reqId % FILES.length] + '?id=' + reqId++;
-                  const r = http.get(url);
-                  errorRate.add(!check(r, { 'status 200': (r) => r.status === 200 }));
-                }
+          command: ["k6", "run", "-e", "BASE_URL=http://yatagarasu:8080", "/scripts/script.js"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: k6-inline-script
 K6JOB
 
     log_info "Waiting for k6 to start..."
@@ -285,7 +291,7 @@ case "${1:-help}" in
         cmd_restart
         ;;
     k6)
-        cmd_k6 "${2:-cold_50rps}" "${3:-1m}"
+        cmd_k6 "${2:-1m}"
         ;;
     logs)
         cmd_logs
