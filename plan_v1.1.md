@@ -2615,23 +2615,23 @@ services:
 ### 36.2: Memory Cache Benchmarks (Moka)
 
 #### Small Entry Benchmarks (1KB)
-- [ ] Benchmark: 1KB set() operation - Target: <100μs P95
-- [ ] Benchmark: 1KB get() operation (cache hit) - Target: <50μs P95
-- [ ] Benchmark: 1KB get() operation (cache miss) - Target: <10μs P95
-- [ ] Benchmark: 1KB concurrent get() (10 threads) - Target: <200μs P95
-- [ ] Benchmark: 1KB concurrent set() (10 threads) - Target: <500μs P95
-- [ ] Benchmark: 1KB mixed workload (70% read, 30% write) - Target: <100μs P95
+- [x] Benchmark: 1KB set() operation - Target: <100μs P95
+- [x] Benchmark: 1KB get() operation (cache hit) - Target: <50μs P95
+- [x] Benchmark: 1KB get() operation (cache miss) - Target: <10μs P95
+- [x] Benchmark: 1KB concurrent get() (10 threads) - Target: <200μs P95
+- [x] Benchmark: 1KB concurrent set() (10 threads) - Target: <500μs P95
+- [x] Benchmark: 1KB mixed workload (70% read, 30% write) - Target: <100μs P95
 
 #### Medium Entry Benchmarks (100KB)
-- [ ] Benchmark: 100KB set() operation - Target: <500μs P95
-- [ ] Benchmark: 100KB get() operation (cache hit) - Target: <200μs P95
-- [ ] Benchmark: 100KB concurrent get() (10 threads) - Target: <500μs P95
-- [ ] Benchmark: 100KB concurrent set() (10 threads) - Target: <1ms P95
+- [x] Benchmark: 100KB set() operation - Target: <500μs P95
+- [x] Benchmark: 100KB get() operation (cache hit) - Target: <200μs P95
+- [x] Benchmark: 100KB concurrent get() (10 threads) - Target: <500μs P95
+- [x] Benchmark: 100KB concurrent set() (10 threads) - Target: <1ms P95
 
 #### Large Entry Benchmarks (1MB)
-- [ ] Benchmark: 1MB set() operation - Target: <5ms P95
-- [ ] Benchmark: 1MB get() operation (cache hit) - Target: <2ms P95
-- [ ] Benchmark: 1MB concurrent get() (10 threads) - Target: <5ms P95
+- [x] Benchmark: 1MB set() operation - Target: <5ms P95
+- [x] Benchmark: 1MB get() operation (cache hit) - Target: <2ms P95
+- [x] Benchmark: 1MB concurrent get() (10 threads) - Target: <5ms P95
 
 #### Eviction Performance
 - [ ] Benchmark: LRU eviction with 1000 entries - Target: <1ms P95

@@ -346,6 +346,156 @@ fn bench_memory_cache_content_types(c: &mut Criterion) {
     group.finish();
 }
 
+/// Number of concurrent threads for parallel benchmarks
+const CONCURRENT_THREADS: usize = 10;
+
+/// Benchmark memory cache concurrent get() operations (10 parallel)
+fn bench_memory_cache_concurrent_get(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let cache = std::sync::Arc::new(create_memory_cache());
+
+    // Pre-populate cache with entries for each size
+    let sizes = [("1kb", SIZE_1KB), ("100kb", SIZE_100KB), ("1mb", SIZE_1MB)];
+
+    rt.block_on(async {
+        for (name, size) in &sizes {
+            for i in 0..100 {
+                let key = create_cache_key("bench", &format!("concurrent-get-{}", name), i);
+                let entry = create_cache_entry(*size);
+                cache.set(key, entry).await.unwrap();
+            }
+        }
+    });
+
+    let mut group = c.benchmark_group("memory_cache_concurrent_get");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+
+    for (name, size) in sizes {
+        group.throughput(Throughput::Bytes((size * CONCURRENT_THREADS) as u64));
+        group.bench_with_input(
+            BenchmarkId::new("10_threads", name),
+            &(name, size),
+            |b, (name, _)| {
+                let mut counter = 0usize;
+                b.iter(|| {
+                    let base_counter = counter;
+                    counter += CONCURRENT_THREADS;
+
+                    rt.block_on(async {
+                        let mut handles = Vec::with_capacity(CONCURRENT_THREADS);
+                        for i in 0..CONCURRENT_THREADS {
+                            let cache = cache.clone();
+                            let key = create_cache_key(
+                                "bench",
+                                &format!("concurrent-get-{}", name),
+                                (base_counter + i) % 100,
+                            );
+                            handles.push(tokio::spawn(async move {
+                                let _result = cache.get(black_box(&key)).await;
+                            }));
+                        }
+                        for handle in handles {
+                            handle.await.unwrap();
+                        }
+                    });
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark memory cache concurrent set() operations (10 parallel)
+fn bench_memory_cache_concurrent_set(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let cache = std::sync::Arc::new(create_memory_cache());
+
+    let sizes = [("1kb", SIZE_1KB), ("100kb", SIZE_100KB)];
+
+    let mut group = c.benchmark_group("memory_cache_concurrent_set");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+
+    for (name, size) in sizes {
+        group.throughput(Throughput::Bytes((size * CONCURRENT_THREADS) as u64));
+        group.bench_with_input(BenchmarkId::new("10_threads", name), &size, |b, &size| {
+            let mut counter = 0u64;
+            b.iter(|| {
+                let base_counter = counter;
+                counter += CONCURRENT_THREADS as u64;
+
+                rt.block_on(async {
+                    let mut handles = Vec::with_capacity(CONCURRENT_THREADS);
+                    for i in 0..CONCURRENT_THREADS {
+                        let cache = cache.clone();
+                        let key = create_cache_key(
+                            "bench",
+                            "concurrent-set",
+                            (base_counter + i as u64) as usize,
+                        );
+                        let entry = create_cache_entry(size);
+                        handles.push(tokio::spawn(async move {
+                            cache.set(black_box(key), black_box(entry)).await.unwrap();
+                        }));
+                    }
+                    for handle in handles {
+                        handle.await.unwrap();
+                    }
+                });
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark memory cache mixed workload (70% read, 30% write)
+fn bench_memory_cache_mixed_workload(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let cache = std::sync::Arc::new(create_memory_cache());
+
+    // Pre-populate cache
+    rt.block_on(async {
+        for i in 0..1000 {
+            let key = create_cache_key("bench", "mixed", i);
+            let entry = create_cache_entry(SIZE_1KB);
+            cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    let mut group = c.benchmark_group("memory_cache_mixed_workload");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Elements(10)); // 10 operations per iteration
+
+    group.bench_function("70_read_30_write", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            rt.block_on(async {
+                // 10 operations: 7 reads, 3 writes
+                for i in 0..10 {
+                    let idx = (counter + i) % 1000;
+                    if i < 7 {
+                        // Read (70%)
+                        let key = create_cache_key("bench", "mixed", idx);
+                        let _result = cache.get(black_box(&key)).await;
+                    } else {
+                        // Write (30%)
+                        let key = create_cache_key("bench", "mixed", idx);
+                        let entry = create_cache_entry(SIZE_1KB);
+                        cache.set(black_box(key), black_box(entry)).await.unwrap();
+                    }
+                }
+            });
+            counter += 10;
+        });
+    });
+
+    group.finish();
+}
+
 /// Benchmark large file operations (10MB - exceeds typical cache limit)
 fn bench_large_file_operations(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
@@ -651,7 +801,13 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
         .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
         .sample_size(MEMORY_SAMPLE_SIZE);
-    targets = bench_memory_cache_set, bench_memory_cache_get, bench_memory_cache_miss, bench_memory_cache_content_types
+    targets = bench_memory_cache_set,
+              bench_memory_cache_get,
+              bench_memory_cache_miss,
+              bench_memory_cache_content_types,
+              bench_memory_cache_concurrent_get,
+              bench_memory_cache_concurrent_set,
+              bench_memory_cache_mixed_workload
 }
 
 criterion_group! {
