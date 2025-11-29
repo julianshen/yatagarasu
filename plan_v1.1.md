@@ -2599,7 +2599,7 @@ services:
 - [x] Benchmark: Configure measurement iterations (100 iterations)
 - [x] Benchmark: Use testcontainers for Redis benchmarks
 - [x] Benchmark: Generate HTML reports with graphs
-- [ ] Benchmark: Add benchmark CI job (GitHub Actions)
+- [x] Benchmark: Add benchmark CI job (GitHub Actions)
 
 #### Test Data Generation
 - [ ] Benchmark: Generate 1KB test data (typical small file)

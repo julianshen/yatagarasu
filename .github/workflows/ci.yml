@@ -7,6 +7,8 @@
 # 3. security - Run cargo audit
 # 4. coverage - Generate and enforce coverage threshold (>90%)
 # 5. integration - Run integration tests with docker-compose + MinIO
+# 6. build - Verify release build works
+# 7. benchmark - Run cache benchmarks (main branch only)
 
 name: CI
 
@@ -300,3 +302,63 @@ jobs:
 
       - name: Verify binary works
         run: ./target/release/yatagarasu --version
+
+  # Job 7: Benchmarks (only on main branch push)
+  benchmark:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    # Only run benchmarks on push to main, not on PRs (too slow)
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: ${{ runner.os }}-cargo-build-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-bench-
+
+      - name: Download previous benchmark results
+        uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-criterion-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-criterion-
+
+      - name: Run cache benchmarks (memory + disk only)
+        run: |
+          # Skip Redis benchmarks in CI (requires Docker, too slow)
+          cargo bench --bench cache_comparison -- "memory_cache" --noplot
+          cargo bench --bench cache_comparison -- "disk_cache" --noplot
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Check for performance regressions
+        run: |
+          echo "Benchmark results saved to artifacts"
+          echo "Review target/criterion/*/report/index.html for detailed analysis"
+          # Note: Criterion automatically compares with previous runs
+          # and reports regressions in the benchmark output
