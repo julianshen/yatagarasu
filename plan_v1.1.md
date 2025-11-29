@@ -1,6 +1,6 @@
 # Yatagarasu v1.1.0 Implementation Plan
 
-**Last Updated**: 2025-11-26
+**Last Updated**: 2025-11-29
 **Current Status**: Phase 30 COMPLETE - Ready for Phase 31 (Advanced JWT)
 **Target Release**: When it's right, not when it's fast
 
@@ -2590,10 +2590,10 @@ services:
 **Deliverable**: Performance report with recommendations for each use case
 **Deferred from**: Phase 27 (memory), Phase 28 (disk), Phase 29 (redis)
 
-### 35.1: Benchmark Infrastructure
+### 36.1: Benchmark Infrastructure
 
 #### Criterion Setup
-- [ ] Benchmark: Create benches/cache_comparison.rs
+- [x] Benchmark: Create benches/cache_comparison.rs
 - [ ] Benchmark: Use Criterion for statistical rigor
 - [ ] Benchmark: Configure warm-up iterations (5 iterations)
 - [ ] Benchmark: Configure measurement iterations (100 iterations)
@@ -2612,7 +2612,7 @@ services:
 
 ---
 
-### 35.2: Memory Cache Benchmarks (Moka)
+### 36.2: Memory Cache Benchmarks (Moka)
 
 #### Small Entry Benchmarks (1KB)
 - [ ] Benchmark: 1KB set() operation - Target: <100μs P95
@@ -2653,7 +2653,7 @@ services:
 
 ---
 
-### 35.3: Disk Cache Benchmarks (tokio::fs)
+### 36.3: Disk Cache Benchmarks (tokio::fs)
 
 #### Small Entry Benchmarks (1KB)
 - [ ] Benchmark: 1KB set() operation - Target: <5ms P95 (disk I/O)
@@ -2698,7 +2698,7 @@ services:
 
 ---
 
-### 35.4: Redis Cache Benchmarks (redis crate + MessagePack)
+### 36.4: Redis Cache Benchmarks (redis crate + MessagePack)
 
 #### Small Entry Benchmarks (1KB)
 - [ ] Benchmark: 1KB set() operation - Target: <5ms P95 (network + Redis)
@@ -2745,7 +2745,7 @@ services:
 
 ---
 
-### 35.5: Tiered Cache Benchmarks (Memory → Disk → Redis)
+### 36.5: Tiered Cache Benchmarks (Memory → Disk → Redis)
 
 #### Multi-Layer Hit Scenarios
 - [ ] Benchmark: Memory hit (L1) - Target: <100μs P95 (fastest)
@@ -2776,7 +2776,7 @@ services:
 
 ---
 
-### 35.6: Comparative Analysis & Reporting
+### 36.6: Comparative Analysis & Reporting
 
 #### Performance Comparison
 - [ ] Report: Create comparison table (ops/s, latency P50/P95/P99)
@@ -2809,7 +2809,7 @@ services:
 **Goal**: Validate cache performance under realistic production load
 **Tools**: k6, hey, wrk, or custom Rust load generator
 
-### 36.1: Memory Cache Load Tests
+### 37.1: Memory Cache Load Tests
 
 #### Cold Cache Scenario (All Misses)
 - [ ] Load: 100 RPS, 5 minutes, cold cache → measure P95 latency
@@ -2844,7 +2844,7 @@ services:
 
 ---
 
-### 36.2: Disk Cache Load Tests
+### 37.2: Disk Cache Load Tests
 
 #### Cold Cache Scenario (All Misses)
 - [ ] Load: 50 RPS, 5 minutes, cold cache → measure disk I/O impact
@@ -2881,7 +2881,7 @@ services:
 
 ---
 
-### 36.3: Redis Cache Load Tests
+### 37.3: Redis Cache Load Tests
 
 #### Cold Cache Scenario (All Misses)
 - [ ] Load: 50 RPS, 5 minutes, cold cache → measure Redis + network overhead
@@ -2919,7 +2919,7 @@ services:
 
 ---
 
-### 36.4: Tiered Cache Load Tests
+### 37.4: Tiered Cache Load Tests
 
 #### Promotion Under Load
 - [ ] Load: 100 RPS, prime redis cache, verify promotion to disk+memory
@@ -2952,7 +2952,7 @@ services:
 
 **Goal**: Push caches to their limits, identify breaking points
 
-### 37.1: Memory Cache Stress Tests
+### 38.1: Memory Cache Stress Tests
 
 #### Extreme Concurrency
 - [ ] Stress: 10,000 concurrent requests (1KB files)
@@ -2978,7 +2978,7 @@ services:
 
 ---
 
-### 37.2: Disk Cache Stress Tests
+### 38.2: Disk Cache Stress Tests
 
 #### Large Cache Size
 - [ ] Stress: Populate with 10,000 files (10GB total)
@@ -3008,7 +3008,7 @@ services:
 
 ---
 
-### 37.3: Redis Cache Stress Tests
+### 38.3: Redis Cache Stress Tests
 
 #### Connection Pool Exhaustion
 - [ ] Stress: 10,000 concurrent requests
@@ -3041,7 +3041,7 @@ services:
 
 **Goal**: Verify constant memory usage for large files (bypass cache)
 
-### 38.1: Large File Streaming (Cache Bypass)
+### 39.1: Large File Streaming (Cache Bypass)
 
 #### Single Large File
 - [ ] Stream: Download 1GB file, verify memory <100MB
@@ -3081,7 +3081,7 @@ services:
 
 ---
 
-### 38.2: Mixed Workload (Cached + Streamed)
+### 39.2: Mixed Workload (Cached + Streamed)
 
 #### Small Files (Cached) + Large Files (Streamed)
 - [ ] Mixed: 50% small files (<1MB, cached), 50% large files (>10MB, streamed)
@@ -3099,53 +3099,14 @@ services:
 
 ---
 
-## PHASE 40: Extreme Concurrency & Scalability Tests
+## PHASE 40: Scalability Testing
 
-**Goal**: Test maximum concurrent connections and identify scalability limits
+**Goal**: Validate vertical and horizontal scaling characteristics
+**Note**: Extreme concurrency tests are covered in Phase 38 (Stress Testing)
 
-### 39.1: Extreme Concurrency - Memory Cache
+### 40.1: Vertical Scaling - CPU
 
-#### High Connection Count
-- [ ] Concurrency: 10,000 concurrent requests, 1KB files
-- [ ] Concurrency: 50,000 concurrent requests, 1KB files
-- [ ] Concurrency: 100,000 concurrent requests (if system capable)
-- [ ] Verify: P95 latency <100ms at 10K connections
-- [ ] Verify: Throughput >10,000 req/s
-- [ ] Verify: Error rate <0.1%
-- [ ] Verify: No connection pool exhaustion
-- [ ] Verify: Graceful degradation beyond capacity
-
-#### Thread Pool Saturation
-- [ ] Measure: Maximum effective concurrency for cache operations
-- [ ] Measure: Tokio runtime thread pool usage
-- [ ] Measure: Lock contention at extreme concurrency
-- [ ] Verify: No thread pool starvation
-- [ ] Verify: Work stealing effective
-
-### 39.2: Extreme Concurrency - Disk Cache
-
-#### High Concurrent File Operations
-- [ ] Concurrency: 1,000 concurrent file reads
-- [ ] Concurrency: 1,000 concurrent file writes
-- [ ] Concurrency: Mixed read/write (500 each)
-- [ ] Verify: tokio::fs handles load without blocking
-- [ ] Verify: File descriptor limits not exceeded
-- [ ] Verify: Disk I/O queue depth reasonable
-
-### 39.3: Extreme Concurrency - Redis Cache
-
-#### High Connection Concurrency
-- [ ] Concurrency: 1,000 concurrent Redis operations
-- [ ] Concurrency: 5,000 concurrent Redis operations
-- [ ] Concurrency: 10,000 concurrent Redis operations
-- [ ] Verify: Connection pool sizing adequate
-- [ ] Verify: Redis server can handle load
-- [ ] Verify: Network buffers don't overflow
-- [ ] Measure: Redis CPU/memory usage at peak
-
-### 39.4: Scalability Testing
-
-#### Vertical Scaling
+#### CPU Core Scaling
 - [ ] Scale: Test with 1 CPU core, measure max RPS
 - [ ] Scale: Test with 2 CPU cores, measure max RPS
 - [ ] Scale: Test with 4 CPU cores, measure max RPS
@@ -3154,14 +3115,31 @@ services:
 - [ ] Verify: Performance scales linearly with cores (up to a point)
 - [ ] Measure: Identify CPU bottleneck point
 
-#### Memory Scaling
-- [ ] Scale: Test with 1GB cache size, measure hit rate
-- [ ] Scale: Test with 10GB cache size, measure hit rate
-- [ ] Scale: Test with 50GB cache size, measure hit rate
+#### Thread Pool Analysis
+- [ ] Measure: Tokio runtime thread pool usage per core count
+- [ ] Measure: Work stealing effectiveness at different core counts
+- [ ] Verify: No thread pool starvation at any configuration
+- [ ] Document: Recommended worker thread configuration
+
+### 40.2: Vertical Scaling - Memory
+
+#### Cache Size Scaling
+- [ ] Scale: Test with 1GB cache size, measure hit rate + eviction time
+- [ ] Scale: Test with 10GB cache size, measure hit rate + eviction time
+- [ ] Scale: Test with 50GB cache size, measure hit rate + eviction time
 - [ ] Verify: Eviction performance doesn't degrade with size
 - [ ] Verify: Memory usage matches configuration
+- [ ] Measure: Index lookup time at different cache sizes
 
-#### Horizontal Scaling (Multiple Proxy Instances)
+#### Memory Efficiency
+- [ ] Measure: Bytes per cached entry overhead (metadata)
+- [ ] Measure: Memory fragmentation over time
+- [ ] Verify: No memory leaks at large cache sizes
+- [ ] Document: Recommended max cache size for different memory configs
+
+### 40.3: Horizontal Scaling (Multiple Proxy Instances)
+
+#### Redis Shared Cache Scaling
 - [ ] Scale: 2 proxy instances + shared Redis cache
 - [ ] Scale: 5 proxy instances + shared Redis cache
 - [ ] Scale: 10 proxy instances + shared Redis cache
@@ -3169,6 +3147,18 @@ services:
 - [ ] Verify: No cache inconsistencies
 - [ ] Verify: Combined throughput scales linearly
 - [ ] Measure: Redis becomes bottleneck at N instances
+
+#### Load Balancer Integration
+- [ ] Scale: Test with round-robin load balancing
+- [ ] Scale: Test with least-connections load balancing
+- [ ] Verify: Sticky sessions not required (stateless proxy)
+- [ ] Verify: Health check endpoints work correctly
+
+#### Cache Coherency
+- [ ] Verify: All instances see same cached data (via Redis)
+- [ ] Verify: Cache invalidation propagates to all instances
+- [ ] Measure: Invalidation propagation latency
+- [ ] Test: Split-brain scenario recovery
 
 ---
 
@@ -3261,7 +3251,7 @@ services:
 **Total Test Count**: 500+ tests across 17 phases
 **Target Release**: When it's right, not when it's fast
 
-**Last Updated**: 2025-11-26
+**Last Updated**: 2025-11-29
 **Status**: Phase 31 PARTIAL (RS256/ES256 done, JWKS client done), Phase 32 COMPLETE
 
 ---

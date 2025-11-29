@@ -145,3 +145,7 @@ harness = false
 [[bench]]
 name = "backend_comparison"
 harness = false
+
+[[bench]]
+name = "cache_comparison"
+harness = false
