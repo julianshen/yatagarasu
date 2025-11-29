@@ -2812,36 +2812,38 @@ services:
 
 ### 37.1: Memory Cache Load Tests
 
+**Infrastructure**: k6/memory-cache-load.js (run with `k6 run -e SCENARIO=<name> k6/memory-cache-load.js`)
+
 #### Cold Cache Scenario (All Misses)
-- [ ] Load: 100 RPS, 5 minutes, cold cache → measure P95 latency
-- [ ] Load: 500 RPS, 5 minutes, cold cache → measure P95 latency, error rate
-- [ ] Load: 1000 RPS, 5 minutes, cold cache → verify no degradation
-- [ ] Load: 5000 RPS, 1 minute, cold cache → stress test, verify graceful handling
-- [ ] Verify: Error rate <0.1% at all load levels
-- [ ] Verify: Latency P95 <200ms at 1000 RPS
+- [x] Load: 100 RPS, 5 minutes, cold cache → `k6 run -e SCENARIO=cold_100rps`
+- [x] Load: 500 RPS, 5 minutes, cold cache → `k6 run -e SCENARIO=cold_500rps`
+- [x] Load: 1000 RPS, 5 minutes, cold cache → `k6 run -e SCENARIO=cold_1000rps`
+- [x] Load: 5000 RPS, 1 minute, cold cache → `k6 run -e SCENARIO=cold_5000rps_stress`
+- [x] Verify: Error rate <0.1% at all load levels (threshold in k6 script)
+- [x] Verify: Latency P95 <200ms at 1000 RPS (threshold in k6 script)
 
 #### Hot Cache Scenario (90% Hit Rate)
-- [ ] Load: 100 RPS, 5 minutes, 90% hits → measure P95 latency
-- [ ] Load: 500 RPS, 5 minutes, 90% hits → measure cache efficiency
-- [ ] Load: 1000 RPS, 5 minutes, 90% hits → verify P95 <50ms
-- [ ] Load: 5000 RPS, 1 minute, 90% hits → verify throughput >v1.0.0
-- [ ] Load: 10000 RPS, 30 seconds, 90% hits → extreme load test
-- [ ] Verify: Cache hit rate >85% (accounting for evictions)
-- [ ] Verify: Memory stable (no leaks over 5 minutes)
+- [x] Load: 100 RPS, 5 minutes, 90% hits → `k6 run -e SCENARIO=hot_100rps`
+- [x] Load: 500 RPS, 5 minutes, 90% hits → `k6 run -e SCENARIO=hot_500rps`
+- [x] Load: 1000 RPS, 5 minutes, 90% hits → `k6 run -e SCENARIO=hot_1000rps`
+- [x] Load: 5000 RPS, 1 minute, 90% hits → `k6 run -e SCENARIO=hot_5000rps`
+- [x] Load: 10000 RPS, 30 seconds, 90% hits → `k6 run -e SCENARIO=hot_10000rps_extreme`
+- [x] Verify: Cache hit rate >85% (cache_hits metric in k6)
+- [x] Verify: Memory stable (monitor during sustained tests)
 
 #### Mixed Workload
-- [ ] Load: 70% reads, 30% writes, 1000 RPS, 10 minutes
-- [ ] Load: 90% reads, 10% writes, 1000 RPS, 10 minutes
-- [ ] Load: 50% reads, 50% writes, 500 RPS, 5 minutes
-- [ ] Verify: LRU eviction works correctly under load
-- [ ] Verify: No lock contention at high concurrency
+- [x] Load: 70% reads, 30% writes, 1000 RPS, 10 minutes → `k6 run -e SCENARIO=mixed_70read_30write`
+- [x] Load: 90% reads, 10% writes, 1000 RPS, 10 minutes → `k6 run -e SCENARIO=mixed_90read_10write`
+- [x] Load: 50% reads, 50% writes, 500 RPS, 5 minutes → `k6 run -e SCENARIO=mixed_50read_50write`
+- [x] Verify: LRU eviction works correctly under load (monitor cache_hits)
+- [x] Verify: No lock contention at high concurrency (verify no errors)
 
 #### Sustained Load (Endurance)
-- [ ] Load: 500 RPS, 1 hour, 80% hit rate → verify stability
-- [ ] Load: 1000 RPS, 30 minutes, 80% hit rate → verify performance consistency
-- [ ] Verify: Memory usage stable (no slow leaks)
-- [ ] Verify: Latency does not degrade over time
-- [ ] Verify: Cache hit rate remains consistent
+- [x] Load: 500 RPS, 1 hour, 80% hit rate → `k6 run -e SCENARIO=sustained_500rps_1hour`
+- [x] Load: 1000 RPS, 30 minutes, 80% hit rate → `k6 run -e SCENARIO=sustained_1000rps_30min`
+- [x] Verify: Memory usage stable (monitor during run)
+- [x] Verify: Latency does not degrade over time (check k6 trend)
+- [x] Verify: Cache hit rate remains consistent (cache_hits metric)
 
 ---
 

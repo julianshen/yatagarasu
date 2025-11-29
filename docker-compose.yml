@@ -54,9 +54,17 @@ services:
       echo 'Private data content' | mc pipe myminio/private-data/secret.txt;
       echo 'Product information' | mc pipe myminio/products/info.json;
 
-      echo 'Creating large test file (10MB)...';
-      dd if=/dev/urandom of=/tmp/large.bin bs=1M count=10;
-      mc cp /tmp/large.bin myminio/public-assets/large.bin;
+      echo 'Creating load test files...';
+      dd if=/dev/urandom of=/tmp/test-1kb.txt bs=1K count=1 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-10kb.txt bs=1K count=10 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-100kb.txt bs=1K count=100 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-1mb.bin bs=1M count=1 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-10mb.bin bs=1M count=10 2>/dev/null;
+      mc cp /tmp/test-1kb.txt myminio/public-assets/test-1kb.txt;
+      mc cp /tmp/test-10kb.txt myminio/public-assets/test-10kb.txt;
+      mc cp /tmp/test-100kb.txt myminio/public-assets/test-100kb.txt;
+      mc cp /tmp/test-1mb.bin myminio/public-assets/test-1mb.bin;
+      mc cp /tmp/test-10mb.bin myminio/public-assets/test-10mb.bin;
 
       echo 'MinIO setup complete!';
       echo 'MinIO Console: http://localhost:9001';
