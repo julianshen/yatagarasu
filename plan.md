@@ -1988,7 +1988,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: POST /admin/cache/purge/:bucket/*path purges specific object - line 1509, 1574
 - [ ] Test: Purge with prefix purges matching entries (not yet implemented)
 - [ ] Test: Purge with pattern (glob) purges matching (not yet implemented)
-- [ ] Test: Purge requires admin authentication (401 without token)
+- [x] Test: Purge requires admin authentication (401 without token) - proxy/mod.rs:1357-1406
 - [x] Test: Purge returns count of purged entries and bytes freed
 - [ ] Test: Invalid purge request returns 400 Bad Request
 
@@ -2004,7 +2004,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: GET /admin/cache/stats/:bucket returns bucket-specific stats - line 1899
 - [x] Test: Stats include: entries, size_bytes, hits, misses, hit_rate
 - [x] Test: GET /admin/cache/info?key=X returns specific entry metadata - proxy/mod.rs:2024-2231
-- [ ] Test: Stats requires admin authentication
+- [x] Test: Stats requires admin authentication - proxy/mod.rs:1729-1778, 2030-2080
 
 ### Test: Conditional request support
 - [x] Test: Client If-Modified-Since returns 304 when cache entry matches - `CacheEntry.last_modified`, proxy/mod.rs:2370-2401

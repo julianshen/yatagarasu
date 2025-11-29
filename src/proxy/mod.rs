@@ -2027,6 +2027,58 @@ impl ProxyHttp for YatagarasuProxy {
             let query_params = Self::extract_query_params(req);
 
             if let Some(ref cache) = self.cache {
+                // Check authentication if JWT is enabled
+                if let Some(jwt_config) = &self.config.jwt {
+                    if jwt_config.enabled {
+                        // Extract headers for auth
+                        let headers = Self::extract_headers(req);
+
+                        // Authenticate request
+                        match authenticate_request(&headers, &query_params, jwt_config) {
+                            Ok(_claims) => {
+                                tracing::debug!(
+                                    request_id = %ctx.request_id(),
+                                    "Cache info request authenticated successfully"
+                                );
+                            }
+                            Err(auth_error) => {
+                                tracing::warn!(
+                                    request_id = %ctx.request_id(),
+                                    error = %auth_error,
+                                    "Cache info authentication failed"
+                                );
+
+                                // Build 401 Unauthorized response
+                                let response_json = serde_json::json!({
+                                    "status": "error",
+                                    "message": format!("Authentication required: {}", auth_error),
+                                });
+
+                                let response_body = response_json.to_string();
+
+                                let mut header = ResponseHeader::build(401, None)?;
+                                header.insert_header("Content-Type", "application/json")?;
+                                header.insert_header(
+                                    "Content-Length",
+                                    response_body.len().to_string(),
+                                )?;
+
+                                session
+                                    .write_response_header(Box::new(header), false)
+                                    .await?;
+                                session
+                                    .write_response_body(Some(response_body.into()), true)
+                                    .await?;
+
+                                // Record metrics
+                                self.metrics.increment_status_count(401);
+
+                                return Ok(true); // Short-circuit
+                            }
+                        }
+                    }
+                }
+
                 // Get the key from query params (format: bucket:object_key)
                 let key_param = query_params.get("key");
 
