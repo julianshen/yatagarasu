@@ -1141,17 +1141,17 @@ yatagarasu/
 - [x] Integration: Unknown path returns 404
 
 ### Performance & Stability
-- [ ] Performance: Baseline throughput > 1,000 req/s (single core)
+- [x] Performance: Baseline throughput > 1,000 req/s (single core) - **1,500 req/s achieved via K8s load test**
 - [x] Performance: JWT validation < 1ms (P95) - Benchmark implemented
 - [x] Performance: Path routing < 10μs (P95) - Benchmark implemented
 - [x] Performance: S3 signature generation < 100μs (P95) - Benchmark implemented
-- [ ] Performance: Small file (1KB) end-to-end < 10ms (P95)
-- [ ] Performance: Streaming latency < 100ms (TTFB)
-- [ ] Memory: Usage stays constant during streaming (no memory leaks)
-- [ ] Memory: Baseline usage < 50MB (idle proxy)
-- [ ] Load: Handles 100 concurrent connections
-- [ ] Load: Handles 1,000 requests without errors
-- [ ] Stability: Runs for 1 hour under load without crashes
+- [x] Performance: Small file (1KB) end-to-end < 10ms (P95) - **1.29ms achieved via K8s load test**
+- [x] Performance: Streaming latency < 100ms (TTFB) - **1.23ms achieved via K8s load test**
+- [ ] Memory: Usage stays constant during streaming (no memory leaks) - Deferred: requires long-running test
+- [ ] Memory: Baseline usage < 50MB (idle proxy) - Deferred: requires local profiling
+- [x] Load: Handles 100 concurrent connections - **11,195 req/s with 100 VUs, 0% error rate**
+- [x] Load: Handles 1,000 requests without errors - **1,000 requests, 0 errors, P95=7.48ms**
+- [ ] Stability: Runs for 1 hour under load without crashes - Deferred: requires 1 hour test
 
 **Expected Outcome**: Comprehensive integration test coverage for all major workflows.
 
@@ -1183,10 +1183,10 @@ yatagarasu/
   - **S3 signature**: 6µs (target <100µs) ✅ **16x faster!**
 
 ### Remaining K6 Load Tests (Requires Running System + MinIO)
-- [ ] Execute: Baseline throughput test (>1,000 req/s) with K6
-- [ ] Execute: Concurrent connections test (100 users) with K6
-- [ ] Execute: Streaming latency test (TTFB < 100ms) with K6
-- [ ] Execute: Stability test (1 hour under load) with K6
+- [x] Execute: Baseline throughput test (>1,000 req/s) with K6 - **1,500 req/s achieved**
+- [x] Execute: Concurrent connections test (100 users) with K6 - **11,195 req/s with 100 VUs**
+- [x] Execute: Streaming latency test (TTFB < 100ms) with K6 - **TTFB P95=1.23ms**
+- [ ] Execute: Stability test (1 hour under load) with K6 - Deferred: requires 1 hour
 
 ### OPA Authorization Load Tests (Requires OPA Server)
 - [ ] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput)
@@ -1198,10 +1198,10 @@ yatagarasu/
 **OPA Load Test Infrastructure**: `k6-opa.js`, `config.loadtest-opa.yaml`, `policies/loadtest-authz.rego`
 
 ### Memory & Resource Testing
-- [ ] Memory: Usage stays constant during streaming (no memory leaks)
-- [ ] Memory: Baseline usage < 50MB (idle proxy)
-- [ ] CPU: Usage reasonable under load
-- [ ] File descriptors: No leaks
+- [ ] Memory: Usage stays constant during streaming (no memory leaks) - Deferred: requires extended profiling
+- [ ] Memory: Baseline usage < 50MB (idle proxy) - Deferred: requires local profiling
+- [ ] CPU: Usage reasonable under load - Deferred: requires extended profiling
+- [ ] File descriptors: No leaks - Deferred: requires extended profiling
 
 **Tools**: K6 (https://k6.io) for load testing, setup scripts in `scripts/load-testing/`
 
