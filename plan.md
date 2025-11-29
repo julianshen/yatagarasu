@@ -2016,7 +2016,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: yatagarasu_cache_hits_total metric increments on hit - `Metrics.cache_hits`
 - [x] Test: yatagarasu_cache_misses_total metric increments on miss - `Metrics.cache_misses`
 - [x] Test: yatagarasu_cache_size_bytes metric reflects current size - `Metrics.cache_size_bytes`
-- [ ] Test: yatagarasu_cache_evictions_total tracks evictions
+- [x] Test: yatagarasu_cache_evictions_total tracks evictions - `Metrics.cache_evictions`, `test_tracks_cache_evictions_counter`
 - [x] Test: yatagarasu_cache_purges_total tracks purge operations - `Metrics.cache_purges`, `test_tracks_cache_purges_counter`
 
 ### Test: Cache hit rate validation

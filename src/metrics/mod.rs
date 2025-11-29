@@ -2338,6 +2338,21 @@ mod tests {
     // ============================================================================
 
     #[test]
+    fn test_tracks_cache_evictions_counter() {
+        // Test: yatagarasu_cache_evictions_total tracks evictions
+        let metrics = Metrics::new();
+
+        assert_eq!(metrics.get_cache_eviction_count(), 0);
+
+        metrics.increment_cache_eviction();
+        assert_eq!(metrics.get_cache_eviction_count(), 1);
+
+        metrics.increment_cache_eviction();
+        metrics.increment_cache_eviction();
+        assert_eq!(metrics.get_cache_eviction_count(), 3);
+    }
+
+    #[test]
     fn test_tracks_cache_purges_counter() {
         // Test: yatagarasu_cache_purges_total tracks purge operations
         let metrics = Metrics::new();
