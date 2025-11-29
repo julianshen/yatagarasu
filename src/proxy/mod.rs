@@ -2021,6 +2021,215 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
+        // Special handling for /admin/cache/info endpoint (Phase 36: Cache Entry Info API)
+        if path == "/admin/cache/info" && method == "GET" {
+            // Extract key from query params
+            let query_params = Self::extract_query_params(req);
+
+            if let Some(ref cache) = self.cache {
+                // Get the key from query params (format: bucket:object_key)
+                let key_param = query_params.get("key");
+
+                if key_param.is_none() || key_param.unwrap().is_empty() {
+                    let response_json = serde_json::json!({
+                        "status": "error",
+                        "message": "Missing required parameter 'key'. Format: bucket:object_key",
+                    });
+                    let response_body = response_json.to_string();
+
+                    let mut header = ResponseHeader::build(400, None)?;
+                    header.insert_header("Content-Type", "application/json")?;
+                    header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                    session
+                        .write_response_header(Box::new(header), false)
+                        .await?;
+                    session
+                        .write_response_body(Some(response_body.into()), true)
+                        .await?;
+                    self.metrics.increment_status_count(400);
+                    return Ok(true);
+                }
+
+                let key_str = key_param.unwrap();
+
+                // Parse key format: bucket:object_key
+                let parts: Vec<&str> = key_str.splitn(2, ':').collect();
+                if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+                    let response_json = serde_json::json!({
+                        "status": "error",
+                        "message": "Invalid key format. Expected: bucket:object_key",
+                    });
+                    let response_body = response_json.to_string();
+
+                    let mut header = ResponseHeader::build(400, None)?;
+                    header.insert_header("Content-Type", "application/json")?;
+                    header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                    session
+                        .write_response_header(Box::new(header), false)
+                        .await?;
+                    session
+                        .write_response_body(Some(response_body.into()), true)
+                        .await?;
+                    self.metrics.increment_status_count(400);
+                    return Ok(true);
+                }
+
+                let bucket = parts[0];
+                let object_key = parts[1];
+
+                // Build cache key
+                let cache_key = CacheKey {
+                    bucket: bucket.to_string(),
+                    object_key: object_key.to_string(),
+                    etag: None,
+                };
+
+                // Try to get the entry from cache
+                match cache.get(&cache_key).await {
+                    Ok(Some(entry)) => {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket,
+                            object_key = %object_key,
+                            "Cache entry info retrieved successfully"
+                        );
+
+                        // Convert timestamps to Unix seconds
+                        let created_at_secs = entry
+                            .created_at
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let expires_at_secs = entry
+                            .expires_at
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let last_accessed_at_secs = entry
+                            .last_accessed_at
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+
+                        let response_json = serde_json::json!({
+                            "status": "success",
+                            "key": key_str,
+                            "data": {
+                                "bucket": bucket,
+                                "object_key": object_key,
+                                "content_type": entry.content_type,
+                                "content_length": entry.content_length,
+                                "etag": entry.etag,
+                                "last_modified": entry.last_modified,
+                                "created_at": created_at_secs,
+                                "expires_at": expires_at_secs,
+                                "last_accessed_at": last_accessed_at_secs,
+                            },
+                            "timestamp": std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(200, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+                        self.metrics.increment_status_count(200);
+                        return Ok(true);
+                    }
+                    Ok(None) => {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket,
+                            object_key = %object_key,
+                            "Cache entry not found"
+                        );
+
+                        let response_json = serde_json::json!({
+                            "status": "error",
+                            "message": "Cache entry not found",
+                            "key": key_str,
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(404, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+                        self.metrics.increment_status_count(404);
+                        return Ok(true);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket,
+                            object_key = %object_key,
+                            error = %e,
+                            "Failed to retrieve cache entry info"
+                        );
+
+                        let response_json = serde_json::json!({
+                            "status": "error",
+                            "message": format!("Failed to retrieve cache entry: {}", e),
+                        });
+
+                        let response_body = response_json.to_string();
+
+                        let mut header = ResponseHeader::build(500, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+                        header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(response_body.into()), true)
+                            .await?;
+                        self.metrics.increment_status_count(500);
+                        return Ok(true);
+                    }
+                }
+            } else {
+                let response_json = serde_json::json!({
+                    "status": "error",
+                    "message": "Cache is not enabled",
+                });
+
+                let response_body = response_json.to_string();
+
+                let mut header = ResponseHeader::build(404, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                header.insert_header("Content-Length", response_body.len().to_string())?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some(response_body.into()), true)
+                    .await?;
+                self.metrics.increment_status_count(404);
+                return Ok(true);
+            }
+        }
+
         // Update context with request details
         ctx.set_method(method);
         ctx.set_path(path.clone());

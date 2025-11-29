@@ -2003,7 +2003,7 @@ Before releasing v0.3.0, verify:
 - [x] Test: GET /admin/cache/stats returns global stats - line 1721
 - [x] Test: GET /admin/cache/stats/:bucket returns bucket-specific stats - line 1899
 - [x] Test: Stats include: entries, size_bytes, hits, misses, hit_rate
-- [ ] Test: GET /admin/cache/info?key=X returns specific entry metadata
+- [x] Test: GET /admin/cache/info?key=X returns specific entry metadata - proxy/mod.rs:2024-2231
 - [ ] Test: Stats requires admin authentication
 
 ### Test: Conditional request support
