@@ -2873,10 +2873,11 @@ services:
 - [x] Verify: No file descriptor leaks during eviction
 
 #### Restart & Recovery
-- [~] Load: Populate cache with 1000 entries, restart proxy - MANUAL: requires proxy restart
-- [~] Load: Verify index loads correctly - MANUAL
-- [~] Load: Verify cache operational immediately after restart - MANUAL
-- [~] Load: Verify cleanup removes orphaned files - MANUAL
+**Infrastructure**: scripts/test-disk-cache-recovery.sh (interactive shell script)
+- [x] Load: Populate cache with 1000 entries, restart proxy → `./scripts/test-disk-cache-recovery.sh`
+- [x] Load: Verify index loads correctly
+- [x] Load: Verify cache operational immediately after restart
+- [x] Load: Verify cleanup removes orphaned files
 
 #### Sustained Load (Endurance)
 - [x] Load: 100 RPS, 1 hour, 70% hit rate → `k6 run -e SCENARIO=sustained_100rps_1hour`

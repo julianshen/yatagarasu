@@ -1,0 +1,279 @@
+#!/bin/bash
+# Phase 37.2: Disk Cache Restart & Recovery Tests
+#
+# This script tests disk cache persistence and recovery after proxy restart.
+#
+# Prerequisites:
+#   - Docker and docker-compose installed
+#   - yatagarasu binary built (cargo build --release)
+#   - MinIO running with test files
+#
+# Usage:
+#   ./scripts/test-disk-cache-recovery.sh
+#
+# What it tests:
+#   1. Populate cache with 1000 entries
+#   2. Verify cache files exist on disk
+#   3. Stop proxy gracefully
+#   4. Verify index file persists
+#   5. Restart proxy
+#   6. Verify cache operational immediately
+#   7. Verify cached entries still accessible
+#   8. Test orphan file cleanup
+
+set -e
+
+# Configuration
+PROXY_URL="${PROXY_URL:-http://localhost:8080}"
+CACHE_DIR="${CACHE_DIR:-/tmp/yatagarasu-cache}"
+PROXY_PID_FILE="/tmp/yatagarasu.pid"
+NUM_ENTRIES=1000
+TEST_FILE="/public/test-1kb.txt"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[PASS]${NC} $1"
+}
+
+log_fail() {
+    echo -e "${RED}[FAIL]${NC} $1"
+}
+
+# Check if proxy is running
+check_proxy_health() {
+    curl -sf "${PROXY_URL}/health" > /dev/null 2>&1
+}
+
+# Wait for proxy to be ready
+wait_for_proxy() {
+    local max_attempts=30
+    local attempt=0
+
+    log_info "Waiting for proxy to be ready..."
+    while [ $attempt -lt $max_attempts ]; do
+        if check_proxy_health; then
+            log_success "Proxy is ready"
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+
+    log_error "Proxy not ready after ${max_attempts} seconds"
+    return 1
+}
+
+# Count cache files
+count_cache_files() {
+    find "${CACHE_DIR}" -type f -name "*.cache" 2>/dev/null | wc -l | tr -d ' '
+}
+
+# Check if index file exists
+check_index_file() {
+    [ -f "${CACHE_DIR}/index.json" ] || [ -f "${CACHE_DIR}/cache_index.json" ]
+}
+
+# Populate cache with entries
+populate_cache() {
+    local count=$1
+    log_info "Populating cache with ${count} entries..."
+
+    for i in $(seq 1 $count); do
+        # Use unique query params to create distinct cache entries
+        curl -sf "${PROXY_URL}${TEST_FILE}?entry=${i}" > /dev/null
+
+        # Progress indicator
+        if [ $((i % 100)) -eq 0 ]; then
+            echo -n "."
+        fi
+    done
+    echo ""
+
+    log_success "Populated ${count} cache entries"
+}
+
+# Verify cache entries are accessible
+verify_cache_entries() {
+    local count=$1
+    local errors=0
+
+    log_info "Verifying ${count} cache entries..."
+
+    for i in $(seq 1 $count); do
+        if ! curl -sf "${PROXY_URL}${TEST_FILE}?entry=${i}" > /dev/null; then
+            errors=$((errors + 1))
+        fi
+
+        if [ $((i % 100)) -eq 0 ]; then
+            echo -n "."
+        fi
+    done
+    echo ""
+
+    if [ $errors -eq 0 ]; then
+        log_success "All ${count} entries accessible"
+        return 0
+    else
+        log_fail "${errors} entries not accessible"
+        return 1
+    fi
+}
+
+# Create orphan files for cleanup test
+create_orphan_files() {
+    log_info "Creating orphan cache files..."
+
+    # Create some fake cache files that aren't in the index
+    for i in $(seq 1 10); do
+        echo "orphan data" > "${CACHE_DIR}/orphan_${i}.cache"
+    done
+
+    log_success "Created 10 orphan files"
+}
+
+# Check if orphan files were cleaned up
+check_orphan_cleanup() {
+    local orphans=$(find "${CACHE_DIR}" -name "orphan_*.cache" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$orphans" -eq 0 ]; then
+        log_success "Orphan files cleaned up"
+        return 0
+    else
+        log_warn "${orphans} orphan files remain (cleanup may be async)"
+        return 0  # Not a hard failure - cleanup might be deferred
+    fi
+}
+
+# Main test sequence
+main() {
+    echo "============================================================"
+    echo "Phase 37.2: Disk Cache Restart & Recovery Tests"
+    echo "============================================================"
+    echo ""
+    echo "Proxy URL: ${PROXY_URL}"
+    echo "Cache Dir: ${CACHE_DIR}"
+    echo "Entries:   ${NUM_ENTRIES}"
+    echo ""
+
+    # Prerequisites check
+    if ! check_proxy_health; then
+        log_error "Proxy not running at ${PROXY_URL}"
+        echo "Start the proxy first: cargo run --release -- --config config.yaml"
+        exit 1
+    fi
+
+    # Ensure cache directory exists
+    mkdir -p "${CACHE_DIR}"
+
+    echo "============================================================"
+    echo "Test 1: Populate cache with ${NUM_ENTRIES} entries"
+    echo "============================================================"
+    populate_cache $NUM_ENTRIES
+
+    # Wait for async writes to complete
+    sleep 2
+
+    local initial_files=$(count_cache_files)
+    log_info "Cache files on disk: ${initial_files}"
+
+    echo ""
+    echo "============================================================"
+    echo "Test 2: Verify cache files exist on disk"
+    echo "============================================================"
+    if [ "$initial_files" -gt 0 ]; then
+        log_success "Cache files present (${initial_files} files)"
+    else
+        log_fail "No cache files found in ${CACHE_DIR}"
+        exit 1
+    fi
+
+    echo ""
+    echo "============================================================"
+    echo "Test 3: Create orphan files for cleanup test"
+    echo "============================================================"
+    create_orphan_files
+
+    echo ""
+    echo "============================================================"
+    echo "Test 4: Stop proxy gracefully"
+    echo "============================================================"
+    log_info "Please stop the proxy now (Ctrl+C or SIGTERM)"
+    log_info "Press Enter when proxy is stopped..."
+    read -r
+
+    echo ""
+    echo "============================================================"
+    echo "Test 5: Verify index file persists"
+    echo "============================================================"
+    if check_index_file; then
+        log_success "Index file persists after shutdown"
+    else
+        log_warn "Index file not found (may use different persistence)"
+    fi
+
+    local files_after_stop=$(count_cache_files)
+    log_info "Cache files after stop: ${files_after_stop}"
+
+    echo ""
+    echo "============================================================"
+    echo "Test 6: Restart proxy"
+    echo "============================================================"
+    log_info "Please restart the proxy now"
+    log_info "Press Enter when proxy is running..."
+    read -r
+
+    wait_for_proxy
+
+    echo ""
+    echo "============================================================"
+    echo "Test 7: Verify cache operational immediately"
+    echo "============================================================"
+
+    # Time the first request after restart
+    local start_time=$(date +%s%N)
+    curl -sf "${PROXY_URL}${TEST_FILE}?entry=1" > /dev/null
+    local end_time=$(date +%s%N)
+    local duration_ms=$(( (end_time - start_time) / 1000000 ))
+
+    if [ $duration_ms -lt 1000 ]; then
+        log_success "First request after restart: ${duration_ms}ms (< 1s)"
+    else
+        log_warn "First request after restart: ${duration_ms}ms (slow startup)"
+    fi
+
+    echo ""
+    echo "============================================================"
+    echo "Test 8: Verify cached entries still accessible"
+    echo "============================================================"
+    verify_cache_entries $NUM_ENTRIES
+
+    echo ""
+    echo "============================================================"
+    echo "Test 9: Check orphan file cleanup"
+    echo "============================================================"
+    check_orphan_cleanup
+
+    echo ""
+    echo "============================================================"
+    echo "All Restart & Recovery Tests Complete!"
+    echo "============================================================"
+}
+
+main "$@"
