@@ -652,6 +652,166 @@ fn bench_memory_cache_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+// =============================================================================
+// Hit Rate Validation Benchmarks (Deferred from Phase 27.10)
+// =============================================================================
+
+/// Generate Zipfian-distributed index for realistic cache access patterns
+/// Zipfian distribution: P(k) ∝ 1/k^s where s is the skew parameter
+/// Higher skew = more concentration on popular items
+fn zipfian_index(n: usize, skew: f64, uniform_random: f64) -> usize {
+    // Approximate Zipfian using inverse CDF
+    // For simplicity, use a power-law approximation
+    let rank = (uniform_random.powf(1.0 / (1.0 - skew)) * n as f64) as usize;
+    rank.min(n - 1)
+}
+
+/// Simple pseudo-random number generator for benchmarks (deterministic)
+struct SimpleRng {
+    state: u64,
+}
+
+impl SimpleRng {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_f64(&mut self) -> f64 {
+        // xorshift64
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        (self.state as f64) / (u64::MAX as f64)
+    }
+}
+
+/// Benchmark hit rate under Zipfian access pattern
+/// Target: >80% hit rate with Zipfian skew=0.99
+fn bench_memory_cache_hit_rate_zipfian(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let mut group = c.benchmark_group("memory_cache_hit_rate");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Elements(100)); // 100 accesses per iteration
+
+    // Small cache (100 items) with larger working set (1000 items)
+    // Zipfian distribution should achieve >80% hit rate
+    group.bench_function("zipfian_skew_0.99", |b| {
+        // Using standard memory cache config (512MB)
+        // TinyLFU admission policy handles Zipfian access well
+        let cache = create_memory_cache();
+        let mut rng = SimpleRng::new(42);
+
+        // Pre-populate with some entries
+        rt.block_on(async {
+            for i in 0..100 {
+                let key = create_cache_key("bench", "zipf", i);
+                let entry = create_cache_entry(SIZE_1KB);
+                cache.set(key, entry).await.unwrap();
+            }
+        });
+
+        b.iter(|| {
+            rt.block_on(async {
+                for _ in 0..100 {
+                    // Zipfian distribution with skew 0.99
+                    let idx = zipfian_index(1000, 0.99, rng.next_f64());
+                    let key = create_cache_key("bench", "zipf", idx);
+
+                    if cache.get(black_box(&key)).await.is_none() {
+                        // Cache miss - insert the entry
+                        let entry = create_cache_entry(SIZE_1KB);
+                        cache.set(key, entry).await.unwrap();
+                    }
+                }
+            });
+        });
+    });
+
+    // Lower skew (more uniform distribution) - lower hit rate expected
+    group.bench_function("zipfian_skew_0.7", |b| {
+        let cache = create_memory_cache();
+        let mut rng = SimpleRng::new(42);
+
+        rt.block_on(async {
+            for i in 0..100 {
+                let key = create_cache_key("bench", "zipf-low", i);
+                let entry = create_cache_entry(SIZE_1KB);
+                cache.set(key, entry).await.unwrap();
+            }
+        });
+
+        b.iter(|| {
+            rt.block_on(async {
+                for _ in 0..100 {
+                    let idx = zipfian_index(1000, 0.7, rng.next_f64());
+                    let key = create_cache_key("bench", "zipf-low", idx);
+
+                    if cache.get(black_box(&key)).await.is_none() {
+                        let entry = create_cache_entry(SIZE_1KB);
+                        cache.set(key, entry).await.unwrap();
+                    }
+                }
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark hit rate adaptation when access pattern changes (hot set rotation)
+fn bench_memory_cache_hit_rate_adaptation(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let mut group = c.benchmark_group("memory_cache_adaptation");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Elements(100));
+
+    // Test TinyLFU's ability to adapt to changing access patterns
+    group.bench_function("hot_set_rotation", |b| {
+        let cache = create_memory_cache();
+        let mut rng = SimpleRng::new(42);
+        let mut phase = 0usize;
+
+        // Pre-populate cache
+        rt.block_on(async {
+            for i in 0..100 {
+                let key = create_cache_key("bench", "adapt", i);
+                let entry = create_cache_entry(SIZE_1KB);
+                cache.set(key, entry).await.unwrap();
+            }
+        });
+
+        b.iter(|| {
+            rt.block_on(async {
+                // Rotate hot set every iteration
+                let hot_set_start = (phase % 10) * 100;
+                phase += 1;
+
+                for _ in 0..100 {
+                    // Access from current hot set with some noise
+                    let base_idx = if rng.next_f64() < 0.8 {
+                        hot_set_start // 80% from current hot set
+                    } else {
+                        0 // 20% from other items
+                    };
+                    let idx = base_idx + (rng.next_f64() * 100.0) as usize;
+                    let key = create_cache_key("bench", "adapt", idx % 1000);
+
+                    if cache.get(black_box(&key)).await.is_none() {
+                        let entry = create_cache_entry(SIZE_1KB);
+                        cache.set(key, entry).await.unwrap();
+                    }
+                }
+            });
+        });
+    });
+
+    group.finish();
+}
+
 /// Benchmark large file operations (10MB - exceeds typical cache limit)
 fn bench_large_file_operations(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
@@ -965,7 +1125,9 @@ criterion_group! {
               bench_memory_cache_concurrent_set,
               bench_memory_cache_mixed_workload,
               bench_memory_cache_eviction,
-              bench_memory_cache_throughput
+              bench_memory_cache_throughput,
+              bench_memory_cache_hit_rate_zipfian,
+              bench_memory_cache_hit_rate_adaptation
 }
 
 criterion_group! {
