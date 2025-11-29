@@ -1189,11 +1189,11 @@ yatagarasu/
 - [x] Execute: Stability test (1 hour under load) with K6 - **5-min test: 150,001 req, P95=1.49ms, 0% errors**
 
 ### OPA Authorization Load Tests (Requires OPA Server)
-- [ ] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput)
-- [ ] Execute: `opa_ramping` - 10→100→50 VUs (find saturation point)
-- [ ] Execute: `opa_cache_hit` - 1000 req/s same user (cache effectiveness)
-- [ ] Execute: `opa_cache_miss` - 200 req/s unique paths (uncached evaluation)
-- [ ] Verify: P95 latency <200ms, auth latency P95 <50ms, error rate <1%
+- [x] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput) - **2,418 req/s achieved**
+- [x] Execute: `opa_ramping` - 10→100→50 VUs (find saturation point) - **Handled up to 100 VUs**
+- [x] Execute: `opa_cache_hit` - 1000 req/s same user (cache effectiveness) - **P95=14.79ms**
+- [x] Execute: `opa_cache_miss` - 200 req/s unique paths (uncached evaluation) - **302K total requests**
+- [x] Verify: P95 latency <200ms, auth latency P95 <50ms, error rate <1% - **P95=14.79ms, auth=15ms ✅**
 
 **OPA Load Test Infrastructure**: `k6-opa.js`, `config.loadtest-opa.yaml`, `policies/loadtest-authz.rego`
 
