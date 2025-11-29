@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: yatagarasu-loadtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: yatagarasu-loadtest
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              value: "minioadmin"
+            - name: MINIO_ROOT_PASSWORD
+              value: "minioadmin"
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: yatagarasu-loadtest
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# Job to setup MinIO buckets and test files
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-setup
+  namespace: yatagarasu-loadtest
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-minio
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MinIO..."
+              until wget -q -O- http://minio:9000/minio/health/ready; do
+                sleep 2
+              done
+              echo "MinIO is ready"
+      containers:
+        - name: setup
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Configuring MinIO..."
+              mc alias set myminio http://minio:9000 minioadmin minioadmin
+
+              echo "Creating buckets..."
+              mc mb --ignore-existing myminio/public-assets
+              mc anonymous set public myminio/public-assets
+
+              echo "Creating test files..."
+              dd if=/dev/urandom of=/tmp/test-1kb.txt bs=1K count=1 2>/dev/null
+              dd if=/dev/urandom of=/tmp/test-10kb.txt bs=1K count=10 2>/dev/null
+              dd if=/dev/urandom of=/tmp/test-100kb.txt bs=1K count=100 2>/dev/null
+              dd if=/dev/urandom of=/tmp/test-1mb.bin bs=1M count=1 2>/dev/null
+              dd if=/dev/urandom of=/tmp/test-10mb.bin bs=1M count=10 2>/dev/null
+
+              mc cp /tmp/test-1kb.txt myminio/public-assets/test-1kb.txt
+              mc cp /tmp/test-10kb.txt myminio/public-assets/test-10kb.txt
+              mc cp /tmp/test-100kb.txt myminio/public-assets/test-100kb.txt
+              mc cp /tmp/test-1mb.bin myminio/public-assets/test-1mb.bin
+              mc cp /tmp/test-10mb.bin myminio/public-assets/test-10mb.bin
+
+              echo "MinIO setup complete!"

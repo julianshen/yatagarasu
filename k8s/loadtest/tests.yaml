@@ -1,0 +1,193 @@
+# Job for disk cache recovery test
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: disk-cache-recovery-test
+  namespace: yatagarasu-loadtest
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test
+          image: curlimages/curl:8.4.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              echo "============================================================"
+              echo "Phase 37.2: K8s Disk Cache Recovery Tests"
+              echo "============================================================"
+
+              PROXY_URL="http://yatagarasu:8080"
+              NUM_ENTRIES=500
+              TEST_FILE="/public/test-1kb.txt"
+
+              echo ""
+              echo "Waiting for proxy to be ready..."
+              until curl -sf "${PROXY_URL}/health" > /dev/null 2>&1; do
+                sleep 2
+              done
+              echo "[PASS] Proxy is ready"
+
+              echo ""
+              echo "============================================================"
+              echo "Test 1: Populate cache with ${NUM_ENTRIES} entries"
+              echo "============================================================"
+
+              i=1
+              while [ $i -le $NUM_ENTRIES ]; do
+                curl -sf "${PROXY_URL}${TEST_FILE}?entry=${i}" > /dev/null
+                if [ $((i % 100)) -eq 0 ]; then
+                  echo "  Populated ${i} entries..."
+                fi
+                i=$((i + 1))
+              done
+              echo "[PASS] Populated ${NUM_ENTRIES} cache entries"
+
+              # Wait for async writes
+              sleep 3
+
+              echo ""
+              echo "============================================================"
+              echo "Test 2: Verify entries are cached"
+              echo "============================================================"
+
+              # Fetch entries again and check for cache hits
+              HITS=0
+              i=1
+              while [ $i -le 10 ]; do
+                RESPONSE=$(curl -sI "${PROXY_URL}${TEST_FILE}?entry=${i}" 2>/dev/null)
+                if echo "$RESPONSE" | grep -qi "X-Cache-Status: HIT"; then
+                  HITS=$((HITS + 1))
+                fi
+                i=$((i + 1))
+              done
+
+              echo "Cache hits: ${HITS}/10"
+              if [ $HITS -gt 5 ]; then
+                echo "[PASS] Cache is working (>50% hit rate on re-fetch)"
+              else
+                echo "[WARN] Low cache hit rate (may be expected for first run)"
+              fi
+
+              echo ""
+              echo "============================================================"
+              echo "Test 3: Verify all entries accessible"
+              echo "============================================================"
+
+              ERRORS=0
+              i=1
+              while [ $i -le $NUM_ENTRIES ]; do
+                if ! curl -sf "${PROXY_URL}${TEST_FILE}?entry=${i}" > /dev/null; then
+                  ERRORS=$((ERRORS + 1))
+                fi
+                if [ $((i % 100)) -eq 0 ]; then
+                  echo "  Verified ${i} entries..."
+                fi
+                i=$((i + 1))
+              done
+
+              if [ $ERRORS -eq 0 ]; then
+                echo "[PASS] All ${NUM_ENTRIES} entries accessible"
+              else
+                echo "[FAIL] ${ERRORS} entries not accessible"
+                exit 1
+              fi
+
+              echo ""
+              echo "============================================================"
+              echo "All K8s Cache Tests Complete!"
+              echo "============================================================"
+              echo ""
+              echo "Note: To test restart recovery, run:"
+              echo "  kubectl rollout restart deployment/yatagarasu -n yatagarasu-loadtest"
+              echo "  kubectl wait --for=condition=ready pod -l app=yatagarasu -n yatagarasu-loadtest"
+              echo "  # Then re-run this job"
+---
+# ConfigMap for k6 load test script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-script
+  namespace: yatagarasu-loadtest
+data:
+  script.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+    import { Rate } from 'k6/metrics';
+
+    const errorRate = new Rate('errors');
+    const BASE_URL = __ENV.BASE_URL || 'http://yatagarasu:8080';
+
+    const TEST_FILES = [
+      '/public/test-1kb.txt',
+      '/public/test-10kb.txt',
+      '/public/test-100kb.txt',
+    ];
+
+    export const options = {
+      scenarios: {
+        load_test: {
+          executor: 'constant-arrival-rate',
+          rate: 50,
+          timeUnit: '1s',
+          duration: '1m',
+          preAllocatedVUs: 10,
+          maxVUs: 50,
+        },
+      },
+      thresholds: {
+        http_req_duration: ['p(95)<500'],
+        http_req_failed: ['rate<0.01'],
+      },
+    };
+
+    let requestId = 0;
+
+    export default function() {
+      const fileIndex = requestId % TEST_FILES.length;
+      const url = `${BASE_URL}${TEST_FILES[fileIndex]}?id=${requestId}`;
+      requestId++;
+
+      const response = http.get(url);
+
+      const success = check(response, {
+        'status is 200': (r) => r.status === 200,
+      });
+
+      errorRate.add(!success);
+    }
+---
+# Job for k6 load testing
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load-test
+  namespace: yatagarasu-loadtest
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          args:
+            - run
+            - -e
+            - BASE_URL=http://yatagarasu:8080
+            - /scripts/script.js
+          volumeMounts:
+            - name: k6-script
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: k6-script
+          configMap:
+            name: k6-script

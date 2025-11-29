@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yatagarasu-config
+  namespace: yatagarasu-loadtest
+data:
+  config.yaml: |
+    server:
+      address: "0.0.0.0"
+      port: 8080
+
+    buckets:
+      - name: "public-assets"
+        path_prefix: "/public"
+        s3:
+          bucket: "public-assets"
+          region: "us-east-1"
+          endpoint: "http://minio:9000"
+          access_key: "minioadmin"
+          secret_key: "minioadmin"
+        auth:
+          enabled: false
+
+    cache:
+      layers: ["memory", "disk"]
+      memory:
+        max_size_bytes: 104857600  # 100MB
+        max_item_size_bytes: 10485760  # 10MB
+      disk:
+        enabled: true
+        cache_dir: "/var/cache/yatagarasu"
+        max_size_bytes: 1073741824  # 1GB
+
+    logging:
+      level: "info"
+      format: "json"
+
+    metrics:
+      enabled: true
+      port: 9090
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: disk-cache
+  namespace: yatagarasu-loadtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yatagarasu
+  namespace: yatagarasu-loadtest
+  labels:
+    app: yatagarasu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yatagarasu
+  template:
+    metadata:
+      labels:
+        app: yatagarasu
+    spec:
+      containers:
+        - name: yatagarasu
+          image: yatagarasu:test
+          imagePullPolicy: Never  # Use local image
+          args:
+            - --config
+            - /etc/yatagarasu/config.yaml
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9090
+              name: metrics
+          volumeMounts:
+            - name: config
+              mountPath: /etc/yatagarasu
+              readOnly: true
+            - name: cache
+              mountPath: /var/cache/yatagarasu
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+      volumes:
+        - name: config
+          configMap:
+            name: yatagarasu-config
+        - name: cache
+          persistentVolumeClaim:
+            claimName: disk-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yatagarasu
+  namespace: yatagarasu-loadtest
+spec:
+  selector:
+    app: yatagarasu
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: metrics
+      port: 9090
+      targetPort: 9090
