@@ -496,6 +496,162 @@ fn bench_memory_cache_mixed_workload(c: &mut Criterion) {
     group.finish();
 }
 
+/// Create a small MemoryCache for eviction testing (fits ~1000 1KB entries)
+fn create_small_memory_cache() -> MemoryCache {
+    let config = MemoryCacheConfig {
+        max_item_size_mb: 1,
+        max_cache_size_mb: 1, // 1MB = ~1000 1KB entries
+        default_ttl_seconds: 3600,
+    };
+    MemoryCache::new(&config)
+}
+
+/// Benchmark LRU eviction performance when cache is full
+fn bench_memory_cache_eviction(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let mut group = c.benchmark_group("memory_cache_eviction");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+
+    // Test eviction with 1000 entries (1KB each, 1MB cache)
+    group.bench_function("eviction_1000_entries", |b| {
+        let cache = create_small_memory_cache();
+
+        // Pre-fill cache to capacity
+        rt.block_on(async {
+            for i in 0..1000 {
+                let key = create_cache_key("bench", "evict-1k", i);
+                let entry = create_cache_entry(SIZE_1KB);
+                cache.set(key, entry).await.unwrap();
+            }
+        });
+
+        let mut counter = 1000usize;
+        b.iter(|| {
+            // Each insert triggers eviction since cache is full
+            let key = create_cache_key("bench", "evict-1k", counter);
+            counter += 1;
+            let entry = create_cache_entry(SIZE_1KB);
+            rt.block_on(async {
+                cache.set(black_box(key), black_box(entry)).await.unwrap();
+            });
+        });
+    });
+
+    // Test eviction with 10000 entries (100B each to fit in 1MB cache)
+    group.bench_function("eviction_10000_entries", |b| {
+        // Use 100-byte entries to fit 10000 in ~1MB
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1,
+            max_cache_size_mb: 1,
+            default_ttl_seconds: 3600,
+        };
+        let cache = MemoryCache::new(&config);
+
+        // Pre-fill cache with smaller entries
+        rt.block_on(async {
+            for i in 0..10000 {
+                let key = create_cache_key("bench", "evict-10k", i);
+                let entry = create_cache_entry(100); // 100 bytes
+                cache.set(key, entry).await.unwrap();
+            }
+        });
+
+        let mut counter = 10000usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "evict-10k", counter);
+            counter += 1;
+            let entry = create_cache_entry(100);
+            rt.block_on(async {
+                cache.set(black_box(key), black_box(entry)).await.unwrap();
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark throughput (operations per second)
+fn bench_memory_cache_throughput(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let cache = std::sync::Arc::new(create_memory_cache());
+
+    // Pre-populate for get operations
+    rt.block_on(async {
+        for i in 0..10000 {
+            let key = create_cache_key("bench", "throughput", i);
+            let entry = create_cache_entry(SIZE_1KB);
+            cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    let mut group = c.benchmark_group("memory_cache_throughput");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.throughput(Throughput::Elements(1));
+
+    // Sequential operations baseline
+    group.bench_function("sequential_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "throughput", counter % 10000);
+            counter += 1;
+            rt.block_on(async {
+                let _result = cache.get(black_box(&key)).await;
+            });
+        });
+    });
+
+    // 10 concurrent operations
+    group.throughput(Throughput::Elements(10));
+    group.bench_function("concurrent_10_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let base = counter;
+            counter += 10;
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(10);
+                for i in 0..10 {
+                    let cache = cache.clone();
+                    let key = create_cache_key("bench", "throughput", (base + i) % 10000);
+                    handles.push(tokio::spawn(async move {
+                        let _result = cache.get(black_box(&key)).await;
+                    }));
+                }
+                for handle in handles {
+                    handle.await.unwrap();
+                }
+            });
+        });
+    });
+
+    // 100 concurrent operations
+    group.throughput(Throughput::Elements(100));
+    group.bench_function("concurrent_100_get", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let base = counter;
+            counter += 100;
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(100);
+                for i in 0..100 {
+                    let cache = cache.clone();
+                    let key = create_cache_key("bench", "throughput", (base + i) % 10000);
+                    handles.push(tokio::spawn(async move {
+                        let _result = cache.get(black_box(&key)).await;
+                    }));
+                }
+                for handle in handles {
+                    handle.await.unwrap();
+                }
+            });
+        });
+    });
+
+    group.finish();
+}
+
 /// Benchmark large file operations (10MB - exceeds typical cache limit)
 fn bench_large_file_operations(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
@@ -807,7 +963,9 @@ criterion_group! {
               bench_memory_cache_content_types,
               bench_memory_cache_concurrent_get,
               bench_memory_cache_concurrent_set,
-              bench_memory_cache_mixed_workload
+              bench_memory_cache_mixed_workload,
+              bench_memory_cache_eviction,
+              bench_memory_cache_throughput
 }
 
 criterion_group! {
