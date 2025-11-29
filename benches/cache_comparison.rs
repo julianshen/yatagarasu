@@ -323,12 +323,27 @@ fn bench_cache_comparison(c: &mut Criterion) {
 }
 
 // =============================================================================
-// Criterion Configuration
+// Criterion Configuration (Phase 36.1: Statistical Rigor)
 // =============================================================================
+
+/// Create a Criterion configuration with statistical rigor settings
+///
+/// Statistical configuration:
+/// - 95% confidence intervals for timing estimates
+/// - 5% significance level for regression detection
+/// - 1% noise threshold to filter measurement noise
+/// - 100,000 bootstrap resamples for robust statistics
+fn statistically_rigorous_config() -> Criterion {
+    Criterion::default()
+        .confidence_level(0.95) // 95% confidence intervals
+        .significance_level(0.05) // 5% significance for regression detection
+        .noise_threshold(0.01) // Ignore <1% changes (measurement noise)
+        .nresamples(100_000) // Bootstrap resamples for statistics
+}
 
 criterion_group! {
     name = memory_benches;
-    config = Criterion::default()
+    config = statistically_rigorous_config()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(5))
         .sample_size(100);
@@ -337,16 +352,16 @@ criterion_group! {
 
 criterion_group! {
     name = disk_benches;
-    config = Criterion::default()
+    config = statistically_rigorous_config()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(5))
-        .sample_size(50);
+        .sample_size(50); // Fewer samples for I/O-bound operations
     targets = bench_disk_cache_set, bench_disk_cache_get
 }
 
 criterion_group! {
     name = comparison_benches;
-    config = Criterion::default()
+    config = statistically_rigorous_config()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(5))
         .sample_size(100);

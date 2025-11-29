@@ -2594,7 +2594,7 @@ services:
 
 #### Criterion Setup
 - [x] Benchmark: Create benches/cache_comparison.rs
-- [ ] Benchmark: Use Criterion for statistical rigor
+- [x] Benchmark: Use Criterion for statistical rigor
 - [ ] Benchmark: Configure warm-up iterations (5 iterations)
 - [ ] Benchmark: Configure measurement iterations (100 iterations)
 - [ ] Benchmark: Use testcontainers for Redis benchmarks
