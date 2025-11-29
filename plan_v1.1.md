@@ -2597,7 +2597,7 @@ services:
 - [x] Benchmark: Use Criterion for statistical rigor
 - [x] Benchmark: Configure warm-up iterations (5 iterations)
 - [x] Benchmark: Configure measurement iterations (100 iterations)
-- [ ] Benchmark: Use testcontainers for Redis benchmarks
+- [x] Benchmark: Use testcontainers for Redis benchmarks
 - [ ] Benchmark: Generate HTML reports with graphs
 - [ ] Benchmark: Add benchmark CI job (GitHub Actions)
 

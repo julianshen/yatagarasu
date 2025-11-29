@@ -14,8 +14,11 @@ use criterion::{
 };
 use std::time::Duration;
 use tempfile::TempDir;
+use testcontainers::{clients::Cli, RunnableImage};
+use testcontainers_modules::redis::Redis;
 use tokio::runtime::Runtime;
 use yatagarasu::cache::disk::DiskCache;
+use yatagarasu::cache::redis::{RedisCache, RedisConfig};
 use yatagarasu::cache::{Cache, CacheEntry, CacheKey, MemoryCache, MemoryCacheConfig};
 
 // =============================================================================
@@ -37,6 +40,9 @@ const MEMORY_SAMPLE_SIZE: usize = 100;
 
 /// Sample size for I/O-bound operations (slower, need fewer samples)
 const DISK_SAMPLE_SIZE: usize = 50;
+
+/// Sample size for Redis operations (network + I/O, need fewer samples)
+const REDIS_SAMPLE_SIZE: usize = 30;
 
 // =============================================================================
 // Test Data Generation (Phase 36.1)
@@ -95,6 +101,22 @@ fn create_disk_cache(temp_dir: &TempDir) -> DiskCache {
         temp_dir.path().to_path_buf(),
         512 * 1024 * 1024, // 512MB cache
     )
+}
+
+/// Create RedisConfig for benchmark with given URL
+fn create_redis_config(redis_url: String) -> RedisConfig {
+    RedisConfig {
+        redis_url: Some(redis_url),
+        redis_password: None,
+        redis_db: 0,
+        redis_key_prefix: "bench".to_string(),
+        redis_ttl_seconds: 3600,
+        redis_max_ttl_seconds: 86400,
+        connection_timeout_ms: 5000,
+        operation_timeout_ms: 2000,
+        min_pool_size: 1,
+        max_pool_size: 10,
+    }
 }
 
 // =============================================================================
@@ -290,6 +312,113 @@ fn bench_disk_cache_get(c: &mut Criterion) {
 }
 
 // =============================================================================
+// Redis Cache Benchmarks (Phase 36.4) - Using Testcontainers
+// =============================================================================
+
+/// Benchmark Redis cache set() operations across different sizes
+///
+/// Uses testcontainers to spin up a real Redis instance.
+/// Container lifetime is managed within the benchmark function.
+fn bench_redis_cache_set(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    // Start Redis container (lives for duration of this benchmark)
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    // Create Redis cache
+    let config = create_redis_config(redis_url);
+    let cache = rt.block_on(async { RedisCache::new(config).await.unwrap() });
+
+    let mut group = c.benchmark_group("redis_cache_set");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+
+    let sizes = [
+        ("1kb", SIZE_1KB),
+        ("10kb", SIZE_10KB),
+        ("100kb", SIZE_100KB),
+    ];
+
+    for (name, size) in sizes {
+        group.throughput(Throughput::Bytes(size as u64));
+        group.bench_with_input(BenchmarkId::new("size", name), &size, |b, &size| {
+            let mut counter = 0u64;
+            b.iter(|| {
+                let key = create_cache_key("bench", "redis-set", counter as usize);
+                counter = counter.wrapping_add(1);
+                let entry = create_cache_entry(size);
+                rt.block_on(async {
+                    cache.set(black_box(key), black_box(entry)).await.unwrap();
+                });
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark Redis cache get() operations (cache hits)
+fn bench_redis_cache_get(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    // Start Redis container
+    let docker = Cli::default();
+    let redis_image = RunnableImage::from(Redis);
+    let redis_container = docker.run(redis_image);
+    let redis_port = redis_container.get_host_port_ipv4(6379);
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = create_redis_config(redis_url);
+    let cache = rt.block_on(async { RedisCache::new(config).await.unwrap() });
+
+    // Pre-populate cache
+    let sizes = [
+        ("1kb", SIZE_1KB),
+        ("10kb", SIZE_10KB),
+        ("100kb", SIZE_100KB),
+    ];
+
+    rt.block_on(async {
+        for (name, size) in &sizes {
+            for i in 0..30 {
+                let key = create_cache_key("bench", &format!("redis-get-{}", name), i);
+                let entry = create_cache_entry(*size);
+                cache.set(key, entry).await.unwrap();
+            }
+        }
+    });
+
+    let mut group = c.benchmark_group("redis_cache_get");
+    group.warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS));
+    group.measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(REDIS_SAMPLE_SIZE);
+
+    for (name, size) in sizes {
+        group.throughput(Throughput::Bytes(size as u64));
+        group.bench_with_input(BenchmarkId::new("size", name), &name, |b, name| {
+            let mut counter = 0usize;
+            b.iter(|| {
+                let key = create_cache_key("bench", &format!("redis-get-{}", name), counter % 30);
+                counter += 1;
+                rt.block_on(async {
+                    let result = cache.get(black_box(&key)).await;
+                    assert!(result.is_ok());
+                });
+            });
+        });
+    }
+
+    group.finish();
+}
+
+// =============================================================================
 // Comparative Benchmarks (Phase 36.6)
 // =============================================================================
 
@@ -380,6 +509,15 @@ criterion_group! {
 }
 
 criterion_group! {
+    name = redis_benches;
+    config = statistically_rigorous_config()
+        .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
+        .measurement_time(Duration::from_secs(MEASUREMENT_TIME_SECS))
+        .sample_size(REDIS_SAMPLE_SIZE);
+    targets = bench_redis_cache_set, bench_redis_cache_get
+}
+
+criterion_group! {
     name = comparison_benches;
     config = statistically_rigorous_config()
         .warm_up_time(Duration::from_secs(WARM_UP_TIME_SECS))
@@ -388,4 +526,4 @@ criterion_group! {
     targets = bench_cache_comparison
 }
 
-criterion_main!(memory_benches, disk_benches, comparison_benches);
+criterion_main!(memory_benches, disk_benches, redis_benches, comparison_benches);
