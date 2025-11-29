@@ -1,7 +1,7 @@
 // Router module unit tests
 // Extracted from src/router/mod.rs for improved readability
 
-use yatagarasu::config::{BucketConfig, S3Config};
+use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
 use yatagarasu::router::Router;
 
 #[test]
@@ -34,6 +34,7 @@ fn test_can_create_router_with_single_bucket_config() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let _router = Router::new(buckets);
@@ -62,6 +63,7 @@ fn test_can_create_router_with_multiple_bucket_configs() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket2 = BucketConfig {
         name: "images".to_string(),
@@ -82,6 +84,7 @@ fn test_can_create_router_with_multiple_bucket_configs() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket3 = BucketConfig {
         name: "documents".to_string(),
@@ -102,6 +105,7 @@ fn test_can_create_router_with_multiple_bucket_configs() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket1, bucket2, bucket3];
     let _router = Router::new(buckets);
@@ -130,6 +134,7 @@ fn test_router_matches_exact_path_prefix() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -163,6 +168,7 @@ fn test_router_matches_path_with_trailing_segments() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -199,6 +205,7 @@ fn test_router_returns_none_for_unmapped_path() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -229,6 +236,7 @@ fn test_router_returns_correct_bucket_for_first_matching_prefix() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket2 = BucketConfig {
         name: "products".to_string(),
@@ -249,6 +257,7 @@ fn test_router_returns_correct_bucket_for_first_matching_prefix() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket3 = BucketConfig {
         name: "documents".to_string(),
@@ -269,6 +278,7 @@ fn test_router_returns_correct_bucket_for_first_matching_prefix() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket1, bucket2, bucket3];
     let router = Router::new(buckets);
@@ -302,6 +312,7 @@ fn test_router_handles_path_without_leading_slash() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -335,6 +346,7 @@ fn test_normalizes_paths_with_double_slashes() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -379,6 +391,7 @@ fn test_normalizes_paths_with_trailing_slash() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -423,6 +436,7 @@ fn test_handles_url_encoded_paths_correctly() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -476,6 +490,7 @@ fn test_handles_special_characters_in_paths() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -539,6 +554,7 @@ fn test_preserves_case_sensitivity_in_paths() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -594,6 +610,7 @@ fn test_matches_longest_prefix_when_multiple_prefixes_match() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket2 = BucketConfig {
         name: "products".to_string(),
@@ -614,6 +631,7 @@ fn test_matches_longest_prefix_when_multiple_prefixes_match() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket1, bucket2];
     let router = Router::new(buckets);
@@ -660,6 +678,7 @@ fn test_products_foo_matches_products_not_prod() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket2 = BucketConfig {
         name: "products".to_string(),
@@ -680,6 +699,7 @@ fn test_products_foo_matches_products_not_prod() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket1, bucket2];
     let router = Router::new(buckets);
@@ -716,6 +736,7 @@ fn test_handles_root_path_correctly() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let bucket2 = BucketConfig {
         name: "products".to_string(),
@@ -736,6 +757,7 @@ fn test_handles_root_path_correctly() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket1, bucket2];
     let router = Router::new(buckets);
@@ -789,6 +811,7 @@ fn test_handles_path_prefixes_with_query_parameters() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -840,6 +863,7 @@ fn test_handles_path_prefixes_with_fragments() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -885,6 +909,7 @@ fn test_extracts_s3_key_by_removing_path_prefix() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -931,6 +956,7 @@ fn test_handles_path_prefix_with_trailing_slash() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -981,6 +1007,7 @@ fn test_handles_path_prefix_without_trailing_slash() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -1031,6 +1058,7 @@ fn test_extracts_nested_s3_keys_correctly() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -1089,6 +1117,7 @@ fn test_handles_s3_key_with_special_characters() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -1179,6 +1208,7 @@ fn test_handles_empty_s3_key_when_prefix_is_full_path() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets = vec![bucket];
     let router = Router::new(buckets);
@@ -1211,6 +1241,7 @@ fn test_handles_empty_s3_key_when_prefix_is_full_path() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets2 = vec![bucket2];
     let router2 = Router::new(buckets2);
@@ -1243,6 +1274,7 @@ fn test_handles_empty_s3_key_when_prefix_is_full_path() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
     let buckets3 = vec![bucket3];
     let router3 = Router::new(buckets3);
@@ -1282,6 +1314,7 @@ fn test_router_lookup_is_fast_for_reasonable_config_sizes() {
             auth: None,
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         });
     }
     let router = Router::new(buckets);
@@ -1333,6 +1366,7 @@ fn test_can_handle_100_plus_bucket_configurations_efficiently() {
             auth: None,
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         });
     }
     let router = Router::new(buckets);

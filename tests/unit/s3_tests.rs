@@ -10,7 +10,7 @@
 // - Range request tests
 // - Mock backend tests
 
-use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
 use yatagarasu::s3::*;
 
 #[test]
@@ -8144,7 +8144,7 @@ fn test_can_mock_different_buckets_with_different_responses() {
 // Test: Can create S3 HTTP client from bucket config
 #[test]
 fn test_can_create_s3_http_client_from_bucket_config() {
-    use yatagarasu::config::BucketConfig;
+    use yatagarasu::config::{BucketConfig, IpFilterConfig};
 
     // Setup: Create a BucketConfig (higher-level config that includes S3Config)
     let bucket_config = BucketConfig {
@@ -8166,6 +8166,7 @@ fn test_can_create_s3_http_client_from_bucket_config() {
         auth: None, // Public bucket
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Action: Create S3 client from BucketConfig
@@ -8208,7 +8209,7 @@ fn test_can_create_s3_http_client_from_bucket_config() {
 // Test: S3 client uses bucket-specific credentials
 #[test]
 fn test_s3_client_uses_bucket_specific_credentials() {
-    use yatagarasu::config::BucketConfig;
+    use yatagarasu::config::{BucketConfig, IpFilterConfig};
 
     // Setup: Create multiple BucketConfigs with DIFFERENT credentials
     let products_bucket = BucketConfig {
@@ -8230,6 +8231,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     let private_bucket = BucketConfig {
@@ -8251,6 +8253,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
         auth: Some(yatagarasu::config::AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     let archive_bucket = BucketConfig {
@@ -8272,6 +8275,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Action: Create S3 clients for each bucket
@@ -8364,7 +8368,7 @@ fn test_s3_client_uses_bucket_specific_credentials() {
 // Test: S3 client connects to configured endpoint (or AWS default)
 #[test]
 fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
-    use yatagarasu::config::BucketConfig;
+    use yatagarasu::config::{BucketConfig, IpFilterConfig};
 
     // SCENARIO 1: Custom endpoint configured (e.g., MinIO, LocalStack, or private S3-compatible storage)
     let minio_bucket = BucketConfig {
@@ -8386,6 +8390,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     let minio_client = create_s3_client(&minio_bucket.s3).expect("Should create MinIO client");
@@ -8417,6 +8422,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     let aws_client = create_s3_client(&aws_bucket.s3).expect("Should create AWS client");
@@ -8447,6 +8453,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     let localstack_client =
@@ -8484,7 +8491,7 @@ fn test_s3_client_connects_to_configured_endpoint_or_aws_default() {
 // Test: S3 client generates valid AWS Signature v4
 #[test]
 fn test_s3_client_generates_valid_aws_signature_v4() {
-    use yatagarasu::config::BucketConfig;
+    use yatagarasu::config::{BucketConfig, IpFilterConfig};
 
     // Setup: Create S3 client with known credentials
     let bucket_config = BucketConfig {
@@ -8506,6 +8513,7 @@ fn test_s3_client_generates_valid_aws_signature_v4() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     let s3_client = create_s3_client(&bucket_config.s3).expect("Should create S3 client");
@@ -8556,7 +8564,7 @@ fn test_s3_client_generates_valid_aws_signature_v4() {
 #[test]
 fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
     use std::collections::HashMap;
-    use yatagarasu::config::BucketConfig;
+    use yatagarasu::config::{BucketConfig, IpFilterConfig};
 
     // Setup: Create a proxy configuration with multiple buckets
     // This simulates the real proxy setup where each bucket gets its own S3 client
@@ -8581,6 +8589,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
         auth: None, // Public bucket
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Bucket 2: Private (authenticated, AWS S3)
@@ -8605,6 +8614,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
         }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Bucket 3: Archive (MinIO, custom endpoint)
@@ -8627,6 +8637,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Simulate proxy initialization: Create isolated S3 client for each bucket
@@ -8734,7 +8745,7 @@ fn test_each_bucket_has_isolated_s3_client_no_credential_mixing() {
 // Test: GET request to /products/image.png fetches from S3
 #[test]
 fn test_get_request_to_products_image_fetches_from_s3() {
-    use yatagarasu::config::BucketConfig;
+    use yatagarasu::config::{BucketConfig, IpFilterConfig};
     use yatagarasu::pipeline::RequestContext;
     use yatagarasu::router::Router;
 
@@ -8758,6 +8769,7 @@ fn test_get_request_to_products_image_fetches_from_s3() {
         auth: None, // Public bucket
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let router = Router::new(buckets.clone());
@@ -9595,6 +9607,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
         auth: None, // Public bucket, no JWT required
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Bucket 2: Private (sensitive data with full access credentials)
@@ -9617,6 +9630,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Bucket 3: Archive (long-term storage with archive-specific credentials)
@@ -9639,6 +9653,7 @@ fn test_requests_to_different_buckets_use_correct_credentials() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Create isolated S3 clients for each bucket

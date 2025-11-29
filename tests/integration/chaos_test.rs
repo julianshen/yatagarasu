@@ -37,12 +37,19 @@ fn start_minio() -> bool {
 
     // Start fresh MinIO container
     docker_cmd(&[
-        "run", "-d",
-        "--name", "minio-chaos-test",
-        "-p", "9100:9000",
-        "-e", "MINIO_ROOT_USER=minioadmin",
-        "-e", "MINIO_ROOT_PASSWORD=minioadmin",
-        "minio/minio", "server", "/data"
+        "run",
+        "-d",
+        "--name",
+        "minio-chaos-test",
+        "-p",
+        "9100:9000",
+        "-e",
+        "MINIO_ROOT_USER=minioadmin",
+        "-e",
+        "MINIO_ROOT_PASSWORD=minioadmin",
+        "minio/minio",
+        "server",
+        "/data",
     ])
 }
 

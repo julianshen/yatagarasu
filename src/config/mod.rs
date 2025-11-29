@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crate::cache::{BucketCacheOverride, CacheConfig};
 use crate::observability::ObservabilityConfig;
-use crate::security::IpFilterConfig;
+pub use crate::security::IpFilterConfig; // Re-export for tests
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {

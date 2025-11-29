@@ -218,7 +218,7 @@ fn test_request_id_is_logged_with_every_log_message() {
 // Test: Router middleware extracts bucket from request path
 #[test]
 fn test_router_middleware_extracts_bucket_from_request_path() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::router::Router;
 
     // Create bucket configs
@@ -242,6 +242,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
             auth: None,
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         },
         BucketConfig {
             name: "private".to_string(),
@@ -262,6 +263,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
             auth: None,
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         },
     ];
 
@@ -282,7 +284,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
 // Test: Requests to /products/* route to products bucket
 #[test]
 fn test_requests_to_products_route_to_products_bucket() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::router::Router;
 
     // Create bucket configs
@@ -305,6 +307,7 @@ fn test_requests_to_products_route_to_products_bucket() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let router = Router::new(buckets);
@@ -332,7 +335,7 @@ fn test_requests_to_products_route_to_products_bucket() {
 // Test: Requests to /private/* route to private bucket
 #[test]
 fn test_requests_to_private_route_to_private_bucket() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::router::Router;
 
     // Create bucket configs
@@ -355,6 +358,7 @@ fn test_requests_to_private_route_to_private_bucket() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let router = Router::new(buckets);
@@ -382,7 +386,7 @@ fn test_requests_to_private_route_to_private_bucket() {
 // Test: Longest prefix matching works
 #[test]
 fn test_longest_prefix_matching_works() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::router::Router;
 
     // Create buckets with overlapping prefixes
@@ -406,6 +410,7 @@ fn test_longest_prefix_matching_works() {
             auth: None,
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         },
         BucketConfig {
             name: "products".to_string(),
@@ -426,6 +431,7 @@ fn test_longest_prefix_matching_works() {
             auth: None,
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         },
     ];
 
@@ -458,7 +464,7 @@ fn test_longest_prefix_matching_works() {
 // Test: Unmapped paths return None (which translates to 404)
 #[test]
 fn test_unmapped_paths_return_none() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::router::Router;
 
     // Create router with limited bucket configs
@@ -481,6 +487,7 @@ fn test_unmapped_paths_return_none() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let router = Router::new(buckets);
@@ -508,7 +515,7 @@ fn test_unmapped_paths_return_none() {
 // Test: S3 key is extracted from path
 #[test]
 fn test_s3_key_is_extracted_from_path() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::router::Router;
 
     // Create bucket configs
@@ -531,6 +538,7 @@ fn test_s3_key_is_extracted_from_path() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let router = Router::new(buckets);
@@ -563,7 +571,7 @@ fn test_s3_key_is_extracted_from_path() {
 // Test: Router middleware adds bucket config to request context
 #[test]
 fn test_router_middleware_adds_bucket_config_to_request_context() {
-    use yatagarasu::config::{BucketConfig, S3Config};
+    use yatagarasu::config::{BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
 
     // Create a request context
@@ -589,6 +597,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
         auth: None,
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Add the bucket config to the context
@@ -612,7 +621,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
 #[test]
 fn test_auth_middleware_skips_validation_for_public_buckets() {
     use std::collections::HashMap;
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
 
     // Create a bucket configuration with authentication disabled (public bucket)
@@ -635,6 +644,7 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
         auth: Some(AuthConfig { enabled: false }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Create a request context without any JWT token
@@ -668,7 +678,7 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
 #[test]
 fn test_auth_middleware_validates_jwt_for_private_buckets() {
     use std::collections::HashMap;
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
 
     // Create a bucket configuration with authentication enabled (private bucket)
@@ -691,6 +701,7 @@ fn test_auth_middleware_validates_jwt_for_private_buckets() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Create a request context with a JWT token in Authorization header
@@ -1134,7 +1145,7 @@ fn test_valid_jwt_adds_claims_to_request_context() {
 fn test_missing_jwt_on_private_bucket_returns_401() {
     use std::collections::HashMap;
     use yatagarasu::auth::extract_bearer_token;
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
 
     // Create a private bucket configuration (auth required)
@@ -1157,6 +1168,7 @@ fn test_missing_jwt_on_private_bucket_returns_401() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     };
 
     // Create a request context WITHOUT any JWT token
@@ -1538,7 +1550,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
     use std::collections::HashMap;
     use yatagarasu::auth::Claims;
     use yatagarasu::auth::{extract_bearer_token, validate_jwt};
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
     use yatagarasu::router::Router;
 
@@ -1562,6 +1574,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let secret = "test_secret_key_123";
@@ -1677,7 +1690,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
 fn test_middleware_can_short_circuit_request() {
     use std::collections::HashMap;
     use yatagarasu::auth::extract_bearer_token;
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
     use yatagarasu::router::Router;
 
@@ -1701,6 +1714,7 @@ fn test_middleware_can_short_circuit_request() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     // Create request WITHOUT JWT token (will fail auth)
@@ -1776,7 +1790,7 @@ fn test_middleware_can_short_circuit_request() {
 fn test_short_circuit_prevents_handler_execution() {
     use std::collections::HashMap;
     use yatagarasu::auth::extract_bearer_token;
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
     use yatagarasu::router::Router;
 
@@ -1800,6 +1814,7 @@ fn test_short_circuit_prevents_handler_execution() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     let router = Router::new(buckets);
@@ -1848,7 +1863,7 @@ fn test_middleware_can_modify_request_context() {
     use serde_json::json;
     use std::collections::HashMap;
     use yatagarasu::auth::{extract_bearer_token, validate_jwt};
-    use yatagarasu::config::{AuthConfig, BucketConfig, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
     use yatagarasu::router::Router;
 
@@ -1872,6 +1887,7 @@ fn test_middleware_can_modify_request_context() {
         auth: Some(AuthConfig { enabled: true }),
         cache: None,
         authorization: None,
+        ip_filter: IpFilterConfig::default(),
     }];
 
     // Create JWT token
@@ -2010,7 +2026,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
     use serde_json::json;
     use std::collections::HashMap;
     use yatagarasu::auth::{extract_bearer_token, validate_jwt, verify_claims, AuthError};
-    use yatagarasu::config::{AuthConfig, BucketConfig, ClaimRule, S3Config};
+    use yatagarasu::config::{AuthConfig, BucketConfig, ClaimRule, IpFilterConfig, S3Config};
     use yatagarasu::pipeline::RequestContext;
     use yatagarasu::router::Router;
 
@@ -2035,6 +2051,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
             auth: None, // Public bucket
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         },
         BucketConfig {
             name: "private".to_string(),
@@ -2055,6 +2072,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
             auth: Some(AuthConfig { enabled: true }),
             cache: None,
             authorization: None,
+            ip_filter: IpFilterConfig::default(),
         },
     ];
 
