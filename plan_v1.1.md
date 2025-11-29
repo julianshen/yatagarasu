@@ -2598,7 +2598,7 @@ services:
 - [x] Benchmark: Configure warm-up iterations (5 iterations)
 - [x] Benchmark: Configure measurement iterations (100 iterations)
 - [x] Benchmark: Use testcontainers for Redis benchmarks
-- [ ] Benchmark: Generate HTML reports with graphs
+- [x] Benchmark: Generate HTML reports with graphs
 - [ ] Benchmark: Add benchmark CI job (GitHub Actions)
 
 #### Test Data Generation

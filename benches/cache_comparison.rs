@@ -6,7 +6,32 @@
 //! - Redis (redis crate + MessagePack)
 //! - Tiered (Memory -> Disk -> Redis)
 //!
-//! Run with: cargo bench --bench cache_comparison
+//! # Running Benchmarks
+//!
+//! ```bash
+//! # Run all cache benchmarks
+//! cargo bench --bench cache_comparison
+//!
+//! # Run specific benchmark group
+//! cargo bench --bench cache_comparison -- "memory_cache"
+//! cargo bench --bench cache_comparison -- "disk_cache"
+//! cargo bench --bench cache_comparison -- "redis_cache"
+//!
+//! # Run single benchmark
+//! cargo bench --bench cache_comparison -- "memory_cache_set/size/1kb"
+//! ```
+//!
+//! # HTML Reports
+//!
+//! Criterion generates HTML reports with graphs automatically:
+//! - Per-benchmark: `target/criterion/<group>/<bench>/report/index.html`
+//! - Summary: `target/criterion/report/index.html`
+//!
+//! Reports include violin plots, regression analysis, and comparison with previous runs.
+//!
+//! # Requirements
+//!
+//! - Redis benchmarks require Docker (uses testcontainers)
 
 use bytes::Bytes;
 use criterion::{
