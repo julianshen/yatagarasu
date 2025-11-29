@@ -2291,9 +2291,11 @@ impl ProxyHttp for YatagarasuProxy {
 
         // FOURTH: Check cache (Phase 30.7: Cache Integration)
         if let Some(ref cache) = self.cache {
-            // Only check cache for GET requests (not HEAD, etc.)
+            // Check cache for GET and HEAD requests
+            // GET: Return full response (headers + body)
+            // HEAD: Return headers only (no body) - useful for metadata checks
             let method = ctx.method();
-            if method == "GET" {
+            if method == "GET" || method == "HEAD" {
                 // Cache Bypass Logic: Range requests always bypass cache
                 // Range requests are for partial content (video seeking, parallel downloads)
                 // and we don't cache partial responses
@@ -2381,15 +2383,21 @@ impl ProxyHttp for YatagarasuProxy {
                             )?;
                             header.insert_header("X-Cache", "HIT")?; // Indicate cache hit
 
-                            // Write response header
+                            // For HEAD requests: send only headers (no body)
+                            // For GET requests: send headers + body
+                            let is_head_request = method == "HEAD";
+
+                            // Write response header (end_stream=true for HEAD, false for GET)
                             session
-                                .write_response_header(Box::new(header), false)
+                                .write_response_header(Box::new(header), is_head_request)
                                 .await?;
 
-                            // Write cached data
-                            session
-                                .write_response_body(Some(cached_entry.data), true)
-                                .await?;
+                            // Only send body for GET requests (not HEAD)
+                            if !is_head_request {
+                                session
+                                    .write_response_body(Some(cached_entry.data), true)
+                                    .await?;
+                            }
 
                             // Record metrics
                             self.metrics.increment_status_count(200);

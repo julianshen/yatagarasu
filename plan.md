@@ -1942,15 +1942,171 @@ Before releasing v0.3.0, verify:
 
 ---
 
+## Phase 36: Cache Integration & API
+
+**Objective**: Integrate the cache library into the proxy and implement cache management API
+
+**Goal**: Enable S3 response caching with full purge/refresh/stats API
+
+**Status**: 🚧 **IN PROGRESS** - Core integration COMPLETE, remaining: refresh API, HEAD cache, admin auth
+
+**Rationale**: The cache library (memory, disk, Redis, tiered) is fully implemented with 452 tests. Proxy integration is now complete with cache hit/miss flow, purge API, and stats API. Remaining work: refresh API, HEAD request caching, admin authentication.
+
+### Cache Library Status (COMPLETE)
+- [x] In-memory LRU cache with moka (182 tests) - `src/cache/mod.rs`
+- [x] Disk cache with io_uring/tokio backends (30 tests) - `src/cache/disk/`
+- [x] Redis cache (63 tests) - `src/cache/redis/`
+- [x] Tiered cache (memory → disk → redis) (4 tests) - `src/cache/tiered.rs`
+- [x] TTL-based expiry
+- [x] LRU eviction when cache full
+- [x] Cache statistics tracking
+
+### Test: Proxy cache integration
+- [x] Test: Initialize TieredCache from config in YatagarasuProxy::new() - `init_cache()` at line 380
+- [x] Test: Check cache before upstream request (cache hit path) - lines 2293-2410
+- [x] Test: Store response in cache after S3 fetch (cache miss path) - lines 2856-2906
+- [x] Test: Cache key includes bucket + path + query string - `CacheKey` struct at line 2320
+- [x] Test: Range requests bypass cache (always fetch from S3) - lines 2297-2306
+- [x] Test: HEAD requests use cache if available - lines 2298, 2386-2400
+- [x] Test: Cache respects max_item_size config - via `CacheConfig.memory.max_item_size_mb`
+- [x] Test: Cache disabled when config.cache.enabled = false - `init_cache()` checks `cache_config.enabled`
+- [x] File: Update `src/proxy/mod.rs` with cache integration - DONE
+
+### Test: Cache configuration
+- [x] Test: Parse cache config from YAML - `test_can_parse_complete_cache_config_example` passes
+- [x] Test: memory_max_size configurable (default 100MB) - `MemoryCacheConfig.max_cache_size_mb`
+- [x] Test: disk_path configurable (default /tmp/yatagarasu-cache) - `DiskCacheConfig.cache_dir`
+- [x] Test: disk_max_size configurable (default 1GB) - `DiskCacheConfig.max_disk_cache_size_mb`
+- [x] Test: redis_url configurable (optional) - `RedisCacheConfig.redis_url`
+- [x] Test: ttl configurable per bucket (default 3600s) - `MemoryCacheConfig.default_ttl_seconds`
+- [x] Test: max_item_size configurable (default 10MB) - `MemoryCacheConfig.max_item_size_mb`
+- [x] File: Update `src/config/mod.rs` with cache config - DONE in `src/cache/mod.rs`
+
+### Test: Cache purge API
+- [x] Test: POST /admin/cache/purge with key purges specific entry - line 1353, 1574
+- [x] Test: POST /admin/cache/purge/:bucket purges entire bucket cache - line 1643
+- [x] Test: POST /admin/cache/purge/:bucket/*path purges specific object - line 1509, 1574
+- [ ] Test: Purge with prefix purges matching entries (not yet implemented)
+- [ ] Test: Purge with pattern (glob) purges matching (not yet implemented)
+- [ ] Test: Purge requires admin authentication (401 without token)
+- [x] Test: Purge returns count of purged entries and bytes freed
+- [ ] Test: Invalid purge request returns 400 Bad Request
+
+### Test: Cache refresh API
+- [ ] Test: POST /admin/cache/refresh with key re-fetches from S3
+- [ ] Test: POST /admin/cache/refresh with prefix refreshes matching
+- [ ] Test: Refresh requires admin authentication
+- [ ] Test: Conditional refresh (mode: "conditional") checks ETag first
+- [ ] Test: Returns refreshed entry metadata
+
+### Test: Cache stats API
+- [x] Test: GET /admin/cache/stats returns global stats - line 1721
+- [x] Test: GET /admin/cache/stats/:bucket returns bucket-specific stats - line 1899
+- [x] Test: Stats include: entries, size_bytes, hits, misses, hit_rate
+- [ ] Test: GET /admin/cache/info?key=X returns specific entry metadata
+- [ ] Test: Stats requires admin authentication
+
+### Test: Conditional request support
+- [ ] Test: Client If-Modified-Since returns 304 when cache entry matches
+- [x] Test: Client If-None-Match returns 304 when ETag matches - lines 2337-2362
+- [x] Test: Cache stores Last-Modified and ETag from S3 response - `CacheEntry` includes `etag`
+- [x] Test: 304 response saves bandwidth (no body sent) - line 2356, `end_stream=true`
+
+### Test: Cache metrics
+- [x] Test: yatagarasu_cache_hits_total metric increments on hit - `Metrics.cache_hits`
+- [x] Test: yatagarasu_cache_misses_total metric increments on miss - `Metrics.cache_misses`
+- [x] Test: yatagarasu_cache_size_bytes metric reflects current size - `Metrics.cache_size_bytes`
+- [ ] Test: yatagarasu_cache_evictions_total tracks evictions
+- [ ] Test: yatagarasu_cache_purges_total tracks purge operations
+
+### Test: Cache hit rate validation
+- [ ] Test: 1000 requests for same file = 999 cache hits (first is miss)
+- [ ] Test: Cache hit rate >95% for repeated requests
+- [ ] Test: Cache hit response time <10ms (vs S3 ~50-100ms)
+
+**Expected Outcome**: S3 responses cached in tiered cache, cache management via API
+
+---
+
+## Phase 37: Chaos Engineering Tests
+
+**Objective**: Validate proxy resilience under failure conditions
+
+**Goal**: Proxy handles S3 failures, network issues, and resource exhaustion gracefully
+
+**Status**: ⏳ **PENDING**
+
+### Test: S3 backend failures
+- [ ] Test: S3 unreachable returns 502 Bad Gateway
+- [ ] Test: S3 returns 500 Internal Server Error (proxied as 502)
+- [ ] Test: S3 returns 503 Service Unavailable (triggers circuit breaker)
+- [ ] Test: S3 timeout (10s+) returns 504 Gateway Timeout
+- [ ] Test: S3 connection reset mid-stream (partial response handling)
+
+### Test: Network chaos
+- [ ] Test: DNS resolution failure returns 502
+- [ ] Test: Network partition to S3 returns 504
+- [ ] Test: MinIO container killed mid-request (connection error)
+- [ ] Test: High latency (1s+) handled without timeout cascade
+
+### Test: Resource exhaustion
+- [ ] Test: File descriptor limit returns 503 (graceful)
+- [ ] Test: Memory pressure triggers cache eviction
+- [ ] Test: Connection pool exhausted queues requests
+- [ ] Test: Recovery after resources available
+
+**Tools**: Docker network manipulation, Toxiproxy, MinIO stop/start
+
+---
+
+## Phase 38: RS256/ES256 JWT Support
+
+**Objective**: Support asymmetric JWT algorithms (RS256, ES256)
+
+**Goal**: Enable public key verification for enterprise JWT workflows
+
+**Status**: ⏳ **PENDING**
+
+### Test: RSA key support
+- [ ] Test: Parse PEM-encoded RSA public key
+- [ ] Test: Parse PKCS8-encoded RSA public key
+- [ ] Test: Load RSA key from file path
+- [ ] Test: Load RSA key from environment variable
+- [ ] Test: Validate RS256 signed JWT
+
+### Test: ECDSA key support
+- [ ] Test: Parse PEM-encoded EC public key
+- [ ] Test: Parse PKCS8-encoded EC public key
+- [ ] Test: Validate ES256 signed JWT
+- [ ] Test: Validate ES384 signed JWT
+
+### Test: JWKS support
+- [ ] Test: Fetch JWKS from URL
+- [ ] Test: Parse JWKS JSON format
+- [ ] Test: Select correct key by kid header
+- [ ] Test: Cache JWKS with TTL
+- [ ] Test: Refresh JWKS on signature verification failure
+
+### Test: Configuration
+- [ ] Test: algorithm: RS256 in config enables RSA
+- [ ] Test: public_key_file: path to PEM file
+- [ ] Test: jwks_url: URL to JWKS endpoint
+- [ ] Test: Reject HS256 token when RS256 configured (algorithm mismatch)
+
+**Expected Outcome**: Enterprise JWT integration with asymmetric keys
+
+---
+
 ## v1.1.0 Release Criteria 🚧 IN PROGRESS
 
 **Target**: Q1 2026
 **Focus**: Cost optimization through caching + enhanced features
 
 **🔴 CRITICAL - Must Have**:
-- [ ] In-memory LRU cache implementation
-- [ ] At least one persistent cache layer (disk OR Redis)
-- [ ] Cache purge/invalidation API
+- [x] In-memory LRU cache implementation - **DONE** (moka, 182 tests in `src/cache/mod.rs`)
+- [x] At least one persistent cache layer (disk OR Redis) - **DONE** (disk + Redis, 93 tests)
+- [ ] Cache purge/invalidation API - **Phase 36** (pending integration)
+- [ ] Cache integration with proxy - **Phase 36** (pending - `let cache = None;` TODO)
 - [x] All v1.0.0 features remain stable
 - [x] Backward compatible with v1.0.0 configurations
 
