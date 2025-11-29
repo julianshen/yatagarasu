@@ -2580,13 +2580,12 @@ impl ProxyHttp for YatagarasuProxy {
                     })?;
 
                     // Construct cache key from bucket and object path
-                    // The path includes the bucket prefix, so we need to extract just the object key
-                    let path = ctx.path();
-                    let object_key = path.trim_start_matches(&bucket_config.path_prefix);
+                    // Use router.extract_s3_key for consistent key generation (same as cache set)
+                    let object_key = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
 
                     let cache_key = CacheKey {
                         bucket: bucket_config.name.clone(),
-                        object_key: object_key.to_string(),
+                        object_key: object_key.clone(),
                         etag: None, // We don't know the etag yet
                     };
 
@@ -3197,7 +3196,8 @@ impl ProxyHttp for YatagarasuProxy {
                         let cache_key = CacheKey {
                             bucket: bucket_config.name.clone(),
                             object_key: object_key.to_string(),
-                            etag: ctx.response_etag().map(|s| s.to_string()),
+                            // Use None to match lookup key - ETag is stored in CacheEntry, not key
+                            etag: None,
                         };
 
                         let cache_entry = CacheEntry::new(

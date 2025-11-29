@@ -1,0 +1,36 @@
+# Yatagarasu configuration for k6 cache hit rate validation test
+# Uses local MinIO and memory cache
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Cache configuration - memory only for fast hit rate testing
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+
+  memory:
+    enabled: true
+    max_memory_cache_mb: 256
+    max_entry_size_mb: 10
+
+logging:
+  level: "debug"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
