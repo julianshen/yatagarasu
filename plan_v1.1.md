@@ -2740,7 +2740,7 @@ services:
 #### Throughput Benchmarks
 - [x] Benchmark: Sequential operations (baseline) - Target: >200 ops/s
 - [x] Benchmark: Concurrent operations (10 parallel) - Target: >1,000 ops/s
-- [~] Benchmark: Concurrent operations (100 parallel) - Target: >5,000 ops/s - DEFERRED: 100 concurrent too many
+- [x] Benchmark: Concurrent operations (100 parallel) - Target: >5,000 ops/s → `bench_redis_cache_throughput/concurrent_100_get`
 - [~] Benchmark: Compare vs memory cache (should be slower) - Comparison - DEFERRED: covered in 36.6
 
 ---
@@ -2800,7 +2800,7 @@ services:
 - [x] Verify: Memory cache 5x faster than redis for gets - verified by bench_cache_comparison
 - [x] Verify: Disk cache provides persistence with acceptable latency - verified by disk_cache benchmarks
 - [x] Verify: Redis cache suitable for distributed deployments - verified by redis_cache benchmarks
-- [~] Verify: Tiered cache provides optimal balance - DEFERRED: requires tiered cache benchmarks
+- [x] Verify: Tiered cache provides optimal balance - verified by tiered_benches group
 - [x] Verify: All caches meet P95 latency targets - verified by all benchmark groups
 
 ---
