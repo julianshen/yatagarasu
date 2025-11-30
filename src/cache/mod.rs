@@ -7065,4 +7065,99 @@ cache:
         // This is verified by CI/CD but documented here
         assert!(true);
     }
+
+    // =========================================================================
+    // Phase 27: Hit Rate Validation Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_repeated_access_pattern_achieves_80_percent_hit_rate() {
+        // Test: Repeated access pattern achieves >80% hit rate
+        // This validates that the Moka cache with TinyLFU achieves good hit rates
+        // for repeated access patterns (common in real-world workloads).
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let cache = MemoryCache::new(&config);
+
+        // Create 10 unique keys to cache
+        let num_keys = 10;
+        let keys: Vec<CacheKey> = (0..num_keys)
+            .map(|i| CacheKey {
+                bucket: "test-bucket".to_string(),
+                object_key: format!("object-{}.txt", i),
+                etag: None,
+            })
+            .collect();
+
+        // Create entries for each key
+        let entries: Vec<CacheEntry> = (0..num_keys)
+            .map(|i| {
+                CacheEntry::new(
+                    Bytes::from(format!("content-{}", i)),
+                    "text/plain".to_string(),
+                    format!("etag-{}", i),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                )
+            })
+            .collect();
+
+        // Populate cache with set() - this doesn't increment misses
+        for (key, entry) in keys.iter().zip(entries.iter()) {
+            cache.set(key.clone(), entry.clone()).await.unwrap();
+        }
+
+        // Now access each key multiple times using get()
+        // First access after set() = hit (data is in cache)
+        // Subsequent accesses = hits
+        let accesses_per_key = 10;
+
+        for _ in 0..accesses_per_key {
+            for key in &keys {
+                let result = cache.get(key).await;
+                assert!(result.is_some(), "Cache should have entry for key");
+            }
+        }
+
+        // Get stats and calculate hit rate
+        let stats = cache.get_stats();
+        let total_gets = stats.hits + stats.misses;
+        let hit_rate = if total_gets > 0 {
+            (stats.hits as f64 / total_gets as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // We did 10 keys * 10 accesses = 100 get() calls
+        // All should be hits since we populated with set()
+        assert_eq!(
+            stats.hits,
+            (num_keys * accesses_per_key) as u64,
+            "All {} gets should be hits",
+            num_keys * accesses_per_key
+        );
+        assert_eq!(
+            stats.misses, 0,
+            "No misses expected when accessing cached data"
+        );
+        assert!(
+            hit_rate > 80.0,
+            "Hit rate should be >80%, got {:.2}%",
+            hit_rate
+        );
+
+        // More specifically, hit rate should be 100% for this access pattern
+        assert!(
+            (hit_rate - 100.0).abs() < 0.01,
+            "Hit rate should be 100% for cached data, got {:.2}%",
+            hit_rate
+        );
+    }
 }
