@@ -38,12 +38,17 @@ fn bench_jwt_extraction_bearer_header(c: &mut Criterion) {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
     };
 
     let query_params = HashMap::new();
@@ -83,12 +88,17 @@ fn bench_jwt_extraction_query_param(c: &mut Criterion) {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "query_parameter".to_string(),
             name: Some("token".to_string()),
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
     };
 
     c.bench_function("jwt_extraction_query_param", |b| {
@@ -125,12 +135,17 @@ fn bench_jwt_extraction_custom_header(c: &mut Criterion) {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "header".to_string(),
             name: Some("x-auth-token".to_string()),
             prefix: None,
         }],
         claims: vec![],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
     };
 
     let query_params = HashMap::new();
@@ -179,12 +194,17 @@ fn bench_jwt_algorithms(c: &mut Criterion) {
             enabled: true,
             secret: secret.to_string(),
             algorithm: algorithm.to_string(),
+            rsa_public_key_path: None,
+            ecdsa_public_key_path: None,
             token_sources: vec![TokenSource {
                 source_type: "bearer".to_string(),
                 name: None,
                 prefix: None,
             }],
             claims: vec![],
+            keys: vec![],
+            jwks_url: None,
+            jwks_refresh_interval_secs: None,
         };
 
         let query_params = HashMap::new();
@@ -230,6 +250,8 @@ fn bench_jwt_with_claims_validation(c: &mut Criterion) {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![TokenSource {
             source_type: "bearer".to_string(),
             name: None,
@@ -240,6 +262,9 @@ fn bench_jwt_with_claims_validation(c: &mut Criterion) {
             operator: "equals".to_string(),
             value: serde_json::Value::String("admin".to_string()),
         }],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
     };
 
     let query_params = HashMap::new();
@@ -279,6 +304,8 @@ fn bench_jwt_multiple_sources(c: &mut Criterion) {
         enabled: true,
         secret: secret.to_string(),
         algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
         token_sources: vec![
             TokenSource {
                 source_type: "bearer".to_string(),
@@ -297,6 +324,9 @@ fn bench_jwt_multiple_sources(c: &mut Criterion) {
             },
         ],
         claims: vec![],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
     };
 
     let query_params = HashMap::new();

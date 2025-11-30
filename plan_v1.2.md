@@ -41,16 +41,16 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 **Objective**: Create Criterion benchmarks for fundamental operations
 
 #### 40.1 JWT Validation Benchmarks
-- [ ] Setup: Add criterion dev-dependency to Cargo.toml
-- [ ] Bench: HS256 JWT validation (target: <1ms)
+- [x] Setup: Add criterion dev-dependency to Cargo.toml
+- [x] Bench: HS256 JWT validation (target: <1ms) - 1.78µs ✓
 - [ ] Bench: HS256 with 5 claims verification
 - [ ] Bench: HS256 with 10 claims verification
-- [ ] Bench: Token extraction from Bearer header
-- [ ] Bench: Token extraction from query parameter
-- [ ] Bench: Token extraction from custom header
+- [x] Bench: Token extraction from Bearer header - 1.44µs ✓
+- [x] Bench: Token extraction from query parameter - 2.2ns ✓
+- [x] Bench: Token extraction from custom header - 1.58µs ✓
 - [ ] Bench: Claims parsing with nested objects
 - [ ] Bench: Expired token detection
-- [ ] Report: Generate baseline metrics
+- [x] Report: Generate baseline metrics (HS384: 1.95µs, HS512: 2.16µs, claims: 2.13µs)
 
 **Success Criteria**:
 - JWT validation P99 <1ms
