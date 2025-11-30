@@ -1,0 +1,52 @@
+# Yatagarasu configuration for Tiered Cache load testing (Phase 37.4)
+# Uses all three cache layers: memory -> disk -> redis
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Tiered cache configuration: L1 (memory) -> L2 (disk) -> L3 (redis)
+cache:
+  enabled: true
+  cache_layers: ["memory", "disk", "redis"]
+
+  memory:
+    enabled: true
+    max_memory_cache_mb: 128
+    max_entry_size_mb: 5
+
+  disk:
+    enabled: true
+    cache_dir: "/tmp/yatagarasu-tiered-cache"
+    max_disk_cache_size_mb: 512
+
+  redis:
+    enabled: true
+    redis_url: "redis://localhost:6379"
+    redis_db: 1
+    redis_key_prefix: "yatagarasu-tiered"
+    redis_ttl_seconds: 3600
+    connection_timeout_ms: 5000
+    operation_timeout_ms: 2000
+    min_pool_size: 5
+    max_pool_size: 50
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
