@@ -7446,4 +7446,137 @@ cache:
             phase1_remaining, phase2_hits, stats.hits, stats.misses
         );
     }
+
+    /// Test: Hit rate calculation is accurate
+    ///
+    /// This test verifies that the hit rate calculation produces
+    /// mathematically correct results: hit_rate = hits / (hits + misses) * 100
+    #[tokio::test]
+    async fn test_hit_rate_calculation_is_accurate() {
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 10,
+            max_cache_size_mb: 100,
+            default_ttl_seconds: 3600,
+        };
+
+        let cache = MemoryCache::new(&config);
+
+        // Verify stats start at zero
+        let initial_stats = cache.get_stats();
+        assert_eq!(initial_stats.hits, 0, "Initial hits should be 0");
+        assert_eq!(initial_stats.misses, 0, "Initial misses should be 0");
+
+        // Create test key
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "hit-rate-test.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("test content for hit rate validation"),
+            "text/plain".to_string(),
+            "test-etag".to_string(),
+            None,
+            Some(Duration::from_secs(3600)),
+        );
+
+        // Scenario 1: First get on empty cache = 1 miss
+        let result = cache.get(&key).await;
+        assert!(result.is_none(), "First get should be a miss");
+
+        let stats = cache.get_stats();
+        assert_eq!(stats.hits, 0, "Should have 0 hits after first miss");
+        assert_eq!(stats.misses, 1, "Should have 1 miss after first get");
+
+        // Calculate expected hit rate: 0 / (0 + 1) * 100 = 0%
+        let expected_rate_1 = 0.0;
+        let actual_rate_1 = if stats.hits + stats.misses > 0 {
+            (stats.hits as f64 / (stats.hits + stats.misses) as f64) * 100.0
+        } else {
+            0.0
+        };
+        assert!(
+            (actual_rate_1 - expected_rate_1).abs() < 0.001,
+            "Hit rate should be {:.1}%, got {:.1}%",
+            expected_rate_1,
+            actual_rate_1
+        );
+
+        // Add item to cache
+        cache.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Scenario 2: Next 4 gets should be hits = 4 hits, 1 miss total
+        for _ in 0..4 {
+            let result = cache.get(&key).await;
+            assert!(result.is_some(), "Subsequent gets should be hits");
+        }
+
+        let stats = cache.get_stats();
+        assert_eq!(stats.hits, 4, "Should have 4 hits");
+        assert_eq!(stats.misses, 1, "Should still have 1 miss");
+
+        // Calculate expected hit rate: 4 / (4 + 1) * 100 = 80%
+        let expected_rate_2 = 80.0;
+        let actual_rate_2 = (stats.hits as f64 / (stats.hits + stats.misses) as f64) * 100.0;
+        assert!(
+            (actual_rate_2 - expected_rate_2).abs() < 0.001,
+            "Hit rate should be {:.1}%, got {:.1}%",
+            expected_rate_2,
+            actual_rate_2
+        );
+
+        // Scenario 3: Try to get 3 non-existent keys = 3 more misses
+        for i in 0..3 {
+            let missing_key = CacheKey {
+                bucket: "test-bucket".to_string(),
+                object_key: format!("missing-{}.txt", i),
+                etag: None,
+            };
+            let result = cache.get(&missing_key).await;
+            assert!(result.is_none(), "Missing key should be a miss");
+        }
+
+        let stats = cache.get_stats();
+        assert_eq!(stats.hits, 4, "Should still have 4 hits");
+        assert_eq!(stats.misses, 4, "Should have 4 misses total (1 + 3)");
+
+        // Calculate expected hit rate: 4 / (4 + 4) * 100 = 50%
+        let expected_rate_3 = 50.0;
+        let actual_rate_3 = (stats.hits as f64 / (stats.hits + stats.misses) as f64) * 100.0;
+        assert!(
+            (actual_rate_3 - expected_rate_3).abs() < 0.001,
+            "Hit rate should be {:.1}%, got {:.1}%",
+            expected_rate_3,
+            actual_rate_3
+        );
+
+        // Scenario 4: 6 more hits on the cached key = 10 hits, 4 misses total
+        for _ in 0..6 {
+            let result = cache.get(&key).await;
+            assert!(result.is_some(), "Cached key access should be a hit");
+        }
+
+        let stats = cache.get_stats();
+        assert_eq!(stats.hits, 10, "Should have 10 hits total");
+        assert_eq!(stats.misses, 4, "Should still have 4 misses");
+
+        // Calculate expected hit rate: 10 / (10 + 4) * 100 ≈ 71.43%
+        let expected_rate_4 = 10.0 / 14.0 * 100.0; // 71.428...
+        let actual_rate_4 = (stats.hits as f64 / (stats.hits + stats.misses) as f64) * 100.0;
+        assert!(
+            (actual_rate_4 - expected_rate_4).abs() < 0.001,
+            "Hit rate should be {:.2}%, got {:.2}%",
+            expected_rate_4,
+            actual_rate_4
+        );
+
+        println!(
+            "Hit rate calculation validated: {} hits, {} misses, {:.2}% hit rate",
+            stats.hits, stats.misses, actual_rate_4
+        );
+    }
 }
