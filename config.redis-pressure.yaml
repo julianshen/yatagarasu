@@ -1,0 +1,43 @@
+# Yatagarasu configuration for Redis Cache Stress testing (Phase 38.3)
+# Uses Redis-only cache with larger pool for connection stress testing
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Redis cache configuration for stress testing
+# Larger pool size to handle 10,000 concurrent connections
+cache:
+  enabled: true
+  cache_layers: ["redis"]
+
+  redis:
+    enabled: true
+    redis_url: "redis://localhost:6379"
+    redis_db: 2  # Use DB 2 for stress testing to isolate from other tests
+    redis_key_prefix: "yatagarasu-stress"
+    redis_ttl_seconds: 3600
+    connection_timeout_ms: 10000
+    operation_timeout_ms: 5000
+    min_pool_size: 20
+    max_pool_size: 200  # Larger pool for stress testing
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
