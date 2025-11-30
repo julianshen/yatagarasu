@@ -1,0 +1,37 @@
+# Yatagarasu configuration for Large File Streaming Tests (Phase 39)
+# Uses small cache to force large files to stream directly (bypass cache)
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Small memory cache with low max_entry_size to force streaming for large files
+# Files > 10MB will bypass cache entirely and stream directly from S3
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+
+  memory:
+    enabled: true
+    max_memory_cache_size_mb: 32
+    max_entry_size_bytes: 10485760  # 10MB - files larger bypass cache
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
