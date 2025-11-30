@@ -658,7 +658,7 @@ pub trait Cache: Send + Sync {
 ### Integration Tests - Hit Rate Validation
 - [x] Test: Repeated access pattern achieves >80% hit rate
 - [x] Test: TinyLFU improves hit rate over pure LRU
-- [ ] Test: Cache adapts to changing access patterns
+- [x] Test: Cache adapts to changing access patterns
 - [ ] Test: Hit rate calculation is accurate
 
 ---

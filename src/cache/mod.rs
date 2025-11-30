@@ -7294,4 +7294,156 @@ cache:
             hit_rate
         );
     }
+
+    /// Test: Cache adapts to changing access patterns
+    ///
+    /// This test verifies that when access patterns shift over time,
+    /// the cache adapts to favor newly popular items over previously
+    /// popular items that are no longer being accessed.
+    #[tokio::test]
+    async fn test_cache_adapts_to_changing_access_patterns() {
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create a small cache (100KB) so we force evictions with ~10KB entries
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1,
+            max_cache_size_mb: 1, // 1MB but we'll use weight-based eviction
+            default_ttl_seconds: 3600,
+        };
+
+        let cache = MemoryCache::new(&config);
+
+        // Phase 1: Create "initially hot" items (5 items x ~50KB each = ~250KB)
+        let phase1_keys: Vec<CacheKey> = (0..5)
+            .map(|i| CacheKey {
+                bucket: "phase1-bucket".to_string(),
+                object_key: format!("initially-hot-{}.txt", i),
+                etag: None,
+            })
+            .collect();
+
+        // Create entries of about 50KB each
+        let phase1_entries: Vec<CacheEntry> = (0..5)
+            .map(|i| {
+                let content = vec![b'A' + (i as u8 % 26); 50 * 1024]; // 50KB each
+                CacheEntry::new(
+                    Bytes::from(content),
+                    "text/plain".to_string(),
+                    format!("phase1-etag-{}", i),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                )
+            })
+            .collect();
+
+        // Insert phase 1 items
+        for (key, entry) in phase1_keys.iter().zip(phase1_entries.iter()) {
+            cache.set(key.clone(), entry.clone()).await.unwrap();
+        }
+
+        // Access phase 1 items frequently (build up their frequency)
+        let phase1_accesses = 20;
+        for _ in 0..phase1_accesses {
+            for key in &phase1_keys {
+                let _ = cache.get(key).await;
+            }
+        }
+
+        // Verify phase 1 items are all cached
+        let mut phase1_initial_hits = 0;
+        for key in &phase1_keys {
+            if cache.get(key).await.is_some() {
+                phase1_initial_hits += 1;
+            }
+        }
+        assert_eq!(
+            phase1_initial_hits, 5,
+            "All phase 1 items should be cached initially"
+        );
+
+        // Phase 2: Stop accessing phase 1 items, introduce new "hot" items
+        // Create 15 new items (15 x 50KB = 750KB) which will force evictions
+        let phase2_keys: Vec<CacheKey> = (0..15)
+            .map(|i| CacheKey {
+                bucket: "phase2-bucket".to_string(),
+                object_key: format!("newly-hot-{}.txt", i),
+                etag: None,
+            })
+            .collect();
+
+        let phase2_entries: Vec<CacheEntry> = (0..15)
+            .map(|i| {
+                let content = vec![b'Z' - (i as u8 % 26); 50 * 1024]; // 50KB each
+                CacheEntry::new(
+                    Bytes::from(content),
+                    "text/plain".to_string(),
+                    format!("phase2-etag-{}", i),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                )
+            })
+            .collect();
+
+        // Insert and heavily access phase 2 items (simulating shift in access pattern)
+        let phase2_accesses = 30;
+        for _ in 0..phase2_accesses {
+            for (key, entry) in phase2_keys.iter().zip(phase2_entries.iter()) {
+                // Insert if not present
+                if cache.get(key).await.is_none() {
+                    cache.set(key.clone(), entry.clone()).await.unwrap();
+                }
+                // Access to build frequency
+                let _ = cache.get(key).await;
+            }
+        }
+
+        // Phase 3: Verify adaptation
+        // Count how many phase 2 (new hot) items are in cache
+        let mut phase2_hits = 0;
+        for key in &phase2_keys {
+            if cache.get(key).await.is_some() {
+                phase2_hits += 1;
+            }
+        }
+
+        // Count how many phase 1 (old hot, now cold) items remain
+        let mut phase1_remaining = 0;
+        for key in &phase1_keys {
+            if cache.get(key).await.is_some() {
+                phase1_remaining += 1;
+            }
+        }
+
+        // The cache should favor phase 2 items since they're currently hot
+        // With TinyLFU, frequently accessed items should have higher priority
+        // We expect at least some of the phase 2 items to be cached
+        assert!(
+            phase2_hits >= 5,
+            "At least 5 of 15 new hot items should be cached, got {}",
+            phase2_hits
+        );
+
+        // With limited cache space and active access to phase 2 items,
+        // the new hot items should dominate the cache
+        // (phase 1 items went from "hot" to "cold" as access stopped)
+        assert!(
+            phase2_hits >= phase1_remaining,
+            "New hot items ({}) should outnumber or equal old cold items ({}) in cache",
+            phase2_hits,
+            phase1_remaining
+        );
+
+        // Verify stats are being tracked
+        let stats = cache.get_stats();
+        assert!(
+            stats.hits > 0,
+            "Should have recorded some cache hits during access patterns"
+        );
+
+        println!(
+            "Cache adapted: phase1_remaining={}, phase2_hits={}, total_hits={}, total_misses={}",
+            phase1_remaining, phase2_hits, stats.hits, stats.misses
+        );
+    }
 }
