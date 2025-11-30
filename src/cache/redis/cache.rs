@@ -200,7 +200,7 @@ impl RedisCache {
         let mut conn = self.connection.clone();
 
         // Try to PING Redis - returns "PONG" on success
-        match redis::cmd("PING").query_async::<_, String>(&mut conn).await {
+        match redis::cmd("PING").query_async::<String>(&mut conn).await {
             Ok(response) => response == "PONG",
             Err(_) => false,
         }

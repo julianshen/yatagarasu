@@ -11,6 +11,9 @@ use crate::config::{ClaimRule, JwtConfig};
 pub mod jwks;
 pub mod jwks_client;
 
+// Re-export JWKS client types for convenience
+pub use jwks_client::{JwksClient, JwksClientConfig, JwksClientError, SharedJwksClient};
+
 /// Error type for key loading operations
 #[derive(Debug)]
 pub enum KeyLoadError {
@@ -557,5 +560,92 @@ pub fn authenticate_request(
     }
 
     tracing::debug!("JWT authentication successful");
+    Ok(claims)
+}
+
+/// Validate JWT using JWKS (JSON Web Key Set) from a remote endpoint
+///
+/// This function:
+/// 1. Extracts the kid (Key ID) from the JWT header
+/// 2. Fetches/uses cached JWKS from the configured URL
+/// 3. Finds the matching key and validates the JWT
+///
+/// # Arguments
+/// * `token` - The JWT token string to validate
+/// * `jwks_client` - A shared JWKS client with caching
+///
+/// # Returns
+/// * `Ok((Claims, String))` - The validated claims and the kid that was used
+/// * `Err(AuthError)` - If validation fails
+pub async fn validate_jwt_with_jwks(
+    token: &str,
+    jwks_client: &JwksClient,
+) -> Result<(Claims, String), AuthError> {
+    // Extract kid from token header
+    let kid = extract_kid_from_token(token).ok_or_else(|| {
+        AuthError::InvalidToken("JWT does not contain a 'kid' (Key ID) header".to_string())
+    })?;
+
+    tracing::debug!("Validating JWT with kid '{}' using JWKS", kid);
+
+    // Ensure JWKS is loaded/refreshed
+    jwks_client.get_jwks().await.map_err(|e| {
+        tracing::error!("Failed to fetch JWKS: {}", e);
+        AuthError::InvalidToken(format!("Failed to fetch JWKS: {}", e))
+    })?;
+
+    // Get the decoding key for this kid
+    let decoding_key = jwks_client.get_decoding_key(&kid).map_err(|e| {
+        tracing::warn!("Key '{}' not found in JWKS: {}", kid, e);
+        AuthError::InvalidToken(format!("Key '{}' not found in JWKS", kid))
+    })?;
+
+    // Determine algorithm from the JWK
+    let jwk = jwks_client
+        .find_key(&kid)
+        .ok_or_else(|| AuthError::InvalidToken(format!("Key '{}' not found in JWKS", kid)))?;
+
+    let algorithm = jwk.algorithm().unwrap_or("RS256");
+
+    // Validate the JWT
+    let claims = validate_jwt_with_key(token, &decoding_key, algorithm).map_err(|e| {
+        tracing::warn!("JWT validation failed with key '{}': {}", kid, e);
+        AuthError::InvalidToken(format!("JWT validation failed: {}", e))
+    })?;
+
+    tracing::debug!("JWT validated successfully using JWKS key '{}'", kid);
+    Ok((claims, kid))
+}
+
+/// Authenticate request using JWKS
+///
+/// Similar to `authenticate_request` but uses JWKS for key lookup.
+/// This is useful when keys are managed externally (e.g., Auth0, Keycloak).
+pub async fn authenticate_request_with_jwks(
+    headers: &HashMap<String, String>,
+    query_params: &HashMap<String, String>,
+    jwt_config: &JwtConfig,
+    jwks_client: &JwksClient,
+) -> Result<Claims, AuthError> {
+    // Extract token from configured sources
+    let token = try_extract_token(headers, query_params, &jwt_config.token_sources)
+        .ok_or(AuthError::MissingToken)?;
+
+    // Validate using JWKS
+    let (claims, kid) = validate_jwt_with_jwks(&token, jwks_client).await?;
+
+    tracing::debug!("JWT validated with key '{}'", kid);
+
+    // Verify claims if rules are configured
+    if !jwt_config.claims.is_empty() {
+        tracing::debug!("Verifying {} custom claim rules", jwt_config.claims.len());
+        if !verify_claims(&claims, &jwt_config.claims) {
+            tracing::warn!("JWT claims verification failed");
+            return Err(AuthError::ClaimsVerificationFailed);
+        }
+        tracing::debug!("All JWT claims verified successfully");
+    }
+
+    tracing::debug!("JWT authentication with JWKS successful");
     Ok(claims)
 }

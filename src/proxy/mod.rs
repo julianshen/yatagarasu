@@ -43,9 +43,7 @@ pub struct YatagarasuProxy {
     request_semaphore: Arc<Semaphore>,
     circuit_breakers: Arc<HashMap<String, Arc<CircuitBreaker>>>,
     rate_limit_manager: Option<Arc<RateLimitManager>>,
-    /// Retry policies per bucket (configured but not yet integrated with Pingora's request flow)
-    /// TODO: Integrate retry logic when we have direct control over HTTP client lifecycle
-    #[allow(dead_code)]
+    /// Retry policies per bucket for automatic retry on transient S3 failures
     retry_policies: Arc<HashMap<String, RetryPolicy>>,
     /// Security validation limits (request size, headers, URI, path traversal)
     security_limits: SecurityLimits,
@@ -3243,6 +3241,153 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Don't modify the body - let it pass through to client unchanged
         Ok(None)
+    }
+
+    /// Handle connection failures with automatic retry for transient errors
+    ///
+    /// Called when connection to upstream fails. Checks if the bucket has retry
+    /// enabled and if we haven't exceeded max attempts, then marks the error as
+    /// retriable so Pingora will automatically retry the connection.
+    fn fail_to_connect(
+        &self,
+        _session: &mut Session,
+        _peer: &HttpPeer,
+        ctx: &mut Self::CTX,
+        mut e: Box<pingora_core::Error>,
+    ) -> Box<pingora_core::Error> {
+        // Get bucket name from context to look up retry policy
+        // Clone to owned String to avoid borrow conflicts
+        let bucket_name = ctx
+            .bucket_config()
+            .map(|bc| bc.name.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Check if bucket has retry policy configured
+        if let Some(retry_policy) = self.retry_policies.get(&bucket_name) {
+            let current_attempt = ctx.retry_attempt();
+
+            // Check if we should retry (haven't exceeded max attempts)
+            // Use 502 as status code for connection failures
+            if retry_policy.should_retry(current_attempt, 502) {
+                // Mark this error as retriable so Pingora will retry
+                e.set_retry(true);
+
+                // Increment attempt counter for next potential retry
+                let next_attempt = ctx.increment_retry_attempt();
+
+                // Track retry metric
+                self.metrics.increment_s3_retry_attempt(&bucket_name);
+
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_name,
+                    attempt = current_attempt,
+                    next_attempt = next_attempt,
+                    max_attempts = retry_policy.max_attempts,
+                    error = %e,
+                    "Connection failed, scheduling retry"
+                );
+            } else {
+                // Exhausted retries
+                self.metrics.increment_s3_retry_exhausted(&bucket_name);
+
+                tracing::error!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_name,
+                    attempt = current_attempt,
+                    max_attempts = retry_policy.max_attempts,
+                    error = %e,
+                    "Connection failed, retry attempts exhausted"
+                );
+            }
+        }
+
+        e
+    }
+
+    /// Handle errors during proxying with automatic retry for transient errors
+    ///
+    /// Called when an error occurs after the connection is established (e.g., during
+    /// data transfer). Checks if the error is retriable and if we haven't exceeded
+    /// max attempts.
+    fn error_while_proxy(
+        &self,
+        peer: &HttpPeer,
+        session: &mut Session,
+        mut e: Box<pingora_core::Error>,
+        ctx: &mut Self::CTX,
+        client_reused: bool,
+    ) -> Box<pingora_core::Error> {
+        // Add peer context to error
+        e = e.more_context(format!("Peer: {}", peer));
+
+        // Get bucket name from context to look up retry policy
+        // Clone to owned String to avoid borrow conflicts
+        let bucket_name = ctx
+            .bucket_config()
+            .map(|bc| bc.name.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Check if bucket has retry policy configured
+        if let Some(retry_policy) = self.retry_policies.get(&bucket_name) {
+            let current_attempt = ctx.retry_attempt();
+
+            // Check if we should retry (haven't exceeded max attempts)
+            // Use 502 as status code for proxy errors
+            if retry_policy.should_retry(current_attempt, 502) {
+                // Only retry if client connection can be reused and buffer isn't truncated
+                let can_retry = client_reused && !session.as_ref().retry_buffer_truncated();
+
+                if can_retry {
+                    // Mark this error as retriable
+                    e.retry.decide_reuse(true);
+
+                    // Increment attempt counter for next potential retry
+                    let next_attempt = ctx.increment_retry_attempt();
+
+                    // Track retry metric
+                    self.metrics.increment_s3_retry_attempt(&bucket_name);
+
+                    tracing::warn!(
+                        request_id = %ctx.request_id(),
+                        bucket = %bucket_name,
+                        attempt = current_attempt,
+                        next_attempt = next_attempt,
+                        max_attempts = retry_policy.max_attempts,
+                        error = %e,
+                        "Proxy error occurred, scheduling retry"
+                    );
+                } else {
+                    tracing::warn!(
+                        request_id = %ctx.request_id(),
+                        bucket = %bucket_name,
+                        attempt = current_attempt,
+                        client_reused = client_reused,
+                        buffer_truncated = session.as_ref().retry_buffer_truncated(),
+                        error = %e,
+                        "Proxy error occurred, cannot retry (client connection not reusable)"
+                    );
+                }
+            } else {
+                // Exhausted retries
+                self.metrics.increment_s3_retry_exhausted(&bucket_name);
+
+                tracing::error!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_name,
+                    attempt = current_attempt,
+                    max_attempts = retry_policy.max_attempts,
+                    error = %e,
+                    "Proxy error occurred, retry attempts exhausted"
+                );
+            }
+        } else {
+            // No retry policy, use default Pingora behavior
+            e.retry
+                .decide_reuse(client_reused && !session.as_ref().retry_buffer_truncated());
+        }
+
+        e
     }
 }
 

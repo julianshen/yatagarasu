@@ -34,6 +34,8 @@ pub struct RequestContext {
     should_cache_response: bool,
     /// Total response size accumulated so far
     total_response_size: usize,
+    /// Retry attempt counter (0-indexed: 0 = first attempt, 1 = first retry)
+    retry_attempt: u32,
 }
 
 impl RequestContext {
@@ -59,6 +61,7 @@ impl RequestContext {
             response_last_modified: None,
             should_cache_response: false,
             total_response_size: 0,
+            retry_attempt: 0,
         }
     }
 
@@ -84,6 +87,7 @@ impl RequestContext {
             response_last_modified: None,
             should_cache_response: false,
             total_response_size: 0,
+            retry_attempt: 0,
         }
     }
 
@@ -113,6 +117,7 @@ impl RequestContext {
             response_last_modified: None,
             should_cache_response: false,
             total_response_size: 0,
+            retry_attempt: 0,
         }
     }
 
@@ -265,6 +270,17 @@ impl RequestContext {
     /// Get total response size accumulated so far
     pub fn total_response_size(&self) -> usize {
         self.total_response_size
+    }
+
+    /// Get current retry attempt number (0-indexed)
+    pub fn retry_attempt(&self) -> u32 {
+        self.retry_attempt
+    }
+
+    /// Increment retry attempt counter and return the new value
+    pub fn increment_retry_attempt(&mut self) -> u32 {
+        self.retry_attempt += 1;
+        self.retry_attempt
     }
 }
 

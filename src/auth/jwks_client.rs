@@ -186,47 +186,29 @@ impl JwksClient {
 /// Thread-safe shared JWKS client
 pub type SharedJwksClient = Arc<JwksClient>;
 
-/// Fetch JWKS from a URL
+/// Fetch JWKS from a URL (supports both HTTP and HTTPS)
 async fn fetch_jwks(url: &str, timeout_secs: u64) -> Result<Jwks, JwksClientError> {
-    use http_body_util::BodyExt;
-    use hyper::body::Buf;
-    use hyper_util::client::legacy::Client;
-    use hyper_util::rt::TokioExecutor;
+    // Use reqwest for HTTP/HTTPS support (already handles TLS)
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| JwksClientError::FetchError(format!("Failed to create HTTP client: {}", e)))?;
 
-    // Parse the URL
-    let uri: hyper::Uri = url
-        .parse()
-        .map_err(|e| JwksClientError::FetchError(format!("Invalid URL: {}", e)))?;
-
-    // Determine if HTTPS
-    let is_https = uri.scheme_str() == Some("https");
-
-    // Create the HTTP client
-    if is_https {
-        // For HTTPS, we need TLS support
-        // Note: In production, you'd want to use hyper-rustls or similar
-        // For now, we'll return an error for HTTPS until TLS is configured
-        return Err(JwksClientError::FetchError(
-            "HTTPS not yet implemented - use HTTP for testing".to_string(),
-        ));
-    }
-
-    let client: Client<_, http_body_util::Empty<bytes::Bytes>> =
-        Client::builder(TokioExecutor::new()).build_http();
-
-    // Create the request
-    let req = hyper::Request::builder()
-        .method(hyper::Method::GET)
-        .uri(&uri)
+    // Make the request
+    let response = client
+        .get(url)
         .header("Accept", "application/json")
-        .body(http_body_util::Empty::new())
-        .map_err(|e| JwksClientError::FetchError(format!("Failed to build request: {}", e)))?;
-
-    // Make the request with timeout
-    let response = tokio::time::timeout(Duration::from_secs(timeout_secs), client.request(req))
+        .send()
         .await
-        .map_err(|_| JwksClientError::FetchError("Request timed out".to_string()))?
-        .map_err(|e| JwksClientError::FetchError(format!("Request failed: {}", e)))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                JwksClientError::FetchError("Request timed out".to_string())
+            } else if e.is_connect() {
+                JwksClientError::FetchError(format!("Connection failed: {}", e))
+            } else {
+                JwksClientError::FetchError(format!("Request failed: {}", e))
+            }
+        })?;
 
     // Check status
     if !response.status().is_success() {
@@ -236,16 +218,10 @@ async fn fetch_jwks(url: &str, timeout_secs: u64) -> Result<Jwks, JwksClientErro
         )));
     }
 
-    // Read the body
-    let body = response
-        .into_body()
-        .collect()
+    // Parse the JSON response directly
+    let jwks: Jwks = response
+        .json()
         .await
-        .map_err(|e| JwksClientError::FetchError(format!("Failed to read body: {}", e)))?
-        .aggregate();
-
-    // Parse the JSON
-    let jwks: Jwks = serde_json::from_reader(body.reader())
         .map_err(|e| JwksClientError::ParseError(format!("Invalid JSON: {}", e)))?;
 
     Ok(jwks)

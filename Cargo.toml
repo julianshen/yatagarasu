@@ -75,7 +75,7 @@ hex = "0.4"
 
 # Caching
 moka = { version = "0.12", features = ["future"] }
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.0.0-rc.4", features = ["tokio-comp", "connection-manager"] }
 rmp-serde = "1.1"
 
 # HTTP Client (for OPA integration)

@@ -1103,7 +1103,7 @@ async fn test_sets_redis_ttl_on_entry_insertion() {
 
     // Get a connection and check TTL
     let client = redis::Client::open(redis_url.as_str()).unwrap();
-    let mut conn = client.get_async_connection().await.unwrap();
+    let mut conn = client.get_multiplexed_async_connection().await.unwrap();
 
     let ttl: i64 = redis::cmd("TTL")
         .arg(&redis_key)
@@ -1171,7 +1171,7 @@ async fn test_calculates_ttl_from_entry_expires_at() {
     );
 
     let client = redis::Client::open(redis_url.as_str()).unwrap();
-    let mut conn = client.get_async_connection().await.unwrap();
+    let mut conn = client.get_multiplexed_async_connection().await.unwrap();
 
     let ttl: i64 = redis::cmd("TTL")
         .arg(&redis_key)
