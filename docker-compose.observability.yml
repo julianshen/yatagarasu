@@ -1,20 +1,20 @@
 # Docker Compose for Yatagarasu Observability Stack
-# Provides Prometheus, Grafana, and Redis for local development and testing
+# Provides Prometheus, Grafana, and Valkey (Redis-compatible) for local development and testing
 
 version: '3.8'
 
 services:
-  # Redis instance for cache testing
-  redis:
-    image: redis:7-alpine
-    container_name: yatagarasu-redis
+  # Valkey instance for cache testing (Redis-compatible)
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: yatagarasu-valkey
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
+    command: valkey-server --appendonly yes
     volumes:
-      - redis-data:/data
+      - valkey-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -35,7 +35,7 @@ services:
       - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--web.enable-lifecycle'
     depends_on:
-      - redis
+      - valkey
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
       interval: 10s
@@ -65,7 +65,7 @@ services:
       retries: 3
 
 volumes:
-  redis-data:
+  valkey-data:
     driver: local
   prometheus-data:
     driver: local
