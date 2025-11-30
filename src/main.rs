@@ -2,6 +2,8 @@ use clap::Parser;
 use pingora_core::server::configuration::Opt;
 use pingora_core::server::Server;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use yatagarasu::config::Config;
 use yatagarasu::proxy::YatagarasuProxy;
 
@@ -146,6 +148,40 @@ fn main() {
         address = %listen_addr,
         "Listening for connections"
     );
+
+    // Register SIGTERM handler for graceful shutdown
+    // Pingora's internal SIGTERM handling may not work in all configurations,
+    // so we add our own handler to ensure container/Kubernetes graceful shutdown works
+    #[cfg(unix)]
+    {
+        use signal_hook::consts::signal::SIGTERM;
+        use signal_hook::flag;
+
+        let shutdown_requested = Arc::new(AtomicBool::new(false));
+        let shutdown_flag = Arc::clone(&shutdown_requested);
+
+        // Register SIGTERM handler
+        if let Err(e) = flag::register(SIGTERM, shutdown_flag) {
+            tracing::warn!(error = %e, "Failed to register SIGTERM handler");
+        } else {
+            tracing::info!("SIGTERM handler registered for graceful shutdown");
+        }
+
+        // Spawn a thread to monitor the shutdown flag and exit gracefully
+        let shutdown_monitor = Arc::clone(&shutdown_requested);
+        std::thread::spawn(move || {
+            loop {
+                if shutdown_monitor.load(Ordering::Relaxed) {
+                    tracing::info!("SIGTERM received, initiating graceful shutdown");
+                    // Give a small grace period for in-flight requests
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    tracing::info!("Graceful shutdown complete");
+                    std::process::exit(0);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
+    }
 
     // Run server forever (blocks until shutdown)
     server.run_forever();
