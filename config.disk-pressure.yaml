@@ -1,0 +1,38 @@
+# Yatagarasu configuration for Disk Cache Pressure testing (Phase 38.2)
+# Uses disk-only cache with configurable size limits for stress testing
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Disk cache configuration for pressure testing
+# 256MB max for rapid eviction testing with smaller files
+cache:
+  enabled: true
+  cache_layers: ["disk"]
+
+  disk:
+    enabled: true
+    cache_dir: "/tmp/yatagarasu-disk-pressure"
+    max_disk_cache_size_mb: 256
+    # Note: max_entry_size for disk is typically larger
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
