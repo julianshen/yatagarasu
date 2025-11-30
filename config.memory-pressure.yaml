@@ -1,0 +1,37 @@
+# Yatagarasu configuration for Memory Pressure testing (Phase 38.1)
+# Uses small memory cache to test eviction and pressure handling
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Small cache configuration for pressure testing
+# 32MB max with 5MB max entry = ~6 entries before eviction
+cache:
+  enabled: true
+  cache_layers: ["memory"]
+
+  memory:
+    enabled: true
+    max_memory_cache_mb: 32
+    max_entry_size_mb: 5
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
