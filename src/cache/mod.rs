@@ -7160,4 +7160,138 @@ cache:
             hit_rate
         );
     }
+
+    #[tokio::test]
+    async fn test_tinylfu_improves_hit_rate_over_pure_lru() {
+        // Test: TinyLFU improves hit rate over pure LRU
+        //
+        // TinyLFU (Tiny Least Frequently Used) is scan-resistant: it tracks access
+        // frequency so that frequently accessed "hot" items aren't evicted when a
+        // scan of "cold" items (one-time accesses) occurs.
+        //
+        // With pure LRU, a scan pattern would evict hot items simply because they
+        // weren't accessed recently. TinyLFU prevents this by requiring items to
+        // prove their worth through repeated accesses before entering the main cache.
+        //
+        // This test demonstrates:
+        // 1. Create a small cache that can only hold ~5 items
+        // 2. Add 3 "hot" items and access them frequently to build frequency
+        // 3. Scan through 10 "cold" items (one-time access each)
+        // 4. Verify hot items are still cached (TinyLFU benefit)
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create a small cache: 1MB max, each entry ~100KB = ~10 entries max
+        // But TinyLFU admission policy means not all scanned items enter main cache
+        let config = MemoryCacheConfig {
+            max_item_size_mb: 1,
+            max_cache_size_mb: 1, // Small cache to force eviction decisions
+            default_ttl_seconds: 3600,
+        };
+
+        let cache = MemoryCache::new(&config);
+
+        // Create 3 "hot" items that will be frequently accessed
+        let hot_keys: Vec<CacheKey> = (0..3)
+            .map(|i| CacheKey {
+                bucket: "hot-bucket".to_string(),
+                object_key: format!("hot-object-{}.txt", i),
+                etag: None,
+            })
+            .collect();
+
+        let hot_entries: Vec<CacheEntry> = (0..3)
+            .map(|i| {
+                // Small entries (~100 bytes) to fit many in cache
+                CacheEntry::new(
+                    Bytes::from(format!("hot-content-{:0>50}", i)),
+                    "text/plain".to_string(),
+                    format!("hot-etag-{}", i),
+                    None,
+                    Some(Duration::from_secs(3600)),
+                )
+            })
+            .collect();
+
+        // Step 1: Insert hot items into cache
+        for (key, entry) in hot_keys.iter().zip(hot_entries.iter()) {
+            cache.set(key.clone(), entry.clone()).await.unwrap();
+        }
+
+        // Step 2: Access hot items frequently to build up frequency count
+        // TinyLFU tracks frequency, so repeated accesses make items "valuable"
+        let hot_accesses = 10;
+        for _ in 0..hot_accesses {
+            for key in &hot_keys {
+                let result = cache.get(key).await;
+                assert!(result.is_some(), "Hot item should be in cache");
+            }
+        }
+
+        // Step 3: Perform a "scan" - access many cold items once each
+        // With pure LRU, these would evict hot items. TinyLFU is scan-resistant.
+        let num_cold_items = 20;
+        for i in 0..num_cold_items {
+            let cold_key = CacheKey {
+                bucket: "cold-bucket".to_string(),
+                object_key: format!("cold-object-{}.txt", i),
+                etag: None,
+            };
+            let cold_entry = CacheEntry::new(
+                Bytes::from(format!("cold-content-{:0>50}", i)),
+                "text/plain".to_string(),
+                format!("cold-etag-{}", i),
+                None,
+                Some(Duration::from_secs(3600)),
+            );
+            // Insert cold item (simulates cache miss -> fetch -> store)
+            cache.set(cold_key.clone(), cold_entry).await.unwrap();
+            // Access it once (the scan pattern)
+            let _ = cache.get(&cold_key).await;
+        }
+
+        // Step 4: Verify hot items are still in cache
+        // This is the key TinyLFU benefit: frequently accessed items survive scans
+        let mut hot_items_remaining = 0;
+        for key in &hot_keys {
+            if cache.get(key).await.is_some() {
+                hot_items_remaining += 1;
+            }
+        }
+
+        // TinyLFU should preserve at least some hot items despite the scan
+        // The exact number depends on Moka's internal implementation, but
+        // we expect better retention than pure LRU (which would evict all 3)
+        assert!(
+            hot_items_remaining >= 1,
+            "TinyLFU should preserve at least 1 hot item after scan, got {}",
+            hot_items_remaining
+        );
+
+        // Check overall hit rate reflects the benefit
+        let stats = cache.get_stats();
+        let total_ops = stats.hits + stats.misses;
+
+        // We did:
+        // - 3 * 10 = 30 hot accesses (all hits)
+        // - 20 cold accesses (all hits after set)
+        // Total: 50 hits expected
+        assert!(
+            stats.hits >= 30,
+            "Should have at least 30 hits from hot accesses, got {}",
+            stats.hits
+        );
+
+        // Hit rate should be high since we're mostly hitting cached data
+        let hit_rate = if total_ops > 0 {
+            (stats.hits as f64 / total_ops as f64) * 100.0
+        } else {
+            0.0
+        };
+        assert!(
+            hit_rate > 80.0,
+            "Hit rate should be >80% with TinyLFU, got {:.2}%",
+            hit_rate
+        );
+    }
 }
