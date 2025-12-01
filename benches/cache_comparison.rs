@@ -144,6 +144,7 @@ fn create_typed_cache_entry(size: usize, content_type: ContentType) -> CacheEntr
         content_type: mime_type.to_string(),
         content_length: data.len(),
         etag: format!("\"test-etag-{}-{}\"", size, mime_type.replace('/', "-")),
+        last_modified: None,
         created_at: std::time::SystemTime::now(),
         expires_at: std::time::SystemTime::now() + Duration::from_secs(3600),
         last_accessed_at: std::time::SystemTime::now(),
@@ -158,6 +159,7 @@ fn create_cache_entry(size: usize) -> CacheEntry {
         content_type: "application/octet-stream".to_string(),
         content_length: data.len(),
         etag: format!("\"test-etag-{}\"", size),
+        last_modified: None,
         created_at: std::time::SystemTime::now(),
         expires_at: std::time::SystemTime::now() + Duration::from_secs(3600),
         last_accessed_at: std::time::SystemTime::now(),
@@ -567,6 +569,118 @@ fn bench_memory_cache_eviction(c: &mut Criterion) {
             rt.block_on(async {
                 cache.set(black_box(key), black_box(entry)).await.unwrap();
             });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark memory cache delete() operations
+fn bench_memory_cache_delete(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let cache = create_memory_cache();
+
+    let mut group = c.benchmark_group("memory_cache_delete");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+
+    // Pre-populate cache for deletion tests
+    rt.block_on(async {
+        for i in 0..10000 {
+            let key = create_cache_key("bench", "delete", i);
+            let entry = create_cache_entry(SIZE_1KB);
+            cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    // Benchmark delete of existing entries
+    group.bench_function("existing_entry", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "delete", counter % 10000);
+            counter += 1;
+            rt.block_on(async {
+                let _ = cache.delete(black_box(&key)).await;
+            });
+        });
+    });
+
+    // Benchmark delete of non-existing entries (miss case)
+    group.bench_function("nonexistent_entry", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "delete-miss", counter);
+            counter += 1;
+            rt.block_on(async {
+                let _ = cache.delete(black_box(&key)).await;
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark CacheKey generation and hashing performance
+/// This measures the overhead of creating cache keys for lookups
+fn bench_cache_key_generation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cache_key_generation");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
+
+    // Benchmark key creation with short paths
+    group.bench_function("short_path", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "obj", counter);
+            counter += 1;
+            black_box(key);
+        });
+    });
+
+    // Benchmark key creation with long paths (common S3 pattern)
+    group.bench_function("long_path", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = CacheKey {
+                bucket: "my-production-bucket".to_string(),
+                object_key: format!(
+                    "users/12345/documents/2024/01/15/reports/quarterly-{:06}.pdf",
+                    counter
+                ),
+                etag: None,
+            };
+            counter += 1;
+            black_box(key);
+        });
+    });
+
+    // Benchmark key Display (string conversion for hashing/storage)
+    group.bench_function("display_conversion", |b| {
+        let key = CacheKey {
+            bucket: "my-production-bucket".to_string(),
+            object_key: "users/12345/documents/2024/01/15/reports/quarterly-report.pdf".to_string(),
+            etag: None,
+        };
+        b.iter(|| {
+            let s = black_box(key.to_string());
+            black_box(s);
+        });
+    });
+
+    // Benchmark key hash computation (used internally by Moka)
+    group.bench_function("hash_computation", |b| {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let key = CacheKey {
+            bucket: "my-production-bucket".to_string(),
+            object_key: "users/12345/documents/2024/01/15/reports/quarterly-report.pdf".to_string(),
+            etag: None,
+        };
+        b.iter(|| {
+            let mut hasher = DefaultHasher::new();
+            key.hash(&mut hasher);
+            black_box(hasher.finish());
         });
     });
 
@@ -1907,6 +2021,8 @@ criterion_group! {
               bench_memory_cache_concurrent_set,
               bench_memory_cache_mixed_workload,
               bench_memory_cache_eviction,
+              bench_memory_cache_delete,
+              bench_cache_key_generation,
               bench_memory_cache_throughput,
               bench_memory_cache_hit_rate_zipfian,
               bench_memory_cache_hit_rate_adaptation
