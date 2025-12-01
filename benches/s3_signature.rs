@@ -1,5 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::collections::HashMap;
+
+// Re-export chrono from yatagarasu's dependencies
+use chrono;
+
 use yatagarasu::s3::{
     build_get_object_request, build_head_object_request, create_canonical_request,
     create_string_to_sign, derive_signing_key, sha256_hex, sign_request, SigningParams,
@@ -270,6 +274,243 @@ fn bench_s3_signature_concurrent(c: &mut Criterion) {
     });
 }
 
+/// Benchmark date formatting (ISO 8601)
+/// Tests chrono datetime formatting as used in AWS Signature V4
+fn bench_date_formatting(c: &mut Criterion) {
+    let mut group = c.benchmark_group("date_formatting");
+
+    // Benchmark datetime format (YYYYMMDDTHHMMSSZ)
+    group.bench_function("datetime_iso8601", |b| {
+        b.iter(|| {
+            let now = chrono::Utc::now();
+            black_box(now.format("%Y%m%dT%H%M%SZ").to_string())
+        })
+    });
+
+    // Benchmark date only format (YYYYMMDD)
+    group.bench_function("date_only", |b| {
+        b.iter(|| {
+            let now = chrono::Utc::now();
+            black_box(now.format("%Y%m%d").to_string())
+        })
+    });
+
+    // Benchmark both formats together (as used in signing)
+    group.bench_function("datetime_and_date", |b| {
+        b.iter(|| {
+            let now = chrono::Utc::now();
+            let datetime = now.format("%Y%m%dT%H%M%SZ").to_string();
+            let date = now.format("%Y%m%d").to_string();
+            black_box((datetime, date))
+        })
+    });
+
+    group.finish();
+}
+
+/// Benchmark header canonicalization with varying header counts
+/// Tests the header sorting and formatting as used in canonical request creation
+fn bench_header_canonicalization(c: &mut Criterion) {
+    let mut group = c.benchmark_group("header_canonicalization");
+
+    // 3 headers (minimum typical S3 request)
+    group.bench_function("3_headers", |b| {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "bucket.s3.us-east-1.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), "20231115T120000Z".to_string());
+        headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
+
+        let params = SigningParams {
+            method: "GET",
+            uri: "/bucket/key.txt",
+            query_string: "",
+            headers: &headers,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231115",
+            datetime: "20231115T120000Z",
+        };
+
+        b.iter(|| create_canonical_request(black_box(&params)))
+    });
+
+    // 5 headers (typical S3 request with extra headers)
+    group.bench_function("5_headers", |b| {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "bucket.s3.us-east-1.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), "20231115T120000Z".to_string());
+        headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
+        headers.insert(
+            "content-type".to_string(),
+            "application/octet-stream".to_string(),
+        );
+        headers.insert("cache-control".to_string(), "max-age=3600".to_string());
+
+        let params = SigningParams {
+            method: "GET",
+            uri: "/bucket/key.txt",
+            query_string: "",
+            headers: &headers,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231115",
+            datetime: "20231115T120000Z",
+        };
+
+        b.iter(|| create_canonical_request(black_box(&params)))
+    });
+
+    // 10 headers (complex request)
+    group.bench_function("10_headers", |b| {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "bucket.s3.us-east-1.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), "20231115T120000Z".to_string());
+        headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
+        headers.insert(
+            "content-type".to_string(),
+            "application/octet-stream".to_string(),
+        );
+        headers.insert("cache-control".to_string(), "max-age=3600".to_string());
+        headers.insert("x-amz-meta-author".to_string(), "test-author".to_string());
+        headers.insert("x-amz-meta-version".to_string(), "1.0.0".to_string());
+        headers.insert("x-amz-acl".to_string(), "private".to_string());
+        headers.insert("content-encoding".to_string(), "gzip".to_string());
+        headers.insert("accept-encoding".to_string(), "gzip, deflate".to_string());
+
+        let params = SigningParams {
+            method: "PUT",
+            uri: "/bucket/key.txt",
+            query_string: "",
+            headers: &headers,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231115",
+            datetime: "20231115T120000Z",
+        };
+
+        b.iter(|| create_canonical_request(black_box(&params)))
+    });
+
+    // 15 headers (many custom metadata headers)
+    group.bench_function("15_headers", |b| {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "host".to_string(),
+            "bucket.s3.us-east-1.amazonaws.com".to_string(),
+        );
+        headers.insert("x-amz-date".to_string(), "20231115T120000Z".to_string());
+        headers.insert("x-amz-content-sha256".to_string(), sha256_hex(b""));
+        headers.insert(
+            "content-type".to_string(),
+            "application/octet-stream".to_string(),
+        );
+        headers.insert("cache-control".to_string(), "max-age=3600".to_string());
+        headers.insert("x-amz-meta-author".to_string(), "test-author".to_string());
+        headers.insert("x-amz-meta-version".to_string(), "1.0.0".to_string());
+        headers.insert("x-amz-meta-project".to_string(), "yatagarasu".to_string());
+        headers.insert(
+            "x-amz-meta-environment".to_string(),
+            "production".to_string(),
+        );
+        headers.insert("x-amz-meta-region".to_string(), "us-east-1".to_string());
+        headers.insert("x-amz-acl".to_string(), "private".to_string());
+        headers.insert("content-encoding".to_string(), "gzip".to_string());
+        headers.insert("accept-encoding".to_string(), "gzip, deflate".to_string());
+        headers.insert("x-amz-storage-class".to_string(), "STANDARD".to_string());
+        headers.insert(
+            "x-amz-server-side-encryption".to_string(),
+            "AES256".to_string(),
+        );
+
+        let params = SigningParams {
+            method: "PUT",
+            uri: "/bucket/key.txt",
+            query_string: "",
+            headers: &headers,
+            payload: b"",
+            access_key: "AKIAIOSFODNN7EXAMPLE",
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region: "us-east-1",
+            service: "s3",
+            date: "20231115",
+            datetime: "20231115T120000Z",
+        };
+
+        b.iter(|| create_canonical_request(black_box(&params)))
+    });
+
+    group.finish();
+}
+
+/// Benchmark HMAC-SHA256 computation in isolation
+fn bench_hmac_sha256(c: &mut Criterion) {
+    let mut group = c.benchmark_group("hmac_sha256");
+
+    // Small key, small data (typical signing scenario)
+    group.bench_function("small_key_small_data", |b| {
+        let key = b"AWS4wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let data = b"20231115";
+        b.iter(|| {
+            use hmac::{Hmac, Mac};
+            use sha2::Sha256;
+            type HmacSha256 = Hmac<Sha256>;
+            let mut mac = HmacSha256::new_from_slice(black_box(key)).unwrap();
+            mac.update(black_box(data));
+            black_box(mac.finalize().into_bytes().to_vec())
+        })
+    });
+
+    // 32-byte derived key (as used after first HMAC in signing key derivation)
+    group.bench_function("derived_key_region", |b| {
+        let key = vec![0u8; 32]; // Simulates derived key
+        let data = b"us-east-1";
+        b.iter(|| {
+            use hmac::{Hmac, Mac};
+            use sha2::Sha256;
+            type HmacSha256 = Hmac<Sha256>;
+            let mut mac = HmacSha256::new_from_slice(black_box(&key)).unwrap();
+            mac.update(black_box(data));
+            black_box(mac.finalize().into_bytes().to_vec())
+        })
+    });
+
+    // Full signing key derivation chain (4 HMAC operations)
+    group.bench_function("full_signing_key_derivation", |b| {
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let date = "20231115";
+        let region = "us-east-1";
+        let service = "s3";
+        b.iter(|| {
+            derive_signing_key(
+                black_box(secret_key),
+                black_box(date),
+                black_box(region),
+                black_box(service),
+            )
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_s3_signature_get_request,
@@ -280,5 +521,8 @@ criterion_group!(
     bench_s3_signature_regions,
     bench_s3_signature_payload_sizes,
     bench_s3_signature_concurrent,
+    bench_date_formatting,
+    bench_header_canonicalization,
+    bench_hmac_sha256,
 );
 criterion_main!(benches);
