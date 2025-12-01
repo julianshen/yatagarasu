@@ -149,3 +149,7 @@ harness = false
 [[bench]]
 name = "cache_comparison"
 harness = false
+
+[[bench]]
+name = "request_processing"
+harness = false
