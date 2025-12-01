@@ -427,6 +427,73 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark path normalization overhead
+/// Compares routing performance for clean paths vs paths needing normalization
+fn bench_path_normalization(c: &mut Criterion) {
+    let config = Config {
+        server: ServerConfig {
+            address: "127.0.0.1".to_string(),
+            port: 8080,
+            request_timeout: 30,
+            max_concurrent_requests: 1000,
+            rate_limit: None,
+            security_limits: Default::default(),
+        },
+        buckets: vec![BucketConfig {
+            name: "test-bucket".to_string(),
+            path_prefix: "/test".to_string(),
+            s3: S3Config {
+                endpoint: Some("https://s3.amazonaws.com".to_string()),
+                region: "us-east-1".to_string(),
+                bucket: "test-bucket".to_string(),
+                access_key: "test-key".to_string(),
+                secret_key: "test-secret".to_string(),
+                timeout: 20,
+                connection_pool_size: 50,
+                rate_limit: None,
+                circuit_breaker: None,
+                retry: None,
+                replicas: None,
+            },
+            auth: None,
+            cache: None,
+            authorization: None,
+            ip_filter: Default::default(),
+        }],
+        jwt: None,
+        cache: None,
+        audit_log: None,
+        observability: Default::default(),
+        generation: 0,
+    };
+
+    let router = Router::new(config.buckets);
+
+    let mut group = c.benchmark_group("path_normalization");
+
+    // Clean path (no normalization needed)
+    group.bench_function("clean_path", |b| {
+        b.iter(|| router.route(black_box("/test/dir/subdir/file.txt")))
+    });
+
+    // Path with double slashes (needs normalization)
+    group.bench_function("double_slashes", |b| {
+        b.iter(|| router.route(black_box("/test//dir//subdir//file.txt")))
+    });
+
+    // Path with many double slashes
+    group.bench_function("many_double_slashes", |b| {
+        b.iter(|| router.route(black_box("/test////dir////subdir////file.txt")))
+    });
+
+    // Path with trailing slash
+    group.bench_function("trailing_slash", |b| {
+        b.iter(|| router.route(black_box("/test/dir/subdir/file.txt/")))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_routing_single_bucket,
@@ -435,5 +502,6 @@ criterion_group!(
     bench_s3_key_extraction,
     bench_routing_longest_prefix,
     bench_routing_many_buckets,
+    bench_path_normalization,
 );
 criterion_main!(benches);
