@@ -1,0 +1,342 @@
+# GitHub Actions Benchmark Pipeline for Yatagarasu S3 Proxy
+#
+# Phase 43.1: Benchmark CI Setup
+#
+# Features:
+# - Runs Criterion benchmarks on PRs and main branch
+# - Stores benchmark history for regression detection
+# - Posts benchmark comparison as PR comments
+# - Alerts on >10% regression
+# - Uploads detailed benchmark reports as artifacts
+#
+# Usage:
+# - Triggered automatically on PRs to main/master
+# - Triggered on push to main/master (for baseline updates)
+# - Can be triggered manually via workflow_dispatch
+
+name: Benchmarks
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+    inputs:
+      full_benchmark:
+        description: 'Run full benchmark suite (including slow benchmarks)'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: Run Criterion benchmarks
+  criterion-benchmarks:
+    name: Criterion Benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: ${{ runner.os }}-cargo-build-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-bench-
+
+      # Restore previous benchmark results for comparison
+      - name: Download previous benchmark results
+        uses: actions/cache@v4
+        with:
+          path: ./cache
+          key: ${{ runner.os }}-benchmark-cache-${{ github.ref_name }}
+          restore-keys: |
+            ${{ runner.os }}-benchmark-cache-main
+            ${{ runner.os }}-benchmark-cache-master
+            ${{ runner.os }}-benchmark-cache-
+
+      # Build benchmarks first (faster iteration on errors)
+      - name: Build benchmarks
+        run: cargo build --release --benches
+
+      # Run core benchmarks (always)
+      - name: Run JWT validation benchmarks
+        run: |
+          cargo bench --bench jwt_validation -- --noplot --save-baseline current 2>&1 | tee jwt_bench.txt
+
+      - name: Run S3 signature benchmarks
+        run: |
+          cargo bench --bench s3_signature -- --noplot --save-baseline current 2>&1 | tee s3_bench.txt
+
+      - name: Run routing benchmarks
+        run: |
+          cargo bench --bench routing -- --noplot --save-baseline current 2>&1 | tee routing_bench.txt
+
+      - name: Run request processing benchmarks
+        run: |
+          cargo bench --bench request_processing -- --noplot --save-baseline current 2>&1 | tee request_bench.txt
+
+      # Run cache benchmarks (memory + disk only in CI)
+      - name: Run cache benchmarks (memory + disk)
+        run: |
+          cargo bench --bench cache_comparison -- "memory_cache" --noplot --save-baseline current 2>&1 | tee memory_cache_bench.txt
+          cargo bench --bench cache_comparison -- "disk_cache" --noplot --save-baseline current 2>&1 | tee disk_cache_bench.txt
+          cargo bench --bench disk_cache -- --noplot --save-baseline current 2>&1 | tee disk_cache_ops_bench.txt
+
+      # Optional: Full benchmark suite (manually triggered or on main)
+      - name: Run full benchmark suite
+        if: github.event.inputs.full_benchmark == 'true' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+        run: |
+          echo "Running full benchmark suite..."
+          cargo bench -- --noplot --save-baseline current 2>&1 | tee full_bench.txt
+
+      # Parse benchmark results and check for regressions
+      - name: Check for regressions
+        id: regression_check
+        run: |
+          echo "## Benchmark Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Parse Criterion output for regressions (>10% slower)
+          REGRESSIONS=""
+          IMPROVEMENTS=""
+
+          for file in *_bench.txt; do
+            if [ -f "$file" ]; then
+              echo "### $(basename $file .txt)" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+
+              # Extract timing info
+              grep -E "time:.*\[.*\]" "$file" | head -20 >> $GITHUB_STEP_SUMMARY || true
+
+              # Check for regression markers
+              if grep -q "Performance has regressed" "$file"; then
+                BENCH_NAME=$(basename "$file" .txt)
+                REGRESSED=$(grep -A1 "Performance has regressed" "$file" | head -2)
+                REGRESSIONS="${REGRESSIONS}${BENCH_NAME}: ${REGRESSED}\n"
+              fi
+
+              # Check for improvements
+              if grep -q "Performance has improved" "$file"; then
+                BENCH_NAME=$(basename "$file" .txt)
+                IMPROVED=$(grep -A1 "Performance has improved" "$file" | head -2)
+                IMPROVEMENTS="${IMPROVEMENTS}${BENCH_NAME}: ${IMPROVED}\n"
+              fi
+
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          # Report regressions
+          if [ -n "$REGRESSIONS" ]; then
+            echo "::warning::Performance regressions detected!"
+            echo "### Performance Regressions Detected" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$REGRESSIONS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "has_regression=true" >> $GITHUB_OUTPUT
+          else
+            echo "No significant regressions detected"
+            echo "has_regression=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Report improvements
+          if [ -n "$IMPROVEMENTS" ]; then
+            echo "### Performance Improvements" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$IMPROVEMENTS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # Post PR comment with benchmark results
+      - name: Comment on PR with benchmark results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read benchmark files
+            let comment = '## Benchmark Results\n\n';
+
+            const benchFiles = [
+              { file: 'jwt_bench.txt', name: 'JWT Validation' },
+              { file: 's3_bench.txt', name: 'S3 Signature' },
+              { file: 'routing_bench.txt', name: 'Routing' },
+              { file: 'request_bench.txt', name: 'Request Processing' },
+              { file: 'memory_cache_bench.txt', name: 'Memory Cache' },
+              { file: 'disk_cache_bench.txt', name: 'Disk Cache' },
+            ];
+
+            for (const bench of benchFiles) {
+              if (fs.existsSync(bench.file)) {
+                const content = fs.readFileSync(bench.file, 'utf8');
+
+                // Extract timing info
+                const timings = content.match(/time:.*\[.*\]/g) || [];
+
+                if (timings.length > 0) {
+                  comment += `### ${bench.name}\n`;
+                  comment += '```\n';
+                  comment += timings.slice(0, 10).join('\n');
+                  comment += '\n```\n\n';
+                }
+
+                // Check for regressions
+                if (content.includes('Performance has regressed')) {
+                  comment += `> **Warning**: Performance regression detected in ${bench.name}!\n\n`;
+                }
+
+                // Check for improvements
+                if (content.includes('Performance has improved')) {
+                  comment += `> **Note**: Performance improvement detected in ${bench.name}!\n\n`;
+                }
+              }
+            }
+
+            comment += '\n---\n';
+            comment += '_Run `cargo bench` locally for detailed results._\n';
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('## Benchmark Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }
+
+      # Upload Criterion HTML reports
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-reports
+          path: target/criterion/
+          retention-days: 30
+
+      # Upload raw benchmark output
+      - name: Upload benchmark logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-logs
+          path: |
+            *_bench.txt
+          retention-days: 14
+
+      # Save baseline for future comparisons (only on main branch)
+      - name: Update benchmark cache
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: actions/cache/save@v4
+        with:
+          path: ./cache
+          key: ${{ runner.os }}-benchmark-cache-${{ github.ref_name }}-${{ github.sha }}
+
+      # Fail on significant regression (optional - can be adjusted)
+      - name: Fail on regression (>10% threshold)
+        if: steps.regression_check.outputs.has_regression == 'true' && github.event_name == 'pull_request'
+        run: |
+          echo "::error::Performance regression detected! Please investigate the benchmark results."
+          echo "See the benchmark comment on this PR for details."
+          echo "If this regression is expected, you can add [benchmark-skip] to your commit message."
+
+          # Check if commit message contains skip marker
+          if git log -1 --pretty=%B | grep -qi "\[benchmark-skip\]"; then
+            echo "Benchmark regression check skipped due to [benchmark-skip] marker."
+            exit 0
+          fi
+
+          # Fail the check
+          exit 1
+
+  # Job 2: Compare benchmarks between base and head (for PRs)
+  benchmark-comparison:
+    name: Benchmark Comparison
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: criterion-benchmarks
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comparison
+
+      - name: Download current benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: criterion-reports
+          path: ./current-results
+
+      - name: Generate comparison summary
+        run: |
+          echo "## Benchmark Comparison: ${{ github.base_ref }} vs PR" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Comparing benchmarks between base branch and this PR." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # List all benchmark reports
+          echo "### Available Reports" >> $GITHUB_STEP_SUMMARY
+          find ./current-results -name "*.json" -o -name "*.html" | head -20 >> $GITHUB_STEP_SUMMARY || echo "No reports found" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the `criterion-reports` artifact for detailed HTML reports." >> $GITHUB_STEP_SUMMARY

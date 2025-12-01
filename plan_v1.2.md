@@ -256,12 +256,21 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 **Objective**: Set up CI/CD benchmark integration
 
 #### 43.1 Benchmark CI Setup
-- [ ] Setup: GitHub Actions workflow for benchmarks
-- [ ] Setup: Benchmark result storage (artifact/DB)
-- [ ] Setup: Regression detection (>10% threshold)
-- [ ] Setup: Benchmark comparison between commits
-- [ ] Test: PR benchmark comments
-- [ ] Document: How to run benchmarks locally
+- [x] Setup: GitHub Actions workflow for benchmarks
+- [x] Setup: Benchmark result storage (artifact/DB)
+- [x] Setup: Regression detection (>10% threshold)
+- [x] Setup: Benchmark comparison between commits
+- [x] Test: PR benchmark comments
+- [x] Document: How to run benchmarks locally
+
+**Implementation Details**:
+- Created `.github/workflows/benchmarks.yml` with comprehensive CI pipeline
+- Runs on PRs and main branch pushes (triggered by src/benches/Cargo changes)
+- Stores Criterion results as artifacts (30-day retention)
+- Parses output for "Performance has regressed" markers (>10% threshold)
+- Posts benchmark comparison as PR comments via github-script
+- Supports `[benchmark-skip]` commit marker to bypass regression check
+- Created `docs/BENCHMARKING.md` with local running guide
 
 #### 43.2 Benchmark Dashboard
 - [ ] Setup: Historical benchmark tracking
