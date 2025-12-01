@@ -646,6 +646,59 @@ fn bench_jwt_nested_claims(c: &mut Criterion) {
     });
 }
 
+/// Benchmark expired token detection
+/// This measures how quickly the system detects and rejects an expired JWT token
+fn bench_jwt_expired_token(c: &mut Criterion) {
+    let secret = "benchmark-secret-key-12345";
+    let claims = Claims {
+        sub: "user123".to_string(),
+        exp: 1, // Expired: January 1, 1970 00:00:01 UTC
+        role: "admin".to_string(),
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .expect("Failed to create token");
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: secret.to_string(),
+        algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
+    };
+
+    let query_params = HashMap::new();
+
+    c.bench_function("jwt_expired_token", |b| {
+        b.iter(|| {
+            // This should return an error due to expired token
+            let result = authenticate_request(
+                black_box(&headers),
+                black_box(&query_params),
+                black_box(&jwt_config),
+            );
+            // We expect this to fail, but we still benchmark the detection time
+            black_box(result)
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_jwt_extraction_bearer_header,
@@ -657,5 +710,6 @@ criterion_group!(
     bench_jwt_10_claims_validation,
     bench_jwt_multiple_sources,
     bench_jwt_nested_claims,
+    bench_jwt_expired_token,
 );
 criterion_main!(benches);
