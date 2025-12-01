@@ -1,18 +1,21 @@
 # GitHub Actions Benchmark Pipeline for Yatagarasu S3 Proxy
 #
-# Phase 43.1: Benchmark CI Setup
+# Phase 43.1 & 43.2: Benchmark CI Setup + Dashboard
 #
 # Features:
 # - Runs Criterion benchmarks on PRs and main branch
 # - Stores benchmark history for regression detection
 # - Posts benchmark comparison as PR comments
-# - Alerts on >10% regression
+# - Alerts on >10% regression with GitHub Issues
 # - Uploads detailed benchmark reports as artifacts
+# - Historical tracking via GitHub Pages benchmark dashboard
+# - Interactive charts showing performance over time
 #
 # Usage:
 # - Triggered automatically on PRs to main/master
 # - Triggered on push to main/master (for baseline updates)
 # - Can be triggered manually via workflow_dispatch
+# - View benchmark history at: https://<owner>.github.io/<repo>/benchmarks/
 
 name: Benchmarks
 
@@ -53,6 +56,8 @@ jobs:
   criterion-benchmarks:
     name: Criterion Benchmarks
     runs-on: ubuntu-latest
+    outputs:
+      has_regression: ${{ steps.regression_check.outputs.has_regression }}
     permissions:
       contents: write
       pull-requests: write
@@ -340,3 +345,466 @@ jobs:
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Download the `criterion-reports` artifact for detailed HTML reports." >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: Historical tracking and GitHub Pages dashboard
+  benchmark-dashboard:
+    name: Update Benchmark Dashboard
+    runs-on: ubuntu-latest
+    # Only update dashboard on push to main (not PRs)
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: criterion-benchmarks
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download benchmark logs
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-logs
+          path: ./benchmark-logs
+
+      - name: Parse benchmark results to JSON
+        id: parse_benchmarks
+        run: |
+          # Create benchmark data directory
+          mkdir -p benchmark-data
+
+          # Parse each benchmark file and extract timing info
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHA:0:7}"
+
+          cat > benchmark-data/current.json << EOF
+          {
+            "timestamp": "$TIMESTAMP",
+            "commit": "$COMMIT_SHA",
+            "commit_short": "$COMMIT_SHORT",
+            "benchmarks": {}
+          }
+          EOF
+
+          # Extract timing from each benchmark file
+          for file in ./benchmark-logs/*_bench.txt; do
+            if [ -f "$file" ]; then
+              BENCH_NAME=$(basename "$file" _bench.txt)
+              echo "Processing $BENCH_NAME..."
+
+              # Extract all timing lines and convert to JSON
+              TIMINGS=$(grep -E "time:.*\[.*\]" "$file" | head -20 | while read line; do
+                # Parse: benchmark_name   time:   [45.234 μs 45.891 μs 46.612 μs]
+                NAME=$(echo "$line" | awk '{print $1}')
+                # Extract the middle value (estimate)
+                TIME=$(echo "$line" | grep -oP '\[\K[^\]]+' | awk '{print $2}')
+                UNIT=$(echo "$line" | grep -oP '\[\K[^\]]+' | awk '{print $3}')
+                echo "\"$NAME\": {\"time\": \"$TIME\", \"unit\": \"$UNIT\"}"
+              done | tr '\n' ',' | sed 's/,$//')
+
+              # Append to JSON (simplified - just store raw timing for now)
+              echo "  Extracted timings for $BENCH_NAME"
+            fi
+          done
+
+          echo "Benchmark data prepared"
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: Initialize gh-pages if needed
+        run: |
+          if [ ! -d "gh-pages" ]; then
+            mkdir -p gh-pages
+            cd gh-pages
+            git init
+            git checkout -b gh-pages
+          fi
+
+          # Ensure benchmarks directory exists
+          mkdir -p gh-pages/benchmarks
+
+      - name: Update benchmark history
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHA:0:7}"
+
+          # Initialize or update history file
+          HISTORY_FILE="gh-pages/benchmarks/history.json"
+          if [ ! -f "$HISTORY_FILE" ]; then
+            echo '{"entries": []}' > "$HISTORY_FILE"
+          fi
+
+          # Create new entry with benchmark summaries
+          NEW_ENTRY=$(cat << EOF
+          {
+            "timestamp": "$TIMESTAMP",
+            "commit": "$COMMIT_SHA",
+            "commit_short": "$COMMIT_SHORT",
+            "benchmarks": {
+          EOF
+          )
+
+          # Parse each benchmark file
+          FIRST=true
+          for file in ./benchmark-logs/*_bench.txt; do
+            if [ -f "$file" ]; then
+              BENCH_NAME=$(basename "$file" _bench.txt)
+
+              # Get first timing line as representative
+              TIMING=$(grep -E "time:.*\[.*\]" "$file" | head -1 || echo "")
+              if [ -n "$TIMING" ]; then
+                # Extract middle value (estimate)
+                TIME_VALUE=$(echo "$TIMING" | grep -oP '\[\K[^\]]+' | awk '{print $2}' || echo "0")
+                TIME_UNIT=$(echo "$TIMING" | grep -oP '\[\K[^\]]+' | awk '{print $3}' || echo "ns")
+
+                if [ "$FIRST" = true ]; then
+                  FIRST=false
+                else
+                  NEW_ENTRY="$NEW_ENTRY,"
+                fi
+                NEW_ENTRY="$NEW_ENTRY
+              \"$BENCH_NAME\": {\"time\": \"$TIME_VALUE\", \"unit\": \"$TIME_UNIT\"}"
+              fi
+            fi
+          done
+
+          NEW_ENTRY="$NEW_ENTRY
+            }
+          }"
+
+          # Append to history (keep last 100 entries)
+          python3 << PYEOF
+          import json
+          import sys
+
+          # Read existing history
+          try:
+              with open('$HISTORY_FILE', 'r') as f:
+                  history = json.load(f)
+          except:
+              history = {"entries": []}
+
+          # Parse new entry
+          new_entry = json.loads('''$NEW_ENTRY''')
+
+          # Append and trim to last 100
+          history["entries"].append(new_entry)
+          history["entries"] = history["entries"][-100:]
+
+          # Write back
+          with open('$HISTORY_FILE', 'w') as f:
+              json.dump(history, f, indent=2)
+
+          print(f"History now has {len(history['entries'])} entries")
+          PYEOF
+
+      - name: Generate dashboard HTML
+        run: |
+          cat > gh-pages/benchmarks/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Yatagarasu Benchmark Dashboard</title>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <style>
+              * { box-sizing: border-box; }
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: #f5f5f5;
+                color: #333;
+              }
+              .container { max-width: 1200px; margin: 0 auto; }
+              h1 {
+                color: #2c3e50;
+                border-bottom: 2px solid #3498db;
+                padding-bottom: 10px;
+              }
+              .summary {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                margin-bottom: 30px;
+              }
+              .metric-card {
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              }
+              .metric-card h3 { margin: 0 0 10px 0; color: #7f8c8d; font-size: 14px; }
+              .metric-card .value { font-size: 24px; font-weight: bold; color: #2c3e50; }
+              .metric-card .unit { font-size: 14px; color: #95a5a6; }
+              .chart-container {
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                margin-bottom: 20px;
+              }
+              .chart-container h2 { margin-top: 0; color: #2c3e50; }
+              canvas { max-height: 300px; }
+              .footer {
+                text-align: center;
+                color: #95a5a6;
+                margin-top: 30px;
+                font-size: 14px;
+              }
+              .status-good { color: #27ae60; }
+              .status-warn { color: #f39c12; }
+              .status-bad { color: #e74c3c; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Yatagarasu Benchmark Dashboard</h1>
+              <p>Performance tracking for the high-performance S3 proxy</p>
+
+              <div class="summary" id="summary">
+                <div class="metric-card">
+                  <h3>Latest Commit</h3>
+                  <div class="value" id="latest-commit">Loading...</div>
+                </div>
+                <div class="metric-card">
+                  <h3>Last Updated</h3>
+                  <div class="value" id="last-updated">Loading...</div>
+                </div>
+                <div class="metric-card">
+                  <h3>Total Runs</h3>
+                  <div class="value" id="total-runs">Loading...</div>
+                </div>
+              </div>
+
+              <div class="chart-container">
+                <h2>JWT Validation Performance</h2>
+                <canvas id="jwt-chart"></canvas>
+              </div>
+
+              <div class="chart-container">
+                <h2>S3 Signature Performance</h2>
+                <canvas id="s3-chart"></canvas>
+              </div>
+
+              <div class="chart-container">
+                <h2>Routing Performance</h2>
+                <canvas id="routing-chart"></canvas>
+              </div>
+
+              <div class="chart-container">
+                <h2>Cache Performance</h2>
+                <canvas id="cache-chart"></canvas>
+              </div>
+
+              <div class="footer">
+                <p>Generated by Yatagarasu CI | <a href="https://github.com/julianshen/yatagarasu">View Source</a></p>
+              </div>
+            </div>
+
+            <script>
+              async function loadData() {
+                try {
+                  const response = await fetch('history.json');
+                  const data = await response.json();
+                  return data;
+                } catch (e) {
+                  console.error('Failed to load history:', e);
+                  return { entries: [] };
+                }
+              }
+
+              function parseTime(timeStr, unit) {
+                const value = parseFloat(timeStr) || 0;
+                // Normalize to microseconds
+                switch(unit) {
+                  case 'ns': return value / 1000;
+                  case 'µs':
+                  case 'μs': return value;
+                  case 'ms': return value * 1000;
+                  case 's': return value * 1000000;
+                  default: return value;
+                }
+              }
+
+              function createChart(ctx, label, data, color) {
+                return new Chart(ctx, {
+                  type: 'line',
+                  data: {
+                    labels: data.labels,
+                    datasets: [{
+                      label: label,
+                      data: data.values,
+                      borderColor: color,
+                      backgroundColor: color + '20',
+                      fill: true,
+                      tension: 0.3
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      legend: { display: true }
+                    },
+                    scales: {
+                      y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Time (µs)' }
+                      }
+                    }
+                  }
+                });
+              }
+
+              async function init() {
+                const history = await loadData();
+                const entries = history.entries || [];
+
+                if (entries.length === 0) {
+                  document.getElementById('latest-commit').textContent = 'No data';
+                  return;
+                }
+
+                // Update summary
+                const latest = entries[entries.length - 1];
+                document.getElementById('latest-commit').textContent = latest.commit_short;
+                document.getElementById('last-updated').textContent = new Date(latest.timestamp).toLocaleDateString();
+                document.getElementById('total-runs').textContent = entries.length;
+
+                // Prepare chart data
+                const labels = entries.map(e => e.commit_short);
+
+                // JWT chart
+                const jwtData = {
+                  labels: labels,
+                  values: entries.map(e => {
+                    const b = e.benchmarks?.jwt || e.benchmarks?.jwt_validation;
+                    return b ? parseTime(b.time, b.unit) : null;
+                  })
+                };
+                createChart(document.getElementById('jwt-chart'), 'JWT Validation', jwtData, '#3498db');
+
+                // S3 chart
+                const s3Data = {
+                  labels: labels,
+                  values: entries.map(e => {
+                    const b = e.benchmarks?.s3 || e.benchmarks?.s3_signature;
+                    return b ? parseTime(b.time, b.unit) : null;
+                  })
+                };
+                createChart(document.getElementById('s3-chart'), 'S3 Signature', s3Data, '#e74c3c');
+
+                // Routing chart
+                const routingData = {
+                  labels: labels,
+                  values: entries.map(e => {
+                    const b = e.benchmarks?.routing;
+                    return b ? parseTime(b.time, b.unit) : null;
+                  })
+                };
+                createChart(document.getElementById('routing-chart'), 'Routing', routingData, '#2ecc71');
+
+                // Cache chart
+                const cacheData = {
+                  labels: labels,
+                  values: entries.map(e => {
+                    const b = e.benchmarks?.memory_cache || e.benchmarks?.disk_cache;
+                    return b ? parseTime(b.time, b.unit) : null;
+                  })
+                };
+                createChart(document.getElementById('cache-chart'), 'Cache Operations', cacheData, '#9b59b6');
+              }
+
+              init();
+            </script>
+          </body>
+          </html>
+          HTMLEOF
+
+      - name: Deploy to GitHub Pages
+        run: |
+          cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "Update benchmark dashboard - ${{ github.sha }}"
+          git push origin gh-pages --force || echo "Push failed - gh-pages may need to be created manually"
+        continue-on-error: true
+
+      - name: Add dashboard link to summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Benchmark Dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View the interactive benchmark dashboard:" >> $GITHUB_STEP_SUMMARY
+          echo "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/benchmarks/" >> $GITHUB_STEP_SUMMARY
+
+  # Job 4: Alert on regression via GitHub Issues
+  regression-alert:
+    name: Regression Alert
+    runs-on: ubuntu-latest
+    needs: criterion-benchmarks
+    if: needs.criterion-benchmarks.outputs.has_regression == 'true' && github.event_name == 'push'
+    permissions:
+      issues: write
+
+    steps:
+      - name: Create regression issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Performance Regression Detected - ${context.sha.substring(0, 7)}`;
+            const body = `## Performance Regression Alert
+
+            A performance regression was detected in commit ${context.sha}.
+
+            **Commit**: [${context.sha.substring(0, 7)}](${context.payload.repository.html_url}/commit/${context.sha})
+            **Author**: ${context.payload.pusher?.name || 'Unknown'}
+            **Branch**: ${context.ref.replace('refs/heads/', '')}
+
+            ### Actions Required
+            1. Review the [benchmark results](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            2. Investigate the cause of the regression
+            3. Consider reverting if the regression is significant
+
+            ### Benchmark Details
+            Check the workflow run for detailed benchmark comparisons.
+
+            ---
+            *This issue was automatically created by the benchmark CI workflow.*
+            `;
+
+            // Check for existing open regression issues
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'performance-regression'
+            });
+
+            // Don't create duplicate issues for the same commit
+            const existingIssue = issues.data.find(i => i.body.includes(context.sha));
+            if (existingIssue) {
+              console.log('Regression issue already exists:', existingIssue.number);
+              return;
+            }
+
+            // Create the issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['performance-regression', 'automated']
+            });

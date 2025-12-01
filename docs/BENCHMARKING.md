@@ -290,6 +290,171 @@ cargo clean
 mv ~/.criterion-backup target/criterion
 ```
 
+## Benchmark Interpretation Guide
+
+### Understanding Criterion Output
+
+When you run `cargo bench`, Criterion produces output like this:
+
+```
+jwt_validation/hs256   time:   [1.72 µs 1.78 µs 1.84 µs]
+                       change: [-2.12% +0.12% +2.45%] (p = 0.12 > 0.05)
+                       No change in performance detected.
+```
+
+**Breaking it down:**
+
+| Component | Meaning |
+|-----------|---------|
+| `[1.72 µs 1.78 µs 1.84 µs]` | [lower bound, **estimate**, upper bound] of execution time |
+| `change: [-2.12% +0.12% +2.45%]` | Performance change from baseline [lower, estimate, upper] |
+| `p = 0.12 > 0.05` | Statistical significance (p < 0.05 = significant change) |
+| `No change in performance detected` | Criterion's conclusion |
+
+### What the Numbers Mean
+
+**Time Measurements:**
+- **Mean**: Average execution time across all samples
+- **Lower/Upper bounds**: 95% confidence interval
+- **Tighter bounds = more consistent performance**
+
+**Performance Change:**
+- **Negative %**: Improvement (faster)
+- **Positive %**: Regression (slower)
+- **p-value < 0.05**: Statistically significant change
+- **p-value > 0.05**: Could be measurement noise
+
+### Regression Severity Guide
+
+| Change | Severity | Action |
+|--------|----------|--------|
+| < 5% | Noise | Usually ignore |
+| 5-10% | Minor | Review if persistent across runs |
+| 10-20% | Moderate | Investigate the cause |
+| > 20% | Severe | Fix before merging |
+| > 50% | Critical | Likely a bug or algorithmic change |
+
+### Common Causes of Performance Changes
+
+**False Positives (fake regressions):**
+- CPU frequency scaling (laptop on battery)
+- Background processes consuming CPU
+- First run after code change (cold instruction cache)
+- Thermal throttling on warm machine
+- Different hardware (local vs CI)
+
+**Real Regressions:**
+- Algorithm complexity change (O(n) → O(n²))
+- Added synchronization (locks, atomics)
+- Increased memory allocations
+- Cache-unfriendly data access patterns
+- Unintended function calls in hot paths
+
+### Interpreting k6 Results
+
+k6 output shows different metrics:
+
+```
+http_req_duration..........: avg=1.23ms min=0.5ms med=1.1ms max=15ms p(90)=2ms p(95)=3ms
+```
+
+| Metric | Meaning | Target |
+|--------|---------|--------|
+| `avg` | Average response time | Use for baseline |
+| `med` | Median (50th percentile) | Better than avg for skewed data |
+| `p(90)` | 90% of requests below this | Good for capacity planning |
+| `p(95)` | 95th percentile | Common SLA metric |
+| `p(99)` | 99th percentile (tail latency) | Important for user experience |
+| `max` | Worst case | Check for outliers |
+
+### Dashboard Metrics
+
+The benchmark dashboard at `https://<owner>.github.io/<repo>/benchmarks/` shows:
+
+1. **JWT Validation**: Token parsing and signature verification
+   - Target: <5µs for HS256
+   - Impact: Auth overhead on every protected request
+
+2. **S3 Signature**: AWS SigV4 signing performance
+   - Target: <10µs
+   - Impact: Per-request overhead to S3
+
+3. **Routing**: Path-to-bucket matching
+   - Target: <1µs
+   - Impact: Very hot path, called on every request
+
+4. **Cache Operations**: Memory/disk cache read/write
+   - Memory target: <100µs
+   - Disk target: <10ms
+   - Impact: Determines cache hit latency
+
+### When to Investigate
+
+**Always investigate when:**
+- Change > 10% and p < 0.05 (statistically significant)
+- Multiple benchmarks regress together
+- Regression appears on multiple consecutive commits
+- P99 latency increases significantly
+
+**Can usually ignore when:**
+- Change < 5%
+- p-value > 0.05 (not statistically significant)
+- Only one run shows regression
+- Regression disappears on re-run
+
+### Debugging Slow Benchmarks
+
+```bash
+# Generate flamegraph for specific benchmark
+cargo flamegraph --bench jwt_validation -- --bench
+
+# Profile with perf (Linux)
+perf record cargo bench --bench jwt_validation
+perf report
+
+# Check allocations with DHAT (requires nightly)
+cargo +nightly bench --bench jwt_validation -- --profile-time=10
+```
+
+## Benchmark Dashboard
+
+After each push to main, benchmark results are published to GitHub Pages:
+
+**URL**: `https://<owner>.github.io/<repo>/benchmarks/`
+
+The dashboard shows:
+- Historical performance trends over last 100 commits
+- Per-component charts (JWT, S3, Routing, Cache)
+- Latest commit information
+- Interactive hover for exact values
+
+### Setting Up GitHub Pages
+
+1. Go to repository Settings > Pages
+2. Set Source to "Deploy from a branch"
+3. Select `gh-pages` branch, `/ (root)` folder
+4. Save
+
+The benchmark workflow automatically creates and updates the `gh-pages` branch.
+
+## Regression Alerts
+
+When a benchmark regresses >10% on the main branch:
+
+1. **GitHub Issue** is automatically created with:
+   - Commit that caused the regression
+   - Link to workflow run
+   - Instructions for investigation
+
+2. **PR Comments** show benchmark results for review before merge
+
+3. **Workflow Annotations** highlight regressions in the Actions UI
+
+To skip regression check for expected changes:
+```bash
+git commit -m "Refactor: Add logging [benchmark-skip]"
+```
+
 ## Resources
 
 - [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)

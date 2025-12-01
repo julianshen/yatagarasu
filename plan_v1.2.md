@@ -273,15 +273,35 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 - Created `docs/BENCHMARKING.md` with local running guide
 
 #### 43.2 Benchmark Dashboard
-- [ ] Setup: Historical benchmark tracking
-- [ ] Setup: Visualization (optional: grafana/charts)
-- [ ] Setup: Alert on regression
-- [ ] Document: Benchmark interpretation guide
+- [x] Setup: Historical benchmark tracking
+- [x] Setup: Visualization (optional: grafana/charts)
+- [x] Setup: Alert on regression
+- [x] Document: Benchmark interpretation guide
+
+**Implementation Details**:
+- Enhanced `.github/workflows/benchmarks.yml` with:
+  - `benchmark-dashboard` job: Parses benchmark results and stores in `gh-pages/benchmarks/history.json`
+  - `regression-alert` job: Creates GitHub Issues when >10% regression detected on main branch
+  - Job outputs for cross-job communication (`has_regression`)
+- GitHub Pages dashboard at `https://<owner>.github.io/<repo>/benchmarks/` with:
+  - Interactive Chart.js visualization for JWT, S3, Routing, Cache metrics
+  - Historical tracking of last 100 commits
+  - Summary cards for latest commit and run count
+- Updated `docs/BENCHMARKING.md` with comprehensive interpretation guide:
+  - Understanding Criterion output format
+  - Regression severity guide (5%, 10%, 20%+ thresholds)
+  - Common false positives vs real regressions
+  - k6 metric interpretation
+  - Dashboard metrics explanation
+  - When to investigate vs ignore
+  - Debugging slow benchmarks
 
 **Deliverables**:
 - `benches/` directory with all Criterion benchmarks
 - CI workflow running on each PR
 - Baseline metrics documented
+- GitHub Pages benchmark dashboard
+- Automatic regression alerts via GitHub Issues
 
 ---
 
