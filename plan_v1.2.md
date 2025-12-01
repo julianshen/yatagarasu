@@ -59,7 +59,7 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 
 #### 40.2 Routing Benchmarks
 - [x] Bench: Single bucket path matching (target: <10μs) - 41.8ns ✓
-- [ ] Bench: 5 bucket path matching
+- [x] Bench: 5 bucket path matching - 81.8ns ✓
 - [ ] Bench: 10 bucket path matching
 - [ ] Bench: 50 bucket path matching
 - [ ] Bench: Longest prefix match with nested paths

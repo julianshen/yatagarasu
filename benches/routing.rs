@@ -358,7 +358,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
 
 /// Benchmark routing with many buckets (stress test)
 fn bench_routing_many_buckets(c: &mut Criterion) {
-    let bucket_counts = [10, 50, 100];
+    let bucket_counts = [5, 10, 50, 100];
 
     let mut group = c.benchmark_group("routing_many_buckets");
 
