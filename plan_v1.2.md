@@ -43,8 +43,8 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 #### 40.1 JWT Validation Benchmarks
 - [x] Setup: Add criterion dev-dependency to Cargo.toml
 - [x] Bench: HS256 JWT validation (target: <1ms) - 1.78µs ✓
-- [ ] Bench: HS256 with 5 claims verification
-- [ ] Bench: HS256 with 10 claims verification
+- [x] Bench: HS256 with 5 claims verification - 2.12µs ✓
+- [x] Bench: HS256 with 10 claims verification - 2.98µs ✓
 - [x] Bench: Token extraction from Bearer header - 1.44µs ✓
 - [x] Bench: Token extraction from query parameter - 2.2ns ✓
 - [x] Bench: Token extraction from custom header - 1.58µs ✓

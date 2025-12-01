@@ -12,6 +12,34 @@ struct Claims {
     role: String,
 }
 
+/// Claims struct with 5 verifiable fields for benchmark
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims5 {
+    sub: String,
+    exp: usize,
+    role: String,
+    department: String,
+    level: String,
+    region: String,
+    active: bool,
+}
+
+/// Claims struct with 10 verifiable fields for benchmark
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims10 {
+    sub: String,
+    exp: usize,
+    role: String,
+    department: String,
+    level: String,
+    region: String,
+    active: bool,
+    tier: String,
+    team: String,
+    project: String,
+    clearance: String,
+}
+
 /// Benchmark JWT extraction from Authorization header
 fn bench_jwt_extraction_bearer_header(c: &mut Criterion) {
     // Setup: Create valid JWT token
@@ -280,6 +308,193 @@ fn bench_jwt_with_claims_validation(c: &mut Criterion) {
     });
 }
 
+/// Benchmark JWT validation with 5 claims verification
+fn bench_jwt_5_claims_validation(c: &mut Criterion) {
+    let secret = "benchmark-secret-key-12345";
+    let claims = Claims5 {
+        sub: "user123".to_string(),
+        exp: 9999999999,
+        role: "admin".to_string(),
+        department: "engineering".to_string(),
+        level: "senior".to_string(),
+        region: "us-west".to_string(),
+        active: true,
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .expect("Failed to create token");
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: secret.to_string(),
+        algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![
+            yatagarasu::config::ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "department".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("engineering".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "level".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("senior".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "region".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("us-west".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "active".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::Bool(true),
+            },
+        ],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
+    };
+
+    let query_params = HashMap::new();
+
+    c.bench_function("jwt_5_claims_validation", |b| {
+        b.iter(|| {
+            authenticate_request(
+                black_box(&headers),
+                black_box(&query_params),
+                black_box(&jwt_config),
+            )
+        })
+    });
+}
+
+/// Benchmark JWT validation with 10 claims verification
+fn bench_jwt_10_claims_validation(c: &mut Criterion) {
+    let secret = "benchmark-secret-key-12345";
+    let claims = Claims10 {
+        sub: "user123".to_string(),
+        exp: 9999999999,
+        role: "admin".to_string(),
+        department: "engineering".to_string(),
+        level: "senior".to_string(),
+        region: "us-west".to_string(),
+        active: true,
+        tier: "platinum".to_string(),
+        team: "platform".to_string(),
+        project: "yatagarasu".to_string(),
+        clearance: "top-secret".to_string(),
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .expect("Failed to create token");
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: secret.to_string(),
+        algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![
+            yatagarasu::config::ClaimRule {
+                claim: "role".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("admin".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "department".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("engineering".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "level".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("senior".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "region".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("us-west".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "active".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::Bool(true),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "tier".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("platinum".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "team".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("platform".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "project".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("yatagarasu".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "clearance".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("top-secret".to_string()),
+            },
+            yatagarasu::config::ClaimRule {
+                claim: "sub".to_string(),
+                operator: "equals".to_string(),
+                value: serde_json::Value::String("user123".to_string()),
+            },
+        ],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
+    };
+
+    let query_params = HashMap::new();
+
+    c.bench_function("jwt_10_claims_validation", |b| {
+        b.iter(|| {
+            authenticate_request(
+                black_box(&headers),
+                black_box(&query_params),
+                black_box(&jwt_config),
+            )
+        })
+    });
+}
+
 /// Benchmark JWT validation with multiple token sources (fallback logic)
 fn bench_jwt_multiple_sources(c: &mut Criterion) {
     let secret = "benchmark-secret-key-12345";
@@ -349,6 +564,8 @@ criterion_group!(
     bench_jwt_extraction_custom_header,
     bench_jwt_algorithms,
     bench_jwt_with_claims_validation,
+    bench_jwt_5_claims_validation,
+    bench_jwt_10_claims_validation,
     bench_jwt_multiple_sources,
 );
 criterion_main!(benches);
