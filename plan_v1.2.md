@@ -58,7 +58,7 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 - Benchmark variance <5%
 
 #### 40.2 Routing Benchmarks
-- [ ] Bench: Single bucket path matching (target: <10μs)
+- [x] Bench: Single bucket path matching (target: <10μs) - 41.8ns ✓
 - [ ] Bench: 5 bucket path matching
 - [ ] Bench: 10 bucket path matching
 - [ ] Bench: 50 bucket path matching

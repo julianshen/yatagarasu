@@ -31,8 +31,14 @@ fn bench_routing_single_bucket(c: &mut Criterion) {
                 replicas: None,
             },
             auth: None,
+            cache: None,
+            authorization: None,
+            ip_filter: Default::default(),
         }],
         jwt: None,
+        cache: None,
+        audit_log: None,
+        observability: Default::default(),
         generation: 0,
     };
 
@@ -64,6 +70,9 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
                 replicas: None,
             },
             auth: None,
+            cache: None,
+            authorization: None,
+            ip_filter: Default::default(),
         })
         .collect();
 
@@ -78,6 +87,9 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
         },
         buckets,
         jwt: None,
+        cache: None,
+        audit_log: None,
+        observability: Default::default(),
         generation: 0,
     };
 
@@ -136,8 +148,14 @@ fn bench_routing_path_lengths(c: &mut Criterion) {
                 replicas: None,
             },
             auth: None,
+            cache: None,
+            authorization: None,
+            ip_filter: Default::default(),
         }],
         jwt: None,
+        cache: None,
+        audit_log: None,
+        observability: Default::default(),
         generation: 0,
     };
 
@@ -195,8 +213,14 @@ fn bench_s3_key_extraction(c: &mut Criterion) {
                 replicas: None,
             },
             auth: None,
+            cache: None,
+            authorization: None,
+            ip_filter: Default::default(),
         }],
         jwt: None,
+        cache: None,
+        audit_log: None,
+        observability: Default::default(),
         generation: 0,
     };
 
@@ -256,6 +280,9 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                     replicas: None,
                 },
                 auth: None,
+                cache: None,
+                authorization: None,
+                ip_filter: Default::default(),
             },
             BucketConfig {
                 name: "bucket-medium".to_string(),
@@ -274,6 +301,9 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                     replicas: None,
                 },
                 auth: None,
+                cache: None,
+                authorization: None,
+                ip_filter: Default::default(),
             },
             BucketConfig {
                 name: "bucket-long".to_string(),
@@ -292,9 +322,15 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                     replicas: None,
                 },
                 auth: None,
+                cache: None,
+                authorization: None,
+                ip_filter: Default::default(),
             },
         ],
         jwt: None,
+        cache: None,
+        audit_log: None,
+        observability: Default::default(),
         generation: 0,
     };
 
@@ -345,6 +381,9 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
                     replicas: None,
                 },
                 auth: None,
+                cache: None,
+                authorization: None,
+                ip_filter: Default::default(),
             })
             .collect();
 
@@ -359,6 +398,9 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
             },
             buckets,
             jwt: None,
+            cache: None,
+            audit_log: None,
+            observability: Default::default(),
             generation: 0,
         };
 
