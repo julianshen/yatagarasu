@@ -13,6 +13,7 @@ fn create_cache_entry(size: usize) -> CacheEntry {
         content_type: "application/octet-stream".to_string(),
         content_length: data.len(),
         etag: "test-etag".to_string(),
+        last_modified: None,
         created_at: std::time::SystemTime::now(),
         expires_at: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
         last_accessed_at: std::time::SystemTime::now(),

@@ -1239,6 +1239,172 @@ fn bench_disk_cache_throughput(c: &mut Criterion) {
 }
 
 // =============================================================================
+// Phase 41.2: Disk Cache Extended Benchmarks
+// =============================================================================
+
+/// Benchmark disk cache get() operations for cache misses
+fn bench_disk_cache_miss(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let cache = create_disk_cache(&temp_dir);
+
+    let mut group = c.benchmark_group("disk_cache_miss");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+
+    // Benchmark cache miss (key does not exist)
+    group.bench_function("nonexistent_key", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            // Use unique keys that don't exist in cache
+            let key = create_cache_key("bench", "disk-miss", counter);
+            counter += 1;
+            rt.block_on(async {
+                let result = cache.get(black_box(&key)).await;
+                // Should return Ok(None) for miss
+                assert!(result.is_ok());
+                assert!(result.unwrap().is_none());
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark disk cache delete() operations
+fn bench_disk_cache_delete(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let cache = create_disk_cache(&temp_dir);
+
+    let mut group = c.benchmark_group("disk_cache_delete");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+
+    // Pre-populate cache with entries for deletion
+    rt.block_on(async {
+        for i in 0..10000 {
+            let key = create_cache_key("bench", "disk-delete", i);
+            let entry = create_cache_entry(SIZE_1KB);
+            cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    // Benchmark delete of existing entries
+    group.bench_function("existing_entry", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "disk-delete", counter % 10000);
+            counter += 1;
+            rt.block_on(async {
+                let _ = cache.delete(black_box(&key)).await;
+            });
+        });
+    });
+
+    // Benchmark delete of non-existing entries (miss case)
+    group.bench_function("nonexistent_entry", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "disk-delete-miss", counter);
+            counter += 1;
+            rt.block_on(async {
+                let _ = cache.delete(black_box(&key)).await;
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark disk cache LRU eviction performance
+/// This tests the internal eviction mechanism when cache reaches capacity
+fn bench_disk_cache_eviction(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    // Create a small cache (10MB max) to force evictions quickly
+    let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 10 * 1024 * 1024);
+
+    let mut group = c.benchmark_group("disk_cache_eviction");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(30); // Fewer samples due to I/O overhead
+
+    // Pre-populate to near capacity (~9MB of 10MB)
+    rt.block_on(async {
+        for i in 0..9 {
+            let key = create_cache_key("bench", "disk-evict-initial", i);
+            let entry = create_cache_entry(SIZE_1MB);
+            cache.set(key, entry).await.unwrap();
+        }
+    });
+
+    // Benchmark set() that triggers eviction (adding 1MB when near capacity)
+    group.throughput(Throughput::Bytes(SIZE_1MB as u64));
+    group.bench_function("eviction_on_set_1mb", |b| {
+        let mut counter = 0usize;
+        b.iter(|| {
+            let key = create_cache_key("bench", "disk-evict-new", counter);
+            counter += 1;
+            let entry = create_cache_entry(SIZE_1MB);
+            rt.block_on(async {
+                cache.set(black_box(key), black_box(entry)).await.unwrap();
+            });
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark disk cache index operations (lookup via get operations)
+/// Tests the O(1) index lookup time by measuring cache get operations with pre-populated index
+fn bench_disk_cache_index_lookup(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let temp_dir = TempDir::new().unwrap();
+    let cache = create_disk_cache(&temp_dir);
+
+    // Populate cache with many entries to test index scaling
+    let entry_counts = [100, 1000, 10000];
+
+    let mut group = c.benchmark_group("disk_cache_index_lookup");
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(5));
+    group.sampling_mode(SamplingMode::Flat);
+    group.sample_size(50);
+
+    for &count in &entry_counts {
+        // Pre-populate with `count` entries
+        rt.block_on(async {
+            for i in 0..count {
+                let key = create_cache_key("bench", &format!("disk-index-{}", count), i);
+                let entry = create_cache_entry(SIZE_1KB);
+                cache.set(key, entry).await.unwrap();
+            }
+        });
+
+        // Benchmark index lookup (via cache.get which uses index internally)
+        group.bench_with_input(BenchmarkId::new("entries", count), &count, |b, &count| {
+            let mut counter = 0usize;
+            b.iter(|| {
+                let key =
+                    create_cache_key("bench", &format!("disk-index-{}", count), counter % count);
+                counter += 1;
+                rt.block_on(async {
+                    let _ = cache.get(black_box(&key)).await;
+                });
+            });
+        });
+    }
+
+    group.finish();
+}
+
+// =============================================================================
 // Redis Cache Benchmarks (Phase 36.4) - Using Testcontainers
 // =============================================================================
 
@@ -2036,6 +2202,10 @@ criterion_group! {
         .sample_size(DISK_SAMPLE_SIZE);
     targets = bench_disk_cache_set,
               bench_disk_cache_get,
+              bench_disk_cache_miss,
+              bench_disk_cache_delete,
+              bench_disk_cache_eviction,
+              bench_disk_cache_index_lookup,
               bench_disk_cache_concurrent_get,
               bench_disk_cache_concurrent_set,
               bench_disk_cache_throughput,

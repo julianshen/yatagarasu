@@ -17,7 +17,7 @@ async fn test_retries_failed_operations_configurable_default_3() {
     // We'll simulate a transient failure and verify retries happen.
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -79,7 +79,7 @@ async fn test_exponential_backoff_on_retries_100ms_200ms_400ms() {
 
     // For now, create a placeholder that documents the requirement
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -93,9 +93,9 @@ async fn test_exponential_backoff_on_retries_100ms_200ms_400ms() {
 
     let _cache = RedisCache::new(config).await.unwrap();
 
-    // Placeholder assertion - will be replaced with actual timing verification
+    // Placeholder - will be replaced with actual timing verification
     // once retry logic is implemented
-    assert!(true, "Backoff timing test placeholder");
+    // Test passes because the connection was established successfully
 }
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn test_gives_up_after_max_retries() {
     // the operation fails and returns an error.
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -127,8 +127,7 @@ async fn test_gives_up_after_max_retries() {
     // 4. Verify it fails after 3 retries
     // 5. Verify error message indicates max retries exceeded
 
-    // Placeholder for now
-    assert!(true, "Max retries test placeholder");
+    // Placeholder - Test passes because the connection was established successfully
 }
 
 #[tokio::test]
@@ -139,7 +138,7 @@ async fn test_does_not_retry_on_client_errors_serialization() {
     // are not retried, since retrying won't fix the problem.
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -159,8 +158,7 @@ async fn test_does_not_retry_on_client_errors_serialization() {
     // 3. Verify it fails immediately without retries
     // 4. Verify retry counter is not incremented
 
-    // Placeholder for now
-    assert!(true, "Client error no-retry test placeholder");
+    // Placeholder - Test passes because the connection was established successfully
 }
 
 #[tokio::test]
@@ -171,7 +169,7 @@ async fn test_only_retries_on_network_server_errors() {
     // not permanent errors like invalid keys.
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -193,6 +191,5 @@ async fn test_only_retries_on_network_server_errors() {
     // 5. Test with permanent error (e.g., authentication failure)
     // 6. Verify operation is NOT retried
 
-    // Placeholder for now
-    assert!(true, "Network/server error retry test placeholder");
+    // Placeholder - Test passes because the connection was established successfully
 }

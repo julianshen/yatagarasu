@@ -13,7 +13,7 @@ use yatagarasu::cache::{CacheEntry, CacheKey};
 async fn test_metrics_track_cache_hits() {
     // Test: Metrics track cache hits correctly
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -61,7 +61,7 @@ async fn test_metrics_track_cache_hits() {
 async fn test_metrics_track_cache_misses() {
     // Test: Metrics track cache misses correctly
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -100,7 +100,7 @@ async fn test_metrics_track_cache_misses() {
 async fn test_metrics_track_cache_sets() {
     // Test: Metrics track cache sets correctly
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -147,7 +147,7 @@ async fn test_metrics_track_cache_sets() {
 async fn test_metrics_track_evictions() {
     // Test: Metrics track evictions correctly
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -240,7 +240,7 @@ async fn test_metrics_endpoint_format() {
     use prometheus::TextEncoder;
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);

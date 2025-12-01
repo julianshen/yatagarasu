@@ -1,9 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::collections::HashMap;
 
-// Re-export chrono from yatagarasu's dependencies
-use chrono;
-
 use yatagarasu::s3::{
     build_get_object_request, build_head_object_request, create_canonical_request,
     create_string_to_sign, derive_signing_key, sha256_hex, sign_request, SigningParams,
