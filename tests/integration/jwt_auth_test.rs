@@ -641,3 +641,568 @@ fn test_custom_claims_validation() {
         log::info!("Custom claims validation test passed");
     });
 }
+
+// ============================================================================
+// Phase 47.2: Integration Tests for Extended JWT Support (RS256, ES256, JWKS)
+// ============================================================================
+
+// Helper: Generate RS256 JWT token using private key
+fn generate_rs256_jwt(private_key_path: &str, exp_offset_seconds: i64) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let expiration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + exp_offset_seconds;
+
+    let claims = serde_json::json!({
+        "sub": "rs256_user",
+        "exp": expiration as u64,
+        "iat": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u64,
+    });
+
+    let private_key_pem = fs::read(private_key_path).expect("Failed to read RSA private key");
+    let encoding_key =
+        EncodingKey::from_rsa_pem(&private_key_pem).expect("Failed to create RSA encoding key");
+
+    let header = Header::new(Algorithm::RS256);
+    encode(&header, &claims, &encoding_key).expect("Failed to generate RS256 JWT")
+}
+
+// Helper: Generate ES256 JWT token using private key
+fn generate_es256_jwt(private_key_path: &str, exp_offset_seconds: i64) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let expiration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + exp_offset_seconds;
+
+    let claims = serde_json::json!({
+        "sub": "es256_user",
+        "exp": expiration as u64,
+        "iat": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u64,
+    });
+
+    let private_key_pem = fs::read(private_key_path).expect("Failed to read EC private key");
+    let encoding_key =
+        EncodingKey::from_ec_pem(&private_key_pem).expect("Failed to create EC encoding key");
+
+    let header = Header::new(Algorithm::ES256);
+    encode(&header, &claims, &encoding_key).expect("Failed to generate ES256 JWT")
+}
+
+// Helper: Create RS256 config file with public key path
+fn create_rs256_config(s3_endpoint: &str, public_key_path: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "private-bucket"
+    path_prefix: "/private"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "private-bucket"
+      access_key: "test"
+      secret_key: "test"
+    jwt:
+      enabled: true
+      algorithm: "RS256"
+      public_key_path: "{}"
+      token_sources:
+        - type: "bearer_header"
+      claims: []
+"#,
+        s3_endpoint, public_key_path
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write RS256 config file");
+    log::info!(
+        "Created RS256 config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
+// Helper: Create ES256 config file with public key path
+fn create_es256_config(s3_endpoint: &str, public_key_path: &str, config_path: &str) {
+    let config_content = format!(
+        r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "private-bucket"
+    path_prefix: "/private"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "private-bucket"
+      access_key: "test"
+      secret_key: "test"
+    jwt:
+      enabled: true
+      algorithm: "ES256"
+      public_key_path: "{}"
+      token_sources:
+        - type: "bearer_header"
+      claims: []
+"#,
+        s3_endpoint, public_key_path
+    );
+
+    fs::write(config_path, config_content).expect("Failed to write ES256 config file");
+    log::info!(
+        "Created ES256 config file at {} for endpoint {}",
+        config_path,
+        s3_endpoint
+    );
+}
+
+#[test]
+#[ignore] // Requires Docker and running proxy
+fn test_e2e_rs256_jwt_authentication() {
+    init_logging();
+
+    // Phase 47.2: End-to-end test with RS256 JWT
+    // Test that RS256 algorithm works correctly in a full proxy flow
+
+    let docker = Cli::default();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    runtime.block_on(async {
+        let (_container, s3_endpoint) =
+            setup_localstack_with_bucket(&docker, "private-bucket").await;
+
+        // Use absolute path for public key
+        let public_key_path = std::env::current_dir()
+            .unwrap()
+            .join("tests/fixtures/rsa_public.pem")
+            .to_string_lossy()
+            .to_string();
+
+        let config_path = "/tmp/yatagarasu-rs256-e2e.yaml";
+        create_rs256_config(&s3_endpoint, &public_key_path, config_path);
+
+        // Start proxy with RS256 config
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for RS256 E2E test");
+
+        let private_key_path = "tests/fixtures/rsa_private.pem";
+        let valid_token = generate_rs256_jwt(private_key_path, 3600);
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        // Test 1: Valid RS256 JWT should succeed
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", valid_token))
+            .send()
+            .await
+            .expect("Failed to send request with RS256 JWT");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "Request with valid RS256 JWT should succeed"
+        );
+
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "Secret content - JWT required");
+
+        // Test 2: Expired RS256 JWT should fail
+        let expired_token = generate_rs256_jwt(private_key_path, -3600);
+
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", expired_token))
+            .send()
+            .await
+            .expect("Failed to send request with expired RS256 JWT");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "Request with expired RS256 JWT should return 403"
+        );
+
+        // Test 3: HS256 JWT should be rejected (algorithm mismatch)
+        let hs256_token = generate_jwt("any-secret", 3600, None);
+
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", hs256_token))
+            .send()
+            .await
+            .expect("Failed to send request with HS256 JWT to RS256 endpoint");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "HS256 JWT should be rejected when RS256 is configured"
+        );
+
+        log::info!("RS256 E2E authentication test passed");
+    });
+}
+
+#[test]
+#[ignore] // Requires Docker and running proxy
+fn test_e2e_es256_jwt_authentication() {
+    init_logging();
+
+    // Phase 47.2: End-to-end test with ES256 JWT
+    // Test that ES256 (ECDSA) algorithm works correctly in a full proxy flow
+
+    let docker = Cli::default();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    runtime.block_on(async {
+        let (_container, s3_endpoint) =
+            setup_localstack_with_bucket(&docker, "private-bucket").await;
+
+        // Use absolute path for public key
+        let public_key_path = std::env::current_dir()
+            .unwrap()
+            .join("tests/fixtures/ecdsa_public.pem")
+            .to_string_lossy()
+            .to_string();
+
+        let config_path = "/tmp/yatagarasu-es256-e2e.yaml";
+        create_es256_config(&s3_endpoint, &public_key_path, config_path);
+
+        // Start proxy with ES256 config
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for ES256 E2E test");
+
+        let private_key_path = "tests/fixtures/ecdsa_private.pem";
+        let valid_token = generate_es256_jwt(private_key_path, 3600);
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        // Test 1: Valid ES256 JWT should succeed
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", valid_token))
+            .send()
+            .await
+            .expect("Failed to send request with ES256 JWT");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "Request with valid ES256 JWT should succeed"
+        );
+
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "Secret content - JWT required");
+
+        // Test 2: Expired ES256 JWT should fail
+        let expired_token = generate_es256_jwt(private_key_path, -3600);
+
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", expired_token))
+            .send()
+            .await
+            .expect("Failed to send request with expired ES256 JWT");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "Request with expired ES256 JWT should return 403"
+        );
+
+        // Test 3: RS256 JWT should be rejected (algorithm mismatch)
+        let rs256_token = generate_rs256_jwt("tests/fixtures/rsa_private.pem", 3600);
+
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", rs256_token))
+            .send()
+            .await
+            .expect("Failed to send request with RS256 JWT to ES256 endpoint");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "RS256 JWT should be rejected when ES256 is configured"
+        );
+
+        log::info!("ES256 E2E authentication test passed");
+    });
+}
+
+// Note: JWKS E2E test requires a mock JWKS server
+// For now, we test JWKS functionality via unit tests in auth_tests.rs
+// A full E2E test would require spinning up a mock JWKS endpoint
+#[test]
+#[ignore] // Requires JWKS mock server - covered by unit tests
+fn test_e2e_jwks_authentication() {
+    init_logging();
+
+    // Phase 47.2: End-to-end test with JWKS
+    // This test is marked as ignored because it requires a running JWKS endpoint
+    // JWKS functionality is tested via unit tests in tests/unit/auth_tests.rs
+
+    log::info!("JWKS E2E test - see unit tests for JWKS validation coverage");
+
+    // In a real implementation, this would:
+    // 1. Start a mock JWKS server (e.g., using wiremock or mockito)
+    // 2. Configure the proxy to use the mock JWKS URL
+    // 3. Sign JWTs with the mock JWKS keys
+    // 4. Verify requests succeed/fail appropriately
+}
+
+#[test]
+#[ignore] // Requires Docker and running proxy
+fn test_key_rotation_scenario() {
+    init_logging();
+
+    // Phase 47.2: Key rotation scenario
+    // Test that both old and new keys work during a rotation window
+    // This simulates a key rotation where both keys are temporarily valid
+
+    let docker = Cli::default();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    runtime.block_on(async {
+        let (_container, s3_endpoint) =
+            setup_localstack_with_bucket(&docker, "private-bucket").await;
+
+        // Use RS256 for this test
+        let public_key_path = std::env::current_dir()
+            .unwrap()
+            .join("tests/fixtures/rsa_public.pem")
+            .to_string_lossy()
+            .to_string();
+
+        let config_path = "/tmp/yatagarasu-key-rotation.yaml";
+        create_rs256_config(&s3_endpoint, &public_key_path, config_path);
+
+        // Start proxy
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for key rotation test");
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        // Token signed with the current (active) key should work
+        let current_key_token = generate_rs256_jwt("tests/fixtures/rsa_private.pem", 3600);
+
+        let response = client
+            .get("http://127.0.0.1:18080/private/test.txt")
+            .header("Authorization", format!("Bearer {}", current_key_token))
+            .send()
+            .await
+            .expect("Failed to send request with current key token");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "Token signed with current key should succeed"
+        );
+
+        // In a real key rotation scenario with JWKS, both old and new keys would be
+        // present in the JWKS endpoint. Here we verify the single-key case works.
+        // Full multi-key rotation requires JWKS support (tested in unit tests).
+
+        log::info!("Key rotation scenario test passed (single key case)");
+    });
+}
+
+#[test]
+#[ignore] // Requires Docker and running proxy
+fn test_multi_algorithm_configuration() {
+    init_logging();
+
+    // Phase 47.2: Multi-algorithm configuration
+    // Test that different buckets can use different JWT algorithms
+
+    let docker = Cli::default();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    runtime.block_on(async {
+        let localstack_image =
+            RunnableImage::from(LocalStack::default()).with_env_var(("SERVICES", "s3"));
+
+        let container = docker.run(localstack_image);
+        let port = container.get_host_port_ipv4(4566);
+        let endpoint = format!("http://127.0.0.1:{}", port);
+
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .endpoint_url(&endpoint)
+            .region(aws_config::Region::new("us-east-1"))
+            .credentials_provider(aws_credential_types::Credentials::new(
+                "test", "test", None, None, "test",
+            ))
+            .load()
+            .await;
+
+        let s3_client = aws_sdk_s3::Client::new(&config);
+
+        // Create two buckets for different algorithms
+        for bucket_name in &["rs256-bucket", "es256-bucket"] {
+            s3_client
+                .create_bucket()
+                .bucket(*bucket_name)
+                .send()
+                .await
+                .expect(&format!("Failed to create bucket: {}", bucket_name));
+
+            s3_client
+                .put_object()
+                .bucket(*bucket_name)
+                .key("test.txt")
+                .body(
+                    format!("Content from {} bucket", bucket_name)
+                        .into_bytes()
+                        .into(),
+                )
+                .send()
+                .await
+                .expect(&format!("Failed to upload to bucket: {}", bucket_name));
+        }
+
+        // Create multi-algorithm config
+        let rsa_public_key_path = std::env::current_dir()
+            .unwrap()
+            .join("tests/fixtures/rsa_public.pem")
+            .to_string_lossy()
+            .to_string();
+
+        let ec_public_key_path = std::env::current_dir()
+            .unwrap()
+            .join("tests/fixtures/ecdsa_public.pem")
+            .to_string_lossy()
+            .to_string();
+
+        let config_content = format!(
+            r#"server:
+  address: "127.0.0.1"
+  port: 18080
+
+buckets:
+  - name: "rs256-bucket"
+    path_prefix: "/rs256"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "rs256-bucket"
+      access_key: "test"
+      secret_key: "test"
+    jwt:
+      enabled: true
+      algorithm: "RS256"
+      public_key_path: "{}"
+      token_sources:
+        - type: "bearer_header"
+      claims: []
+
+  - name: "es256-bucket"
+    path_prefix: "/es256"
+    s3:
+      endpoint: "{}"
+      region: "us-east-1"
+      bucket: "es256-bucket"
+      access_key: "test"
+      secret_key: "test"
+    jwt:
+      enabled: true
+      algorithm: "ES256"
+      public_key_path: "{}"
+      token_sources:
+        - type: "bearer_header"
+      claims: []
+"#,
+            endpoint, rsa_public_key_path, endpoint, ec_public_key_path
+        );
+
+        let config_path = "/tmp/yatagarasu-multi-alg.yaml";
+        fs::write(config_path, config_content).expect("Failed to write multi-alg config");
+
+        // Start proxy with multi-algorithm config
+        let _proxy = ProxyTestHarness::start(config_path, 18080)
+            .expect("Failed to start proxy for multi-algorithm test");
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        // Test 1: RS256 bucket with RS256 token should succeed
+        let rs256_token = generate_rs256_jwt("tests/fixtures/rsa_private.pem", 3600);
+
+        let response = client
+            .get("http://127.0.0.1:18080/rs256/test.txt")
+            .header("Authorization", format!("Bearer {}", rs256_token))
+            .send()
+            .await
+            .expect("Failed to send RS256 request to RS256 bucket");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "RS256 token to RS256 bucket should succeed"
+        );
+
+        // Test 2: ES256 bucket with ES256 token should succeed
+        let es256_token = generate_es256_jwt("tests/fixtures/ecdsa_private.pem", 3600);
+
+        let response = client
+            .get("http://127.0.0.1:18080/es256/test.txt")
+            .header("Authorization", format!("Bearer {}", es256_token))
+            .send()
+            .await
+            .expect("Failed to send ES256 request to ES256 bucket");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "ES256 token to ES256 bucket should succeed"
+        );
+
+        // Test 3: RS256 token to ES256 bucket should fail
+        let response = client
+            .get("http://127.0.0.1:18080/es256/test.txt")
+            .header("Authorization", format!("Bearer {}", rs256_token))
+            .send()
+            .await
+            .expect("Failed to send RS256 token to ES256 bucket");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "RS256 token to ES256 bucket should be rejected"
+        );
+
+        // Test 4: ES256 token to RS256 bucket should fail
+        let response = client
+            .get("http://127.0.0.1:18080/rs256/test.txt")
+            .header("Authorization", format!("Bearer {}", es256_token))
+            .send()
+            .await
+            .expect("Failed to send ES256 token to RS256 bucket");
+
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "ES256 token to RS256 bucket should be rejected"
+        );
+
+        log::info!("Multi-algorithm configuration test passed");
+    });
+}
