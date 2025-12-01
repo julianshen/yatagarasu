@@ -65,12 +65,22 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 - [x] Bench: Longest prefix match with nested paths - short: 43.8ns, medium: 46.8ns, long: 75.8ns ✓
 - [x] Bench: Path normalization overhead - clean: 74.1ns, double slashes: 77.6ns (~5% overhead) ✓
 - [x] Bench: Bucket lookup by name - O(n) linear: 5b=7.5ns, 10b=14.5ns, 50b=72.7ns, 100b=144.7ns ✓
-- [ ] Report: Generate baseline metrics
+- [x] Report: Generate baseline metrics - See summary below ✓
+
+**Phase 40.2 Routing Benchmark Summary**:
+| Benchmark | Result | Target | Status |
+|-----------|--------|--------|--------|
+| Single bucket routing | 41.8ns | <10μs | PASS |
+| 10 bucket routing | 95.9ns | <10μs | PASS |
+| 50 bucket routing | 183ns | <10μs | PASS |
+| Longest prefix (nested) | 43-76ns | <10μs | PASS |
+| Path normalization overhead | ~5% | N/A | OK |
+| Bucket lookup by name (100b) | 145ns | <10μs | PASS |
 
 **Success Criteria**:
-- Path routing P99 <10μs for 10 buckets
-- Linear scaling with bucket count
-- No allocation per routing decision
+- Path routing P99 <10μs for 10 buckets - **ACHIEVED** (95.9ns = 0.096μs)
+- Linear scaling with bucket count - **ACHIEVED** (O(n) behavior confirmed)
+- No allocation per routing decision - **ACHIEVED** (stack-only operations)
 
 #### 40.3 S3 Signature Benchmarks
 - [ ] Bench: SigV4 signature generation (target: <100μs)
