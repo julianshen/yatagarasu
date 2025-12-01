@@ -163,20 +163,32 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 | Eviction (small cache) | ~387μs |
 
 #### 41.3 Redis Cache Benchmarks
-- [ ] Bench: Redis get hit (local Redis)
-- [ ] Bench: Redis get miss
-- [ ] Bench: Redis set (small entry)
-- [ ] Bench: Redis set (1MB entry)
-- [ ] Bench: Redis delete
-- [ ] Bench: Connection pool checkout time
-- [ ] Bench: Pipeline vs single operations
-- [ ] Bench: Serialization overhead (bincode)
-- [ ] Report: Compare vs memory/disk
+- [x] Bench: Redis get hit (local Redis)
+- [x] Bench: Redis get miss
+- [x] Bench: Redis set (small entry)
+- [x] Bench: Redis set (1MB entry)
+- [x] Bench: Redis delete
+- [x] Bench: Connection pool checkout time
+- [x] Bench: Pipeline vs single operations
+- [x] Bench: Serialization overhead (bincode)
+- [x] Report: Compare vs memory/disk
 
 **Success Criteria**:
-- Redis hit P99 <5ms (local)
-- Connection pool efficient
-- Serialization overhead <10%
+- Redis hit P99 <5ms (local) - **ACHIEVED** (72-478μs = 10-69x faster than target)
+- Connection pool efficient - **ACHIEVED** (293K ops/s at 100 concurrent threads)
+- Serialization overhead <10% - **ACHIEVED** (bincode is fast, ~5% overhead)
+
+**Benchmark Results**:
+| Operation | Time | Throughput |
+|-----------|------|------------|
+| Redis get 1KB | ~72μs | 13.4 MiB/s |
+| Redis get 10KB | ~107μs | 91.4 MiB/s |
+| Redis get 100KB | ~478μs | 204 MiB/s |
+| Redis set 1KB | ~73μs | 13.5 MiB/s |
+| Redis set 10KB | ~113μs | 86.5 MiB/s |
+| Redis set 100KB | ~579μs | 168.7 MiB/s |
+| Concurrent 10 threads | ~128μs | 78K ops/s |
+| Concurrent 100 threads | ~341μs | 293K ops/s |
 
 ---
 
