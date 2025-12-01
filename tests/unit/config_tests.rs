@@ -1887,3 +1887,141 @@ buckets:
         "Authorization should be None when not configured"
     );
 }
+
+// =============================================================================
+// Phase 48.1: OpenFGA Configuration Tests
+// =============================================================================
+
+#[test]
+fn test_can_parse_openfga_authorization_config() {
+    // Test: Parse OpenFGA config from bucket auth section
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "shared-files"
+    path_prefix: "/shared"
+    s3:
+      bucket: "shared-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: "openfga"
+      openfga_endpoint: "http://localhost:8080"
+      openfga_store_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to parse OpenFGA authorization config");
+    let bucket = &config.buckets[0];
+    let authz = bucket
+        .authorization
+        .as_ref()
+        .expect("Should have authorization");
+
+    assert_eq!(authz.auth_type, "openfga");
+    assert_eq!(
+        authz.openfga_endpoint.as_deref(),
+        Some("http://localhost:8080")
+    );
+    assert_eq!(
+        authz.openfga_store_id.as_deref(),
+        Some("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    );
+    // Verify defaults for timeout and cache TTL
+    assert_eq!(authz.openfga_timeout_ms, 100); // default value
+    assert_eq!(authz.openfga_cache_ttl_seconds, 60); // default value
+}
+
+#[test]
+fn test_can_parse_complete_openfga_config_with_all_optional_fields() {
+    // Test: Parse OpenFGA config with all optional fields populated
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "secure-documents"
+    path_prefix: "/docs"
+    s3:
+      bucket: "secure-docs-bucket"
+      region: "us-west-2"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: "openfga"
+      openfga_endpoint: "https://api.fga.example.com"
+      openfga_store_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+      openfga_authorization_model_id: "01GXSA8YR785C4FYS3C0RTG7B1"
+      openfga_api_token: "fga_live_sk_test123"
+      openfga_timeout_ms: 200
+      openfga_cache_ttl_seconds: 120
+      openfga_fail_mode: "open"
+"#;
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to parse complete OpenFGA config");
+    let bucket = &config.buckets[0];
+    let authz = bucket
+        .authorization
+        .as_ref()
+        .expect("Should have authorization");
+
+    assert_eq!(authz.auth_type, "openfga");
+    assert_eq!(
+        authz.openfga_endpoint.as_deref(),
+        Some("https://api.fga.example.com")
+    );
+    assert_eq!(
+        authz.openfga_store_id.as_deref(),
+        Some("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    );
+    assert_eq!(
+        authz.openfga_authorization_model_id.as_deref(),
+        Some("01GXSA8YR785C4FYS3C0RTG7B1")
+    );
+    assert_eq!(
+        authz.openfga_api_token.as_deref(),
+        Some("fga_live_sk_test123")
+    );
+    assert_eq!(authz.openfga_timeout_ms, 200);
+    assert_eq!(authz.openfga_cache_ttl_seconds, 120);
+    assert_eq!(authz.openfga_fail_mode.as_deref(), Some("open"));
+}
+
+#[test]
+fn test_openfga_config_allows_env_var_substitution() {
+    // Test: OpenFGA API token supports environment variable substitution
+    let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets:
+  - name: "cloud-files"
+    path_prefix: "/cloud"
+    s3:
+      bucket: "cloud-bucket"
+      region: "us-east-1"
+      access_key: "test"
+      secret_key: "test"
+    authorization:
+      type: "openfga"
+      openfga_endpoint: "https://api.fga.example.com"
+      openfga_store_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+      openfga_api_token: "${OPENFGA_API_TOKEN}"
+"#;
+    // Just verify it parses - actual substitution happens in resolve_env_vars
+    let config: Config =
+        serde_yaml::from_str(yaml).expect("Failed to parse OpenFGA config with env var");
+    let bucket = &config.buckets[0];
+    let authz = bucket
+        .authorization
+        .as_ref()
+        .expect("Should have authorization");
+
+    assert_eq!(authz.auth_type, "openfga");
+    assert_eq!(
+        authz.openfga_api_token.as_deref(),
+        Some("${OPENFGA_API_TOKEN}")
+    );
+}

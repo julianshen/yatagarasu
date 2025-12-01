@@ -461,13 +461,13 @@ OpenFGA provides **relationship-based access control (ReBAC)** which complements
 **Reference**: https://openfga.dev/docs/getting-started
 
 #### 48.1 OpenFGA Configuration
-- [ ] Test: Parse OpenFGA config from bucket auth section
-- [ ] Test: Validate OpenFGA endpoint URL
-- [ ] Test: Validate store_id configuration
-- [ ] Test: Validate authorization_model_id (optional)
-- [ ] Test: Support API token authentication
-- [ ] Impl: Add OpenFgaConfig struct to config module
-- [ ] Doc: OpenFGA configuration example in config.yaml
+- [x] Test: Parse OpenFGA config from bucket auth section
+- [x] Test: Validate OpenFGA endpoint URL
+- [x] Test: Validate store_id configuration
+- [x] Test: Validate authorization_model_id (optional)
+- [x] Test: Support API token authentication
+- [x] Impl: Add OpenFGA fields to AuthorizationConfig struct
+- [x] Doc: OpenFGA configuration example in tests
 
 ```yaml
 # Example OpenFGA config

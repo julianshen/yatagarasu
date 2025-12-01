@@ -623,6 +623,16 @@ fn default_opa_cache_ttl_seconds() -> u64 {
     60
 }
 
+/// Default OpenFGA timeout in milliseconds
+fn default_openfga_timeout_ms() -> u64 {
+    100
+}
+
+/// Default OpenFGA cache TTL in seconds
+fn default_openfga_cache_ttl_seconds() -> u64 {
+    60
+}
+
 /// Authorization configuration for bucket-level access control
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizationConfig {
@@ -649,6 +659,35 @@ pub struct AuthorizationConfig {
     /// Fail mode: "open" (allow on OPA failure) or "closed" (deny on failure, default)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opa_fail_mode: Option<String>,
+
+    // OpenFGA configuration fields
+    /// OpenFGA server endpoint URL (e.g., "http://localhost:8080")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openfga_endpoint: Option<String>,
+
+    /// OpenFGA store ID (ULID format, e.g., "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openfga_store_id: Option<String>,
+
+    /// OpenFGA authorization model ID (optional, ULID format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openfga_authorization_model_id: Option<String>,
+
+    /// OpenFGA API token for cloud deployments (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openfga_api_token: Option<String>,
+
+    /// Timeout for OpenFGA requests in milliseconds (default: 100ms)
+    #[serde(default = "default_openfga_timeout_ms")]
+    pub openfga_timeout_ms: u64,
+
+    /// Cache TTL for OpenFGA decisions in seconds (default: 60s)
+    #[serde(default = "default_openfga_cache_ttl_seconds")]
+    pub openfga_cache_ttl_seconds: u64,
+
+    /// Fail mode: "open" (allow on OpenFGA failure) or "closed" (deny on failure, default)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openfga_fail_mode: Option<String>,
 }
 
 /// Individual JWT key configuration for multi-key support
