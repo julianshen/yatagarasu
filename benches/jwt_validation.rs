@@ -40,6 +40,31 @@ struct Claims10 {
     clearance: String,
 }
 
+/// Nested profile object for benchmark
+#[derive(Debug, Serialize, Deserialize)]
+struct NestedProfile {
+    name: String,
+    email: String,
+    department: String,
+}
+
+/// Nested permissions object for benchmark
+#[derive(Debug, Serialize, Deserialize)]
+struct NestedPermissions {
+    roles: Vec<String>,
+    level: u8,
+    admin: bool,
+}
+
+/// Claims struct with nested objects for benchmark
+#[derive(Debug, Serialize, Deserialize)]
+struct ClaimsNested {
+    sub: String,
+    exp: usize,
+    profile: NestedProfile,
+    permissions: NestedPermissions,
+}
+
 /// Benchmark JWT extraction from Authorization header
 fn bench_jwt_extraction_bearer_header(c: &mut Criterion) {
     // Setup: Create valid JWT token
@@ -557,6 +582,70 @@ fn bench_jwt_multiple_sources(c: &mut Criterion) {
     });
 }
 
+/// Benchmark JWT validation with nested objects in claims
+fn bench_jwt_nested_claims(c: &mut Criterion) {
+    let secret = "benchmark-secret-key-12345";
+    let claims = ClaimsNested {
+        sub: "user123".to_string(),
+        exp: 9999999999,
+        profile: NestedProfile {
+            name: "John Doe".to_string(),
+            email: "john.doe@example.com".to_string(),
+            department: "engineering".to_string(),
+        },
+        permissions: NestedPermissions {
+            roles: vec![
+                "admin".to_string(),
+                "developer".to_string(),
+                "reviewer".to_string(),
+            ],
+            level: 5,
+            admin: true,
+        },
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .expect("Failed to create token");
+
+    let mut headers = HashMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {}", token));
+
+    // Note: The current claim validation doesn't support nested object paths,
+    // so we benchmark the parsing overhead without claim rules
+    let jwt_config = JwtConfig {
+        enabled: true,
+        secret: secret.to_string(),
+        algorithm: "HS256".to_string(),
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![],
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: None,
+    };
+
+    let query_params = HashMap::new();
+
+    c.bench_function("jwt_nested_claims", |b| {
+        b.iter(|| {
+            authenticate_request(
+                black_box(&headers),
+                black_box(&query_params),
+                black_box(&jwt_config),
+            )
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_jwt_extraction_bearer_header,
@@ -567,5 +656,6 @@ criterion_group!(
     bench_jwt_5_claims_validation,
     bench_jwt_10_claims_validation,
     bench_jwt_multiple_sources,
+    bench_jwt_nested_claims,
 );
 criterion_main!(benches);

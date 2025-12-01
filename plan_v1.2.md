@@ -48,7 +48,7 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 - [x] Bench: Token extraction from Bearer header - 1.44µs ✓
 - [x] Bench: Token extraction from query parameter - 2.2ns ✓
 - [x] Bench: Token extraction from custom header - 1.58µs ✓
-- [ ] Bench: Claims parsing with nested objects
+- [x] Bench: Claims parsing with nested objects - 2.58µs ✓
 - [ ] Bench: Expired token detection
 - [x] Report: Generate baseline metrics (HS384: 1.95µs, HS512: 2.16µs, claims: 2.13µs)
 
