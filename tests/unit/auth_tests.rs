@@ -4600,3 +4600,266 @@ async fn test_jwks_client_invalid_url_error() {
         other => panic!("Expected FetchError, got: {:?}", other),
     }
 }
+
+// ============================================================================
+// Phase 47: JWT Security Hardening - Algorithm Confusion Prevention Tests
+// ============================================================================
+
+/// Test: Reject HS256 JWT when RS256 is configured (algorithm confusion attack prevention)
+///
+/// This is a critical security test. The classic "algorithm confusion" attack involves:
+/// 1. Attacker gets the RSA public key (often publicly available)
+/// 2. Attacker creates a JWT with alg=HS256, using the public key as the HMAC secret
+/// 3. Server validates the token using the public key as HMAC secret
+///
+/// The jsonwebtoken library should reject this because the Validation struct
+/// enforces strict algorithm checking.
+#[test]
+fn test_rejects_hs256_jwt_when_rs256_configured() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::{load_rsa_public_key, validate_jwt_with_key};
+
+    // Load the RSA public key
+    let public_key_pem =
+        fs::read("tests/fixtures/rsa_public.pem").expect("Failed to read public key");
+
+    // Create an HS256 token using the public key as the HMAC secret
+    // This simulates an algorithm confusion attack
+    let claims = serde_json::json!({
+        "sub": "attacker",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Sign with HS256 using the public key bytes as secret
+    let hs256_token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(&public_key_pem),
+    )
+    .expect("Failed to encode HS256 JWT");
+
+    // Load the RSA public key for validation
+    let decoding_key =
+        load_rsa_public_key("tests/fixtures/rsa_public.pem").expect("Failed to load public key");
+
+    // Attempt to validate with RS256 config - this MUST fail
+    let result = validate_jwt_with_key(&hs256_token, &decoding_key, "RS256");
+
+    assert!(
+        result.is_err(),
+        "SECURITY: HS256 token should be rejected when RS256 is configured! \
+         Algorithm confusion attack should be prevented."
+    );
+}
+
+/// Test: Reject RS256 JWT when HS256 is configured
+///
+/// The reverse scenario: server expects HS256 but receives RS256 token.
+/// This should also be rejected for strict algorithm enforcement.
+#[test]
+fn test_rejects_rs256_jwt_when_hs256_configured() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::validate_jwt;
+
+    // Read the RSA private key and create an RS256 token
+    let private_key =
+        fs::read("tests/fixtures/rsa_private.pem").expect("Failed to read private key");
+
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Sign with RS256
+    let encoding_key =
+        EncodingKey::from_rsa_pem(&private_key).expect("Failed to create encoding key");
+    let rs256_token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        .expect("Failed to encode RS256 JWT");
+
+    // Attempt to validate with HS256 config and a random secret
+    let hs256_secret = "my-secret-key";
+    let result = validate_jwt(&rs256_token, hs256_secret, "HS256");
+
+    assert!(
+        result.is_err(),
+        "SECURITY: RS256 token should be rejected when HS256 is configured! \
+         Strict algorithm enforcement should prevent this."
+    );
+}
+
+/// Test: Reject JWT with "none" algorithm
+///
+/// The "none" algorithm is a known attack vector where an attacker creates
+/// an unsigned JWT. Servers should never accept "none" algorithm tokens.
+#[test]
+fn test_rejects_none_algorithm_jwt() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use yatagarasu::auth::validate_jwt;
+
+    // Manually construct a JWT with "none" algorithm
+    // Header: {"alg":"none","typ":"JWT"}
+    let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
+
+    // Payload: {"sub":"attacker","exp":<future>}
+    let exp = chrono::Utc::now().timestamp() + 3600;
+    let payload = URL_SAFE_NO_PAD.encode(format!(
+        r#"{{"sub":"attacker","exp":{},"iat":{}}}"#,
+        exp,
+        chrono::Utc::now().timestamp()
+    ));
+
+    // "none" algorithm tokens have no signature (or empty signature)
+    let none_token = format!("{}.{}.", header, payload);
+
+    // Attempt to validate - this MUST fail regardless of secret
+    let result = validate_jwt(&none_token, "any-secret", "HS256");
+
+    assert!(
+        result.is_err(),
+        "SECURITY: JWT with 'none' algorithm should be rejected!"
+    );
+
+    // Also test with empty signature variant
+    let none_token_empty_sig = format!("{}.{}.{}", header, payload, "");
+    let result2 = validate_jwt(&none_token_empty_sig, "any-secret", "HS256");
+
+    assert!(
+        result2.is_err(),
+        "SECURITY: JWT with 'none' algorithm (empty signature) should be rejected!"
+    );
+}
+
+/// Test: Reject algorithm downgrade attempts
+///
+/// Tests that tokens signed with a weaker algorithm are rejected when
+/// a stronger algorithm is configured.
+#[test]
+fn test_rejects_algorithm_downgrade_hs256_to_hs384() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use yatagarasu::auth::validate_jwt;
+
+    let secret = "my-shared-secret-key-for-testing";
+
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Create HS256 token
+    let hs256_token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .expect("Failed to encode HS256 JWT");
+
+    // Attempt to validate with HS384 config - should fail
+    let result = validate_jwt(&hs256_token, secret, "HS384");
+
+    assert!(
+        result.is_err(),
+        "SECURITY: HS256 token should be rejected when HS384 is configured! \
+         Algorithm downgrade should be prevented."
+    );
+}
+
+/// Test: Reject ES256 JWT when RS256 is configured
+///
+/// Tests cross-algorithm rejection between asymmetric algorithms.
+#[test]
+fn test_rejects_es256_jwt_when_rs256_configured() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::fs;
+    use yatagarasu::auth::{load_rsa_public_key, validate_jwt_with_key};
+
+    // Read the ECDSA private key and create an ES256 token
+    let ec_private_key =
+        fs::read("tests/fixtures/ecdsa_private.pem").expect("Failed to read ECDSA private key");
+
+    let claims = serde_json::json!({
+        "sub": "ec-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    // Sign with ES256
+    let encoding_key =
+        EncodingKey::from_ec_pem(&ec_private_key).expect("Failed to create EC encoding key");
+    let es256_token = encode(&Header::new(Algorithm::ES256), &claims, &encoding_key)
+        .expect("Failed to encode ES256 JWT");
+
+    // Load RSA public key and try to validate ES256 token with RS256 config
+    let rsa_decoding_key = load_rsa_public_key("tests/fixtures/rsa_public.pem")
+        .expect("Failed to load RSA public key");
+
+    let result = validate_jwt_with_key(&es256_token, &rsa_decoding_key, "RS256");
+
+    assert!(
+        result.is_err(),
+        "SECURITY: ES256 token should be rejected when RS256 is configured!"
+    );
+}
+
+/// Test: Validate that authenticate_request respects algorithm configuration
+///
+/// Integration test ensuring the full authentication flow enforces algorithm matching.
+#[test]
+fn test_authenticate_request_enforces_algorithm() {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::collections::HashMap;
+    use yatagarasu::auth::authenticate_request;
+    use yatagarasu::config::{JwtConfig, TokenSource};
+
+    // Create an HS256 token
+    let secret = "test-secret-key";
+    let claims = serde_json::json!({
+        "sub": "test-user",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp()
+    });
+
+    let hs256_token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .expect("Failed to encode JWT");
+
+    // Configure for HS384 (different from HS256)
+    let config = JwtConfig {
+        enabled: true,
+        secret: secret.to_string(),
+        algorithm: "HS384".to_string(),
+        token_sources: vec![TokenSource {
+            source_type: "bearer".to_string(),
+            name: None,
+            prefix: None,
+        }],
+        claims: vec![],
+        rsa_public_key_path: None,
+        ecdsa_public_key_path: None,
+        keys: vec![],
+        jwks_url: None,
+        jwks_refresh_interval_secs: Some(300),
+    };
+
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        format!("Bearer {}", hs256_token),
+    );
+    let query_params = HashMap::new();
+
+    // This should fail because token is HS256 but config expects HS384
+    let result = authenticate_request(&headers, &query_params, &config);
+
+    assert!(
+        result.is_err(),
+        "authenticate_request should reject HS256 token when HS384 is configured"
+    );
+}

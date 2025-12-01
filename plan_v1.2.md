@@ -412,11 +412,11 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 **Objective**: Prevent JWT-related attacks
 
 #### 47.1 Algorithm Confusion Prevention
-- [ ] Test: Reject HS256 JWT with RS256 config (alg confusion)
-- [ ] Test: Reject RS256 JWT with HS256 config
-- [ ] Test: Reject "none" algorithm JWT
-- [ ] Test: Reject algorithm downgrade attempts
-- [ ] Impl: Strict algorithm enforcement
+- [x] Test: Reject HS256 JWT with RS256 config (alg confusion)
+- [x] Test: Reject RS256 JWT with HS256 config
+- [x] Test: Reject "none" algorithm JWT
+- [x] Test: Reject algorithm downgrade attempts
+- [x] Impl: Strict algorithm enforcement (verified existing implementation)
 
 #### 47.2 Integration Tests
 - [ ] Test: End-to-end test with RS256 JWT
