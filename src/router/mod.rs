@@ -32,6 +32,14 @@ impl Router {
         Some(key.to_string())
     }
 
+    /// Get a bucket configuration by name
+    ///
+    /// This is an O(n) linear search through buckets.
+    /// Use `route()` for path-based lookups which is the primary use case.
+    pub fn get_bucket_by_name(&self, name: &str) -> Option<&BucketConfig> {
+        self.buckets.iter().find(|b| b.name == name)
+    }
+
     fn normalize_path(path: &str) -> String {
         let mut result = String::new();
         let mut prev_was_slash = false;

@@ -64,7 +64,7 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 - [x] Bench: 50 bucket path matching - 183ns ✓
 - [x] Bench: Longest prefix match with nested paths - short: 43.8ns, medium: 46.8ns, long: 75.8ns ✓
 - [x] Bench: Path normalization overhead - clean: 74.1ns, double slashes: 77.6ns (~5% overhead) ✓
-- [ ] Bench: Bucket lookup by name
+- [x] Bench: Bucket lookup by name - O(n) linear: 5b=7.5ns, 10b=14.5ns, 50b=72.7ns, 100b=144.7ns ✓
 - [ ] Report: Generate baseline metrics
 
 **Success Criteria**:

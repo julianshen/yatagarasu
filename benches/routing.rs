@@ -494,6 +494,78 @@ fn bench_path_normalization(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark bucket lookup by name
+/// Tests the get_bucket_by_name method with varying bucket counts
+fn bench_bucket_lookup_by_name(c: &mut Criterion) {
+    let bucket_counts = [5, 10, 50, 100];
+
+    let mut group = c.benchmark_group("bucket_lookup_by_name");
+
+    for &count in &bucket_counts {
+        let buckets: Vec<BucketConfig> = (0..count)
+            .map(|i| BucketConfig {
+                name: format!("bucket-{}", i),
+                path_prefix: format!("/bucket-{}", i),
+                s3: S3Config {
+                    endpoint: Some("https://s3.amazonaws.com".to_string()),
+                    region: "us-east-1".to_string(),
+                    bucket: format!("bucket-{}", i),
+                    access_key: "test-key".to_string(),
+                    secret_key: "test-secret".to_string(),
+                    timeout: 20,
+                    connection_pool_size: 50,
+                    rate_limit: None,
+                    circuit_breaker: None,
+                    retry: None,
+                    replicas: None,
+                },
+                auth: None,
+                cache: None,
+                authorization: None,
+                ip_filter: Default::default(),
+            })
+            .collect();
+
+        let router = Router::new(buckets);
+
+        // Lookup first bucket (best case)
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}_buckets_first", count)),
+            &count,
+            |b, _| b.iter(|| router.get_bucket_by_name(black_box("bucket-0"))),
+        );
+
+        // Lookup middle bucket
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}_buckets_middle", count)),
+            &count,
+            |b, _| {
+                let name = format!("bucket-{}", count / 2);
+                b.iter(|| router.get_bucket_by_name(black_box(&name)))
+            },
+        );
+
+        // Lookup last bucket (worst case)
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}_buckets_last", count)),
+            &count,
+            |b, _| {
+                let name = format!("bucket-{}", count - 1);
+                b.iter(|| router.get_bucket_by_name(black_box(&name)))
+            },
+        );
+
+        // Lookup non-existent bucket
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}_buckets_not_found", count)),
+            &count,
+            |b, _| b.iter(|| router.get_bucket_by_name(black_box("nonexistent"))),
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_routing_single_bucket,
@@ -503,5 +575,6 @@ criterion_group!(
     bench_routing_longest_prefix,
     bench_routing_many_buckets,
     bench_path_normalization,
+    bench_bucket_lookup_by_name,
 );
 criterion_main!(benches);
