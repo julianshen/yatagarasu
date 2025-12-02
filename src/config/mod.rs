@@ -688,6 +688,11 @@ pub struct AuthorizationConfig {
     /// Fail mode: "open" (allow on OpenFGA failure) or "closed" (deny on failure, default)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub openfga_fail_mode: Option<String>,
+
+    /// JWT claim to use for user ID extraction in OpenFGA (default: "sub")
+    /// Supports dot notation for nested claims (e.g., "user.id")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openfga_user_claim: Option<String>,
 }
 
 /// Individual JWT key configuration for multi-key support

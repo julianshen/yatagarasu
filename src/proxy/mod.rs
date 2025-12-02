@@ -18,8 +18,13 @@ use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::opa::{
-    AuthorizationDecision, FailMode, OpaCache, OpaClient, OpaClientConfig, OpaInput,
-    SharedOpaClient,
+    AuthorizationDecision as OpaAuthorizationDecision, FailMode as OpaFailMode, OpaCache,
+    OpaClient, OpaClientConfig, OpaInput, SharedOpaClient,
+};
+use crate::openfga::{
+    build_openfga_object, extract_user_id, http_method_to_relation,
+    AuthorizationDecision as OpenFgaAuthorizationDecision, FailMode as OpenFgaFailMode,
+    OpenFgaClient,
 };
 use crate::pipeline::RequestContext;
 use crate::rate_limit::RateLimitManager;
@@ -60,6 +65,9 @@ pub struct YatagarasuProxy {
     /// OPA authorization decision cache (Phase 32: OPA Integration)
     /// Shared cache for all OPA clients to avoid redundant evaluations
     opa_cache: Option<Arc<OpaCache>>,
+    /// OpenFGA clients per bucket (Phase 49: OpenFGA Integration)
+    /// Maps bucket name to OpenFGA client for authorization decisions
+    openfga_clients: Arc<HashMap<String, Arc<OpenFgaClient>>>,
 }
 
 impl YatagarasuProxy {
@@ -192,6 +200,52 @@ impl YatagarasuProxy {
             None
         };
 
+        // Phase 49: Initialize OpenFGA clients for buckets with authorization config
+        let mut openfga_clients = HashMap::new();
+        for bucket in &config.buckets {
+            if let Some(ref auth_config) = bucket.authorization {
+                if auth_config.auth_type == "openfga" {
+                    if let (Some(endpoint), Some(store_id)) =
+                        (&auth_config.openfga_endpoint, &auth_config.openfga_store_id)
+                    {
+                        let mut builder = OpenFgaClient::builder(endpoint, store_id);
+
+                        // Set optional API token
+                        if let Some(ref api_token) = auth_config.openfga_api_token {
+                            builder = builder.api_token(api_token);
+                        }
+
+                        // Set optional authorization model ID
+                        if let Some(ref model_id) = auth_config.openfga_authorization_model_id {
+                            builder = builder.authorization_model_id(model_id);
+                        }
+
+                        // Set timeout (default: 100ms)
+                        builder = builder.timeout_ms(auth_config.openfga_timeout_ms);
+
+                        match builder.build() {
+                            Ok(client) => {
+                                openfga_clients.insert(bucket.name.clone(), Arc::new(client));
+                                tracing::info!(
+                                    bucket = %bucket.name,
+                                    endpoint = %endpoint,
+                                    store_id = %store_id,
+                                    "OpenFGA authorization enabled for bucket"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    bucket = %bucket.name,
+                                    error = %e,
+                                    "Failed to create OpenFGA client for bucket"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Self {
             config: Arc::new(config),
             router,
@@ -208,6 +262,7 @@ impl YatagarasuProxy {
             cache,
             opa_clients: Arc::new(opa_clients),
             opa_cache,
+            openfga_clients: Arc::new(openfga_clients),
         }
     }
 
@@ -341,6 +396,52 @@ impl YatagarasuProxy {
             None
         };
 
+        // Phase 49: Initialize OpenFGA clients for buckets with authorization config
+        let mut openfga_clients = HashMap::new();
+        for bucket in &config.buckets {
+            if let Some(ref auth_config) = bucket.authorization {
+                if auth_config.auth_type == "openfga" {
+                    if let (Some(endpoint), Some(store_id)) =
+                        (&auth_config.openfga_endpoint, &auth_config.openfga_store_id)
+                    {
+                        let mut builder = OpenFgaClient::builder(endpoint, store_id);
+
+                        // Set optional API token
+                        if let Some(ref api_token) = auth_config.openfga_api_token {
+                            builder = builder.api_token(api_token);
+                        }
+
+                        // Set optional authorization model ID
+                        if let Some(ref model_id) = auth_config.openfga_authorization_model_id {
+                            builder = builder.authorization_model_id(model_id);
+                        }
+
+                        // Set timeout (default: 100ms)
+                        builder = builder.timeout_ms(auth_config.openfga_timeout_ms);
+
+                        match builder.build() {
+                            Ok(client) => {
+                                openfga_clients.insert(bucket.name.clone(), Arc::new(client));
+                                tracing::info!(
+                                    bucket = %bucket.name,
+                                    endpoint = %endpoint,
+                                    store_id = %store_id,
+                                    "OpenFGA authorization enabled for bucket"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    bucket = %bucket.name,
+                                    error = %e,
+                                    "Failed to create OpenFGA client for bucket"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Self {
             config: Arc::new(config),
             router,
@@ -357,6 +458,7 @@ impl YatagarasuProxy {
             cache,
             opa_clients: Arc::new(opa_clients),
             opa_cache,
+            openfga_clients: Arc::new(openfga_clients),
         }
     }
 
@@ -2466,7 +2568,7 @@ impl ProxyHttp for YatagarasuProxy {
                 .authorization
                 .as_ref()
                 .and_then(|a| a.opa_fail_mode.as_ref())
-                .map(|s| FailMode::from_str(s).unwrap_or_default())
+                .map(|s| OpaFailMode::from_str(s).unwrap_or_default())
                 .unwrap_or_default();
 
             // Build OPA input from request context
@@ -2498,12 +2600,12 @@ impl ProxyHttp for YatagarasuProxy {
                     allowed = %allowed,
                     "OPA authorization decision from cache"
                 );
-                AuthorizationDecision::from_opa_result(Ok(allowed), fail_mode)
+                OpaAuthorizationDecision::from_opa_result(Ok(allowed), fail_mode)
             } else {
                 // Cache miss - call OPA
                 let eval_result = opa_client.evaluate(&opa_input).await;
                 let decision =
-                    AuthorizationDecision::from_opa_result(eval_result.clone(), fail_mode);
+                    OpaAuthorizationDecision::from_opa_result(eval_result.clone(), fail_mode);
 
                 // Cache the result on success
                 if let (Ok(allowed), Some(ref opa_cache)) = (eval_result, &self.opa_cache) {
@@ -2549,6 +2651,113 @@ impl ProxyHttp for YatagarasuProxy {
 
                 self.metrics.increment_status_count(403);
                 return Ok(true); // Short-circuit
+            }
+        }
+
+        // Phase 49: OpenFGA Authorization check (after JWT authentication and OPA)
+        if let Some(openfga_client) = self.openfga_clients.get(&bucket_config.name) {
+            // Get authorization config for fail mode
+            let fail_mode = bucket_config
+                .authorization
+                .as_ref()
+                .and_then(|a| a.openfga_fail_mode.as_ref())
+                .map(|s| OpenFgaFailMode::from_str(s).unwrap_or_default())
+                .unwrap_or_default();
+
+            // Extract user ID from JWT claims
+            let jwt_claims = ctx
+                .claims()
+                .map(|c| serde_json::to_value(c).unwrap_or_default())
+                .unwrap_or(serde_json::json!({}));
+
+            // Get the claim name to extract user ID from (default: "sub")
+            let user_claim = bucket_config
+                .authorization
+                .as_ref()
+                .and_then(|a| a.openfga_user_claim.as_deref());
+
+            let user_id = extract_user_id(&jwt_claims, user_claim);
+
+            if let Some(user) = user_id {
+                // Build OpenFGA object from bucket and path
+                let object_path = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
+                let object = build_openfga_object(&bucket_config.name, &object_path);
+
+                // Map HTTP method to relation (GET/HEAD→viewer, PUT/POST→editor, DELETE→owner)
+                let relation = http_method_to_relation(ctx.method());
+
+                // Perform authorization check
+                let check_result = openfga_client
+                    .check(&user, relation.as_str(), &object)
+                    .await;
+
+                let decision =
+                    OpenFgaAuthorizationDecision::from_check_result(check_result, fail_mode);
+
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_config.name,
+                    user = %user,
+                    object = %object,
+                    relation = %relation.as_str(),
+                    allowed = %decision.is_allowed(),
+                    fail_open = %decision.is_fail_open_allow(),
+                    "OpenFGA authorization decision"
+                );
+
+                // Log warning for fail-open decisions
+                if decision.is_fail_open_allow() {
+                    if let Some(error) = decision.error() {
+                        tracing::warn!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket_config.name,
+                            user = %user,
+                            error = %error,
+                            "OpenFGA authorization failed but allowing due to fail-open mode"
+                        );
+                    }
+                }
+
+                // Deny if not allowed
+                if !decision.is_allowed() {
+                    let mut header = ResponseHeader::build(403, None)?;
+                    header.insert_header("Content-Type", "text/plain")?;
+                    session
+                        .write_response_header(Box::new(header), true)
+                        .await?;
+
+                    tracing::warn!(
+                        request_id = %ctx.request_id(),
+                        bucket = %bucket_config.name,
+                        user = %user,
+                        object = %object,
+                        relation = %relation.as_str(),
+                        "OpenFGA authorization denied"
+                    );
+
+                    self.metrics.increment_status_count(403);
+                    return Ok(true); // Short-circuit
+                }
+            } else {
+                // No user ID found in claims - deny or fail-open based on config
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    bucket = %bucket_config.name,
+                    "OpenFGA authorization failed: no user ID in JWT claims"
+                );
+
+                // Default to deny if no user ID (security-first approach)
+                if fail_mode == OpenFgaFailMode::Closed {
+                    let mut header = ResponseHeader::build(403, None)?;
+                    header.insert_header("Content-Type", "text/plain")?;
+                    session
+                        .write_response_header(Box::new(header), true)
+                        .await?;
+
+                    self.metrics.increment_status_count(403);
+                    return Ok(true); // Short-circuit
+                }
+                // If fail-open, continue to allow the request
             }
         }
 
