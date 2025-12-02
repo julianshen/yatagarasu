@@ -256,3 +256,138 @@ fn test_relation_to_string() {
     assert_eq!(Relation::Editor.as_str(), "editor");
     assert_eq!(Relation::Owner.as_str(), "owner");
 }
+
+// Phase 49.2: Authorization Decision Tests
+use yatagarasu::openfga::{AuthorizationDecision, FailMode};
+
+#[test]
+fn test_authorization_decision_allowed() {
+    let decision = AuthorizationDecision::allowed();
+    assert!(decision.is_allowed());
+    assert!(!decision.is_fail_open_allow());
+    assert!(decision.error().is_none());
+}
+
+#[test]
+fn test_authorization_decision_denied() {
+    let decision = AuthorizationDecision::denied();
+    assert!(!decision.is_allowed());
+    assert!(!decision.is_fail_open_allow());
+    assert!(decision.error().is_none());
+}
+
+#[test]
+fn test_authorization_decision_from_check_result_allowed() {
+    // When check returns Ok(true), request should be allowed
+    let result: Result<bool, Error> = Ok(true);
+    let decision = AuthorizationDecision::from_check_result(result, FailMode::Closed);
+
+    assert!(decision.is_allowed());
+    assert!(!decision.is_fail_open_allow());
+    assert!(decision.error().is_none());
+}
+
+#[test]
+fn test_authorization_decision_from_check_result_denied() {
+    // When check returns Ok(false), request should be denied (403)
+    let result: Result<bool, Error> = Ok(false);
+    let decision = AuthorizationDecision::from_check_result(result, FailMode::Closed);
+
+    assert!(
+        !decision.is_allowed(),
+        "Should return 403 on authorization failure"
+    );
+    assert!(!decision.is_fail_open_allow());
+    assert!(decision.error().is_none());
+}
+
+#[test]
+fn test_authorization_decision_fail_closed_on_error() {
+    // When OpenFGA returns an error with FailMode::Closed, request should be denied (500)
+    let result: Result<bool, Error> = Err(Error::Connection("Failed to connect".to_string()));
+    let decision = AuthorizationDecision::from_check_result(result, FailMode::Closed);
+
+    assert!(
+        !decision.is_allowed(),
+        "Should return 500 (deny) on OpenFGA error with fail-closed mode"
+    );
+    assert!(!decision.is_fail_open_allow());
+    assert!(decision.has_error());
+    assert!(decision.error().unwrap().contains("Failed to connect"));
+}
+
+#[test]
+fn test_authorization_decision_fail_open_on_error() {
+    // When OpenFGA returns an error with FailMode::Open, request should be allowed
+    let result: Result<bool, Error> = Err(Error::Connection("Timeout".to_string()));
+    let decision = AuthorizationDecision::from_check_result(result, FailMode::Open);
+
+    assert!(
+        decision.is_allowed(),
+        "Should allow on OpenFGA error with fail-open mode"
+    );
+    assert!(
+        decision.is_fail_open_allow(),
+        "Should be marked as fail-open allow"
+    );
+    assert!(decision.has_error());
+    assert!(decision.error().unwrap().contains("Timeout"));
+}
+
+#[test]
+fn test_fail_mode_from_str_open() {
+    let mode: FailMode = "open".parse().unwrap();
+    assert_eq!(mode, FailMode::Open);
+
+    let mode: FailMode = "Open".parse().unwrap();
+    assert_eq!(mode, FailMode::Open);
+
+    let mode: FailMode = "OPEN".parse().unwrap();
+    assert_eq!(mode, FailMode::Open);
+}
+
+#[test]
+fn test_fail_mode_from_str_closed() {
+    let mode: FailMode = "closed".parse().unwrap();
+    assert_eq!(mode, FailMode::Closed);
+
+    let mode: FailMode = "Closed".parse().unwrap();
+    assert_eq!(mode, FailMode::Closed);
+}
+
+#[test]
+fn test_fail_mode_from_str_defaults_to_closed() {
+    // Unknown values should default to closed for security
+    let mode: FailMode = "unknown".parse().unwrap();
+    assert_eq!(mode, FailMode::Closed);
+
+    let mode: FailMode = "".parse().unwrap();
+    assert_eq!(mode, FailMode::Closed);
+}
+
+#[test]
+fn test_fail_mode_default_is_closed() {
+    let mode = FailMode::default();
+    assert_eq!(mode, FailMode::Closed);
+}
+
+#[test]
+fn test_authorization_decision_api_error_fail_closed() {
+    // API errors (like 404 store not found) should also respect fail mode
+    let result: Result<bool, Error> = Err(Error::Api("Store 'nonexistent' not found".to_string()));
+    let decision = AuthorizationDecision::from_check_result(result, FailMode::Closed);
+
+    assert!(!decision.is_allowed());
+    assert!(decision.has_error());
+    assert!(decision.error().unwrap().contains("Store"));
+}
+
+#[test]
+fn test_authorization_decision_timeout_fail_open() {
+    // Timeout errors with fail-open mode should allow
+    let result: Result<bool, Error> = Err(Error::Connection("Request timed out".to_string()));
+    let decision = AuthorizationDecision::from_check_result(result, FailMode::Open);
+
+    assert!(decision.is_allowed());
+    assert!(decision.is_fail_open_allow());
+}

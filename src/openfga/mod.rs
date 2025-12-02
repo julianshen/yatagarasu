@@ -425,6 +425,120 @@ pub fn http_method_to_relation(method: &str) -> Relation {
     }
 }
 
+// Phase 49.2: Authorization Decision Types
+
+/// Fail mode for OpenFGA authorization
+///
+/// Determines behavior when OpenFGA is unreachable or returns an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FailMode {
+    /// Fail-open: Allow requests when OpenFGA is unavailable (less secure, higher availability)
+    Open,
+    /// Fail-closed: Deny requests when OpenFGA is unavailable (more secure, default)
+    #[default]
+    Closed,
+}
+
+impl std::str::FromStr for FailMode {
+    type Err = std::convert::Infallible;
+
+    /// Parse fail mode from string
+    ///
+    /// Returns Closed (deny) for unknown values as a secure default.
+    /// This never fails - unknown values default to Closed.
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
+            "open" => FailMode::Open,
+            _ => FailMode::Closed, // Default to closed for security
+        })
+    }
+}
+
+/// Result of an OpenFGA authorization decision
+///
+/// Captures the authorization outcome along with any error information
+/// for logging and debugging purposes.
+#[derive(Debug)]
+pub struct AuthorizationDecision {
+    /// Whether the request is allowed
+    allowed: bool,
+    /// Whether this decision was made due to fail-open mode
+    fail_open_allow: bool,
+    /// Error that occurred, if any
+    error: Option<String>,
+}
+
+impl AuthorizationDecision {
+    /// Create a new allowed decision
+    pub fn allowed() -> Self {
+        Self {
+            allowed: true,
+            fail_open_allow: false,
+            error: None,
+        }
+    }
+
+    /// Create a new denied decision
+    pub fn denied() -> Self {
+        Self {
+            allowed: false,
+            fail_open_allow: false,
+            error: None,
+        }
+    }
+
+    /// Create a decision from an OpenFGA check result and fail mode
+    ///
+    /// # Arguments
+    /// * `result` - The result from OpenFGA check (Ok(bool) or Err(Error))
+    /// * `fail_mode` - The configured fail mode for handling errors
+    ///
+    /// # Returns
+    /// An AuthorizationDecision based on the result and fail mode:
+    /// - Ok(true) -> allowed
+    /// - Ok(false) -> denied
+    /// - Err(_) + FailMode::Open -> allowed with fail_open_allow=true
+    /// - Err(_) + FailMode::Closed -> denied with error
+    pub fn from_check_result(result: Result<bool>, fail_mode: FailMode) -> Self {
+        match result {
+            Ok(true) => Self::allowed(),
+            Ok(false) => Self::denied(),
+            Err(e) => match fail_mode {
+                FailMode::Open => Self {
+                    allowed: true,
+                    fail_open_allow: true,
+                    error: Some(e.to_string()),
+                },
+                FailMode::Closed => Self {
+                    allowed: false,
+                    fail_open_allow: false,
+                    error: Some(e.to_string()),
+                },
+            },
+        }
+    }
+
+    /// Check if the request is allowed
+    pub fn is_allowed(&self) -> bool {
+        self.allowed
+    }
+
+    /// Check if this was a fail-open allow
+    pub fn is_fail_open_allow(&self) -> bool {
+        self.fail_open_allow
+    }
+
+    /// Get the error message, if any
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// Check if an error occurred
+    pub fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
