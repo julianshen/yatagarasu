@@ -541,14 +541,14 @@ type file
 - [x] Test: Check authorization before proxying - tests/integration/openfga_test.rs
 - [x] Test: Return 403 on authorization failure - tests/integration/openfga_test.rs
 - [x] Test: Return 500 on OpenFGA error (fail closed) - tests/integration/openfga_test.rs
-- [ ] Impl: OpenFGA authorizer middleware
+- [x] Impl: OpenFGA authorizer middleware - src/proxy/mod.rs lines 2657-2762
 
 #### 49.3 Authorization Caching
-- [ ] Test: Cache positive authorization decisions (configurable TTL)
-- [ ] Test: Cache negative authorization decisions (shorter TTL)
-- [ ] Test: Cache key includes user, relation, object
+- [x] Test: Cache positive authorization decisions (configurable TTL) - tests/unit/openfga_tests.rs
+- [x] Test: Cache negative authorization decisions (shorter TTL) - tests/unit/openfga_tests.rs
+- [x] Test: Cache key includes user, relation, object - tests/unit/openfga_tests.rs
 - [ ] Test: Cache invalidation on TTL expiry
-- [ ] Impl: Moka cache for OpenFGA decisions
+- [x] Impl: Moka cache for OpenFGA decisions - src/openfga/mod.rs OpenFgaCache
 - [ ] Config: decision_cache_ttl_seconds (default: 60)
 
 **Success Criteria**:

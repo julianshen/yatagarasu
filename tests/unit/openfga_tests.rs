@@ -391,3 +391,116 @@ fn test_authorization_decision_timeout_fail_open() {
     assert!(decision.is_allowed());
     assert!(decision.is_fail_open_allow());
 }
+
+// Phase 49.3: Authorization Caching Tests
+use yatagarasu::openfga::OpenFgaCache;
+
+#[tokio::test]
+async fn test_cache_positive_authorization_decisions() {
+    // Create cache with 60 second TTL
+    let cache = OpenFgaCache::new(60);
+
+    // Cache key format: user|relation|object
+    let key = "user:alice|viewer|file:bucket/docs/readme.txt".to_string();
+
+    // Initially cache should be empty
+    assert!(cache.get(&key).await.is_none());
+
+    // Store positive decision (allowed=true)
+    cache.put(key.clone(), true).await;
+
+    // Should retrieve cached positive decision
+    let cached = cache.get(&key).await;
+    assert_eq!(
+        cached,
+        Some(true),
+        "Should cache positive authorization decision"
+    );
+}
+
+#[tokio::test]
+async fn test_cache_negative_authorization_decisions() {
+    // Create cache with 60 second TTL
+    let cache = OpenFgaCache::new(60);
+
+    // Cache key format: user|relation|object
+    let key = "user:bob|editor|file:bucket/private/secret.txt".to_string();
+
+    // Store negative decision (allowed=false)
+    cache.put(key.clone(), false).await;
+
+    // Should retrieve cached negative decision
+    let cached = cache.get(&key).await;
+    assert_eq!(
+        cached,
+        Some(false),
+        "Should cache negative authorization decision"
+    );
+}
+
+#[tokio::test]
+async fn test_cache_key_includes_user_relation_object() {
+    let cache = OpenFgaCache::new(60);
+
+    // Different users should have different cache entries
+    let key_alice = "user:alice|viewer|file:bucket/doc.txt".to_string();
+    let key_bob = "user:bob|viewer|file:bucket/doc.txt".to_string();
+
+    cache.put(key_alice.clone(), true).await;
+    cache.put(key_bob.clone(), false).await;
+
+    // Each user should have their own cached decision
+    assert_eq!(cache.get(&key_alice).await, Some(true));
+    assert_eq!(cache.get(&key_bob).await, Some(false));
+
+    // Different relations should have different cache entries
+    let key_viewer = "user:alice|viewer|file:bucket/doc.txt".to_string();
+    let key_editor = "user:alice|editor|file:bucket/doc.txt".to_string();
+
+    cache.put(key_viewer.clone(), true).await;
+    cache.put(key_editor.clone(), false).await;
+
+    assert_eq!(cache.get(&key_viewer).await, Some(true));
+    assert_eq!(cache.get(&key_editor).await, Some(false));
+
+    // Different objects should have different cache entries
+    let key_obj1 = "user:alice|viewer|file:bucket/doc1.txt".to_string();
+    let key_obj2 = "user:alice|viewer|file:bucket/doc2.txt".to_string();
+
+    cache.put(key_obj1.clone(), true).await;
+    cache.put(key_obj2.clone(), false).await;
+
+    assert_eq!(cache.get(&key_obj1).await, Some(true));
+    assert_eq!(cache.get(&key_obj2).await, Some(false));
+}
+
+#[tokio::test]
+async fn test_cache_len_and_is_empty() {
+    let cache = OpenFgaCache::new(60);
+
+    assert!(cache.is_empty());
+    assert_eq!(cache.len(), 0);
+
+    cache.put("key1".to_string(), true).await;
+    // Allow moka to update its internal counters
+    cache.run_pending_tasks().await;
+    assert!(!cache.is_empty());
+    assert_eq!(cache.len(), 1);
+
+    cache.put("key2".to_string(), false).await;
+    cache.run_pending_tasks().await;
+    assert_eq!(cache.len(), 2);
+}
+
+#[test]
+fn test_cache_key_builder() {
+    // Test the cache key builder function
+    use yatagarasu::openfga::build_cache_key;
+
+    let key = build_cache_key("user:alice", "viewer", "file:bucket/doc.txt");
+    assert_eq!(key, "user:alice|viewer|file:bucket/doc.txt");
+
+    // Different components produce different keys
+    let key2 = build_cache_key("user:bob", "viewer", "file:bucket/doc.txt");
+    assert_ne!(key, key2);
+}

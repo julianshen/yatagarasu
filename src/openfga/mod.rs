@@ -3,6 +3,7 @@
 //! This module provides an HTTP client for OpenFGA, enabling fine-grained
 //! authorization checks based on relationships between users and objects.
 
+use moka::future::Cache;
 use std::fmt;
 use std::time::Duration;
 
@@ -537,6 +538,85 @@ impl AuthorizationDecision {
     pub fn has_error(&self) -> bool {
         self.error.is_some()
     }
+}
+
+// Phase 49.3: Authorization Caching
+
+/// Cache for OpenFGA authorization decisions
+///
+/// This cache stores authorization decisions (allow/deny) keyed by
+/// a combination of user, relation, and object. It uses moka for efficient
+/// concurrent access with automatic TTL-based expiration.
+pub struct OpenFgaCache {
+    cache: Cache<String, bool>,
+}
+
+impl OpenFgaCache {
+    /// Create a new OpenFGA cache with the specified TTL in seconds
+    pub fn new(ttl_seconds: u64) -> Self {
+        let cache = Cache::builder()
+            .time_to_live(Duration::from_secs(ttl_seconds))
+            .max_capacity(10_000) // Default max entries
+            .build();
+
+        Self { cache }
+    }
+
+    /// Get a cached authorization decision (async)
+    ///
+    /// Returns Some(true) if allowed, Some(false) if denied, None if not cached
+    pub async fn get(&self, key: &str) -> Option<bool> {
+        self.cache.get(key).await
+    }
+
+    /// Store an authorization decision in the cache (async)
+    pub async fn put(&self, key: String, allowed: bool) {
+        self.cache.insert(key, allowed).await;
+    }
+
+    /// Check if a key exists in the cache
+    pub fn contains(&self, key: &str) -> bool {
+        self.cache.contains_key(key)
+    }
+
+    /// Get the number of entries in the cache
+    pub fn len(&self) -> u64 {
+        self.cache.entry_count()
+    }
+
+    /// Check if the cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.cache.entry_count() == 0
+    }
+
+    /// Run pending maintenance tasks
+    ///
+    /// This is useful in tests to ensure cache counters are updated
+    /// after inserts. In production, moka runs these automatically.
+    pub async fn run_pending_tasks(&self) {
+        self.cache.run_pending_tasks().await;
+    }
+}
+
+/// Build a cache key from user, relation, and object
+///
+/// # Arguments
+/// * `user` - The user identifier (e.g., "user:alice")
+/// * `relation` - The relation (e.g., "viewer", "editor", "owner")
+/// * `object` - The object identifier (e.g., "file:bucket/path/file.txt")
+///
+/// # Returns
+/// A cache key string in the format "user|relation|object"
+///
+/// # Examples
+/// ```
+/// use yatagarasu::openfga::build_cache_key;
+///
+/// let key = build_cache_key("user:alice", "viewer", "file:bucket/doc.txt");
+/// assert_eq!(key, "user:alice|viewer|file:bucket/doc.txt");
+/// ```
+pub fn build_cache_key(user: &str, relation: &str, object: &str) -> String {
+    format!("{}|{}|{}", user, relation, object)
 }
 
 #[cfg(test)]
