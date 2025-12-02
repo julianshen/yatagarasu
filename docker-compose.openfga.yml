@@ -1,0 +1,202 @@
+# Docker Compose setup for OpenFGA testing with Yatagarasu
+#
+# Usage:
+#   docker-compose -f docker-compose.openfga.yml up -d
+#
+# This starts:
+#   - OpenFGA server on port 8081
+#   - MinIO S3-compatible storage on port 9000
+#   - Setup container to initialize buckets and test files
+#
+# After startup, run the setup script to configure OpenFGA:
+#   ./scripts/setup-openfga-loadtest.sh
+#
+# Then start the proxy:
+#   OPENFGA_STORE_ID=<store_id> cargo run --release -- --config config.loadtest-openfga.yaml
+
+version: '3.8'
+
+services:
+  # OpenFGA authorization server
+  openfga:
+    image: openfga/openfga:latest
+    container_name: yatagarasu-openfga
+    command: run
+    ports:
+      - "8081:8080"   # OpenFGA HTTP API
+      - "8082:8081"   # OpenFGA gRPC API
+      - "3000:3000"   # OpenFGA Playground (if enabled)
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=memory
+      - OPENFGA_DATASTORE_URI=
+      # For production, use PostgreSQL:
+      # - OPENFGA_DATASTORE_ENGINE=postgres
+      # - OPENFGA_DATASTORE_URI=postgres://user:password@postgres:5432/openfga
+    healthcheck:
+      test: ["CMD", "/openfga", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - yatagarasu-openfga-net
+    restart: unless-stopped
+
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: yatagarasu-openfga-minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-openfga-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-openfga-net
+    restart: unless-stopped
+
+  # MinIO setup - creates buckets and uploads test data
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-openfga-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to be ready...';
+      sleep 3;
+
+      echo 'Configuring MinIO client...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+
+      echo 'Creating test buckets...';
+      mc mb --ignore-existing myminio/public;
+      mc mb --ignore-existing myminio/test-openfga;
+      mc mb --ignore-existing myminio/test-private;
+
+      echo 'Setting bucket policies...';
+      mc anonymous set public myminio/public;
+
+      echo 'Creating test files for load testing...';
+      dd if=/dev/urandom of=/tmp/test-1kb.txt bs=1K count=1 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-10kb.txt bs=1K count=10 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-100kb.txt bs=1K count=100 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-1mb.bin bs=1M count=1 2>/dev/null;
+      dd if=/dev/urandom of=/tmp/test-10mb.bin bs=1M count=10 2>/dev/null;
+
+      echo 'Uploading test files to public bucket...';
+      mc cp /tmp/test-1kb.txt myminio/public/test-1kb.txt;
+      mc cp /tmp/test-10kb.txt myminio/public/test-10kb.txt;
+      mc cp /tmp/test-100kb.txt myminio/public/test-100kb.txt;
+      mc cp /tmp/test-1mb.bin myminio/public/test-1mb.bin;
+      mc cp /tmp/test-10mb.bin myminio/public/test-10mb.bin;
+
+      echo 'Uploading test files to OpenFGA-protected bucket...';
+      mc cp /tmp/test-1kb.txt myminio/test-openfga/test-1kb.txt;
+      mc cp /tmp/test-10kb.txt myminio/test-openfga/test-10kb.txt;
+      mc cp /tmp/test-100kb.txt myminio/test-openfga/test-100kb.txt;
+      mc cp /tmp/test-1mb.bin myminio/test-openfga/test-1mb.bin;
+
+      echo 'Uploading test files to private bucket...';
+      mc cp /tmp/test-1kb.txt myminio/test-private/test-1kb.txt;
+      mc cp /tmp/test-10kb.txt myminio/test-private/test-10kb.txt;
+      mc cp /tmp/test-100kb.txt myminio/test-private/test-100kb.txt;
+
+      echo '';
+      echo '=================================================';
+      echo 'MinIO Setup Complete!';
+      echo '=================================================';
+      echo 'MinIO Console: http://localhost:9001';
+      echo 'MinIO S3 API:  http://localhost:9000';
+      echo 'Username: minioadmin';
+      echo 'Password: minioadmin';
+      echo '';
+      echo 'Buckets created:';
+      echo '  - public (no auth required)';
+      echo '  - test-openfga (OpenFGA authorization)';
+      echo '  - test-private (JWT auth only)';
+      echo '';
+      echo 'Next steps:';
+      echo '  1. Run: ./scripts/setup-openfga-loadtest.sh';
+      echo '  2. Export OPENFGA_STORE_ID from the script output';
+      echo '  3. Start the proxy with config.loadtest-openfga.yaml';
+      echo '=================================================';
+      "
+    networks:
+      - yatagarasu-openfga-net
+
+  # OpenFGA setup - creates store, model, and sample tuples
+  openfga-setup:
+    image: curlimages/curl:latest
+    container_name: yatagarasu-openfga-setup
+    depends_on:
+      openfga:
+        condition: service_healthy
+    volumes:
+      - ./openfga:/openfga:ro
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for OpenFGA to be ready...';
+      sleep 5;
+
+      echo 'Creating OpenFGA store...';
+      STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \
+        -H 'Content-Type: application/json' \
+        -d '{\"name\": \"yatagarasu-loadtest\"}');
+
+      STORE_ID=$$(echo $$STORE_RESPONSE | sed 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/');
+      echo \"Store created with ID: $$STORE_ID\";
+
+      if [ -z \"$$STORE_ID\" ] || [ \"$$STORE_ID\" = \"$$STORE_RESPONSE\" ]; then
+        echo 'Failed to create store or parse store ID';
+        exit 1;
+      fi;
+
+      echo 'Writing authorization model...';
+      MODEL_RESPONSE=$$(curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/authorization-models\" \
+        -H 'Content-Type: application/json' \
+        -d @/openfga/model.json);
+
+      MODEL_ID=$$(echo $$MODEL_RESPONSE | sed 's/.*\"authorization_model_id\":\"\\([^\"]*\\)\".*/\\1/');
+      echo \"Model created with ID: $$MODEL_ID\";
+
+      echo 'Writing authorization tuples...';
+      curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/write\" \
+        -H 'Content-Type: application/json' \
+        -d @/openfga/tuples.json;
+
+      echo '';
+      echo '=================================================';
+      echo 'OpenFGA Setup Complete!';
+      echo '=================================================';
+      echo \"Store ID: $$STORE_ID\";
+      echo \"Model ID: $$MODEL_ID\";
+      echo '';
+      echo 'To start the proxy, run:';
+      echo \"  export OPENFGA_STORE_ID=$$STORE_ID\";
+      echo '  cargo run --release -- --config config.loadtest-openfga.yaml';
+      echo '';
+      echo 'To run load tests:';
+      echo '  k6 run k6/openfga-load.js';
+      echo '=================================================';
+      "
+    networks:
+      - yatagarasu-openfga-net
+
+networks:
+  yatagarasu-openfga-net:
+    driver: bridge
+
+volumes:
+  minio-openfga-data:
+    driver: local

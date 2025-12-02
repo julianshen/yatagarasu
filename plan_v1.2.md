@@ -578,10 +578,10 @@ type file
 - [x] Verify: OpenFGA doesn't become bottleneck - k6/openfga-load.js::ramp_up scenario
 
 #### 50.3 Docker Compose Setup
-- [ ] Setup: docker-compose.openfga.yml with OpenFGA server
-- [ ] Setup: Pre-loaded authorization model
-- [ ] Setup: Sample data for testing
-- [ ] Doc: How to run OpenFGA locally
+- [x] Setup: docker-compose.openfga.yml with OpenFGA server - docker-compose.openfga.yml
+- [x] Setup: Pre-loaded authorization model - openfga/model.json
+- [x] Setup: Sample data for testing - openfga/tuples.json
+- [x] Doc: How to run OpenFGA locally - scripts/setup-openfga-loadtest.sh
 
 #### 50.4 Documentation
 - [ ] Doc: OpenFGA vs OPA comparison and when to use each

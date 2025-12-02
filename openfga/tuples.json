@@ -1,0 +1,51 @@
+{
+  "writes": {
+    "tuple_keys": [
+      {
+        "user": "user:alice",
+        "relation": "viewer",
+        "object": "bucket:test-openfga"
+      },
+      {
+        "user": "user:bob",
+        "relation": "editor",
+        "object": "bucket:test-openfga"
+      },
+      {
+        "user": "user:charlie",
+        "relation": "viewer",
+        "object": "file:test-openfga/test-1kb.txt"
+      },
+      {
+        "user": "user:diana",
+        "relation": "owner",
+        "object": "bucket:test-openfga"
+      },
+      {
+        "user": "user:alice",
+        "relation": "viewer",
+        "object": "file:test-openfga/test-1kb.txt"
+      },
+      {
+        "user": "user:alice",
+        "relation": "viewer",
+        "object": "file:test-openfga/test-10kb.txt"
+      },
+      {
+        "user": "user:alice",
+        "relation": "viewer",
+        "object": "file:test-openfga/test-100kb.txt"
+      },
+      {
+        "user": "user:bob",
+        "relation": "editor",
+        "object": "file:test-openfga/test-1kb.txt"
+      },
+      {
+        "user": "user:bob",
+        "relation": "editor",
+        "object": "file:test-openfga/test-10kb.txt"
+      }
+    ]
+  }
+}

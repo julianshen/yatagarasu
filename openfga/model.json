@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "user",
+      "relations": {}
+    },
+    {
+      "type": "bucket",
+      "relations": {
+        "viewer": {
+          "this": {}
+        },
+        "editor": {
+          "this": {}
+        },
+        "owner": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "viewer": {
+            "directly_related_user_types": [{"type": "user"}]
+          },
+          "editor": {
+            "directly_related_user_types": [{"type": "user"}]
+          },
+          "owner": {
+            "directly_related_user_types": [{"type": "user"}]
+          }
+        }
+      }
+    },
+    {
+      "type": "folder",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "viewer": {
+          "union": {
+            "child": [
+              {"this": {}},
+              {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "viewer"}}}
+            ]
+          }
+        },
+        "editor": {
+          "union": {
+            "child": [
+              {"this": {}},
+              {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "editor"}}}
+            ]
+          }
+        },
+        "owner": {
+          "union": {
+            "child": [
+              {"this": {}},
+              {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "owner"}}}
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [{"type": "bucket"}]
+          },
+          "viewer": {
+            "directly_related_user_types": [{"type": "user"}]
+          },
+          "editor": {
+            "directly_related_user_types": [{"type": "user"}]
+          },
+          "owner": {
+            "directly_related_user_types": [{"type": "user"}]
+          }
+        }
+      }
+    },
+    {
+      "type": "file",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "viewer": {
+          "union": {
+            "child": [
+              {"this": {}},
+              {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "viewer"}}}
+            ]
+          }
+        },
+        "editor": {
+          "union": {
+            "child": [
+              {"this": {}},
+              {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "editor"}}}
+            ]
+          }
+        },
+        "owner": {
+          "union": {
+            "child": [
+              {"this": {}},
+              {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "owner"}}}
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [{"type": "bucket"}, {"type": "folder"}]
+          },
+          "viewer": {
+            "directly_related_user_types": [{"type": "user"}]
+          },
+          "editor": {
+            "directly_related_user_types": [{"type": "user"}]
+          },
+          "owner": {
+            "directly_related_user_types": [{"type": "user"}]
+          }
+        }
+      }
+    }
+  ]
+}
