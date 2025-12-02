@@ -547,7 +547,7 @@ type file
 - [x] Test: Cache positive authorization decisions (configurable TTL) - tests/unit/openfga_tests.rs
 - [x] Test: Cache negative authorization decisions (shorter TTL) - tests/unit/openfga_tests.rs
 - [x] Test: Cache key includes user, relation, object - tests/unit/openfga_tests.rs
-- [ ] Test: Cache invalidation on TTL expiry
+- [x] Test: Cache invalidation on TTL expiry - tests/unit/openfga_tests.rs
 - [x] Impl: Moka cache for OpenFGA decisions - src/openfga/mod.rs OpenFgaCache
 - [ ] Config: decision_cache_ttl_seconds (default: 60)
 

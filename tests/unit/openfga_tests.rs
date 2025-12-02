@@ -504,3 +504,31 @@ fn test_cache_key_builder() {
     let key2 = build_cache_key("user:bob", "viewer", "file:bucket/doc.txt");
     assert_ne!(key, key2);
 }
+
+#[tokio::test]
+async fn test_cache_invalidation_on_ttl_expiry() {
+    // Create cache with very short TTL (1 second)
+    let cache = OpenFgaCache::new(1);
+
+    let key = "user:alice|viewer|file:bucket/expiring.txt".to_string();
+
+    // Put a value and verify it's there
+    cache.put(key.clone(), true).await;
+    let cached = cache.get(&key).await;
+    assert_eq!(
+        cached,
+        Some(true),
+        "Should have cached value before TTL expiry"
+    );
+
+    // Wait for TTL to expire (1.5 seconds to be safe)
+    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+    // After TTL, value should be gone
+    let expired = cache.get(&key).await;
+    assert!(
+        expired.is_none(),
+        "Cached value should expire after TTL ({:?})",
+        expired
+    );
+}
