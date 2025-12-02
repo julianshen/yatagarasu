@@ -15,9 +15,9 @@ v1.2.0 focuses on production hardening through comprehensive benchmarking, long-
 
 | Milestone | Description | Phases | Status |
 |-----------|-------------|--------|--------|
-| 1 | Performance Benchmarks (Criterion) | 40-43 | Planned |
-| 2 | Extended JWT Support | 44-47 | Planned |
-| 3 | OpenFGA Integration | 48-50 | Planned |
+| 1 | Performance Benchmarks (Criterion) | 40-43 | Complete |
+| 2 | Extended JWT Support | 44-47 | Complete |
+| 3 | OpenFGA Integration | 48-50 | Complete |
 | 4 | Endurance & Long-Duration Testing | 51-54 | Planned |
 | 5 | Extreme Scale & Stress Testing | 55-58 | Planned |
 | 6 | Production Resilience | 59-61 | Planned |
