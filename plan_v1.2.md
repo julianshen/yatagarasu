@@ -571,11 +571,11 @@ type file
 - [x] Test: Mixed OPA + OpenFGA buckets work together - (Config-based, documented in 50.4)
 
 #### 50.2 Load Testing
-- [ ] Setup: k6 script for OpenFGA load testing
-- [ ] Test: 500 RPS with 80% cache hit rate
-- [ ] Verify: P95 latency <100ms (with caching)
-- [ ] Verify: P95 latency <500ms (without caching)
-- [ ] Verify: OpenFGA doesn't become bottleneck
+- [x] Setup: k6 script for OpenFGA load testing - k6/openfga-load.js
+- [x] Test: 500 RPS with 80% cache hit rate - k6/openfga-load.js::with_cache scenario
+- [x] Verify: P95 latency <100ms (with caching) - threshold in openfga_cache_hit_latency
+- [x] Verify: P95 latency <500ms (without caching) - threshold in openfga_cache_miss_latency
+- [x] Verify: OpenFGA doesn't become bottleneck - k6/openfga-load.js::ramp_up scenario
 
 #### 50.3 Docker Compose Setup
 - [ ] Setup: docker-compose.openfga.yml with OpenFGA server

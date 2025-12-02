@@ -1,0 +1,103 @@
+# Load Test Configuration with OpenFGA Authorization
+#
+# Prerequisites:
+# 1. Start OpenFGA server:
+#    docker run -d -p 8081:8080 --name openfga openfga/openfga run
+#
+# 2. Create store and model using the setup script:
+#    ./scripts/setup-openfga-loadtest.sh
+#
+# 3. Start MinIO (if not running):
+#    docker run -d -p 9000:9000 --name minio \
+#      -e MINIO_ROOT_USER=minioadmin \
+#      -e MINIO_ROOT_PASSWORD=minioadmin \
+#      minio/minio server /data
+#
+# 4. Start the proxy:
+#    cargo run --release -- --config config.loadtest-openfga.yaml
+#
+# 5. Run load tests:
+#    k6 run k6/openfga-load.js
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  # Public bucket (no authentication, no OpenFGA)
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      endpoint: "http://localhost:9000"
+      region: "us-east-1"
+      bucket: "public"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+  # OpenFGA-protected bucket (JWT + OpenFGA authorization)
+  - name: "openfga-protected"
+    path_prefix: "/openfga-protected"
+    s3:
+      endpoint: "http://localhost:9000"
+      region: "us-east-1"
+      bucket: "test-openfga"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: true
+      jwt:
+        secret: "test-secret-key-for-load-testing-only"
+        algorithm: "HS256"
+        token_sources:
+          - source_type: "header"
+            name: "Authorization"
+            prefix: "Bearer "
+          - source_type: "query"
+            name: "token"
+        claims_verification: []
+    # OpenFGA Authorization
+    authorization:
+      type: openfga
+      openfga_endpoint: "http://localhost:8081"
+      # Store ID will be set after running setup script
+      # Use environment variable: OPENFGA_STORE_ID
+      openfga_store_id: "${OPENFGA_STORE_ID}"
+      # Model ID is optional - uses latest if not specified
+      # openfga_model_id: "${OPENFGA_MODEL_ID}"
+      timeout_ms: 100          # Fast fail for load testing
+      cache_ttl_seconds: 60    # Cache OpenFGA decisions for 60s
+      fail_mode: closed        # Deny on OpenFGA failure
+
+  # Private bucket (JWT only, no OpenFGA - for comparison)
+  - name: "private"
+    path_prefix: "/private"
+    s3:
+      endpoint: "http://localhost:9000"
+      region: "us-east-1"
+      bucket: "test-private"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: true
+      jwt:
+        secret: "test-secret-key-for-load-testing-only"
+        algorithm: "HS256"
+        token_sources:
+          - source_type: "header"
+            name: "Authorization"
+            prefix: "Bearer "
+          - source_type: "query"
+            name: "token"
+        claims_verification: []
+
+logging:
+  level: "info"
+  format: "json"
+
+# Metrics endpoint for monitoring during load tests
+metrics:
+  enabled: true
+  address: "127.0.0.1"
+  port: 9090
