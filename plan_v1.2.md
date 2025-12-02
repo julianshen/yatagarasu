@@ -584,10 +584,10 @@ type file
 - [x] Doc: How to run OpenFGA locally - scripts/setup-openfga-loadtest.sh
 
 #### 50.4 Documentation
-- [ ] Doc: OpenFGA vs OPA comparison and when to use each
-- [ ] Doc: Configuration guide for OpenFGA
-- [ ] Doc: Example authorization models for common use cases
-- [ ] Doc: Performance tuning (caching, connection pooling)
+- [x] Doc: OpenFGA vs OPA comparison and when to use each - docs/OPENFGA.md (Section 3)
+- [x] Doc: Configuration guide for OpenFGA - docs/OPENFGA.md (Section 5)
+- [x] Doc: Example authorization models for common use cases - docs/OPENFGA.md (Example Models section)
+- [x] Doc: Performance tuning (caching, connection pooling) - docs/OPENFGA.md (Performance Tuning section)
 
 **Deliverables**:
 - `src/auth/openfga/` module with client and authorizer
