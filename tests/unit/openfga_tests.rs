@@ -135,3 +135,124 @@ async fn test_check_with_authorization_model_id() {
     let result = client.check("user:test", "viewer", "doc:test").await;
     assert!(result.is_err());
 }
+
+// Phase 49.2: Request Authorization Flow Tests
+use serde_json::json;
+use yatagarasu::openfga::{
+    build_openfga_object, extract_user_id, http_method_to_relation, Relation,
+};
+
+#[test]
+fn test_extract_user_id_from_sub_claim() {
+    // Default claim is "sub"
+    let claims = json!({
+        "sub": "user123",
+        "email": "test@example.com"
+    });
+
+    let user_id = extract_user_id(&claims, None);
+    assert_eq!(user_id, Some("user:user123".to_string()));
+}
+
+#[test]
+fn test_extract_user_id_from_custom_claim() {
+    // Custom claim extraction
+    let claims = json!({
+        "sub": "user123",
+        "user_id": "custom_id_456",
+        "email": "test@example.com"
+    });
+
+    let user_id = extract_user_id(&claims, Some("user_id"));
+    assert_eq!(user_id, Some("user:custom_id_456".to_string()));
+}
+
+#[test]
+fn test_extract_user_id_missing_claim_returns_none() {
+    let claims = json!({
+        "email": "test@example.com"
+    });
+
+    // No "sub" claim
+    let user_id = extract_user_id(&claims, None);
+    assert!(user_id.is_none());
+}
+
+#[test]
+fn test_extract_user_id_from_nested_claim() {
+    // Support for nested claims using dot notation
+    let claims = json!({
+        "user": {
+            "id": "nested_user_789"
+        },
+        "email": "test@example.com"
+    });
+
+    let user_id = extract_user_id(&claims, Some("user.id"));
+    assert_eq!(user_id, Some("user:nested_user_789".to_string()));
+}
+
+#[test]
+fn test_build_openfga_object_for_file() {
+    // File object: file:{bucket}/{path}
+    let object = build_openfga_object("my-bucket", "documents/report.pdf");
+    assert_eq!(object, "file:my-bucket/documents/report.pdf");
+}
+
+#[test]
+fn test_build_openfga_object_for_folder() {
+    // Folder object: folder:{bucket}/{path}/
+    let object = build_openfga_object("my-bucket", "documents/");
+    assert_eq!(object, "folder:my-bucket/documents/");
+}
+
+#[test]
+fn test_build_openfga_object_for_bucket_root() {
+    // Bucket root: bucket:{bucket}
+    let object = build_openfga_object("my-bucket", "");
+    assert_eq!(object, "bucket:my-bucket");
+}
+
+#[test]
+fn test_build_openfga_object_normalizes_path() {
+    // Should normalize paths (remove leading slash)
+    let object = build_openfga_object("my-bucket", "/documents/report.pdf");
+    assert_eq!(object, "file:my-bucket/documents/report.pdf");
+}
+
+#[test]
+fn test_http_method_to_relation_get() {
+    let relation = http_method_to_relation("GET");
+    assert_eq!(relation, Relation::Viewer);
+}
+
+#[test]
+fn test_http_method_to_relation_head() {
+    let relation = http_method_to_relation("HEAD");
+    assert_eq!(relation, Relation::Viewer);
+}
+
+#[test]
+fn test_http_method_to_relation_put() {
+    let relation = http_method_to_relation("PUT");
+    assert_eq!(relation, Relation::Editor);
+}
+
+#[test]
+fn test_http_method_to_relation_post() {
+    let relation = http_method_to_relation("POST");
+    assert_eq!(relation, Relation::Editor);
+}
+
+#[test]
+fn test_http_method_to_relation_delete() {
+    let relation = http_method_to_relation("DELETE");
+    assert_eq!(relation, Relation::Owner);
+}
+
+#[test]
+fn test_relation_to_string() {
+    assert_eq!(Relation::Viewer.as_str(), "viewer");
+    assert_eq!(Relation::Editor.as_str(), "editor");
+    assert_eq!(Relation::Owner.as_str(), "owner");
+}

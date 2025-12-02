@@ -511,10 +511,10 @@ buckets:
 **Objective**: Integrate OpenFGA authorization into request flow
 
 #### 49.1 Authorization Model Design
-- [ ] Design: Map S3 paths to OpenFGA objects
-- [ ] Design: Define relations (viewer, editor, owner, etc.)
-- [ ] Design: Define user extraction from JWT
-- [ ] Doc: Example authorization model for S3 proxy
+- [x] Design: Map S3 paths to OpenFGA objects - docs/OPENFGA.md lines 517-539
+- [x] Design: Define relations (viewer, editor, owner, etc.) - docs/OPENFGA.md lines 451-489
+- [x] Design: Define user extraction from JWT - docs/OPENFGA.md lines 255-264
+- [x] Doc: Example authorization model for S3 proxy - docs/OPENFGA.md complete model
 
 ```
 # Example OpenFGA model for S3 access
@@ -535,9 +535,9 @@ type file
 ```
 
 #### 49.2 Request Authorization Flow
-- [ ] Test: Extract user ID from JWT claims (configurable claim)
-- [ ] Test: Build OpenFGA object from bucket + path
-- [ ] Test: Build OpenFGA relation from HTTP method (GET→viewer, PUT→editor)
+- [x] Test: Extract user ID from JWT claims (configurable claim)
+- [x] Test: Build OpenFGA object from bucket + path
+- [x] Test: Build OpenFGA relation from HTTP method (GET→viewer, PUT→editor)
 - [ ] Test: Check authorization before proxying
 - [ ] Test: Return 403 on authorization failure
 - [ ] Test: Return 500 on OpenFGA error (fail closed)

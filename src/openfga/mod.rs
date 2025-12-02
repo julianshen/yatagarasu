@@ -293,6 +293,138 @@ impl OpenFgaClient {
     }
 }
 
+// Phase 49.2: Request Authorization Flow - Helper functions
+
+/// Relation types for OpenFGA authorization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relation {
+    /// Read-only access (GET, HEAD)
+    Viewer,
+    /// Read-write access (PUT, POST)
+    Editor,
+    /// Full access including delete (DELETE)
+    Owner,
+}
+
+impl Relation {
+    /// Get the relation string for OpenFGA
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Relation::Viewer => "viewer",
+            Relation::Editor => "editor",
+            Relation::Owner => "owner",
+        }
+    }
+}
+
+/// Extracts the user ID from JWT claims
+///
+/// # Arguments
+/// * `claims` - JSON value containing JWT claims
+/// * `claim_name` - Optional custom claim name (defaults to "sub")
+///
+/// # Returns
+/// * `Some(user:{id})` - The user ID formatted for OpenFGA
+/// * `None` - If the claim is not found or is not a string
+///
+/// # Examples
+/// ```
+/// use serde_json::json;
+/// use yatagarasu::openfga::extract_user_id;
+///
+/// let claims = json!({"sub": "user123"});
+/// let user_id = extract_user_id(&claims, None);
+/// assert_eq!(user_id, Some("user:user123".to_string()));
+/// ```
+pub fn extract_user_id(claims: &serde_json::Value, claim_name: Option<&str>) -> Option<String> {
+    let claim = claim_name.unwrap_or("sub");
+
+    // Support nested claims using dot notation (e.g., "user.id")
+    let value = if claim.contains('.') {
+        let parts: Vec<&str> = claim.split('.').collect();
+        let mut current = claims;
+        for part in parts {
+            current = current.get(part)?;
+        }
+        current
+    } else {
+        claims.get(claim)?
+    };
+
+    // Extract string value
+    let id = value.as_str()?;
+    Some(format!("user:{}", id))
+}
+
+/// Builds an OpenFGA object identifier from bucket and path
+///
+/// Object naming convention:
+/// - `bucket:{bucket}` - For bucket root access
+/// - `folder:{bucket}/{path}/` - For folder access (path ends with /)
+/// - `file:{bucket}/{path}` - For file access
+///
+/// # Arguments
+/// * `bucket` - The S3 bucket name
+/// * `path` - The object path within the bucket
+///
+/// # Returns
+/// The OpenFGA object identifier string
+///
+/// # Examples
+/// ```
+/// use yatagarasu::openfga::build_openfga_object;
+///
+/// assert_eq!(build_openfga_object("my-bucket", "docs/file.txt"), "file:my-bucket/docs/file.txt");
+/// assert_eq!(build_openfga_object("my-bucket", "docs/"), "folder:my-bucket/docs/");
+/// assert_eq!(build_openfga_object("my-bucket", ""), "bucket:my-bucket");
+/// ```
+pub fn build_openfga_object(bucket: &str, path: &str) -> String {
+    // Normalize path: remove leading slash
+    let normalized_path = path.trim_start_matches('/');
+
+    if normalized_path.is_empty() {
+        // Bucket root access
+        format!("bucket:{}", bucket)
+    } else if normalized_path.ends_with('/') {
+        // Folder access
+        format!("folder:{}/{}", bucket, normalized_path)
+    } else {
+        // File access
+        format!("file:{}/{}", bucket, normalized_path)
+    }
+}
+
+/// Converts an HTTP method to the required OpenFGA relation
+///
+/// Mapping:
+/// - GET, HEAD → Viewer (read access)
+/// - PUT, POST → Editor (write access)
+/// - DELETE → Owner (delete access)
+///
+/// # Arguments
+/// * `method` - The HTTP method string (case-insensitive)
+///
+/// # Returns
+/// The corresponding Relation enum value
+///
+/// # Examples
+/// ```
+/// use yatagarasu::openfga::{http_method_to_relation, Relation};
+///
+/// assert_eq!(http_method_to_relation("GET"), Relation::Viewer);
+/// assert_eq!(http_method_to_relation("PUT"), Relation::Editor);
+/// assert_eq!(http_method_to_relation("DELETE"), Relation::Owner);
+/// ```
+pub fn http_method_to_relation(method: &str) -> Relation {
+    match method.to_uppercase().as_str() {
+        "GET" | "HEAD" => Relation::Viewer,
+        "PUT" | "POST" => Relation::Editor,
+        "DELETE" => Relation::Owner,
+        // Default to viewer for unknown methods (most restrictive common case)
+        _ => Relation::Viewer,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
