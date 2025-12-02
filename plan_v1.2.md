@@ -484,20 +484,20 @@ buckets:
 ```
 
 #### 48.2 OpenFGA Client Implementation
-- [ ] Test: Create OpenFGA HTTP client
-- [ ] Test: Client handles connection errors gracefully
-- [ ] Test: Client implements timeout (configurable)
-- [ ] Test: Client retries on transient failures
-- [ ] Impl: OpenFgaClient struct with reqwest
-- [ ] Impl: Check endpoint for authorization queries
+- [x] Test: Create OpenFGA HTTP client
+- [x] Test: Client handles connection errors gracefully
+- [x] Test: Client implements timeout (configurable)
+- [x] Test: Client retries on transient failures
+- [x] Impl: OpenFgaClient struct with reqwest
+- [x] Impl: Check endpoint for authorization queries
 
 #### 48.3 Authorization Check API
-- [ ] Test: Check() returns allowed=true for permitted access
-- [ ] Test: Check() returns allowed=false for denied access
-- [ ] Test: Check() handles network timeout
-- [ ] Test: Check() handles invalid store_id
-- [ ] Test: Check() handles 400 Bad Request (invalid tuple)
-- [ ] Impl: Check API call with user, relation, object
+- [x] Test: Check() returns allowed=true for permitted access
+- [x] Test: Check() returns allowed=false for denied access
+- [x] Test: Check() handles network timeout
+- [x] Test: Check() handles invalid store_id
+- [x] Test: Check() handles 400 Bad Request (invalid tuple)
+- [x] Impl: Check API call with user, relation, object
 
 **Success Criteria**:
 - OpenFGA client connects successfully

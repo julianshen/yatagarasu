@@ -7,6 +7,7 @@ use std::fmt;
 use std::time::Duration;
 
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
 /// Error type for OpenFGA operations
 #[derive(Debug, Clone)]
@@ -42,7 +43,6 @@ pub struct OpenFgaClient {
     authorization_model_id: Option<String>,
     api_token: Option<String>,
     timeout: Duration,
-    #[allow(dead_code)] // Will be used in Phase 48.3 for HTTP requests
     client: Client,
 }
 
@@ -184,6 +184,112 @@ impl OpenFgaClientBuilder {
             timeout,
             client,
         })
+    }
+}
+
+/// Tuple key for OpenFGA authorization check
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TupleKey {
+    /// The user identifier (e.g., "user:alice")
+    pub user: String,
+    /// The relation to check (e.g., "viewer", "editor", "owner")
+    pub relation: String,
+    /// The object identifier (e.g., "document:readme")
+    pub object: String,
+}
+
+impl TupleKey {
+    /// Creates a new tuple key
+    pub fn new(user: &str, relation: &str, object: &str) -> Self {
+        Self {
+            user: user.to_string(),
+            relation: relation.to_string(),
+            object: object.to_string(),
+        }
+    }
+}
+
+/// Request body for OpenFGA Check API
+#[derive(Debug, Serialize)]
+struct CheckRequest {
+    tuple_key: TupleKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authorization_model_id: Option<String>,
+}
+
+/// Response from OpenFGA Check API
+#[derive(Debug, Deserialize)]
+struct CheckResponse {
+    allowed: bool,
+}
+
+impl OpenFgaClient {
+    /// Checks if a user has a specific relation to an object
+    ///
+    /// # Arguments
+    /// * `user` - The user identifier (e.g., "user:alice")
+    /// * `relation` - The relation to check (e.g., "viewer", "editor", "owner")
+    /// * `object` - The object identifier (e.g., "document:readme")
+    ///
+    /// # Returns
+    /// * `Ok(true)` - The user has the specified relation to the object
+    /// * `Ok(false)` - The user does not have the specified relation
+    /// * `Err(Error)` - An error occurred during the check
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Network connection fails
+    /// - Request times out
+    /// - OpenFGA server returns an error
+    pub async fn check(&self, user: &str, relation: &str, object: &str) -> Result<bool> {
+        let url = format!("{}/stores/{}/check", self.endpoint, self.store_id);
+
+        let request = CheckRequest {
+            tuple_key: TupleKey::new(user, relation, object),
+            authorization_model_id: self.authorization_model_id.clone(),
+        };
+
+        let mut req = self.client.post(&url).json(&request);
+
+        // Add Authorization header if API token is set
+        if let Some(ref token) = self.api_token {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = req.send().await.map_err(|e| {
+            if e.is_timeout() {
+                Error::Connection(format!("Request timed out: {}", e))
+            } else if e.is_connect() {
+                Error::Connection(format!("Failed to connect: {}", e))
+            } else {
+                Error::Connection(format!("HTTP request failed: {}", e))
+            }
+        })?;
+
+        let status = response.status();
+
+        if status.is_success() {
+            let check_response: CheckResponse = response
+                .json()
+                .await
+                .map_err(|e| Error::Api(format!("Failed to parse response: {}", e)))?;
+            Ok(check_response.allowed)
+        } else if status.as_u16() == 400 {
+            // Bad Request - invalid tuple format
+            let error_body = response.text().await.unwrap_or_default();
+            Err(Error::Api(format!("Invalid request (400): {}", error_body)))
+        } else if status.as_u16() == 404 {
+            // Store not found
+            Err(Error::Api(format!("Store '{}' not found", self.store_id)))
+        } else {
+            // Other API errors
+            let error_body = response.text().await.unwrap_or_default();
+            Err(Error::Api(format!(
+                "OpenFGA API error ({}): {}",
+                status.as_u16(),
+                error_body
+            )))
+        }
     }
 }
 
