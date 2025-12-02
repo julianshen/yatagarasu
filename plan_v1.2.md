@@ -538,9 +538,9 @@ type file
 - [x] Test: Extract user ID from JWT claims (configurable claim)
 - [x] Test: Build OpenFGA object from bucket + path
 - [x] Test: Build OpenFGA relation from HTTP method (GET→viewer, PUT→editor)
-- [ ] Test: Check authorization before proxying
-- [ ] Test: Return 403 on authorization failure
-- [ ] Test: Return 500 on OpenFGA error (fail closed)
+- [x] Test: Check authorization before proxying - tests/integration/openfga_test.rs
+- [x] Test: Return 403 on authorization failure - tests/integration/openfga_test.rs
+- [x] Test: Return 500 on OpenFGA error (fail closed) - tests/integration/openfga_test.rs
 - [ ] Impl: OpenFGA authorizer middleware
 
 #### 49.3 Authorization Caching
