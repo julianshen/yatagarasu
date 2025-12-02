@@ -549,7 +549,7 @@ type file
 - [x] Test: Cache key includes user, relation, object - tests/unit/openfga_tests.rs
 - [x] Test: Cache invalidation on TTL expiry - tests/unit/openfga_tests.rs
 - [x] Impl: Moka cache for OpenFGA decisions - src/openfga/mod.rs OpenFgaCache
-- [ ] Config: decision_cache_ttl_seconds (default: 60)
+- [x] Config: decision_cache_ttl_seconds (default: 60) - src/config/mod.rs openfga_cache_ttl_seconds
 
 **Success Criteria**:
 - Authorization integrated into request flow
