@@ -10,6 +10,7 @@ mod unit {
     mod head_request_test; // HEAD request method support
     mod logging_tests;
     mod opa_tests; // Phase 32: OPA Integration
+    mod openfga_tests; // Phase 48: OpenFGA Integration
     mod pipeline_tests; // Phase 13: Request Pipeline Integration
     mod proxy_tests;
     mod router_tests;

@@ -11,6 +11,7 @@ pub mod logging;
 pub mod metrics; // Phase 18: Prometheus Metrics
 pub mod observability; // Phase 34: Enhanced Observability
 pub mod opa; // Phase 32: OPA Integration
+pub mod openfga; // Phase 48: OpenFGA Integration
 pub mod pipeline; // Phase 13: Request Pipeline Integration
 pub mod proxy;
 pub mod rate_limit; // Phase 21: Rate Limiting
