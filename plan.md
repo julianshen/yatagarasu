@@ -1529,7 +1529,7 @@ cargo test --test 'integration_*' -- --test-threads=1
 - [x] Test: Rate limit metrics exposed (Prometheus counter: rate_limit_exceeded)
 
 ### Test: Memory leak prevention
-- [ ] Test: 24 hour sustained load (no memory growth)
+- [x] Test: 24 hour sustained load (no memory growth)
 - [ ] Test: Repeated config reloads (no memory leak)
 - [ ] Test: 1 million requests (memory stays constant)
 - [ ] Test: Large file uploads/downloads (no buffering leak)
