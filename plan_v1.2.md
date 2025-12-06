@@ -700,8 +700,10 @@ type file
 - `high_concurrency`: 200 concurrent VUs
 
 #### 53.2 Redis Advanced Configuration Tests
-- [ ] Test: Redis maxmemory-policy=allkeys-lru
-- [ ] Verify: Redis evictions happen correctly
+- [x] Test: Redis maxmemory-policy=allkeys-lru ✅ PASSED
+- [x] Verify: Redis evictions happen correctly ✅ PASSED
+  - `test_redis_maxmemory_allkeys_lru_eviction` - LRU evictions work correctly
+  - `test_redis_maxmemory_noeviction_fails` - noeviction policy rejects writes at limit
 - [x] Test: Redis with authentication ✅ PASSED
   - `test_redis_with_authentication_connects_successfully` - password auth works
   - `test_redis_with_wrong_password_fails` - rejects invalid credentials

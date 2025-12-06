@@ -35,6 +35,31 @@ fn create_redis_with_password<'a>(
     (container, port)
 }
 
+/// Create a Redis container with maxmemory and eviction policy
+fn create_redis_with_maxmemory<'a>(
+    docker: &'a Cli,
+    maxmemory: &str,
+    policy: &str,
+) -> (testcontainers::Container<'a, GenericImage>, u16) {
+    let redis_image = GenericImage::new("redis", "7")
+        .with_exposed_port(6379)
+        .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"));
+
+    let args: Vec<String> = vec![
+        "redis-server".to_string(),
+        "--maxmemory".to_string(),
+        maxmemory.to_string(),
+        "--maxmemory-policy".to_string(),
+        policy.to_string(),
+    ];
+    let runnable_image = RunnableImage::from((redis_image, args));
+
+    let container = docker.run(runnable_image);
+    let port = container.get_host_port_ipv4(6379);
+
+    (container, port)
+}
+
 /// Helper to create a test cache key
 fn test_key(name: &str) -> CacheKey {
     CacheKey {
@@ -332,4 +357,158 @@ async fn test_redis_key_prefix_isolation() {
     // Cleanup
     let _ = cache_app1.delete(&key).await;
     let _ = cache_app2.delete(&key).await;
+}
+
+/// Test: Redis maxmemory-policy=allkeys-lru evicts old keys when memory limit reached
+#[tokio::test]
+#[ignore] // Requires Docker
+async fn test_redis_maxmemory_allkeys_lru_eviction() {
+    // Start Redis with 4MB maxmemory and allkeys-lru eviction
+    // Need enough space for Redis overhead (~2MB) plus some data
+    let docker = Cli::default();
+    let (_container, redis_port) = create_redis_with_maxmemory(&docker, "4mb", "allkeys-lru");
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_password: None,
+        redis_db: 0,
+        redis_key_prefix: "eviction-test".to_string(),
+        redis_ttl_seconds: 3600,
+        redis_max_ttl_seconds: 3600,
+        connection_timeout_ms: 5000,
+        operation_timeout_ms: 2000,
+        min_pool_size: 1,
+        max_pool_size: 5,
+    };
+
+    let cache = RedisCache::new(config).await.expect("Should connect");
+
+    // Create data larger than 4MB total to trigger evictions
+    // Each entry is ~10KB, so 600 entries = ~6MB (exceeds 4MB limit)
+    let data_10kb = vec![b'x'; 10 * 1024];
+    let num_entries = 600;
+
+    // Insert many entries - this should trigger evictions
+    for i in 0..num_entries {
+        let key = CacheKey {
+            bucket: "eviction-bucket".to_string(),
+            object_key: format!("file-{:04}.bin", i),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(data_10kb.clone()),
+            "application/octet-stream".to_string(),
+            format!("etag-{}", i),
+            None,
+            Some(Duration::from_secs(3600)),
+        );
+
+        // Sets should succeed even when memory is full (LRU eviction kicks in)
+        let result = cache.set(key, entry).await;
+        assert!(
+            result.is_ok(),
+            "Set should succeed with LRU eviction policy, got error at entry {}: {:?}",
+            i,
+            result.err()
+        );
+    }
+
+    // Access early entries to check they were evicted
+    // With LRU policy, early entries should have been evicted
+    let mut evicted_count = 0;
+    for i in 0..100 {
+        let key = CacheKey {
+            bucket: "eviction-bucket".to_string(),
+            object_key: format!("file-{:04}.bin", i),
+            etag: None,
+        };
+        if let Ok(None) = cache.get(&key).await {
+            evicted_count += 1;
+        }
+    }
+
+    // We expect some early entries to be evicted (at least 50% should be gone)
+    // since we wrote 6MB of data to a 4MB cache
+    assert!(
+        evicted_count > 50,
+        "Expected at least 50 early entries to be evicted, but only {} were evicted",
+        evicted_count
+    );
+
+    // Recent entries should still exist
+    let mut recent_found = 0;
+    for i in (num_entries - 50)..num_entries {
+        let key = CacheKey {
+            bucket: "eviction-bucket".to_string(),
+            object_key: format!("file-{:04}.bin", i),
+            etag: None,
+        };
+        if let Ok(Some(_)) = cache.get(&key).await {
+            recent_found += 1;
+        }
+    }
+
+    // Most recent entries should still be present
+    assert!(
+        recent_found >= 30,
+        "Expected at least 30 of 50 recent entries to exist, but only {} found",
+        recent_found
+    );
+}
+
+/// Test: Redis with noeviction policy returns error when memory full
+#[tokio::test]
+#[ignore] // Requires Docker
+async fn test_redis_maxmemory_noeviction_fails() {
+    // Start Redis with very small maxmemory (500KB) and noeviction policy
+    let docker = Cli::default();
+    let (_container, redis_port) = create_redis_with_maxmemory(&docker, "500kb", "noeviction");
+    let redis_url = format!("redis://127.0.0.1:{}", redis_port);
+
+    let config = RedisConfig {
+        redis_url: Some(redis_url),
+        redis_password: None,
+        redis_db: 0,
+        redis_key_prefix: "noeviction-test".to_string(),
+        redis_ttl_seconds: 3600,
+        redis_max_ttl_seconds: 3600,
+        connection_timeout_ms: 5000,
+        operation_timeout_ms: 2000,
+        min_pool_size: 1,
+        max_pool_size: 5,
+    };
+
+    let cache = RedisCache::new(config).await.expect("Should connect");
+
+    // Create data to exceed 500KB limit
+    let data_100kb = vec![b'y'; 100 * 1024];
+    let mut error_occurred = false;
+
+    // Try to insert 10 entries (1MB total) - should eventually fail
+    for i in 0..10 {
+        let key = CacheKey {
+            bucket: "noeviction-bucket".to_string(),
+            object_key: format!("bigfile-{}.bin", i),
+            etag: None,
+        };
+        let entry = CacheEntry::new(
+            Bytes::from(data_100kb.clone()),
+            "application/octet-stream".to_string(),
+            format!("etag-{}", i),
+            None,
+            Some(Duration::from_secs(3600)),
+        );
+
+        if cache.set(key, entry).await.is_err() {
+            error_occurred = true;
+            break;
+        }
+    }
+
+    // With noeviction policy, we should get an error when memory is full
+    assert!(
+        error_occurred,
+        "Expected error when exceeding maxmemory with noeviction policy"
+    );
 }
