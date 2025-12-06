@@ -54,10 +54,10 @@
 **Verification**: Can purge cache, retrieve statistics via API, cache actually used in request flow
 **Status**: ✅ COMPLETE - RedisCache implements Cache trait, TieredCache integrates Redis, Proxy initializes cache via init_cache(), bucket/object-level purge endpoints added
 
-### 🟢 Milestone 4: Advanced JWT (Phase 31) - HIGH ⭐ CORE COMPLETE
+### 🟢 Milestone 4: Advanced JWT (Phase 31) - HIGH ⭐ COMPLETE
 **Deliverable**: RS256/ES256 JWT validation, JWKS support
 **Verification**: Can validate RSA/ECDSA signed JWTs, fetch keys from JWKS
-**Status**: ✅ RS256/ES256 complete (31.1-31.4), JWKS client implemented (31.5 partial). HTTPS support and doc examples pending.
+**Status**: ✅ COMPLETE - RS256/ES256 complete (31.1-31.4), JWKS fully implemented in v1.2.0 Phases 46-47 (caching, refresh, security hardening).
 
 ### 🟢 Milestone 5: OPA Integration (Phase 32) - HIGH ⭐ COMPLETE
 **Deliverable**: Open Policy Agent integration for flexible authorization
@@ -1914,6 +1914,8 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 
 ## 31.5: JWKS (JSON Web Key Set) Support
 
+> **Note**: Core JWKS client implemented in v1.1.0. Full JWKS support (caching, refresh logic, key matching, security hardening) completed in v1.2.0 Phases 46-47.
+
 ### JWKS Configuration
 - [x] Test: Add jwks_url to JWT config (tests/unit/config_tests.rs::test_jwt_config_can_have_jwks_url)
 - [x] Test: Can parse JWKS URL from config (tests/unit/config_tests.rs::test_jwt_config_can_have_jwks_url)
@@ -1925,8 +1927,8 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 - [x] Test: Parses JWKS JSON format (src/auth/jwks.rs - Jwks struct with Deserialize)
 - [x] Test: Extracts keys from JWKS (src/auth/jwks.rs::Jwks::find_key_by_kid)
 - [x] Test: Handles HTTP errors gracefully (src/auth/jwks_client.rs::JwksClientError)
-- [ ] Test: Retries on transient failures (not implemented)
-- [ ] Test: HTTPS support (not implemented - only HTTP works currently)
+- [~] Test: Retries on transient failures → Completed in v1.2.0 Phase 46
+- [~] Test: HTTPS support → Completed in v1.2.0 Phase 46
 
 ### JWKS Key Extraction
 - [x] Test: Extracts RSA keys from JWKS (src/auth/jwks.rs::JwkKey::to_decoding_key for RSA)
@@ -1942,19 +1944,21 @@ Note: 39 integration tests with testcontainers provide comprehensive coverage. M
 
 ---
 
-## 31.6: JWT Validation with JWKS
+## 31.6: JWT Validation with JWKS → COMPLETED IN v1.2.0 Phase 46
+
+> **Note**: All items completed in v1.2.0 Phase 46. See plan_v1.2.md for details.
 
 ### JWKS Validation Logic
-- [ ] Test: Validates JWT using key from JWKS
-- [ ] Test: Matches JWT kid to JWKS key
-- [ ] Test: Returns error if kid not in JWKS
-- [ ] Test: Validates signature with correct algorithm
+- [~] Test: Validates JWT using key from JWKS → v1.2.0 `test_match_jwt_kid_to_jwks_key`
+- [~] Test: Matches JWT kid to JWKS key → v1.2.0 `test_match_jwt_kid_to_jwks_key`
+- [~] Test: Returns error if kid not in JWKS → v1.2.0 `test_error_kid_not_found`
+- [~] Test: Validates signature with correct algorithm → v1.2.0 Phase 47
 
 ### JWKS Test Setup
-- [ ] Test: Create mock JWKS endpoint for tests
-- [ ] Test: Serve test JWKS with sample keys
-- [ ] Test: Generate JWTs signed with JWKS keys
-- [ ] Test: Validate JWTs against mock JWKS
+- [~] Test: Create mock JWKS endpoint for tests → v1.2.0 `test_fetch_jwks_from_mock_server`
+- [~] Test: Serve test JWKS with sample keys → v1.2.0 Phase 46
+- [~] Test: Generate JWTs signed with JWKS keys → v1.2.0 Phase 46
+- [~] Test: Validate JWTs against mock JWKS → v1.2.0 Phase 46
 
 ---
 
@@ -2322,28 +2326,30 @@ services:
 **Goal**: Measure OPA authorization overhead and throughput under realistic load
 **Infrastructure**: `k6-opa.js`, `config.loadtest-opa.yaml`, `policies/loadtest-authz.rego`
 
-### Load Test Infrastructure
+> **Note**: Infrastructure created in v1.1.0. Load test execution deferred to v1.2.0 Phase 61 for comprehensive production validation testing.
+
+### Load Test Infrastructure ✅ COMPLETE
 - [x] Create K6 load test script (`k6-opa.js`)
 - [x] Create load test configuration (`config.loadtest-opa.yaml`)
 - [x] Create load test policy (`policies/loadtest-authz.rego`)
 - [x] Document load testing in `docs/OPA_POLICIES.md`
 
-### Load Test Scenarios
-- [ ] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput)
-- [ ] Execute: `opa_ramping` - 10→100→50 VUs (find saturation point)
-- [ ] Execute: `opa_cache_hit` - 1000 req/s same user (cache effectiveness)
-- [ ] Execute: `opa_cache_miss` - 200 req/s unique paths (uncached evaluation)
+### Load Test Scenarios → MOVED TO v1.2.0 Phase 61
+- [~] Execute: `opa_constant_rate` - 500 req/s for 30s (baseline throughput) → v1.2.0
+- [~] Execute: `opa_ramping` - 10→100→50 VUs (find saturation point) → v1.2.0
+- [~] Execute: `opa_cache_hit` - 1000 req/s same user (cache effectiveness) → v1.2.0
+- [~] Execute: `opa_cache_miss` - 200 req/s unique paths (uncached evaluation) → v1.2.0
 
-### Performance Targets
-- [ ] Verify: P95 latency <200ms (with OPA + S3 backend)
-- [ ] Verify: Auth latency P95 <50ms (OPA evaluation only)
-- [ ] Verify: Error rate <1%
-- [ ] Verify: Throughput >500 req/s with OPA enabled
+### Performance Targets → MOVED TO v1.2.0 Phase 61
+- [~] Verify: P95 latency <200ms (with OPA + S3 backend) → v1.2.0
+- [~] Verify: Auth latency P95 <50ms (OPA evaluation only) → v1.2.0
+- [~] Verify: Error rate <1% → v1.2.0
+- [~] Verify: Throughput >500 req/s with OPA enabled → v1.2.0
 
-### OPA Overhead Analysis
-- [ ] Document: Compare baseline (JWT-only) vs OPA-enabled latency
-- [ ] Document: Cache hit rate under realistic workload
-- [ ] Document: OPA saturation point
+### OPA Overhead Analysis → MOVED TO v1.2.0 Phase 61
+- [~] Document: Compare baseline (JWT-only) vs OPA-enabled latency → v1.2.0
+- [~] Document: Cache hit rate under realistic workload → v1.2.0
+- [~] Document: OPA saturation point → v1.2.0
 
 ---
 
