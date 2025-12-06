@@ -710,7 +710,7 @@ type file
   - `test_redis_ttl_expiration` - TTL expiration verified
   - `test_redis_database_selection` - DB isolation works
   - `test_redis_key_prefix_isolation` - prefix isolation works
-- [ ] Test: Redis Sentinel failover (if applicable)
+- [ ] Test: Redis Sentinel failover (SKIPPED - requires multi-node cluster setup)
 
 **Success Criteria**:
 - Connection pool stable
@@ -722,6 +722,10 @@ type file
 ### PHASE 54: Tiered Cache Endurance
 
 **Objective**: Test tiered cache stability over extended period
+
+**Test Script**: `k6/tiered-endurance.js`
+- Scenarios: `quick` (5m), `one_hour`, `two_hour`, `high_concurrency`, `layer_stress`
+- Access pattern: 70% hot files (memory), 20% warm (disk), 10% cold (redis)
 
 #### 54.1 Extended Tiered Cache Test
 - [ ] Test: 100 RPS, 2 hours, 80% total hit rate
