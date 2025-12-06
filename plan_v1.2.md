@@ -683,13 +683,21 @@ type file
 **Objective**: Test Redis cache stability over 24+ hours
 
 #### 53.1 24-Hour Redis Cache Test
-- [ ] Setup: k6 script for 24-hour Redis load
+- [x] Setup: k6 script for 24-hour Redis load (k6/redis-endurance.js)
 - [ ] Test: 100 RPS, 24 hours, 70% hit rate
 - [ ] Monitor: Redis connection pool stability
 - [ ] Verify: No connection leaks
 - [ ] Verify: Redis memory stable
 - [ ] Verify: TTL expiration working correctly
 - [ ] Report: Generate 24-hour metrics summary
+
+**k6/redis-endurance.js Scenarios**:
+- `quick`: 5-minute validation (100 RPS)
+- `one_hour`: 1-hour sustained load (100 RPS)
+- `full_24h`: 24-hour production validation (100 RPS)
+- `pool_stress`: Connection pool exhaustion/recovery test
+- `ttl_test`: TTL expiration validation
+- `high_concurrency`: 200 concurrent VUs
 
 #### 53.2 Redis Advanced Configuration Tests
 - [ ] Test: Redis maxmemory-policy=allkeys-lru
