@@ -20,6 +20,7 @@ mod integration {
     mod multibucket_test;
     mod opa_test; // Phase 32: OPA Integration
     mod openfga_test; // Phase 49: OpenFGA Integration
+    mod openfga_e2e_test; // Phase 49: OpenFGA E2E Tests (HTTP → Proxy → OpenFGA → S3)
     mod range_requests_test;
     mod rate_limit_test;
     mod replica_set_test;
