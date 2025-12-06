@@ -179,8 +179,9 @@ const activeScenarios = selectedScenario
 export const options = {
   scenarios: activeScenarios,
   thresholds: {
-    http_req_duration: ['p(95)<100', 'p(99)<500'],   // P95 <100ms, P99 <500ms
-    http_req_failed: ['rate<0.01'],                   // Error rate <1%
+    // Thresholds for proxy requests only (exclude metrics endpoint fetches)
+    'http_req_duration{expected_response:true}': ['p(95)<100', 'p(99)<500'],  // P95 <100ms, P99 <500ms
+    'http_req_failed{expected_response:true}': ['rate<0.01'],                  // Error rate <1%
     errors: ['rate<0.01'],                            // Custom error rate <1%
     cache_hits: ['rate>0.60'],                        // Cache hit rate >60%
     redis_hit_latency_ms: ['p(95)<10'],              // Redis hits P95 <10ms
