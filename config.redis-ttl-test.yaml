@@ -1,0 +1,42 @@
+# Yatagarasu configuration for Redis TTL testing (Phase 53.1)
+# Uses short TTL (30s) to verify TTL expiration works correctly
+
+server:
+  address: "127.0.0.1"
+  port: 8080
+
+buckets:
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public"
+      region: "us-east-1"
+      endpoint: "http://localhost:9000"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+    auth:
+      enabled: false
+
+# Cache configuration - Redis with short TTL for testing
+cache:
+  enabled: true
+  cache_layers: ["redis"]
+
+  redis:
+    enabled: true
+    redis_url: "redis://localhost:6379"
+    redis_db: 1  # Use different DB to avoid conflicts
+    redis_key_prefix: "yatagarasu-ttltest"
+    redis_ttl_seconds: 30  # Short TTL for testing
+    connection_timeout_ms: 5000
+    operation_timeout_ms: 2000
+    min_pool_size: 5
+    max_pool_size: 20
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

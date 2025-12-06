@@ -405,8 +405,7 @@ fn test_e2e_openfga_authorized_user_can_access_file() {
         );
 
         // 6. Start the proxy
-        let proxy = ProxyTestHarness::start(config_path, proxy_port)
-            .expect("Proxy should start");
+        let proxy = ProxyTestHarness::start(config_path, proxy_port).expect("Proxy should start");
         println!("Proxy running at {}", proxy.base_url);
 
         // Wait for proxy to fully initialize
@@ -488,8 +487,7 @@ fn test_e2e_openfga_unauthorized_user_gets_403() {
         );
 
         // 5. Start the proxy
-        let proxy = ProxyTestHarness::start(config_path, proxy_port)
-            .expect("Proxy should start");
+        let proxy = ProxyTestHarness::start(config_path, proxy_port).expect("Proxy should start");
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -561,8 +559,7 @@ fn test_e2e_openfga_missing_jwt_denied() {
         );
 
         // 5. Start the proxy
-        let proxy = ProxyTestHarness::start(config_path, proxy_port)
-            .expect("Proxy should start");
+        let proxy = ProxyTestHarness::start(config_path, proxy_port).expect("Proxy should start");
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -660,8 +657,7 @@ fn test_e2e_openfga_bucket_level_permission() {
         );
 
         // 7. Start the proxy
-        let proxy = ProxyTestHarness::start(config_path, proxy_port)
-            .expect("Proxy should start");
+        let proxy = ProxyTestHarness::start(config_path, proxy_port).expect("Proxy should start");
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 

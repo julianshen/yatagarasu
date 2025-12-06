@@ -19,10 +19,11 @@ mod integration {
     mod metrics_test;
     mod multibucket_test;
     mod opa_test; // Phase 32: OPA Integration
-    mod openfga_test; // Phase 49: OpenFGA Integration
     mod openfga_e2e_test; // Phase 49: OpenFGA E2E Tests (HTTP → Proxy → OpenFGA → S3)
+    mod openfga_test; // Phase 49: OpenFGA Integration
     mod range_requests_test;
     mod rate_limit_test;
+    mod redis_auth_test; // Phase 53.2: Redis Advanced Configuration Tests
     mod replica_set_test;
     mod retry_test;
     mod security_test;
