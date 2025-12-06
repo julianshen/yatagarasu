@@ -140,6 +140,18 @@ const scenarios = {
     ],
     env: { TEST_TYPE: 'soak', REPORT_INTERVAL: '1800' },  // Report every 30 minutes
   },
+
+  // 1 million requests test (Phase 51.1 - memory stays constant)
+  // 2000 RPS * 500s = 1,000,000 requests in ~8-9 minutes
+  million_requests: {
+    executor: 'constant-arrival-rate',
+    rate: 2000,           // 2000 RPS for fast execution
+    timeUnit: '1s',
+    duration: '8m20s',    // 8:20 = 500 seconds * 2000 RPS = 1,000,000 requests
+    preAllocatedVUs: 200,
+    maxVUs: 1000,
+    env: { TEST_TYPE: 'million_requests', REPORT_INTERVAL: '60' },
+  },
 };
 
 // Select scenario from environment variable
