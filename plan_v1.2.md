@@ -735,13 +735,25 @@ type file
 - [ ] Verify: Promotion keeps hot data in fast layers
 - [ ] Monitor: Per-layer hit rates over time
 
-#### 54.2 Layer Failure Recovery
-- [ ] Test: 100 RPS, disable Redis mid-test → verify fallback to disk
-- [ ] Test: 100 RPS, disable disk mid-test → verify fallback to memory
-- [ ] Verify: Error rate <1% during layer failure
-- [ ] Verify: Automatic recovery when layer restored
+#### 54.2 Layer Failure Recovery ✅
+- [x] Test: 100 RPS, disable Redis mid-test → verify fallback to disk
+- [x] Test: 100 RPS, disable disk mid-test → verify fallback to memory
+- [x] Verify: Error rate <1% during layer failure
+- [x] Verify: Automatic recovery when layer restored
 
-**Success Criteria**:
+**Implementation**:
+- Fixed tiered cache `get()` to handle layer errors gracefully (continue to next layer instead of propagating error)
+- Added 3 unit tests for layer failure recovery in `src/cache/tiered.rs`
+- Added 7 integration tests in `tests/integration/layer_failure_test.rs`:
+  - `test_memory_only_cache_resilience`
+  - `test_multiple_layer_failures_fallback`
+  - `test_stats_with_partial_layer_failure`
+  - `test_disk_failure_handled_gracefully`
+  - `test_tiered_cache_fallback_when_redis_unavailable` (Docker)
+  - `test_tiered_cache_survives_redis_failure` (Docker)
+  - `test_layer_recovery_after_failure` (Docker)
+
+**Success Criteria**: ✅
 - Graceful degradation on layer failure
 - Automatic recovery
 - No data corruption

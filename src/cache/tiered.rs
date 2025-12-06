@@ -125,9 +125,10 @@ impl TieredCache {
 impl Cache for TieredCache {
     async fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
         // Check each layer in order (fastest to slowest)
+        // On layer error, log and continue to next layer (graceful degradation)
         for (layer_index, layer) in self.layers.iter().enumerate() {
-            match layer.get(key).await? {
-                Some(entry) => {
+            match layer.get(key).await {
+                Ok(Some(entry)) => {
                     // Found in this layer
 
                     // If found in a slower layer (not the first/fastest), promote to faster layers
@@ -153,8 +154,19 @@ impl Cache for TieredCache {
                     // Return the entry immediately
                     return Ok(Some(entry));
                 }
-                None => {
+                Ok(None) => {
                     // Miss - continue to next layer
+                    continue;
+                }
+                Err(e) => {
+                    // Layer error - log and continue to next layer (graceful degradation)
+                    // This allows the cache to remain functional even if one layer is down
+                    tracing::warn!(
+                        layer_index = layer_index,
+                        error = %e,
+                        key = %format!("{}/{}", key.bucket, key.object_key),
+                        "Cache layer error during get, falling back to next layer"
+                    );
                     continue;
                 }
             }
@@ -1130,5 +1142,188 @@ mod tests {
                 idx
             );
         }
+    }
+
+    // Mock cache that always fails - for testing layer failure recovery
+    struct FailingMockCache {
+        name: String,
+    }
+
+    impl FailingMockCache {
+        fn new(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Cache for FailingMockCache {
+        async fn get(&self, _key: &CacheKey) -> Result<Option<CacheEntry>, CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+
+        async fn set(&self, _key: CacheKey, _entry: CacheEntry) -> Result<(), CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+
+        async fn delete(&self, _key: &CacheKey) -> Result<bool, CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+
+        async fn clear(&self) -> Result<(), CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+
+        async fn clear_bucket(&self, _bucket: &str) -> Result<usize, CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+
+        async fn stats(&self) -> Result<CacheStats, CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+
+        async fn stats_bucket(&self, _bucket: &str) -> Result<CacheStats, CacheError> {
+            Err(CacheError::RedisConnectionFailed(format!(
+                "{} layer connection failed",
+                self.name
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_falls_back_to_next_layer_on_error() {
+        // Test: get() gracefully falls back to next layer when a layer errors
+        // This tests the layer failure recovery behavior (Phase 54.2)
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        // Create a failing layer (simulates Redis being down) and a working layer
+        let failing_redis = FailingMockCache::new("redis");
+        let working_disk = MockCache::new("disk");
+
+        // Set an entry in the working disk layer
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "fallback.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data from working layer"),
+            "text/plain".to_string(),
+            "etag-fallback".to_string(),
+            None,
+            Some(Duration::from_secs(3600)),
+        );
+
+        working_disk.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Create tiered cache: failing redis first, then working disk
+        // In real scenario, memory -> disk -> redis, but redis might be down
+        let tiered = TieredCache::new(vec![Box::new(failing_redis), Box::new(working_disk)]);
+
+        // Get from tiered cache - should skip failing layer and find in disk
+        let result = tiered.get(&key).await;
+
+        // Should succeed (Ok) not propagate the error
+        assert!(result.is_ok(), "Should not propagate layer error");
+
+        let retrieved = result.unwrap();
+        assert!(retrieved.is_some(), "Should find entry in fallback layer");
+
+        let entry = retrieved.unwrap();
+        assert_eq!(entry.data, Bytes::from("data from working layer"));
+    }
+
+    #[tokio::test]
+    async fn test_get_returns_none_when_all_layers_fail_or_miss() {
+        // Test: get() returns None when all layers either error or miss
+        // This ensures graceful degradation even with layer failures
+
+        // Create a failing layer and an empty working layer
+        let failing_redis = FailingMockCache::new("redis");
+        let empty_disk = MockCache::new("disk"); // Empty, will return None
+
+        let tiered = TieredCache::new(vec![Box::new(failing_redis), Box::new(empty_disk)]);
+
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "nonexistent.txt".to_string(),
+            etag: None,
+        };
+
+        // Get from tiered cache - redis fails, disk misses
+        let result = tiered.get(&key).await;
+
+        // Should succeed (Ok) with None, not propagate the error
+        assert!(result.is_ok(), "Should not propagate layer error");
+        assert!(
+            result.unwrap().is_none(),
+            "Should return None on all misses/failures"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_recovers_from_first_layer_failure() {
+        // Test: get() recovers when first (fastest) layer fails
+        // Simulates memory cache failure with fallback to disk and redis
+        use bytes::Bytes;
+        use std::time::Duration;
+
+        let failing_memory = FailingMockCache::new("memory");
+        let working_disk = MockCache::new("disk");
+        let working_redis = MockCache::new("redis");
+
+        // Set entry in both working layers
+        let key = CacheKey {
+            bucket: "test-bucket".to_string(),
+            object_key: "multi-fallback.txt".to_string(),
+            etag: None,
+        };
+
+        let entry = CacheEntry::new(
+            Bytes::from("data from disk"),
+            "text/plain".to_string(),
+            "etag-disk".to_string(),
+            None,
+            Some(Duration::from_secs(3600)),
+        );
+
+        working_disk.set(key.clone(), entry.clone()).await.unwrap();
+        working_redis.set(key.clone(), entry.clone()).await.unwrap();
+
+        // Create tiered cache: failing memory -> working disk -> working redis
+        let tiered = TieredCache::new(vec![
+            Box::new(failing_memory),
+            Box::new(working_disk),
+            Box::new(working_redis),
+        ]);
+
+        // Get from tiered cache - should skip failing memory, find in disk
+        let result = tiered.get(&key).await;
+
+        assert!(result.is_ok(), "Should recover from first layer failure");
+        let retrieved = result.unwrap();
+        assert!(retrieved.is_some(), "Should find entry in fallback layer");
+        assert_eq!(retrieved.unwrap().data, Bytes::from("data from disk"));
     }
 }

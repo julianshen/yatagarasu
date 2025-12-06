@@ -15,7 +15,8 @@ mod integration {
     // mod health_test; // TODO: Fix API mismatch with test_harness
     mod hot_reload_test;
     mod jwt_auth_test;
-    // mod logging_test; // TODO: Fix API mismatch with test_harness
+    mod layer_failure_test; // Phase 54.2: Layer Failure Recovery Tests
+                            // mod logging_test; // TODO: Fix API mismatch with test_harness
     mod metrics_test;
     mod multibucket_test;
     mod opa_test; // Phase 32: OPA Integration
