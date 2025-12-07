@@ -1229,11 +1229,11 @@ due to system contention, but **0% errors** - workloads coexist without failures
 - [x] Test: Returns 403 without admin claim
 - [x] Impl: Admin role verification
 
-#### 65.2 Enhanced Cache Stats
-- [ ] Test: Stats include per-bucket breakdown
-- [ ] Test: Metrics include layer label (memory, disk, redis)
-- [ ] Test: Metrics include bucket label
-- [ ] Impl: Enhanced metrics collection
+#### 65.2 Enhanced Cache Stats ✅
+- [x] Test: Stats include per-bucket breakdown
+- [x] Test: Metrics include layer label (memory, disk, redis)
+- [x] Test: Metrics include bucket label
+- [x] Impl: Enhanced metrics collection
 
 #### 65.3 Cache Write-Through Improvements
 - [ ] Test: set() writes to memory synchronously
