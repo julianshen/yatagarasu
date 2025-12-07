@@ -1,0 +1,114 @@
+# Docker Compose setup for multi-instance testing with shared Redis cache
+# Phase 63: Multi-Instance Testing
+# Usage: docker-compose -f docker-compose.multi-instance.yml up -d --scale yatagarasu=N
+
+version: '3.8'
+
+services:
+  # MinIO S3-compatible storage (shared backend)
+  minio:
+    image: minio/minio:latest
+    container_name: multi-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - multi-net
+
+  # MinIO setup - creates buckets and test data
+  minio-setup:
+    image: minio/mc:latest
+    container_name: multi-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 3
+        mc alias set myminio http://minio:9000 minioadmin minioadmin
+        mc mb --ignore-existing myminio/test-bucket
+        mc anonymous set public myminio/test-bucket
+        for i in $$(seq 1 100); do
+          echo "Test content for file $$i" | mc pipe myminio/test-bucket/file-$$i.txt
+        done
+        dd if=/dev/urandom of=/tmp/test-10kb.bin bs=1K count=10 2>/dev/null
+        dd if=/dev/urandom of=/tmp/test-100kb.bin bs=1K count=100 2>/dev/null
+        mc cp /tmp/test-10kb.bin myminio/test-bucket/large-10kb.bin
+        mc cp /tmp/test-100kb.bin myminio/test-bucket/large-100kb.bin
+        echo "MinIO setup complete with 102 test files"
+    networks:
+      - multi-net
+
+  # Redis shared cache
+  redis:
+    image: redis:7-alpine
+    container_name: multi-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - multi-net
+
+  # Yatagarasu proxy instances (scaled)
+  yatagarasu:
+    image: yatagarasu:multi-test
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      AWS_ACCESS_KEY_PUBLIC: minioadmin
+      AWS_SECRET_KEY_PUBLIC: minioadmin
+      JWT_SECRET: test-secret-key-for-local-development-only
+      RUST_LOG: info,yatagarasu::cache=debug
+    volumes:
+      - ./config.multi-instance.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - multi-net
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 256M
+
+  # Nginx load balancer
+  nginx:
+    image: nginx:alpine
+    container_name: multi-nginx
+    ports:
+      - "8080:80"
+      - "9090:9090"
+    volumes:
+      - ./nginx.multi-instance.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - yatagarasu
+    networks:
+      - multi-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  multi-net:
+    driver: bridge

@@ -1,0 +1,49 @@
+# Yatagarasu configuration for multi-instance testing with shared Redis
+# Phase 63: Multi-Instance Testing
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: test
+    path_prefix: "/test"
+    s3:
+      endpoint: "http://minio:9000"
+      region: "us-east-1"
+      bucket: "test-bucket"
+      access_key: "${AWS_ACCESS_KEY_PUBLIC}"
+      secret_key: "${AWS_SECRET_KEY_PUBLIC}"
+    auth:
+      enabled: false
+
+# Tiered cache with shared Redis as the distributed layer
+cache:
+  enabled: true
+  cache_layers: ["memory", "redis"]
+
+  # Local memory cache (per-instance)
+  memory:
+    enabled: true
+    max_memory_cache_mb: 64
+    max_entry_size_mb: 5
+
+  # Shared Redis cache (cross-instance)
+  redis:
+    enabled: true
+    redis_url: "redis://redis:6379"
+    redis_db: 0
+    redis_key_prefix: "yatagarasu"
+    redis_ttl_seconds: 3600
+    connection_timeout_ms: 5000
+    operation_timeout_ms: 2000
+    min_pool_size: 2
+    max_pool_size: 10
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

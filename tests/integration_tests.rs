@@ -20,6 +20,7 @@ mod integration {
     mod layer_failure_test; // Phase 54.2: Layer Failure Recovery Tests
                             // mod logging_test; // TODO: Fix API mismatch with test_harness
     mod metrics_test;
+    mod multi_instance_test; // Phase 63: Multi-Instance Testing
     mod multibucket_test;
     mod opa_test; // Phase 32: OPA Integration
     mod openfga_e2e_test; // Phase 49: OpenFGA E2E Tests (HTTP → Proxy → OpenFGA → S3)
