@@ -175,7 +175,7 @@ pub fn correlation_id_from_header(header_value: Option<&str>) -> String {
 
 /// Request context that accumulates information during request processing
 /// and is converted to an AuditLogEntry at the end.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RequestContext {
     /// Unique correlation ID for request tracing
     pub correlation_id: String,
