@@ -7,6 +7,8 @@ resources:
   - namespace.yaml
   - minio.yaml
   - yatagarasu.yaml
+  - hpa.yaml
+  - pdb.yaml
   - tests.yaml
 
 commonLabels:
