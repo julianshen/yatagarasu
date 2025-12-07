@@ -1,0 +1,21 @@
+# Cargo audit configuration for Yatagarasu
+# See: https://rustsec.org/
+
+[advisories]
+# List of advisory IDs to ignore
+ignore = [
+    # RUSTSEC-2024-0437: proc-macro-error unmaintained
+    # This crate is transitively pulled in by several dependencies.
+    # It's unmaintained but there's no security vulnerability, just lack of maintenance.
+    # Impact: None - this only affects compile-time proc-macro error handling.
+    "RUSTSEC-2024-0437",
+
+    # RUSTSEC-2023-0071: Marvin Attack - potential key recovery in RSA decryption
+    # This only affects RSA PKCS#1 v1.5 decryption operations.
+    # Yatagarasu uses RSA for JWT signature VERIFICATION (public key ops), not decryption.
+    # Impact: None - we don't use RSA private key decryption operations.
+    "RUSTSEC-2023-0071",
+]
+
+# Warn about unmaintained crates (but don't fail)
+informational_warnings = ["unmaintained"]
