@@ -1,10 +1,10 @@
 use super::test_harness::*;
-use yatagarasu::audit::{AuditLogEntry, AsyncAuditFileWriter, CacheStatus};
-use yatagarasu::config::RotationPolicy;
 use chrono::{DateTime, Utc};
 use std::io::{self, BufReader, Read, Write};
 use std::time::Duration;
 use tempfile::tempdir;
+use yatagarasu::audit::{AsyncAuditFileWriter, AuditLogEntry, CacheStatus};
+use yatagarasu::config::RotationPolicy;
 
 #[tokio::test]
 #[ignore] // Marked as ignore because it requires file system access and potentially specific timing
@@ -16,10 +16,10 @@ async fn test_async_audit_file_writer_unbuffered() -> Result<(), anyhow::Error> 
     // Initialize AsyncAuditFileWriter with buffer_size: 0 (unbuffered)
     let mut writer = AsyncAuditFileWriter::new(
         &log_file_path,
-        1000,                    // max_size_mb (large value to prevent rotation)
-        1,                     // max_backup_files
-        RotationPolicy::Size,  // rotation_policy
-        0,                     // buffer_size: 0 for unbuffered
+        1000,                 // max_size_mb (large value to prevent rotation)
+        1,                    // max_backup_files
+        RotationPolicy::Size, // rotation_policy
+        0,                    // buffer_size: 0 for unbuffered
     )?;
 
     // Create some audit log entries
@@ -77,7 +77,13 @@ async fn test_async_audit_file_writer_unbuffered() -> Result<(), anyhow::Error> 
     let mut combined_content = String::new();
     for entry in std::fs::read_dir(dir.path())? {
         let path = entry?.path();
-        if path.is_file() && path.file_name().unwrap_or_default().to_string_lossy().starts_with("audit.log") {
+        if path.is_file()
+            && path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with("audit.log")
+        {
             combined_content.push_str(&std::fs::read_to_string(&path)?);
         }
     }
@@ -86,12 +92,20 @@ async fn test_async_audit_file_writer_unbuffered() -> Result<(), anyhow::Error> 
     let entry2_json = serde_json::to_string(&entry2)?;
     let large_entry_json = serde_json::to_string(&large_entry)?;
 
-    assert!(combined_content.contains(&entry1_json), "Entry 1 not found in combined content after shutdown");
-    assert!(combined_content.contains(&entry2_json), "Entry 2 not found in combined content after shutdown");
+    assert!(
+        combined_content.contains(&entry1_json),
+        "Entry 1 not found in combined content after shutdown"
+    );
+    assert!(
+        combined_content.contains(&entry2_json),
+        "Entry 2 not found in combined content after shutdown"
+    );
     // Count occurrences of large_entry in combined content
     let large_entry_count = combined_content.matches(&large_entry_json).count();
-    assert_eq!(large_entry_count, 2, "Expected 2 large entries in combined content");
-
+    assert_eq!(
+        large_entry_count, 2,
+        "Expected 2 large entries in combined content"
+    );
 
     // Check if rotated log files exist
     let dir_entries: Vec<_> = std::fs::read_dir(dir.path())?
@@ -101,7 +115,13 @@ async fn test_async_audit_file_writer_unbuffered() -> Result<(), anyhow::Error> 
 
     let old_log_files: Vec<_> = dir_entries
         .iter()
-        .filter(|p| p.file_name().unwrap_or_default().to_string_lossy().starts_with("audit.log.") && p != &&log_file_path)
+        .filter(|p| {
+            p.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with("audit.log.")
+                && p != &&log_file_path
+        })
         .collect();
 
     assert_eq!(old_log_files.len(), 0, "Expected no rotated log files");
