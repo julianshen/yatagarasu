@@ -836,8 +836,8 @@ async fn test_metrics_track_cache_items_count() {
         cache.set(key, entry).await.unwrap();
     }
 
-    // Give a moment for async metrics update
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // Give time for async metrics update (increased for CI environments)
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Verify item count increased
     let items_after = metrics.get_cache_items();
