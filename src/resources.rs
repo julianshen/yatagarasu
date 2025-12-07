@@ -55,7 +55,7 @@ pub fn detect_fd_limit() -> u64 {
                 if rlim.rlim_cur == libc::RLIM_INFINITY {
                     // Use hard limit if it's reasonable, otherwise use default
                     if rlim.rlim_max != libc::RLIM_INFINITY && rlim.rlim_max > 0 {
-                        let limit = rlim.rlim_max as u64;
+                        let limit = rlim.rlim_max;
                         tracing::debug!(
                             limit = limit,
                             "FD soft limit is unlimited, using hard limit"
@@ -68,7 +68,7 @@ pub fn detect_fd_limit() -> u64 {
                 }
 
                 // Use soft limit (can be changed by process)
-                let limit = rlim.rlim_cur as u64;
+                let limit = rlim.rlim_cur;
                 tracing::debug!(limit = limit, "Detected file descriptor soft limit");
                 return limit;
             } else {

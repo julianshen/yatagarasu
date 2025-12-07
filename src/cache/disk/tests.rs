@@ -1628,7 +1628,7 @@ fn test_uring_backend_implements_disk_backend() {
     let _trait_object: Arc<dyn DiskBackend> = Arc::new(backend);
 
     // If this compiles, UringBackend implements DiskBackend trait with Send futures
-    assert!(true, "UringBackend implements DiskBackend trait");
+    // Compile-time assertion - if we get here, the trait is implemented
 }
 
 #[test]
