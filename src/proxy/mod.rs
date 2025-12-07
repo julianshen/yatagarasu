@@ -74,6 +74,28 @@ pub struct YatagarasuProxy {
 }
 
 impl YatagarasuProxy {
+    /// Initialize audit writer from configuration
+    fn initialize_audit_writer(config: &Config) -> Option<Arc<AsyncAuditFileWriter>> {
+        let audit_config = config.audit_log.as_ref()?;
+        if !audit_config.enabled {
+            return None;
+        }
+        let file_config = audit_config.file.as_ref()?;
+        match AsyncAuditFileWriter::new(
+            &file_config.path,
+            file_config.max_file_size_mb,
+            file_config.max_backup_files,
+            file_config.rotation_policy.clone(),
+            file_config.buffer_size,
+        ) {
+            Ok(writer) => Some(Arc::new(writer)),
+            Err(e) => {
+                tracing::error!("Failed to initialize audit file writer: {}", e);
+                None
+            }
+        }
+    }
+
     /// Create a new YatagarasuProxy instance from configuration
     pub fn new(config: Config) -> Self {
         // Normalize config to ensure all buckets have replicas populated (Phase 23: HA support)
@@ -249,32 +271,7 @@ impl YatagarasuProxy {
         }
 
         // Initialize audit writer if enabled
-        let audit_writer = if let Some(ref audit_config) = config.audit_log {
-            if audit_config.enabled {
-                // For now, only file writer is supported
-                if let Some(file_config) = &audit_config.file {
-                    match AsyncAuditFileWriter::new(
-                        &file_config.path,
-                        file_config.max_file_size_mb,
-                        file_config.max_backup_files,
-                        file_config.rotation_policy.clone(),
-                        file_config.buffer_size,
-                    ) {
-                        Ok(writer) => Some(Arc::new(writer)),
-                        Err(e) => {
-                            tracing::error!("Failed to initialize audit file writer: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let audit_writer = Self::initialize_audit_writer(&config);
 
         Self {
             config: Arc::new(config),
@@ -474,32 +471,7 @@ impl YatagarasuProxy {
         }
 
         // Initialize audit writer if enabled
-        let audit_writer = if let Some(ref audit_config) = config.audit_log {
-            if audit_config.enabled {
-                // For now, only file writer is supported
-                if let Some(file_config) = &audit_config.file {
-                    match AsyncAuditFileWriter::new(
-                        &file_config.path,
-                        file_config.max_file_size_mb,
-                        file_config.max_backup_files,
-                        file_config.rotation_policy.clone(),
-                        file_config.buffer_size,
-                    ) {
-                        Ok(writer) => Some(Arc::new(writer)),
-                        Err(e) => {
-                            tracing::error!("Failed to initialize audit file writer: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let audit_writer = Self::initialize_audit_writer(&config);
 
         Self {
             config: Arc::new(config),
@@ -2925,8 +2897,10 @@ impl ProxyHttp for YatagarasuProxy {
             // Check cache for GET and HEAD requests
             // GET: Return full response (headers + body)
             // HEAD: Return headers only (no body) - useful for metadata checks
-            let method = ctx.method().to_string();
-            if method == "GET" || method == "HEAD" {
+            // Check method and extract HEAD flag before any mutable ctx borrows
+            let is_get_or_head = ctx.method() == "GET" || ctx.method() == "HEAD";
+            let is_head_request = ctx.method() == "HEAD";
+            if is_get_or_head {
                 // Cache Bypass Logic: Range requests always bypass cache
                 // Range requests are for partial content (video seeking, parallel downloads)
                 // and we don't cache partial responses
@@ -3074,7 +3048,6 @@ impl ProxyHttp for YatagarasuProxy {
 
                             // For HEAD requests: send only headers (no body)
                             // For GET requests: send headers + body
-                            let is_head_request = method == "HEAD";
 
                             // Write response header (end_stream=true for HEAD, false for GET)
                             session

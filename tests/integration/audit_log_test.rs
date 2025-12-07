@@ -52,7 +52,8 @@ async fn test_async_audit_file_writer_unbuffered() -> Result<(), anyhow::Error> 
     // Test flush
     writer.flush()?;
 
-    // Test rotation (create a file larger than max_size_mb)
+    // Write additional entries to verify multi-entry handling
+    // Note: max_size_mb is set to 1000MB (large), so no rotation will occur
     let large_entry = AuditLogEntry::new(
         "127.0.0.1".to_string(),
         "large_bucket".to_string(),
@@ -60,12 +61,10 @@ async fn test_async_audit_file_writer_unbuffered() -> Result<(), anyhow::Error> 
         "GET".to_string(),
         "/large_path".to_string(),
     )
-    .with_response(200, 1_000_000, 50) // ~1MB
+    .with_response(200, 1_000_000, 50)
     .with_cache_status(CacheStatus::Miss);
 
-    // Write enough entries to trigger rotation
-    // max_size_mb is 1MB, so write 4000 small entries.
-    // Total size will be 4000 * 315 bytes = 1.2MB, which will trigger at least one rotation.
+    // Write two more entries to verify multiple writes work correctly
     for _i in 0..2 {
         writer.write_entry(large_entry.clone())?;
     }
