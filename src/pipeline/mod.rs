@@ -1,6 +1,7 @@
 // Request pipeline module - handles request context and middleware chain
 // Phase 13: Request Pipeline Integration
 
+use crate::audit::RequestContext as AuditRequestContext;
 use crate::auth::Claims;
 use crate::config::BucketConfig;
 use std::collections::HashMap;
@@ -36,6 +37,8 @@ pub struct RequestContext {
     total_response_size: usize,
     /// Retry attempt counter (0-indexed: 0 = first attempt, 1 = first retry)
     retry_attempt: u32,
+    /// Audit context
+    pub audit: AuditRequestContext,
 }
 
 impl RequestContext {
@@ -62,6 +65,7 @@ impl RequestContext {
             should_cache_response: false,
             total_response_size: 0,
             retry_attempt: 0,
+            audit: AuditRequestContext::new(),
         }
     }
 
@@ -88,6 +92,7 @@ impl RequestContext {
             should_cache_response: false,
             total_response_size: 0,
             retry_attempt: 0,
+            audit: AuditRequestContext::new(),
         }
     }
 
@@ -118,6 +123,7 @@ impl RequestContext {
             should_cache_response: false,
             total_response_size: 0,
             retry_attempt: 0,
+            audit: AuditRequestContext::new(),
         }
     }
 
@@ -281,6 +287,11 @@ impl RequestContext {
     pub fn increment_retry_attempt(&mut self) -> u32 {
         self.retry_attempt += 1;
         self.retry_attempt
+    }
+
+    /// Get a mutable reference to the audit context
+    pub fn audit(&mut self) -> &mut AuditRequestContext {
+        &mut self.audit
     }
 }
 

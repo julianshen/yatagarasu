@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
+use crate::audit::AsyncAuditFileWriter;
 use crate::auth::{authenticate_request, AuthError};
 use crate::cache::tiered::TieredCache;
 use crate::cache::{Cache, CacheKey};
@@ -68,6 +69,8 @@ pub struct YatagarasuProxy {
     /// OpenFGA clients per bucket (Phase 49: OpenFGA Integration)
     /// Maps bucket name to OpenFGA client for authorization decisions
     openfga_clients: Arc<HashMap<String, Arc<OpenFgaClient>>>,
+    /// Audit writer for logging requests
+    audit_writer: Option<Arc<AsyncAuditFileWriter>>,
 }
 
 impl YatagarasuProxy {
@@ -133,7 +136,6 @@ impl YatagarasuProxy {
                 retry_policies.insert(bucket.name.clone(), RetryPolicy::default());
             }
         }
-
         // Initialize replica sets for each bucket (Phase 23: HA bucket replication)
         let mut replica_sets = HashMap::new();
         for bucket in &config.buckets {
@@ -246,6 +248,34 @@ impl YatagarasuProxy {
             }
         }
 
+        // Initialize audit writer if enabled
+        let audit_writer = if let Some(ref audit_config) = config.audit_log {
+            if audit_config.enabled {
+                // For now, only file writer is supported
+                if let Some(file_config) = &audit_config.file {
+                    match AsyncAuditFileWriter::new(
+                        &file_config.path,
+                        file_config.max_file_size_mb,
+                        file_config.max_backup_files,
+                        file_config.rotation_policy.clone(),
+                        file_config.buffer_size,
+                    ) {
+                        Ok(writer) => Some(Arc::new(writer)),
+                        Err(e) => {
+                            tracing::error!("Failed to initialize audit file writer: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Self {
             config: Arc::new(config),
             router,
@@ -263,6 +293,7 @@ impl YatagarasuProxy {
             opa_clients: Arc::new(opa_clients),
             opa_cache,
             openfga_clients: Arc::new(openfga_clients),
+            audit_writer,
         }
     }
 
@@ -442,6 +473,34 @@ impl YatagarasuProxy {
             }
         }
 
+        // Initialize audit writer if enabled
+        let audit_writer = if let Some(ref audit_config) = config.audit_log {
+            if audit_config.enabled {
+                // For now, only file writer is supported
+                if let Some(file_config) = &audit_config.file {
+                    match AsyncAuditFileWriter::new(
+                        &file_config.path,
+                        file_config.max_file_size_mb,
+                        file_config.max_backup_files,
+                        file_config.rotation_policy.clone(),
+                        file_config.buffer_size,
+                    ) {
+                        Ok(writer) => Some(Arc::new(writer)),
+                        Err(e) => {
+                            tracing::error!("Failed to initialize audit file writer: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Self {
             config: Arc::new(config),
             router,
@@ -459,6 +518,7 @@ impl YatagarasuProxy {
             opa_clients: Arc::new(opa_clients),
             opa_cache,
             openfga_clients: Arc::new(openfga_clients),
+            audit_writer,
         }
     }
 
@@ -765,6 +825,21 @@ impl ProxyHttp for YatagarasuProxy {
 
     /// Filter and process incoming requests (routing and authentication)
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        // -- Audit Logging: Start Request --
+        if self.audit_writer.is_some() {
+            let req = session.req_header();
+            let audit_ctx = ctx.audit();
+            audit_ctx.http_method = Some(req.method.to_string());
+            audit_ctx.request_path = Some(req.uri.path().to_string());
+            if let Some(ua) = req.headers.get("user-agent").and_then(|v| v.to_str().ok()) {
+                audit_ctx.user_agent = Some(ua.to_string());
+            }
+            if let Some(r) = req.headers.get("referer").and_then(|v| v.to_str().ok()) {
+                audit_ctx.referer = Some(r.to_string());
+            }
+        }
+        // -- End Audit Logging --
+
         // Check concurrency limit FIRST - reject if at max concurrent requests
         let _permit = match self.request_semaphore.try_acquire() {
             Ok(permit) => permit,
@@ -842,6 +917,9 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Extract client IP for logging (X-Forwarded-For aware)
         let client_ip = self.get_client_ip(session);
+        if self.audit_writer.is_some() {
+            ctx.audit().client_ip = Some(client_ip.clone());
+        }
 
         // SECURITY VALIDATIONS (check early before routing)
 
@@ -2478,6 +2556,15 @@ impl ProxyHttp for YatagarasuProxy {
         // Store bucket config in context
         ctx.set_bucket_config(bucket_config.clone());
 
+        // -- Audit Logging: Populate bucket and key --
+        if self.audit_writer.is_some() {
+            let audit_ctx = ctx.audit();
+            audit_ctx.bucket = Some(bucket_config.name.clone());
+            let s3_key = self.router.extract_s3_key(&path).unwrap_or_default();
+            audit_ctx.object_key = Some(s3_key);
+        }
+        // -- End Audit Logging --
+
         // Record bucket metrics
         self.metrics.increment_bucket_count(&bucket_config.name);
 
@@ -2587,6 +2674,9 @@ impl ProxyHttp for YatagarasuProxy {
 
                     match authenticate_request(headers, query_params, jwt_config) {
                         Ok(claims) => {
+                            if self.audit_writer.is_some() {
+                                ctx.audit().user = claims.sub.clone();
+                            }
                             ctx.set_claims(claims);
                             // Record successful authentication
                             self.metrics.increment_auth_success();
@@ -2835,20 +2925,26 @@ impl ProxyHttp for YatagarasuProxy {
             // Check cache for GET and HEAD requests
             // GET: Return full response (headers + body)
             // HEAD: Return headers only (no body) - useful for metadata checks
-            let method = ctx.method();
+            let method = ctx.method().to_string();
             if method == "GET" || method == "HEAD" {
                 // Cache Bypass Logic: Range requests always bypass cache
                 // Range requests are for partial content (video seeking, parallel downloads)
                 // and we don't cache partial responses
-                let headers = ctx.headers();
-                if headers.contains_key("range") || headers.contains_key("Range") {
+                let is_range_request =
+                    ctx.headers().contains_key("range") || ctx.headers().contains_key("Range");
+
+                if is_range_request {
                     tracing::debug!(
                         request_id = %ctx.request_id(),
                         "Range request detected - bypassing cache"
                     );
+                    if self.audit_writer.is_some() {
+                        ctx.audit()
+                            .set_cache_status(crate::audit::CacheStatus::Bypass);
+                    }
                     // Skip cache lookup - fall through to Ok(false) at the end
                 } else {
-                    let bucket_config = ctx.bucket_config().ok_or_else(|| {
+                    let bucket_config = ctx.bucket_config().cloned().ok_or_else(|| {
                         pingora_core::Error::explain(
                             pingora_core::ErrorType::InternalError,
                             "Missing bucket config in context",
@@ -2865,6 +2961,19 @@ impl ProxyHttp for YatagarasuProxy {
                         etag: None, // We don't know the etag yet
                     };
 
+                    // Extract conditional headers before mutable borrow of ctx for audit
+                    let if_none_match = ctx
+                        .headers()
+                        .get("If-None-Match")
+                        .or_else(|| ctx.headers().get("if-none-match"))
+                        .cloned();
+
+                    let if_modified_since = ctx
+                        .headers()
+                        .get("If-Modified-Since")
+                        .or_else(|| ctx.headers().get("if-modified-since"))
+                        .cloned();
+
                     // Try to get from cache (with duration tracking)
                     let cache_start = std::time::Instant::now();
                     let cache_result = cache.get(&cache_key).await;
@@ -2873,15 +2982,15 @@ impl ProxyHttp for YatagarasuProxy {
 
                     match cache_result {
                         Ok(Some(cached_entry)) => {
+                            if self.audit_writer.is_some() {
+                                ctx.audit().set_cache_status(crate::audit::CacheStatus::Hit);
+                            }
                             // Cache hit!
                             // Phase 30.7: ETag validation
                             // Check if client sent If-None-Match header for conditional requests
-                            if let Some(if_none_match) = headers
-                                .get("If-None-Match")
-                                .or_else(|| headers.get("if-none-match"))
-                            {
+                            if let Some(ref client_etag) = if_none_match {
                                 // If ETags match, return 304 Not Modified
-                                if if_none_match == cached_entry.etag.as_str() {
+                                if client_etag == cached_entry.etag.as_str() {
                                     tracing::debug!(
                                         request_id = %ctx.request_id(),
                                         bucket = %bucket_config.name,
@@ -2904,13 +3013,10 @@ impl ProxyHttp for YatagarasuProxy {
                             }
 
                             // Phase 36: Check If-Modified-Since header for conditional requests
-                            if let Some(if_modified_since) = headers
-                                .get("If-Modified-Since")
-                                .or_else(|| headers.get("if-modified-since"))
-                            {
+                            if let Some(ref client_modified_since) = if_modified_since {
                                 // If Last-Modified matches, return 304 Not Modified
                                 if let Some(ref last_modified) = cached_entry.last_modified {
-                                    if if_modified_since == last_modified.as_str() {
+                                    if client_modified_since == last_modified.as_str() {
                                         tracing::debug!(
                                             request_id = %ctx.request_id(),
                                             bucket = %bucket_config.name,
@@ -2989,6 +3095,10 @@ impl ProxyHttp for YatagarasuProxy {
                             return Ok(true); // Short-circuit - don't go to upstream
                         }
                         Ok(None) => {
+                            if self.audit_writer.is_some() {
+                                ctx.audit()
+                                    .set_cache_status(crate::audit::CacheStatus::Miss);
+                            }
                             // Cache miss - continue to upstream
                             tracing::debug!(
                                 request_id = %ctx.request_id(),
@@ -3000,6 +3110,10 @@ impl ProxyHttp for YatagarasuProxy {
                             // Fall through to Ok(false) below
                         }
                         Err(e) => {
+                            if self.audit_writer.is_some() {
+                                ctx.audit()
+                                    .set_cache_status(crate::audit::CacheStatus::Miss);
+                            }
                             // Cache error - log but continue to upstream (don't fail request)
                             tracing::warn!(
                                 request_id = %ctx.request_id(),
@@ -3326,6 +3440,27 @@ impl ProxyHttp for YatagarasuProxy {
             duration_ms = duration_ms,
             "Request completed"
         );
+
+        // -- Audit Logging: Finalize and write log --
+        if let Some(writer) = &self.audit_writer {
+            let audit_ctx = ctx.audit();
+            audit_ctx.set_response_status(status_code);
+            if let Some(resp) = session.response_written() {
+                let content_length = resp
+                    .headers
+                    .get("content-length")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                audit_ctx.set_response_size(content_length);
+            }
+
+            let entry = audit_ctx.to_audit_entry();
+            if let Err(e) = writer.write_entry(entry) {
+                tracing::error!("Failed to write audit entry: {}", e);
+            }
+        }
+        // -- End Audit Logging --
     }
 
     /// Filter upstream responses to add custom headers (request correlation)

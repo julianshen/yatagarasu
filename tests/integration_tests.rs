@@ -6,6 +6,7 @@
 #[allow(clippy::all)]
 mod integration {
     mod admin_auth_test; // Phase 65.1: Admin JWT Authentication
+    mod audit_log_test;
     mod audit_s3_export_test; // Phase 33.6: S3 Export for Audit Logs
     mod backend_failure_test; // Phase 59: Backend Failure Handling
     mod cache_e2e_test;

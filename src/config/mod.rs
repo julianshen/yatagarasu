@@ -67,6 +67,11 @@ fn default_max_backup_files() -> u32 {
     5
 }
 
+/// Default audit buffer size (1MB)
+fn default_audit_buffer_size() -> usize {
+    1024 * 1024
+}
+
 /// File output configuration for audit logs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditFileConfig {
@@ -84,6 +89,11 @@ pub struct AuditFileConfig {
     /// Rotation policy (default: size)
     #[serde(default)]
     pub rotation_policy: RotationPolicy,
+
+    /// Buffer size in bytes (default: 1MB)
+    /// Set to 0 to disable buffering
+    #[serde(default = "default_audit_buffer_size")]
+    pub buffer_size: usize,
 }
 
 /// Syslog transport protocol
