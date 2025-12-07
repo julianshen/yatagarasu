@@ -11,6 +11,7 @@ mod integration {
     mod backend_failure_test; // Phase 59: Backend Failure Handling
     mod cache_e2e_test;
     mod cache_metrics_test; // Phase 65.2: Enhanced Cache Metrics
+    mod cache_write_through_test; // Phase 65.3: Cache Write-Through Tests
     mod chaos_test; // Phase 37: Chaos Engineering Tests
     mod circuit_breaker_test;
     mod concurrency_test;

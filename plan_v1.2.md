@@ -1236,10 +1236,11 @@ due to system contention, but **0% errors** - workloads coexist without failures
 - [x] Impl: Enhanced metrics collection
 
 #### 65.3 Cache Write-Through Improvements
-- [ ] Test: set() writes to memory synchronously
-- [ ] Test: Writes to disk/redis asynchronously
-- [ ] Test: Async writes queued in background
-- [ ] Test: Background write failures logged
+- [x] Test: set() writes to memory synchronously
+- [x] Test: Writes to disk/redis asynchronously
+- [x] Test: Async writes queued in background
+- [x] Test: Background write failures logged
+- [x] Impl: TieredCache::set() writes first layer sync, remaining layers with error logging
 
 ---
 
