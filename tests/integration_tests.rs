@@ -14,6 +14,7 @@ mod integration {
     mod e2e_localstack_test;
     mod error_scenarios_test;
     // mod health_test; // TODO: Fix API mismatch with test_harness
+    mod hot_reload_load_test; // Phase 60: Hot Reload Under Load
     mod hot_reload_test;
     mod jwt_auth_test;
     mod layer_failure_test; // Phase 54.2: Layer Failure Recovery Tests
