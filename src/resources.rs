@@ -44,6 +44,7 @@ pub enum ResourceLevel {
 ///
 /// Returns the soft limit for RLIMIT_NOFILE (number of open files).
 /// Falls back to 10240 if detection fails or limit is unlimited.
+#[allow(clippy::unnecessary_cast)] // rlim_t is u64 on 64-bit Linux, cast needed for portability
 pub fn detect_fd_limit() -> u64 {
     #[cfg(unix)]
     {
@@ -55,7 +56,7 @@ pub fn detect_fd_limit() -> u64 {
                 if rlim.rlim_cur == libc::RLIM_INFINITY {
                     // Use hard limit if it's reasonable, otherwise use default
                     if rlim.rlim_max != libc::RLIM_INFINITY && rlim.rlim_max > 0 {
-                        let limit = rlim.rlim_max;
+                        let limit = rlim.rlim_max as u64;
                         tracing::debug!(
                             limit = limit,
                             "FD soft limit is unlimited, using hard limit"
@@ -68,7 +69,7 @@ pub fn detect_fd_limit() -> u64 {
                 }
 
                 // Use soft limit (can be changed by process)
-                let limit = rlim.rlim_cur;
+                let limit = rlim.rlim_cur as u64;
                 tracing::debug!(limit = limit, "Detected file descriptor soft limit");
                 return limit;
             } else {
