@@ -222,7 +222,7 @@ impl PhaseTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+
     use std::thread;
     use std::time::Duration;
 
@@ -346,7 +346,8 @@ mod tests {
     #[test]
     fn test_phase_timer_start() {
         let timer = PhaseTimer::start();
-        assert!(timer.total_ms() >= 0);
+        // Verify timer can be read (total_ms returns u64, always valid)
+        let _ = timer.total_ms();
     }
 
     #[test]

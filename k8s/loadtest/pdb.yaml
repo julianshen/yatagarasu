@@ -1,0 +1,12 @@
+# Phase 64: PodDisruptionBudget for Yatagarasu
+# Ensures minimum availability during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yatagarasu-pdb
+  namespace: yatagarasu-loadtest
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: yatagarasu

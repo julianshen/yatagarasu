@@ -8,6 +8,11 @@ description = "High-performance S3 proxy built with Cloudflare's Pingora framewo
 license = "MIT"
 repository = "https://github.com/julianshen/yatagarasu"
 
+[features]
+default = []
+# Feature flag for disabling io_uring backend tests (never enabled by default)
+uring_backend_disabled = []
+
 [dependencies]
 # Proxy Framework
 pingora = "0.6"
@@ -21,7 +26,7 @@ tokio = { version = "1.35", features = ["full"] }
 
 # AWS S3 SDK
 aws-sdk-s3 = "1.0"
-aws-config = "1.0"
+aws-config = { version = "1.0", features = ["behavior-version-latest"] }
 aws-credential-types = "1.0"
 
 # JWT Authentication

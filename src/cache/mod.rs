@@ -1088,7 +1088,7 @@ enabled: false
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
         // If this deserializes without error, the test passes
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
     }
 
     #[test]
@@ -1101,7 +1101,7 @@ enabled: false
             redis: RedisCacheConfig::default(),
             cache_layers: vec!["memory".to_string()],
         };
-        assert_eq!(config.enabled, true);
+        assert!(config.enabled);
 
         let config = CacheConfig {
             enabled: false,
@@ -1110,19 +1110,19 @@ enabled: false
             redis: RedisCacheConfig::default(),
             cache_layers: vec!["memory".to_string()],
         };
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
     }
 
     #[test]
     fn test_cache_config_defaults_to_disabled() {
         // Test: CacheConfig defaults to disabled when not specified
         let config = CacheConfig::default();
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
 
         // Also test with empty YAML
         let yaml = r#"{}"#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
     }
 
     #[test]
@@ -1132,7 +1132,7 @@ enabled: false
 enabled: true
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.enabled, true);
+        assert!(config.enabled);
     }
 
     #[test]
@@ -1142,7 +1142,7 @@ enabled: true
 enabled: false
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
     }
 
     // Memory Cache Configuration tests
@@ -1294,7 +1294,7 @@ disk:
   max_disk_cache_size_mb: 5120
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.disk.enabled, true);
+        assert!(config.disk.enabled);
         assert_eq!(config.disk.cache_dir, "/tmp/cache");
         assert_eq!(config.disk.max_disk_cache_size_mb, 5120);
     }
@@ -1335,7 +1335,7 @@ disk:
     fn test_disk_cache_enabled_defaults_to_false() {
         // Test: Can parse disk_cache_enabled (default false)
         let config = DiskCacheConfig::default();
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
 
         // Test explicit enabled
         let yaml = r#"
@@ -1344,7 +1344,7 @@ disk:
   enabled: true
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.disk.enabled, true);
+        assert!(config.disk.enabled);
     }
 
     #[test]
@@ -1387,7 +1387,7 @@ redis:
   redis_ttl_seconds: 7200
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.redis.enabled, true);
+        assert!(config.redis.enabled);
         assert_eq!(
             config.redis.redis_url,
             Some("redis://localhost:6379".to_string())
@@ -1485,7 +1485,7 @@ redis:
     fn test_redis_enabled_defaults_to_false() {
         // Test: Can parse redis_enabled (default false)
         let config = RedisCacheConfig::default();
-        assert_eq!(config.enabled, false);
+        assert!(!config.enabled);
 
         // Test explicit enabled
         let yaml = r#"
@@ -1495,7 +1495,7 @@ redis:
   redis_url: redis://localhost:6379
 "#;
         let config: CacheConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.redis.enabled, true);
+        assert!(config.redis.enabled);
     }
 
     #[test]
@@ -1740,7 +1740,7 @@ max_item_size_mb: 5
         };
 
         let merged = override_config.merge_with_global(&global);
-        assert_eq!(merged.enabled, false);
+        assert!(!merged.enabled);
     }
 
     #[test]
@@ -1808,7 +1808,7 @@ max_item_size_mb: 5
         };
 
         let merged = override_config.merge_with_global(&global);
-        assert_eq!(merged.enabled, true);
+        assert!(merged.enabled);
         assert_eq!(merged.memory.max_item_size_mb, 10);
         assert_eq!(merged.memory.default_ttl_seconds, 3600);
     }
@@ -2913,7 +2913,7 @@ max_item_size_mb: 5
         assert!(entry1.last_accessed_at > entry2.last_accessed_at);
 
         // Can sort by last_accessed_at for LRU ordering
-        let mut entries = vec![&entry1, &entry2, &entry3];
+        let mut entries = [&entry1, &entry2, &entry3];
         entries.sort_by_key(|e| e.last_accessed_at);
 
         // After sorting, least recently accessed should be first
@@ -3555,7 +3555,7 @@ max_item_size_mb: 5
     fn test_can_create_cache_module() {
         // Test: Can create cache module in src/cache/mod.rs
         // This test passes if the module compiles
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3619,7 +3619,7 @@ max_item_size_mb: 5
         // Test: Cache module has module-level documentation
         // This is verified by checking the file has doc comments
         // The test passes if the module compiles with documentation
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3628,7 +3628,7 @@ max_item_size_mb: 5
         // Documentation is verified at compile time
         // This test ensures the type exists and is documented
         let _config = CacheConfig::default();
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3637,7 +3637,7 @@ max_item_size_mb: 5
         // Documentation is verified at compile time
         // This test ensures the trait exists and is documented
         fn _accepts_cache<T: Cache>(_cache: &T) {}
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3649,7 +3649,7 @@ max_item_size_mb: 5
             object_key: "key".to_string(),
             etag: None,
         };
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3665,7 +3665,7 @@ max_item_size_mb: 5
             None,
             None,
         );
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3836,7 +3836,7 @@ cache:
     fn test_add_moka_dependency() {
         // Test: Add `moka = { version = "0.12", features = ["future"] }` to Cargo.toml
         // This test passes if the module compiles with moka dependency
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[tokio::test]
@@ -3846,7 +3846,7 @@ cache:
 
         // If this compiles, the import works
         let _: Option<Cache<String, String>> = None;
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3857,7 +3857,7 @@ cache:
         // Verify the enum exists and has expected variants
         let _cause = RemovalCause::Size;
         let _cause = RemovalCause::Expired;
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -3866,7 +3866,7 @@ cache:
         // This test passes if the module compiles
         use moka::future::Cache;
         let _: Option<Cache<CacheKey, CacheEntry>> = None;
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[tokio::test]
@@ -4008,7 +4008,7 @@ cache:
     fn test_can_create_memory_cache_struct() {
         // Test: Can create MemoryCache struct (compiles)
         let _cache: Option<MemoryCache> = None;
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[tokio::test]
@@ -4920,7 +4920,7 @@ cache:
         };
 
         // If this compiles, the test passes
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[tokio::test]
@@ -5503,7 +5503,7 @@ cache:
 
         // Count should be approximately 5
         let count = cache.entry_count();
-        assert!(count >= 4 && count <= 6); // Allow tolerance for eventual consistency
+        assert!((4..=6).contains(&count)); // Allow tolerance for eventual consistency
     }
 
     #[tokio::test]
@@ -6153,7 +6153,7 @@ cache:
     fn test_can_create_null_cache() {
         // Test: Can create NullCache struct
         let _cache = NullCache;
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
@@ -6702,7 +6702,7 @@ cache:
 
         // Weighted size should be within limits
         let size = cache.weighted_size();
-        assert!(size <= 1 * 1024 * 1024 * 2); // Allow 2x for async eviction
+        assert!(size <= 1024 * 1024 * 2); // Allow 2x for async eviction
     }
 
     #[tokio::test]
@@ -7049,21 +7049,21 @@ cache:
         // Test: All MemoryCache unit tests pass
         // This test serves as documentation that we have comprehensive coverage
         // If we're running this test, all unit tests passed
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
     fn test_no_clippy_warnings() {
         // Test: No clippy warnings in cache module
         // This is verified by CI/CD but documented here
-        assert!(true);
+        // Test passes if it compiles
     }
 
     #[test]
     fn test_code_formatted_with_rustfmt() {
         // Test: Code formatted with rustfmt
         // This is verified by CI/CD but documented here
-        assert!(true);
+        // Test passes if it compiles
     }
 
     // =========================================================================

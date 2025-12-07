@@ -131,7 +131,7 @@ mod tests {
         // Should use hash format
         assert!(key.starts_with("prefix:hash:"));
         // Hash should be 64 characters (SHA256 hex)
-        assert!(key.contains(&":hash:"));
+        assert!(key.contains(":hash:"));
     }
 
     #[test]

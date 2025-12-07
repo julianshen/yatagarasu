@@ -107,6 +107,14 @@ pub struct Metrics {
     cache_get_durations: Mutex<Vec<u64>>, // microseconds
     cache_set_durations: Mutex<Vec<u64>>, // microseconds
 
+    // Phase 65.2: Per-bucket and per-layer cache metrics
+    // Key format: "bucket:layer" where layer is "memory", "disk", or "redis"
+    cache_hits_by_bucket_layer: Mutex<HashMap<String, u64>>,
+    cache_misses_by_bucket_layer: Mutex<HashMap<String, u64>>,
+    cache_evictions_by_layer: Mutex<HashMap<String, u64>>, // Per-layer evictions
+    cache_size_by_layer: Mutex<HashMap<String, u64>>,      // Per-layer size in bytes
+    cache_items_by_layer: Mutex<HashMap<String, u64>>,     // Per-layer item count
+
     // Phase 32: OPA authorization metrics
     opa_cache_hits: AtomicU64,
     opa_cache_misses: AtomicU64,
@@ -166,6 +174,12 @@ impl Metrics {
             cache_items: AtomicU64::new(0),
             cache_get_durations: Mutex::new(Vec::new()),
             cache_set_durations: Mutex::new(Vec::new()),
+            // Phase 65.2: Per-bucket and per-layer cache metrics
+            cache_hits_by_bucket_layer: Mutex::new(HashMap::new()),
+            cache_misses_by_bucket_layer: Mutex::new(HashMap::new()),
+            cache_evictions_by_layer: Mutex::new(HashMap::new()),
+            cache_size_by_layer: Mutex::new(HashMap::new()),
+            cache_items_by_layer: Mutex::new(HashMap::new()),
             // Phase 32: OPA metrics
             opa_cache_hits: AtomicU64::new(0),
             opa_cache_misses: AtomicU64::new(0),
@@ -261,6 +275,96 @@ impl Metrics {
     /// Update cache items gauge (Phase 30.8)
     pub fn set_cache_items(&self, item_count: u64) {
         self.cache_items.store(item_count, Ordering::Relaxed);
+    }
+
+    // =========================================================================
+    // Phase 65.2: Per-bucket and Per-layer Cache Metrics
+    // =========================================================================
+
+    /// Increment cache hit counter with bucket and layer labels (Phase 65.2)
+    pub fn increment_cache_hit_with_labels(&self, bucket: &str, layer: &str) {
+        // Update global counter
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+        // Update per-bucket-layer counter
+        let key = format!("{}:{}", bucket, layer);
+        if let Ok(mut counts) = self.cache_hits_by_bucket_layer.lock() {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    /// Increment cache miss counter with bucket and layer labels (Phase 65.2)
+    pub fn increment_cache_miss_with_labels(&self, bucket: &str, layer: &str) {
+        // Update global counter
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+        // Update per-bucket-layer counter
+        let key = format!("{}:{}", bucket, layer);
+        if let Ok(mut counts) = self.cache_misses_by_bucket_layer.lock() {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    /// Increment cache eviction counter with layer label (Phase 65.2)
+    pub fn increment_cache_eviction_with_layer(&self, layer: &str) {
+        // Update global counter
+        self.cache_evictions.fetch_add(1, Ordering::Relaxed);
+        // Update per-layer counter
+        if let Ok(mut counts) = self.cache_evictions_by_layer.lock() {
+            *counts.entry(layer.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    /// Update cache size gauge with layer label (Phase 65.2)
+    pub fn set_cache_size_with_layer(&self, layer: &str, size_bytes: u64) {
+        if let Ok(mut sizes) = self.cache_size_by_layer.lock() {
+            sizes.insert(layer.to_string(), size_bytes);
+        }
+    }
+
+    /// Update cache items gauge with layer label (Phase 65.2)
+    pub fn set_cache_items_with_layer(&self, layer: &str, item_count: u64) {
+        if let Ok(mut items) = self.cache_items_by_layer.lock() {
+            items.insert(layer.to_string(), item_count);
+        }
+    }
+
+    /// Get cache hits by bucket and layer (Phase 65.2)
+    pub fn get_cache_hits_by_bucket_layer(&self) -> HashMap<String, u64> {
+        self.cache_hits_by_bucket_layer
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get cache misses by bucket and layer (Phase 65.2)
+    pub fn get_cache_misses_by_bucket_layer(&self) -> HashMap<String, u64> {
+        self.cache_misses_by_bucket_layer
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get cache evictions by layer (Phase 65.2)
+    pub fn get_cache_evictions_by_layer(&self) -> HashMap<String, u64> {
+        self.cache_evictions_by_layer
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get cache size by layer (Phase 65.2)
+    pub fn get_cache_size_by_layer(&self) -> HashMap<String, u64> {
+        self.cache_size_by_layer
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get cache items by layer (Phase 65.2)
+    pub fn get_cache_items_by_layer(&self) -> HashMap<String, u64> {
+        self.cache_items_by_layer
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
     }
 
     // =========================================================================
@@ -1271,6 +1375,72 @@ impl Metrics {
             "yatagarasu_cache_purges_total {}\n",
             self.cache_purges.load(Ordering::Relaxed)
         ));
+
+        // Phase 65.2: Per-bucket and per-layer cache metrics
+        output.push_str(
+            "\n# HELP yatagarasu_cache_hits_by_bucket_layer Cache hits by bucket and layer\n",
+        );
+        output.push_str("# TYPE yatagarasu_cache_hits_by_bucket_layer counter\n");
+        if let Ok(hits) = self.cache_hits_by_bucket_layer.lock() {
+            for (key, count) in hits.iter() {
+                // key format: "bucket:layer"
+                if let Some((bucket, layer)) = key.split_once(':') {
+                    output.push_str(&format!(
+                        "yatagarasu_cache_hits_by_bucket_layer{{bucket=\"{}\",layer=\"{}\"}} {}\n",
+                        bucket, layer, count
+                    ));
+                }
+            }
+        }
+
+        output.push_str(
+            "\n# HELP yatagarasu_cache_misses_by_bucket_layer Cache misses by bucket and layer\n",
+        );
+        output.push_str("# TYPE yatagarasu_cache_misses_by_bucket_layer counter\n");
+        if let Ok(misses) = self.cache_misses_by_bucket_layer.lock() {
+            for (key, count) in misses.iter() {
+                // key format: "bucket:layer"
+                if let Some((bucket, layer)) = key.split_once(':') {
+                    output.push_str(&format!(
+                        "yatagarasu_cache_misses_by_bucket_layer{{bucket=\"{}\",layer=\"{}\"}} {}\n",
+                        bucket, layer, count
+                    ));
+                }
+            }
+        }
+
+        output.push_str("\n# HELP yatagarasu_cache_evictions_by_layer Cache evictions by layer\n");
+        output.push_str("# TYPE yatagarasu_cache_evictions_by_layer counter\n");
+        if let Ok(evictions) = self.cache_evictions_by_layer.lock() {
+            for (layer, count) in evictions.iter() {
+                output.push_str(&format!(
+                    "yatagarasu_cache_evictions_by_layer{{layer=\"{}\"}} {}\n",
+                    layer, count
+                ));
+            }
+        }
+
+        output.push_str("\n# HELP yatagarasu_cache_size_by_layer Cache size in bytes by layer\n");
+        output.push_str("# TYPE yatagarasu_cache_size_by_layer gauge\n");
+        if let Ok(sizes) = self.cache_size_by_layer.lock() {
+            for (layer, size) in sizes.iter() {
+                output.push_str(&format!(
+                    "yatagarasu_cache_size_by_layer{{layer=\"{}\"}} {}\n",
+                    layer, size
+                ));
+            }
+        }
+
+        output.push_str("\n# HELP yatagarasu_cache_items_by_layer Cache item count by layer\n");
+        output.push_str("# TYPE yatagarasu_cache_items_by_layer gauge\n");
+        if let Ok(items) = self.cache_items_by_layer.lock() {
+            for (layer, count) in items.iter() {
+                output.push_str(&format!(
+                    "yatagarasu_cache_items_by_layer{{layer=\"{}\"}} {}\n",
+                    layer, count
+                ));
+            }
+        }
 
         output
     }

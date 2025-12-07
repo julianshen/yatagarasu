@@ -455,6 +455,17 @@ pub fn verify_claims(claims: &Claims, rules: &[ClaimRule]) -> bool {
     true
 }
 
+/// Verify admin claims for cache management API access (Phase 65.1)
+/// Returns true if admin_claims is empty (no admin restriction) or all admin claims match
+pub fn verify_admin_claims(claims: &Claims, admin_rules: &[ClaimRule]) -> bool {
+    // If no admin rules configured, admin access is not restricted
+    if admin_rules.is_empty() {
+        return true;
+    }
+    // All admin claim rules must match
+    verify_claims(claims, admin_rules)
+}
+
 pub fn is_auth_required(jwt_config: &Option<JwtConfig>) -> bool {
     match jwt_config {
         Some(config) => config.enabled,
@@ -467,6 +478,8 @@ pub enum AuthError {
     MissingToken,
     InvalidToken(String),
     ClaimsVerificationFailed,
+    /// Admin claim verification failed (Phase 65.1)
+    AdminAccessDenied,
 }
 
 impl std::fmt::Display for AuthError {
@@ -482,6 +495,12 @@ impl std::fmt::Display for AuthError {
                 write!(
                     f,
                     "JWT claims verification failed: required claims do not match"
+                )
+            }
+            AuthError::AdminAccessDenied => {
+                write!(
+                    f,
+                    "Admin access denied: JWT does not contain required admin claims"
                 )
             }
         }

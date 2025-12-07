@@ -167,7 +167,7 @@ mod tests {
 
         // MessagePack binary starts with specific markers
         // We just verify it's binary (not text)
-        assert!(bytes.len() > 0);
+        assert!(!bytes.is_empty());
         // MessagePack uses compact binary format
         assert!(bytes.len() < 500); // Much smaller than JSON
     }

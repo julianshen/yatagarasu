@@ -1539,7 +1539,42 @@ impl ProxyHttp for YatagarasuProxy {
 
                         // Authenticate request
                         match authenticate_request(&headers, &query_params, jwt_config) {
-                            Ok(_claims) => {
+                            Ok(claims) => {
+                                // Phase 65.1: Verify admin claims
+                                if !crate::auth::verify_admin_claims(
+                                    &claims,
+                                    &jwt_config.admin_claims,
+                                ) {
+                                    tracing::warn!(
+                                        request_id = %ctx.request_id(),
+                                        "Cache purge admin claims verification failed"
+                                    );
+
+                                    let response_json = serde_json::json!({
+                                        "status": "error",
+                                        "message": "Admin access denied: insufficient privileges",
+                                    });
+
+                                    let response_body = response_json.to_string();
+
+                                    let mut header = ResponseHeader::build(403, None)?;
+                                    header.insert_header("Content-Type", "application/json")?;
+                                    header.insert_header(
+                                        "Content-Length",
+                                        response_body.len().to_string(),
+                                    )?;
+
+                                    session
+                                        .write_response_header(Box::new(header), false)
+                                        .await?;
+                                    session
+                                        .write_response_body(Some(response_body.into()), true)
+                                        .await?;
+
+                                    self.metrics.increment_status_count(403);
+                                    return Ok(true);
+                                }
+
                                 tracing::debug!(
                                     request_id = %ctx.request_id(),
                                     "Cache purge request authenticated successfully"
@@ -1707,7 +1742,41 @@ impl ProxyHttp for YatagarasuProxy {
                         let query_params = Self::extract_query_params(req);
 
                         match authenticate_request(&headers, &query_params, jwt_config) {
-                            Ok(_claims) => {
+                            Ok(claims) => {
+                                // Phase 65.1: Verify admin claims
+                                if !crate::auth::verify_admin_claims(
+                                    &claims,
+                                    &jwt_config.admin_claims,
+                                ) {
+                                    tracing::warn!(
+                                        request_id = %ctx.request_id(),
+                                        bucket = %bucket_name,
+                                        "Cache purge admin claims verification failed"
+                                    );
+
+                                    let response_json = serde_json::json!({
+                                        "status": "error",
+                                        "message": "Admin access denied: insufficient privileges",
+                                    });
+                                    let response_body = response_json.to_string();
+
+                                    let mut header = ResponseHeader::build(403, None)?;
+                                    header.insert_header("Content-Type", "application/json")?;
+                                    header.insert_header(
+                                        "Content-Length",
+                                        response_body.len().to_string(),
+                                    )?;
+
+                                    session
+                                        .write_response_header(Box::new(header), false)
+                                        .await?;
+                                    session
+                                        .write_response_body(Some(response_body.into()), true)
+                                        .await?;
+                                    self.metrics.increment_status_count(403);
+                                    return Ok(true);
+                                }
+
                                 tracing::debug!(
                                     request_id = %ctx.request_id(),
                                     bucket = %bucket_name,

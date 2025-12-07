@@ -2,7 +2,7 @@
 //!
 //! Benchmarks for request parsing, range header parsing, and response header construction.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use yatagarasu::s3::parse_range_header;
 
 /// Benchmark single range parsing (most common case)
