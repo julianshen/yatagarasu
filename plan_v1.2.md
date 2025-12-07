@@ -1224,10 +1224,10 @@ due to system contention, but **0% errors** - workloads coexist without failures
 
 **Objective**: Enhanced cache management APIs
 
-#### 65.1 Admin JWT Authentication (Optional)
-- [ ] Test: Requires admin claim in JWT
-- [ ] Test: Returns 403 without admin claim
-- [ ] Impl: Admin role verification
+#### 65.1 Admin JWT Authentication (Optional) ✅
+- [x] Test: Requires admin claim in JWT
+- [x] Test: Returns 403 without admin claim
+- [x] Impl: Admin role verification
 
 #### 65.2 Enhanced Cache Stats
 - [ ] Test: Stats include per-bucket breakdown

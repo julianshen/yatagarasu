@@ -728,6 +728,10 @@ pub struct JwtConfig {
     pub token_sources: Vec<TokenSource>,
     #[serde(default)]
     pub claims: Vec<ClaimRule>,
+    /// Admin claim rules for cache management API access (Phase 65.1)
+    /// These claims are checked for /admin/* endpoints
+    #[serde(default)]
+    pub admin_claims: Vec<ClaimRule>,
     /// Multiple keys for key rotation support
     #[serde(default)]
     pub keys: Vec<JwtKey>,

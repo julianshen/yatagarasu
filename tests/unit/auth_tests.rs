@@ -2557,6 +2557,7 @@ fn test_passes_request_through_when_auth_disabled() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     });
 
     let auth_required = is_auth_required(&jwt_config);
@@ -2590,6 +2591,7 @@ fn test_passes_request_through_when_auth_disabled() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     });
 
     let auth_required = is_auth_required(&jwt_config_enabled);
@@ -2655,6 +2657,7 @@ fn test_extracts_and_validates_jwt_when_auth_enabled() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     // Create headers with the JWT
@@ -2712,6 +2715,7 @@ fn test_returns_missing_token_error_when_jwt_missing_and_auth_required() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     // Create empty headers and query params (no token provided)
@@ -2755,6 +2759,7 @@ fn test_returns_invalid_token_error_when_jwt_invalid_and_auth_required() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     // Create headers with an invalid JWT (malformed, wrong signature, expired, etc.)
@@ -2839,6 +2844,7 @@ fn test_returns_claims_verification_failed_when_jwt_valid_but_claims_dont_match(
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     // Create headers with the valid JWT
@@ -2927,6 +2933,7 @@ fn test_attaches_validated_claims_to_request_context() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     // Create headers with the JWT
@@ -3026,6 +3033,7 @@ fn test_error_response_includes_clear_error_message() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     let headers = HashMap::new();
@@ -3120,6 +3128,7 @@ fn test_error_response_includes_clear_error_message() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     let mut headers3 = HashMap::new();
@@ -3585,6 +3594,7 @@ fn test_rs256_authenticate_request_with_config() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     let mut headers = HashMap::new();
@@ -3646,6 +3656,7 @@ fn test_es256_authenticate_request_with_config() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     let mut headers = HashMap::new();
@@ -3711,6 +3722,7 @@ fn test_rs256_rejects_token_signed_with_wrong_key() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: None,
+        admin_claims: vec![],
     };
 
     let mut headers = HashMap::new();
@@ -4846,6 +4858,7 @@ fn test_authenticate_request_enforces_algorithm() {
         keys: vec![],
         jwks_url: None,
         jwks_refresh_interval_secs: Some(300),
+        admin_claims: vec![],
     };
 
     let mut headers = HashMap::new();
