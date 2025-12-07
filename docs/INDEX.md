@@ -1,7 +1,7 @@
 # Yatagarasu Documentation Index
 
-**Version**: v1.0.0 (Production Ready)
-**Status**: Released November 15, 2025
+**Version**: v1.2.0 (Production Ready)
+**Status**: Released December 2025
 
 ---
 
@@ -161,6 +161,57 @@
   - How to reproduce performance results
   - Resource monitoring scripts
   - Test file generation
+
+---
+
+## v1.2.0 Documentation (NEW)
+
+### Performance & Benchmarks
+- **[BENCHMARK_RESULTS_V1.2.md](BENCHMARK_RESULTS_V1.2.md)** - Criterion Benchmark Results
+  - JWT validation: 1.78µs (561x faster than target)
+  - Routing: 95.9ns (104x faster than target)
+  - S3 signature: 5.91µs (17x faster than target)
+  - Cache hit: 319ns (3,131x faster than target)
+  - Scaling recommendations and tuning guide
+
+### Operations
+- **[OPERATIONS.md](OPERATIONS.md)** - Production Operations Guide
+  - Endurance test results (24-hour stability)
+  - Prometheus metrics and Grafana queries
+  - Alert thresholds (critical, warning, info)
+  - Failure recovery procedures
+  - Runbook for common issues
+
+### Authentication
+- **[JWT_AUTHENTICATION.md](JWT_AUTHENTICATION.md)** - JWT Authentication Guide
+  - RS256/RS384/RS512 (RSA) support
+  - ES256/ES384 (ECDSA) support
+  - JWKS integration with auto-refresh
+  - Token sources (header, query, custom)
+  - Claims verification with operators
+  - Admin claims for cache management API
+
+### Deployment
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Multi-Instance Deployment Guide
+  - Horizontal scaling patterns
+  - Load balancer configuration (Nginx, HAProxy)
+  - Shared Redis cache setup
+  - Kubernetes deployment manifests
+  - Docker Compose multi-instance
+  - HPA (Horizontal Pod Autoscaler) configuration
+
+### Authorization
+- **[OPENFGA.md](OPENFGA.md)** - OpenFGA Relationship-Based Authorization
+  - ReBAC (Relationship-Based Access Control)
+  - Object hierarchies for S3 paths
+  - Team/user permission models
+  - Integration with JWT claims
+  - Caching strategy
+
+- **[OPA_POLICIES.md](OPA_POLICIES.md)** - OPA Policy-Based Authorization
+  - Rego policy examples
+  - Path-based access control
+  - Rate limiting policies
 
 ---
 
