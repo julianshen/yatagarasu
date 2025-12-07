@@ -27,6 +27,7 @@ mod integration {
     mod range_requests_test;
     mod rate_limit_test;
     mod redis_auth_test; // Phase 53.2: Redis Advanced Configuration Tests
+    mod replica_failover_test; // Phase 59.3: Replica Failover Integration Tests
     mod replica_set_test;
     mod retry_test;
     mod security_test;
