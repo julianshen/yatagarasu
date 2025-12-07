@@ -127,8 +127,10 @@ fn test_primary_failover_to_backup() {
     let backup_port = get_unique_port();
 
     // Start Primary (500) and Backup (200)
-    let mut primary_server = start_mock_s3_server(primary_port, "500").expect("Failed to start primary");
-    let mut backup_server = start_mock_s3_server(backup_port, "200").expect("Failed to start backup");
+    let mut primary_server =
+        start_mock_s3_server(primary_port, "500").expect("Failed to start primary");
+    let mut backup_server =
+        start_mock_s3_server(backup_port, "200").expect("Failed to start backup");
 
     if !is_port_open(primary_port) || !is_port_open(backup_port) {
         println!("Skipping test - Mock servers failed to start");
@@ -153,9 +155,13 @@ fn test_primary_failover_to_backup() {
     let result = replica_set.try_request(|replica| {
         let url = format!("{}/key", replica.client.config.endpoint.as_ref().unwrap());
         let resp = client.get(&url).send().map_err(|e| e.to_string())?;
-        
+
         if resp.status().is_success() {
-            Ok(format!("{}:{}", replica.name, resp.text().unwrap_or_default()))
+            Ok(format!(
+                "{}:{}",
+                replica.name,
+                resp.text().unwrap_or_default()
+            ))
         } else {
             Err(format!("{} returned {}", replica.name, resp.status()))
         }
@@ -165,11 +171,21 @@ fn test_primary_failover_to_backup() {
     // Verify failover happened
     assert!(result.is_ok(), "Request should succeed via failover");
     let success_msg = result.unwrap();
-    assert!(success_msg.starts_with("backup:"), "Should be served by backup");
-    assert!(success_msg.contains("success"), "Should return success body");
-    
+    assert!(
+        success_msg.starts_with("backup:"),
+        "Should be served by backup"
+    );
+    assert!(
+        success_msg.contains("success"),
+        "Should return success body"
+    );
+
     // Verify failover speed (<5s target)
-    assert!(duration < Duration::from_secs(5), "Failover took too long: {:?}", duration);
+    assert!(
+        duration < Duration::from_secs(5),
+        "Failover took too long: {:?}",
+        duration
+    );
     println!("✓ Primary failover took {:?}", duration);
 
     let _ = primary_server.kill();
@@ -202,7 +218,7 @@ fn test_tertiary_fallback() {
     let result = replica_set.try_request(|replica| {
         let url = format!("{}/key", replica.client.config.endpoint.as_ref().unwrap());
         let resp = client.get(&url).send().map_err(|e| e.to_string())?;
-        
+
         if resp.status().is_success() {
             Ok(replica.name.clone())
         } else {
@@ -223,28 +239,30 @@ fn test_tertiary_fallback() {
 fn test_primary_recovery_circuit_breaker() {
     // This test verifies that after the primary recovers, traffic eventually flows back to it.
     // It relies on the circuit breaker transition from Open -> HalfOpen -> Closed.
-    
+
     let primary_port = get_unique_port();
     let backup_port = get_unique_port();
 
     // Start Primary (500 - failing) and Backup (200)
-    let mut primary_server = start_mock_s3_server(primary_port, "500").expect("Failed to start primary");
-    let mut backup_server = start_mock_s3_server(backup_port, "200").expect("Failed to start backup");
+    let mut primary_server =
+        start_mock_s3_server(primary_port, "500").expect("Failed to start primary");
+    let mut backup_server =
+        start_mock_s3_server(backup_port, "200").expect("Failed to start backup");
 
     let mut replicas = vec![
         create_test_replica("primary", primary_port, 1),
         create_test_replica("backup", backup_port, 2),
     ];
-    
+
     // Configure aggressive circuit breaker for testing
     // Note: S3Replica struct doesn't expose circuit breaker config directly in its definition,
     // but ReplicaSet initializes them with defaults.
-    // We can't easily change the default config without modifying the code, 
+    // We can't easily change the default config without modifying the code,
     // so we'll have to work with the defaults (5 failures, 60s timeout).
-    // Wait, 60s is too long for a test. 
+    // Wait, 60s is too long for a test.
     //
     // However, we can manually trigger failures to open the circuit.
-    
+
     let replica_set = ReplicaSet::new(&replicas).expect("Failed to create ReplicaSet");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(1))
@@ -256,32 +274,36 @@ fn test_primary_recovery_circuit_breaker() {
     println!("Triggering failures to open circuit breaker...");
     for i in 0..6 {
         let _ = replica_set.try_request(|replica| {
-             let url = format!("{}/key", replica.client.config.endpoint.as_ref().unwrap());
-             let resp = client.get(&url).send().map_err(|e| e.to_string())?;
-             if resp.status().is_success() {
-                 Ok(replica.name.clone())
-             } else {
-                 Err("fail".to_string())
-             }
+            let url = format!("{}/key", replica.client.config.endpoint.as_ref().unwrap());
+            let resp = client.get(&url).send().map_err(|e| e.to_string())?;
+            if resp.status().is_success() {
+                Ok(replica.name.clone())
+            } else {
+                Err("fail".to_string())
+            }
         });
     }
-    
+
     // Check state - should be using backup
     let result = replica_set.try_request(|replica| {
         let url = format!("{}/key", replica.client.config.endpoint.as_ref().unwrap());
         let resp = client.get(&url).send().map_err(|e| e.to_string())?;
         if resp.status().is_success() {
-             Ok(replica.name.clone())
-         } else {
-             Err("fail".to_string())
-         }
+            Ok(replica.name.clone())
+        } else {
+            Err("fail".to_string())
+        }
     });
-    assert_eq!(result.unwrap(), "backup", "Should be using backup after primary failure");
+    assert_eq!(
+        result.unwrap(),
+        "backup",
+        "Should be using backup after primary failure"
+    );
 
     // 2. Restart Primary as healthy (200)
     let _ = primary_server.kill();
     primary_server = start_mock_s3_server(primary_port, "200").expect("Failed to restart primary");
-    
+
     // 3. We cannot wait 60s for the default circuit breaker timeout in a unit test.
     // Since we can't inject a custom circuit breaker config into `ReplicaSet` (it hardcodes `CircuitBreakerConfig::default()`),
     // we can't verify automatic recovery without waiting 60s.
@@ -289,7 +311,7 @@ fn test_primary_recovery_circuit_breaker() {
     // Ideally, we would refactor `ReplicaSet` to accept CB config.
     // For this test, verifying that we failover to backup is the critical part for HA.
     // The circuit breaker logic itself is tested in unit tests.
-    
+
     println!("✓ Primary recovery test (Partial): Verified failover. Skipping recovery wait due to 60s default timeout.");
 
     let _ = primary_server.kill();
