@@ -168,9 +168,9 @@ mod tests {
         let hits_before = metrics.hits.get();
         let misses_before = metrics.misses.get();
 
-        // Just verify we can read the values
-        assert!(hits_before >= 0);
-        assert!(misses_before >= 0);
+        // Just verify we can read the values (they exist)
+        let _ = hits_before;
+        let _ = misses_before;
     }
 
     #[test]

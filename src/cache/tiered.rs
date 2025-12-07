@@ -1130,17 +1130,10 @@ mod tests {
 
         // Each layer should have valid stats structure
         for (idx, layer_stats) in per_layer.iter().enumerate() {
-            // Verify stats fields exist
-            assert!(
-                layer_stats.hits >= 0,
-                "Layer {} should have valid hits count",
-                idx
-            );
-            assert!(
-                layer_stats.misses >= 0,
-                "Layer {} should have valid misses count",
-                idx
-            );
+            // Verify stats fields exist by reading them
+            let _ = (layer_stats.hits, layer_stats.misses);
+            // Layer index should match
+            assert!(idx < per_layer.len(), "Layer {} index should be valid", idx);
         }
     }
 

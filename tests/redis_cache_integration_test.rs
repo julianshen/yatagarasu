@@ -10,7 +10,7 @@ use yatagarasu::cache::redis::{RedisCache, RedisConfig};
 async fn test_can_create_redis_cache_new_async() {
     // Test: Can create RedisCache::new(config) async
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -37,7 +37,7 @@ async fn test_can_create_redis_cache_new_async() {
 async fn test_constructor_creates_connection_manager() {
     // Test: Constructor creates ConnectionManager
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -67,7 +67,7 @@ async fn test_constructor_creates_connection_manager() {
 async fn test_constructor_connects_to_redis_server() {
     // Test: Constructor connects to Redis server
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -152,7 +152,7 @@ async fn test_returns_error_if_redis_url_invalid() {
 async fn test_health_check_returns_true_when_redis_alive() {
     // Test: health_check() returns true if Redis responsive
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -177,7 +177,7 @@ async fn test_health_check_uses_ping_command() {
     // Test: health_check() uses PING command
     // This is verified by the fact that it succeeds - PING is the standard health check
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -202,7 +202,7 @@ async fn test_get_retrieves_entry_from_redis() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -250,7 +250,7 @@ async fn test_get_returns_none_if_key_doesnt_exist() {
     use yatagarasu::cache::CacheKey;
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -281,7 +281,7 @@ async fn test_set_stores_entry_in_redis() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -325,7 +325,7 @@ async fn test_get_and_set_roundtrip() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -372,7 +372,7 @@ async fn test_delete_removes_key_from_redis() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -423,7 +423,7 @@ async fn test_delete_returns_ok_if_key_existed() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -463,7 +463,7 @@ async fn test_delete_returns_ok_if_key_didnt_exist() {
     use yatagarasu::cache::CacheKey;
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -496,7 +496,7 @@ async fn test_delete_uses_del_command() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -538,7 +538,7 @@ async fn test_clear_removes_all_keys_with_prefix() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -595,7 +595,7 @@ async fn test_clear_uses_scan_for_safe_iteration() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -641,7 +641,7 @@ async fn test_clear_does_not_affect_other_prefixes() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -700,7 +700,7 @@ async fn test_clear_handles_large_key_count() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -742,7 +742,7 @@ async fn test_clear_returns_zero_when_no_keys() {
     // Test: Returns 0 when cache is already empty
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -769,7 +769,7 @@ async fn test_stats_returns_current_statistics() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -835,7 +835,7 @@ async fn test_stats_returns_hit_count() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -878,7 +878,7 @@ async fn test_stats_returns_miss_count() {
     use yatagarasu::cache::CacheKey;
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -913,7 +913,7 @@ async fn test_stats_returns_set_count() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -959,7 +959,7 @@ async fn test_stats_returns_eviction_count() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1003,7 +1003,7 @@ async fn test_stats_tracks_operations_atomically() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1062,7 +1062,7 @@ async fn test_sets_redis_ttl_on_entry_insertion() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1130,7 +1130,7 @@ async fn test_calculates_ttl_from_entry_expires_at() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1196,7 +1196,7 @@ async fn test_redis_auto_expires_entries() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1252,7 +1252,7 @@ async fn test_get_double_checks_entry_not_expired_locally() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1308,7 +1308,7 @@ async fn test_can_store_and_retrieve_medium_entries_100kb() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);
@@ -1360,7 +1360,7 @@ async fn test_can_store_and_retrieve_large_entries_1mb() {
     use yatagarasu::cache::{CacheEntry, CacheKey};
 
     let docker = Cli::default();
-    let redis_image = RunnableImage::from(Redis::default());
+    let redis_image = RunnableImage::from(Redis);
     let redis_container = docker.run(redis_image);
 
     let redis_port = redis_container.get_host_port_ipv4(6379);

@@ -339,9 +339,10 @@ tracing:
 
     #[test]
     fn test_exporter_type_parsing() {
-        let mut config = TracingConfig::default();
-
-        config.exporter = "otlp".to_string();
+        let mut config = TracingConfig {
+            exporter: "otlp".to_string(),
+            ..Default::default()
+        };
         assert_eq!(config.exporter_type(), ExporterType::Otlp);
 
         config.exporter = "OTLP".to_string();

@@ -2246,11 +2246,11 @@ cache:
 
         // Verify cache config
         let cache = config.cache.as_ref().unwrap();
-        assert_eq!(cache.enabled, true);
+        assert!(cache.enabled);
         assert_eq!(cache.memory.max_item_size_mb, 10);
         assert_eq!(cache.memory.max_cache_size_mb, 1024);
-        assert_eq!(cache.disk.enabled, false);
-        assert_eq!(cache.redis.enabled, false);
+        assert!(!cache.disk.enabled);
+        assert!(!cache.redis.enabled);
         assert_eq!(cache.cache_layers, vec!["memory"]);
 
         // Verify bucket cache override
@@ -2304,7 +2304,7 @@ cache:
         assert_eq!(merged.memory.max_item_size_mb, 5);
 
         // Global settings should be inherited
-        assert_eq!(merged.enabled, true);
+        assert!(merged.enabled);
         assert_eq!(merged.memory.max_cache_size_mb, 1024);
     }
 

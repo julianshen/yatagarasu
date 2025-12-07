@@ -167,12 +167,12 @@ fn bench_mixed_file_sizes(c: &mut Criterion) {
     let cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 1024 * 1024 * 1024);
 
     let file_sizes = vec![
-        ("1kb", 1 * 1024),
+        ("1kb", 1024),
         ("4kb", 4 * 1024),
         ("16kb", 16 * 1024),
         ("64kb", 64 * 1024),
         ("256kb", 256 * 1024),
-        ("1mb", 1 * 1024 * 1024),
+        ("1mb", 1024 * 1024),
     ];
 
     // Pre-populate cache

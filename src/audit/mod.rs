@@ -3140,11 +3140,11 @@ mod tests {
 
         // Test different facility/severity combinations
         let test_cases = vec![
-            (SyslogFacility::Kern, SyslogSeverity::Emergency, 0 * 8 + 0), // 0
-            (SyslogFacility::User, SyslogSeverity::Info, 1 * 8 + 6),      // 14
+            (SyslogFacility::Kern, SyslogSeverity::Emergency, 0), // 0
+            (SyslogFacility::User, SyslogSeverity::Info, 8 + 6),  // 14
             (SyslogFacility::Daemon, SyslogSeverity::Warning, 3 * 8 + 4), // 28
-            (SyslogFacility::Auth, SyslogSeverity::Error, 4 * 8 + 3),     // 35
-            (SyslogFacility::Local0, SyslogSeverity::Debug, 16 * 8 + 7),  // 135
+            (SyslogFacility::Auth, SyslogSeverity::Error, 4 * 8 + 3), // 35
+            (SyslogFacility::Local0, SyslogSeverity::Debug, 16 * 8 + 7), // 135
             (SyslogFacility::Local7, SyslogSeverity::Critical, 23 * 8 + 2), // 186
         ];
 
