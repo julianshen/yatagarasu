@@ -1,0 +1,129 @@
+# Kustomize Production Example
+#
+# This example demonstrates how to customize the base resources
+# for a production deployment with site-specific configurations.
+#
+# Usage:
+#   kubectl apply -k examples/kubernetes/kustomize-prod/
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: yatagarasu-prod-example
+
+# Use the base resources
+resources:
+  - base
+  - namespace.yaml
+  - pdb.yaml
+
+# Override namespace for this deployment
+namespace: yatagarasu-prod
+
+# Add site-specific labels
+commonLabels:
+  environment: production
+  team: platform
+  cost-center: infrastructure
+
+# Add annotations for monitoring and compliance
+commonAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  owner: platform-team@example.com
+
+# Production patches
+patches:
+  # Increase replica count for production
+  - target:
+      kind: Deployment
+      name: yatagarasu
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+  # Add pod anti-affinity for HA
+  - target:
+      kind: Deployment
+      name: yatagarasu
+    patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: yatagarasu
+                  topologyKey: kubernetes.io/hostname
+
+  # Add site-specific environment variables
+  - target:
+      kind: Deployment
+      name: yatagarasu
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: SITE_NAME
+          value: us-west-2-prod
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: LOG_FORMAT
+          value: json
+
+  # Increase resource limits for production
+  - target:
+      kind: Deployment
+      name: yatagarasu
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: "2"
+            memory: 512Mi
+
+# Use ConfigMapGenerator to create site-specific config
+configMapGenerator:
+  - name: yatagarasu-config
+    files:
+      - config.yaml
+    options:
+      disableNameSuffixHash: true
+
+# Reference secrets that must be created separately
+# See README.md for secret creation instructions
+secretGenerator:
+  - name: yatagarasu-s3-credentials
+    type: Opaque
+    literals:
+      - AWS_ACCESS_KEY_ASSETS=REPLACE_ME
+      - AWS_SECRET_KEY_ASSETS=REPLACE_ME
+      - AWS_ACCESS_KEY_MEDIA=REPLACE_ME
+      - AWS_SECRET_KEY_MEDIA=REPLACE_ME
+      - AWS_ACCESS_KEY_PRIVATE=REPLACE_ME
+      - AWS_SECRET_KEY_PRIVATE=REPLACE_ME
+    options:
+      disableNameSuffixHash: true
+
+  - name: yatagarasu-jwt-secret
+    type: Opaque
+    literals:
+      - JWT_SECRET=REPLACE_ME
+    options:
+      disableNameSuffixHash: true
+
+# Image customization for site-specific registry
+images:
+  - name: ghcr.io/julianshen/yatagarasu
+    newName: registry.example.com/yatagarasu
+    newTag: "1.2.0"

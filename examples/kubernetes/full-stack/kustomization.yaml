@@ -1,0 +1,94 @@
+# Full Stack Kubernetes Example
+#
+# Complete deployment with all components:
+# - Yatagarasu S3 proxy
+# - Redis for caching
+# - OPA for authorization policies
+# - OpenFGA for fine-grained authorization
+# - PostgreSQL for OpenFGA storage
+# - Ingress for external access
+# - NetworkPolicy for security
+#
+# Usage:
+#   kubectl apply -k examples/kubernetes/full-stack/
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: yatagarasu-full-stack
+
+namespace: yatagarasu-full
+
+commonLabels:
+  app.kubernetes.io/part-of: yatagarasu-stack
+  environment: production
+
+resources:
+  # Namespace
+  - namespace.yaml
+
+  # Core components
+  - yatagarasu-deployment.yaml
+  - yatagarasu-service.yaml
+  - yatagarasu-configmap.yaml
+
+  # Caching
+  - redis-deployment.yaml
+  - redis-service.yaml
+
+  # Authorization - OPA
+  - opa-deployment.yaml
+  - opa-service.yaml
+  - opa-configmap.yaml
+
+  # Authorization - OpenFGA
+  - openfga-deployment.yaml
+  - openfga-service.yaml
+
+  # OpenFGA storage
+  - postgres-deployment.yaml
+  - postgres-service.yaml
+  - postgres-pvc.yaml
+
+  # Networking
+  - ingress.yaml
+  - network-policy.yaml
+
+  # Service account
+  - serviceaccount.yaml
+
+configMapGenerator:
+  - name: yatagarasu-config
+    files:
+      - config.yaml
+    options:
+      disableNameSuffixHash: true
+
+  - name: opa-policy
+    files:
+      - policy.rego
+    options:
+      disableNameSuffixHash: true
+
+secretGenerator:
+  - name: yatagarasu-secrets
+    literals:
+      - JWT_SECRET=change-me-in-production
+      - AWS_ACCESS_KEY=minioadmin
+      - AWS_SECRET_KEY=minioadmin
+    options:
+      disableNameSuffixHash: true
+
+  - name: postgres-credentials
+    literals:
+      - POSTGRES_USER=openfga
+      - POSTGRES_PASSWORD=openfga-password
+      - POSTGRES_DB=openfga
+      - POSTGRES_URI=postgres://openfga:openfga-password@postgres:5432/openfga?sslmode=disable
+    options:
+      disableNameSuffixHash: true
+
+images:
+  - name: ghcr.io/julianshen/yatagarasu
+    newTag: "1.2.0"

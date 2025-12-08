@@ -1,0 +1,99 @@
+# Full Stack Yatagarasu Configuration
+# Demonstrates integration with Redis, OPA, and OpenFGA
+
+server:
+  addr: "0.0.0.0:8080"
+  threads: 4
+
+metrics:
+  enabled: true
+  addr: "0.0.0.0:9090"
+
+logging:
+  level: info
+  format: json
+
+# Multi-tier caching: memory + Redis
+cache:
+  enabled: true
+  memory:
+    max_size: 52428800  # 50MB in-memory cache
+    ttl: 300
+  redis:
+    url: ${REDIS_URL}
+    ttl: 3600
+    key_prefix: "yatagarasu:"
+
+# OPA integration for policy-based authorization
+authorization:
+  opa:
+    enabled: true
+    url: ${OPA_URL}
+    policy_path: /v1/data/yatagarasu/authz/allow
+
+  # OpenFGA for fine-grained access control
+  openfga:
+    enabled: true
+    url: ${OPENFGA_URL}
+    store_id: ${OPENFGA_STORE_ID}
+
+# Bucket configurations
+buckets:
+  - name: public-assets
+    path_prefix: /public
+    s3:
+      bucket: public-assets
+      region: us-east-1
+      endpoint: http://minio:9000
+      access_key: ${AWS_ACCESS_KEY}
+      secret_key: ${AWS_SECRET_KEY}
+    auth:
+      enabled: false
+    cache:
+      enabled: true
+      max_size: 104857600  # 100MB
+
+  - name: user-content
+    path_prefix: /users
+    s3:
+      bucket: user-content
+      region: us-east-1
+      endpoint: http://minio:9000
+      access_key: ${AWS_ACCESS_KEY}
+      secret_key: ${AWS_SECRET_KEY}
+    auth:
+      enabled: true
+      jwt:
+        secret: ${JWT_SECRET}
+        token_sources:
+          - type: bearer_header
+          - type: query_param
+            param_name: token
+      # Use OpenFGA for user-specific access control
+      authorization:
+        type: openfga
+        relation: viewer
+        object_prefix: "document:"
+    cache:
+      enabled: true
+      max_size: 52428800  # 50MB
+
+  - name: admin-only
+    path_prefix: /admin
+    s3:
+      bucket: admin-data
+      region: us-east-1
+      endpoint: http://minio:9000
+      access_key: ${AWS_ACCESS_KEY}
+      secret_key: ${AWS_SECRET_KEY}
+    auth:
+      enabled: true
+      jwt:
+        secret: ${JWT_SECRET}
+        token_sources:
+          - type: bearer_header
+      # Use OPA for role-based access control
+      authorization:
+        type: opa
+    cache:
+      enabled: false  # No caching for admin data

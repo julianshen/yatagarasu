@@ -1,0 +1,77 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: yatagarasu
+  labels:
+    app.kubernetes.io/name: yatagarasu
+    app.kubernetes.io/component: ingress
+  annotations:
+    # NGINX Ingress Controller annotations
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"  # Unlimited for large files
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"  # Stream without buffering
+
+    # Rate limiting (adjust as needed)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+
+    # SSL redirect
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # CORS (uncomment if needed)
+    # nginx.ingress.kubernetes.io/enable-cors: "true"
+    # nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    # nginx.ingress.kubernetes.io/cors-allow-methods: "GET, HEAD, OPTIONS"
+
+    # For AWS ALB Ingress Controller, use these instead:
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/healthcheck-path: /health
+
+spec:
+  ingressClassName: nginx  # Change to 'alb' for AWS, 'traefik' for Traefik
+
+  # TLS configuration
+  tls:
+    - hosts:
+        - s3proxy.example.com
+      secretName: yatagarasu-tls
+
+  rules:
+    - host: s3proxy.example.com
+      http:
+        paths:
+          # Main proxy path
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: yatagarasu
+                port:
+                  name: http
+
+---
+# Optional: Separate ingress for metrics (internal only)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: yatagarasu-metrics
+  labels:
+    app.kubernetes.io/name: yatagarasu
+    app.kubernetes.io/component: metrics-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: metrics.s3proxy.internal
+      http:
+        paths:
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: yatagarasu
+                port:
+                  name: metrics

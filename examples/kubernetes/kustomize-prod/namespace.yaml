@@ -1,0 +1,15 @@
+# Namespace definition for production deployment
+# Apply this first: kubectl apply -f namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yatagarasu-prod
+  labels:
+    app.kubernetes.io/name: yatagarasu
+    environment: production
+  annotations:
+    # Resource quota annotations
+    scheduler.alpha.kubernetes.io/defaultTolerations: "[]"
+    # Network policy annotations
+    net.beta.kubernetes.io/network-policy: |
+      {"ingress":{"isolation":"DefaultDeny"}}

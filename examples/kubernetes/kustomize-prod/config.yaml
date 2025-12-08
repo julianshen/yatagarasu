@@ -1,0 +1,90 @@
+# Site-specific Yatagarasu configuration
+# This overrides the base configuration for production
+
+server:
+  addr: "0.0.0.0:8080"
+  threads: 8
+
+metrics:
+  enabled: true
+  addr: "0.0.0.0:9090"
+
+logging:
+  level: info
+  format: json
+
+# Production bucket configuration
+# Credentials come from Kubernetes secrets
+buckets:
+  - name: assets
+    path_prefix: /assets
+    s3:
+      bucket: company-assets-prod
+      region: us-west-2
+      endpoint: https://s3.us-west-2.amazonaws.com
+      access_key: ${AWS_ACCESS_KEY_ASSETS}
+      secret_key: ${AWS_SECRET_KEY_ASSETS}
+    auth:
+      enabled: false
+    cache:
+      enabled: true
+      max_size: 104857600  # 100MB
+      ttl: 3600
+
+  - name: media
+    path_prefix: /media
+    s3:
+      bucket: company-media-prod
+      region: us-west-2
+      endpoint: https://s3.us-west-2.amazonaws.com
+      access_key: ${AWS_ACCESS_KEY_MEDIA}
+      secret_key: ${AWS_SECRET_KEY_MEDIA}
+    auth:
+      enabled: true
+      jwt:
+        secret: ${JWT_SECRET}
+        token_sources:
+          - type: bearer_header
+          - type: query_param
+            param_name: token
+        required_claims:
+          - claim: aud
+            operator: equals
+            value: media-service
+    cache:
+      enabled: true
+      max_size: 524288000  # 500MB
+      ttl: 7200
+
+  - name: private
+    path_prefix: /private
+    s3:
+      bucket: company-private-prod
+      region: us-west-2
+      endpoint: https://s3.us-west-2.amazonaws.com
+      access_key: ${AWS_ACCESS_KEY_PRIVATE}
+      secret_key: ${AWS_SECRET_KEY_PRIVATE}
+    auth:
+      enabled: true
+      jwt:
+        secret: ${JWT_SECRET}
+        token_sources:
+          - type: bearer_header
+        required_claims:
+          - claim: role
+            operator: in
+            value: ["admin", "internal-service"]
+    cache:
+      enabled: false  # No caching for private content
+
+# Cache warming for frequently accessed content
+cache:
+  warming:
+    enabled: true
+    endpoints:
+      - bucket: assets
+        paths:
+          - /css/main.css
+          - /js/app.js
+          - /images/logo.png
+    interval: 300  # 5 minutes
