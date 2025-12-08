@@ -13,7 +13,7 @@
  * 2. Create store and model using scripts/setup-openfga-loadtest.sh
  *
  * 3. Start the proxy:
- *    cargo run --release -- --config config.loadtest-openfga.yaml
+ *    cargo run --release -- --config config/loadtest/config.loadtest-openfga.yaml
  *
  * Usage:
  *   k6 run k6/openfga-load.js                          # All scenarios

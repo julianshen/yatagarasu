@@ -77,7 +77,7 @@ services:
       AWS_SECRET_KEY_PUBLIC: minioadmin
       RUST_LOG: info
     volumes:
-      - ./config.loadtest-diskcache.yaml:/etc/yatagarasu/config.yaml:ro
+      - ../config/loadtest/config.loadtest-diskcache.yaml:/etc/yatagarasu/config.yaml:ro
       - disk-cache:/var/cache/yatagarasu
     depends_on:
       minio:

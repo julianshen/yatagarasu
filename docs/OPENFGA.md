@@ -41,7 +41,7 @@ docker logs yatagarasu-openfga-setup 2>&1 | grep "Store ID"
 
 # 4. Export the Store ID and start the proxy
 export OPENFGA_STORE_ID=<store_id_from_logs>
-cargo run --release -- --config config.loadtest-openfga.yaml
+cargo run --release -- --config config/loadtest/config.loadtest-openfga.yaml
 
 # 5. Test with different users
 # Alice (viewer) - should succeed
@@ -1350,7 +1350,7 @@ The sample data includes these test users:
 | `openfga/model.json` | Authorization model (types, relations, inheritance) |
 | `openfga/tuples.json` | Sample permission tuples |
 | `scripts/setup-openfga-loadtest.sh` | Manual setup script for local testing |
-| `config.loadtest-openfga.yaml` | Proxy configuration for OpenFGA testing |
+| `config/loadtest/config.loadtest-openfga.yaml` | Proxy configuration for OpenFGA testing |
 | `k6/openfga-load.js` | k6 load test script for OpenFGA |
 
 ---

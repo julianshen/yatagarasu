@@ -24,7 +24,7 @@ cargo bench --bench cache_comparison
 cargo bench --bench disk_cache
 
 # Run k6 proxy pipeline tests (requires running proxy)
-./target/release/yatagarasu --config config.k6test.yaml &
+./target/release/yatagarasu --config config/loadtest/config.k6test.yaml &
 k6 run k6/proxy-pipeline.js
 ```
 
@@ -110,7 +110,7 @@ Key metrics to watch:
 
 ```bash
 # Start the proxy first
-./target/release/yatagarasu --config config.k6test.yaml &
+./target/release/yatagarasu --config config/loadtest/config.k6test.yaml &
 
 # Run all scenarios
 k6 run k6/proxy-pipeline.js

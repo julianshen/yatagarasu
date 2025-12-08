@@ -12,7 +12,7 @@
 #   ./scripts/setup-openfga-loadtest.sh
 #
 # Then start the proxy:
-#   OPENFGA_STORE_ID=<store_id> cargo run --release -- --config config.loadtest-openfga.yaml
+#   OPENFGA_STORE_ID=<store_id> cargo run --release -- --config config/loadtest/config.loadtest-openfga.yaml
 
 version: '3.8'
 
@@ -129,7 +129,7 @@ services:
       echo 'Next steps:';
       echo '  1. Run: ./scripts/setup-openfga-loadtest.sh';
       echo '  2. Export OPENFGA_STORE_ID from the script output';
-      echo '  3. Start the proxy with config.loadtest-openfga.yaml';
+      echo '  3. Start the proxy with config/loadtest/config.loadtest-openfga.yaml';
       echo '=================================================';
       "
     networks:
@@ -184,7 +184,7 @@ services:
       echo '';
       echo 'To start the proxy, run:';
       echo \"  export OPENFGA_STORE_ID=$$STORE_ID\";
-      echo '  cargo run --release -- --config config.loadtest-openfga.yaml';
+      echo '  cargo run --release -- --config config/loadtest/config.loadtest-openfga.yaml';
       echo '';
       echo 'To run load tests:';
       echo '  k6 run k6/openfga-load.js';

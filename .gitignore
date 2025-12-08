@@ -15,3 +15,11 @@ Thumbs.db
 # Test artifacts
 *.profraw
 *.profdata
+
+# Generated/temporary files
+benchmark_results*.txt
+stability-metrics.log
+*.log
+
+# Coverage reports
+/coverage/

@@ -76,7 +76,7 @@ services:
       JWT_SECRET: test-secret-key-for-local-development-only
       RUST_LOG: info,yatagarasu::cache=debug
     volumes:
-      - ./config.multi-instance.yaml:/etc/yatagarasu/config.yaml:ro
+      - ../config/loadtest/config.multi-instance.yaml:/etc/yatagarasu/config.yaml:ro
     depends_on:
       minio:
         condition: service_healthy

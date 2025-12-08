@@ -588,7 +588,7 @@ mc cp /path/to/test-file.txt local/test-opa/
 
 5. **Start proxy with OPA config**:
 ```bash
-cargo run -- --config config.loadtest-opa.yaml
+cargo run -- --config config/loadtest/config.loadtest-opa.yaml
 ```
 
 ### Running Load Tests

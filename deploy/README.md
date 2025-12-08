@@ -14,7 +14,7 @@ This directory contains Docker Compose configuration and provisioning files for 
 
 ```bash
 # From the project root
-docker-compose -f docker-compose.observability.yml up -d
+docker-compose -f docker/docker-compose.observability.yml up -d
 ```
 
 ### Access the services
@@ -40,13 +40,13 @@ cargo run -- --config config.yaml
 ### Stop the stack
 
 ```bash
-docker-compose -f docker-compose.observability.yml down
+docker-compose -f docker/docker-compose.observability.yml down
 ```
 
 ### Clean up volumes (removes all data)
 
 ```bash
-docker-compose -f docker-compose.observability.yml down -v
+docker-compose -f docker/docker-compose.observability.yml down -v
 ```
 
 ## Metrics Exposed
@@ -93,7 +93,7 @@ Dashboards are automatically loaded from the dashboards directory.
 
 ```bash
 # Start the stack
-docker-compose -f docker-compose.observability.yml up -d
+docker-compose -f docker/docker-compose.observability.yml up -d
 
 # Run integration tests with real Redis
 TEST_S3_ENDPOINT=http://localhost:9000 \
@@ -110,7 +110,7 @@ open http://localhost:3000
 ### Adding custom dashboards
 
 1. Create a new `.json` file in `deploy/grafana/provisioning/dashboards/`
-2. Restart Grafana: `docker-compose -f docker-compose.observability.yml restart grafana`
+2. Restart Grafana: `docker-compose -f docker/docker-compose.observability.yml restart grafana`
 3. Dashboard will be automatically loaded
 
 ## Production Deployment

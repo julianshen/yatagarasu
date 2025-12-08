@@ -9,7 +9,7 @@
 //! - Combined throughput scaling
 //!
 //! Run with: cargo test --test integration_tests multi_instance -- --ignored
-//! Requires: docker-compose -f docker-compose.multi-instance.yml up -d
+//! Requires: docker-compose -f docker/docker-compose.multi-instance.yml up -d
 
 use bytes::Bytes;
 use reqwest::Client;
@@ -38,7 +38,7 @@ fn create_client() -> Client {
 /// - Both instances serve requests correctly
 /// - Load balancer distributes requests
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_2_instances_shared_redis_cache() {
     let client = create_client();
 
@@ -88,7 +88,7 @@ async fn test_2_instances_shared_redis_cache() {
 /// 1. Request file through instance A -> miss, fetches from S3, caches in Redis
 /// 2. Request same file through instance B -> should hit Redis cache
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_cache_sharing_between_instances() {
     let client = create_client();
 
@@ -122,7 +122,7 @@ async fn test_cache_sharing_between_instances() {
 ///
 /// Uses docker-compose --scale to run 5 instances
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml with --scale yatagarasu=5"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml with --scale yatagarasu=5"]
 async fn test_5_instances_shared_redis_cache() {
     let client = create_client();
     let mut upstreams_seen: HashSet<String> = HashSet::new();
@@ -152,7 +152,7 @@ async fn test_5_instances_shared_redis_cache() {
 
 /// Phase 63.1: Test with 10 instances
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml with --scale yatagarasu=10"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml with --scale yatagarasu=10"]
 async fn test_10_instances_shared_redis_cache() {
     let client = create_client();
     let mut upstreams_seen: HashSet<String> = HashSet::new();
@@ -182,7 +182,7 @@ async fn test_10_instances_shared_redis_cache() {
 
 /// Phase 63.1: Verify combined throughput scales with instance count
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_combined_throughput_scales() {
     let client = Arc::new(create_client());
     let request_count = Arc::new(AtomicU64::new(0));
@@ -251,7 +251,7 @@ async fn test_combined_throughput_scales() {
 
 /// Phase 63.2: Test round-robin load balancing
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_round_robin_load_balancing() {
     let client = create_client();
     let mut upstream_counts: std::collections::HashMap<String, u32> =
@@ -296,7 +296,7 @@ async fn test_round_robin_load_balancing() {
 
 /// Phase 63.2: Verify health check endpoint works through load balancer
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_health_check_endpoint() {
     let client = create_client();
 
@@ -315,7 +315,7 @@ async fn test_health_check_endpoint() {
 
 /// Phase 63.3: Verify cache consistency - all instances see same data
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_cache_consistency_across_instances() {
     let client = create_client();
     let url = format!("{}/test/file-99.txt", LB_URL);
@@ -350,7 +350,7 @@ async fn test_cache_consistency_across_instances() {
 
 /// Phase 63.3: Test Redis cache contains shared data
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_redis_contains_cached_data() {
     // Connect directly to Redis to verify cache entries exist
     let redis_client =
@@ -386,7 +386,7 @@ async fn test_redis_contains_cached_data() {
 
 /// Phase 63.1: Verify no cache inconsistencies under concurrent load
 #[tokio::test]
-#[ignore = "requires docker-compose.multi-instance.yml running"]
+#[ignore = "requires docker/docker-compose.multi-instance.yml running"]
 async fn test_no_cache_inconsistencies_under_load() {
     let client = Arc::new(create_client());
     let inconsistencies = Arc::new(AtomicU64::new(0));

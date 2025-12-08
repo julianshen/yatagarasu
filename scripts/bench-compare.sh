@@ -23,13 +23,13 @@ echo ""
 # Step 2: Build Linux Docker image
 echo -e "${BLUE}[2/3] Building Linux Docker image with UringBackend...${NC}"
 echo ""
-docker-compose -f docker-compose.bench.yml build benchmarks
+docker-compose -f docker/docker-compose.bench.yml build benchmarks
 echo ""
 
 # Step 3: Run Linux benchmarks (UringBackend)
 echo -e "${BLUE}[3/3] Running benchmarks on Linux (UringBackend)...${NC}"
 echo ""
-docker-compose -f docker-compose.bench.yml run --rm benchmarks \
+docker-compose -f docker/docker-compose.bench.yml run --rm benchmarks \
     cargo bench --bench disk_cache -- --save-baseline linux-uring 2>&1 | grep -E "(time:|Found|Benchmarking)"
 echo ""
 

@@ -4,7 +4,7 @@
 # This script tests disk cache persistence and recovery after proxy restart.
 #
 # RECOMMENDED: Use docker-compose for easy testing:
-#   docker-compose -f docker-compose.loadtest.yaml up -d
+#   docker-compose -f docker/docker-compose.loadtest.yaml up -d
 #   ./scripts/test-disk-cache-recovery.sh --docker
 #
 # Manual Prerequisites (without docker):
@@ -219,7 +219,7 @@ main() {
     if ! check_proxy_health; then
         log_error "Proxy not running at ${PROXY_URL}"
         if $USE_DOCKER; then
-            echo "Start with: docker-compose -f docker-compose.loadtest.yaml up -d"
+            echo "Start with: docker-compose -f docker/docker-compose.loadtest.yaml up -d"
         else
             echo "Start the proxy first: cargo run --release -- --config config.yaml"
         fi

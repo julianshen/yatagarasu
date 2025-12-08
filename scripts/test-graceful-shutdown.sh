@@ -24,7 +24,7 @@ NC='\033[0m' # No Color
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-CONFIG_FILE="${PROJECT_ROOT}/config.k6test.yaml"
+CONFIG_FILE="${PROJECT_ROOT}/config/loadtest/config.k6test.yaml"
 PROXY_BINARY="${PROJECT_ROOT}/target/release/yatagarasu"
 LOG_FILE="/tmp/yatagarasu-shutdown-test.log"
 RESULTS_FILE="/tmp/graceful-shutdown-results.txt"

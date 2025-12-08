@@ -9,6 +9,7 @@ mod integration {
     mod audit_log_test;
     mod audit_s3_export_test; // Phase 33.6: S3 Export for Audit Logs
     mod backend_failure_test; // Phase 59: Backend Failure Handling
+    mod cache; // Cache integration tests (memory, redis, tiered)
     mod cache_e2e_test;
     mod cache_metrics_test; // Phase 65.2: Enhanced Cache Metrics
     mod cache_write_through_test; // Phase 65.3: Cache Write-Through Tests
