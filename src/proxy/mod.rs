@@ -37,12 +37,13 @@ use crate::s3::{build_get_object_request, build_head_object_request};
 use crate::security::{self, SecurityLimits};
 use std::path::PathBuf;
 use std::str::FromStr;
+use arc_swap::ArcSwap;
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
 /// Handles routing, authentication, and S3 proxying
 pub struct YatagarasuProxy {
-    config: Arc<Config>,
-    router: Router,
+    config: ArcSwap<Config>,
+    router: ArcSwap<Router>,
     metrics: Arc<Metrics>,
     reload_manager: Option<Arc<ReloadManager>>,
     resource_monitor: Arc<ResourceMonitor>,
@@ -274,8 +275,8 @@ impl YatagarasuProxy {
         let audit_writer = Self::initialize_audit_writer(&config);
 
         Self {
-            config: Arc::new(config),
-            router,
+            config: ArcSwap::from_pointee(config),
+            router: ArcSwap::from_pointee(router),
             metrics,
             reload_manager: None,
             resource_monitor,
@@ -301,6 +302,16 @@ impl YatagarasuProxy {
         let router = Router::new(config.buckets.clone());
         let metrics = Arc::new(Metrics::new());
         let reload_manager = Arc::new(ReloadManager::new(config_path));
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = reload_manager.register_signal_handler() {
+                tracing::warn!("Failed to register SIGHUP handler: {}", e);
+            } else {
+                tracing::info!("Registered SIGHUP handler for config reload");
+            }
+        }
+
         // Initialize resource monitor with auto-detected system limits
         let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
         // Initialize request semaphore with max concurrent requests limit
@@ -474,8 +485,8 @@ impl YatagarasuProxy {
         let audit_writer = Self::initialize_audit_writer(&config);
 
         Self {
-            config: Arc::new(config),
-            router,
+            config: ArcSwap::from_pointee(config),
+            router: ArcSwap::from_pointee(router),
             metrics,
             reload_manager: Some(reload_manager),
             resource_monitor,
@@ -501,6 +512,57 @@ impl YatagarasuProxy {
         self
     }
 
+    /// Check for reload request and reload if needed
+    fn check_reload(&self) {
+        if let Some(reload_manager) = &self.reload_manager {
+            if reload_manager.is_reload_requested() {
+                tracing::info!("SIGHUP received, triggering configuration reload");
+                reload_manager.clear_reload_request();
+                let _ = self.reload_configuration();
+            }
+        }
+    }
+
+    /// Reload configuration from disk
+    fn reload_configuration(&self) -> Result<u64, String> {
+        if let Some(reload_manager) = &self.reload_manager {
+            // Load current config to get generation
+            let current_config = self.config.load();
+            let current_generation = current_config.generation;
+
+            match reload_manager.reload_config_with_generation(current_generation) {
+                Ok(new_config) => {
+                    let new_generation = new_config.generation;
+                    tracing::info!(
+                        old_generation = current_generation,
+                        new_generation = new_generation,
+                        "Configuration loaded successfully, applying changes"
+                    );
+
+                    // Create new router
+                    let new_router = Router::new(new_config.buckets.clone());
+
+                    // Update shared state atomically (using ArcSwap)
+                    self.config.store(Arc::new(new_config));
+                    self.router.store(Arc::new(new_router));
+
+                    // Record reload metrics
+                    self.metrics.increment_reload_success();
+                    self.metrics.set_config_generation(new_generation);
+
+                    Ok(new_generation)
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Configuration reload failed");
+                    self.metrics.increment_reload_failure();
+                    Err(e)
+                }
+            }
+        } else {
+            Err("Hot reload not enabled".to_string())
+        }
+    }
+
     /// Initialize the cache from configuration asynchronously
     /// Phase 30: Cache integration
     ///
@@ -511,7 +573,8 @@ impl YatagarasuProxy {
     /// Returns the proxy with cache initialized, or the proxy unchanged if cache is disabled
     pub async fn init_cache(mut self) -> Self {
         // Check if cache is enabled in config
-        if let Some(ref cache_config) = self.config.cache {
+        let config = self.config.load();
+        if let Some(ref cache_config) = config.cache {
             if cache_config.enabled && !cache_config.cache_layers.is_empty() {
                 match TieredCache::from_config(cache_config).await {
                     Ok(tiered_cache) => {
@@ -797,6 +860,13 @@ impl ProxyHttp for YatagarasuProxy {
 
     /// Filter and process incoming requests (routing and authentication)
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        // Check for config reload first
+        self.check_reload();
+
+        // Load config and router atomically for this request
+        let config = self.config.load_full();
+        let router = self.router.load_full();
+
         // -- Audit Logging: Start Request --
         if self.audit_writer.is_some() {
             let req = session.req_header();
@@ -1211,7 +1281,7 @@ impl ProxyHttp for YatagarasuProxy {
             let mut backends_health = serde_json::Map::new();
             let mut all_healthy = true;
 
-            for bucket_config in &self.config.buckets {
+            for bucket_config in &config.buckets {
                 // Get the ReplicaSet for this bucket
                 if let Some(replica_set) = self.replica_sets.get(&bucket_config.name) {
                     // Check health of each replica via circuit breaker state
@@ -1338,9 +1408,9 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Special handling for /admin/reload endpoint (config hot reload)
         if path == "/admin/reload" && method == "POST" {
-            if let Some(reload_manager) = &self.reload_manager {
+            if let Some(_reload_manager) = &self.reload_manager {
                 // Check authentication if JWT is enabled
-                if let Some(jwt_config) = &self.config.jwt {
+                if let Some(jwt_config) = &config.jwt {
                     if jwt_config.enabled {
                         // Extract headers and query params
                         let headers = Self::extract_headers(req);
@@ -1393,25 +1463,19 @@ impl ProxyHttp for YatagarasuProxy {
                 }
 
                 // Attempt to reload configuration
-                let current_generation = self.config.generation;
-                match reload_manager.reload_config_with_generation(current_generation) {
-                    Ok(new_config) => {
+                match self.reload_configuration() {
+                    Ok(new_generation) => {
                         tracing::info!(
                             request_id = %ctx.request_id(),
-                            old_generation = current_generation,
-                            new_generation = new_config.generation,
-                            "Configuration reloaded successfully"
+                            new_generation = new_generation,
+                            "Configuration reloaded successfully via API"
                         );
-
-                        // Record reload metrics
-                        self.metrics.increment_reload_success();
-                        self.metrics.set_config_generation(new_config.generation);
 
                         // Build success response JSON
                         let response_json = serde_json::json!({
                             "status": "success",
                             "message": "Configuration reloaded successfully",
-                            "config_generation": new_config.generation,
+                            "config_generation": new_generation,
                             "timestamp": std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap()
@@ -1504,7 +1568,7 @@ impl ProxyHttp for YatagarasuProxy {
             // Check if cache is enabled
             if let Some(ref cache) = self.cache {
                 // Check authentication if JWT is enabled
-                if let Some(jwt_config) = &self.config.jwt {
+                if let Some(jwt_config) = &config.jwt {
                     if jwt_config.enabled {
                         // Extract headers and query params
                         let headers = Self::extract_headers(req);
@@ -1709,7 +1773,7 @@ impl ProxyHttp for YatagarasuProxy {
 
             if let Some(ref cache) = self.cache {
                 // Check authentication if JWT is enabled
-                if let Some(jwt_config) = &self.config.jwt {
+                if let Some(jwt_config) = &config.jwt {
                     if jwt_config.enabled {
                         let headers = Self::extract_headers(req);
                         let query_params = Self::extract_query_params(req);
@@ -1945,7 +2009,7 @@ impl ProxyHttp for YatagarasuProxy {
             // Check if cache is enabled
             if let Some(ref cache) = self.cache {
                 // Check authentication if JWT is enabled
-                if let Some(jwt_config) = &self.config.jwt {
+                if let Some(jwt_config) = &config.jwt {
                     if jwt_config.enabled {
                         // Extract headers and query params
                         let headers = Self::extract_headers(req);
@@ -2247,7 +2311,7 @@ impl ProxyHttp for YatagarasuProxy {
 
             if let Some(ref cache) = self.cache {
                 // Check authentication if JWT is enabled
-                if let Some(jwt_config) = &self.config.jwt {
+                if let Some(jwt_config) = &config.jwt {
                     if jwt_config.enabled {
                         // Extract headers for auth
                         let headers = Self::extract_headers(req);
@@ -2508,7 +2572,7 @@ impl ProxyHttp for YatagarasuProxy {
         ctx.set_query_params(Self::extract_query_params(req));
 
         // Route request to bucket
-        let bucket_config = match self.router.route(&path) {
+        let bucket_config = match router.route(&path) {
             Some(config) => config,
             None => {
                 // No matching bucket found - return 404
@@ -2532,7 +2596,7 @@ impl ProxyHttp for YatagarasuProxy {
         if self.audit_writer.is_some() {
             let audit_ctx = ctx.audit();
             audit_ctx.bucket = Some(bucket_config.name.clone());
-            let s3_key = self.router.extract_s3_key(&path).unwrap_or_default();
+            let s3_key = router.extract_s3_key(&path).unwrap_or_default();
             audit_ctx.object_key = Some(s3_key);
         }
         // -- End Audit Logging --
@@ -2639,7 +2703,7 @@ impl ProxyHttp for YatagarasuProxy {
         // Check if authentication is required
         if let Some(auth_config) = &bucket_config.auth {
             if auth_config.enabled {
-                if let Some(jwt_config) = &self.config.jwt {
+                if let Some(jwt_config) = &config.jwt {
                     // Authenticate request
                     let headers = ctx.headers();
                     let query_params = ctx.query_params();
@@ -2811,7 +2875,7 @@ impl ProxyHttp for YatagarasuProxy {
 
             if let Some(user) = user_id {
                 // Build OpenFGA object from bucket and path
-                let object_path = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
+                let object_path = router.extract_s3_key(ctx.path()).unwrap_or_default();
                 let object = build_openfga_object(&bucket_config.name, &object_path);
 
                 // Map HTTP method to relation (GET/HEAD→viewer, PUT/POST→editor, DELETE→owner)
@@ -2927,7 +2991,7 @@ impl ProxyHttp for YatagarasuProxy {
 
                     // Construct cache key from bucket and object path
                     // Use router.extract_s3_key for consistent key generation (same as cache set)
-                    let object_key = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
+                    let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
 
                     let cache_key = CacheKey {
                         bucket: bucket_config.name.clone(),
@@ -3112,6 +3176,8 @@ impl ProxyHttp for YatagarasuProxy {
         upstream_request: &mut RequestHeader,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
+        let router = self.router.load_full();
+
         let bucket_config = ctx.bucket_config().ok_or_else(|| {
             pingora_core::Error::explain(
                 pingora_core::ErrorType::InternalError,
@@ -3120,7 +3186,7 @@ impl ProxyHttp for YatagarasuProxy {
         })?;
 
         // Extract S3 key from path
-        let s3_key = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
+        let s3_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
 
         // Phase 23: Use selected replica's config if available
         let (bucket, region, access_key, secret_key, endpoint): (
@@ -3576,7 +3642,8 @@ impl ProxyHttp for YatagarasuProxy {
                     if let (Some(bucket_config), Some(cache)) = (ctx.bucket_config(), &self.cache) {
                         use crate::cache::{CacheEntry, CacheKey};
 
-                        let object_key = self.router.extract_s3_key(ctx.path()).unwrap_or_default();
+                        let router = self.router.load_full();
+                        let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
                         let cache_key = CacheKey {
                             bucket: bucket_config.name.clone(),
                             object_key: object_key.to_string(),
