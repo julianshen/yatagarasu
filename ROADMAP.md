@@ -38,23 +38,36 @@
 
 ## Planned Features
 
-### v1.3.0 - Advanced Operations (Q1 2026)
+### v1.3.0 - Deployment & Documentation (Q1 2026)
 
-**Focus**: Operational improvements and debugging
+**Focus**: Production-ready deployment and comprehensive documentation
 
-- [ ] Admin dashboard web UI
-- [ ] Cache warming/preloading API
-- [ ] Enhanced metrics (SLO tracking, percentile histograms)
-- [ ] Request replay for debugging
-- [ ] Configuration validation endpoint
+#### Cache API
+- [ ] Cache warming/preloading API (pre-fetch frequently accessed objects)
+
+#### Kubernetes Deployment
+- [ ] Helm chart with configurable values
+- [ ] Kustomize base and overlays
+
+#### Deployment Examples
+- [ ] **Docker Compose**: Simple single-instance setup
+- [ ] **Docker Compose**: HA setup with Redis cache
+- [ ] **Docker Compose**: Full stack (HA + OPA + OpenFGA)
+- [ ] **Kubernetes**: Basic deployment with Helm
+- [ ] **Kubernetes**: Production setup with Kustomize overlays
+
+#### Documentation Website (GitHub Pages)
+- [ ] Quick start guide
+- [ ] Configuration tutorials
+- [ ] Architecture & design documents
+- [ ] Deployment examples walkthrough
+- [ ] API reference
+- [ ] Troubleshooting guide
 
 ### v2.0.0 - Extended Capabilities (Future)
 
-**Focus**: New proxy capabilities
-
 Ideas under consideration:
 - WebSocket support for real-time S3 events
-- GraphQL API for object queries
 - Image/video transformation on-the-fly
 - Optional write support (PUT/POST behind feature flag)
 - Multi-region latency-based routing
