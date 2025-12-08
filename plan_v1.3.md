@@ -408,6 +408,42 @@ yatagarasu/
 
 ---
 
+## Development Rules
+
+### Branch and PR Strategy
+
+**IMPORTANT**: Do NOT commit directly to the `master` branch.
+
+1. **Create a feature branch for each phase**:
+   ```bash
+   git checkout -b feature/v1.3-phase1-cache-warming
+   git checkout -b feature/v1.3-phase2-helm-chart
+   git checkout -b feature/v1.3-phase3-kustomize
+   # etc.
+   ```
+
+2. **Create a Pull Request when phase is complete**:
+   - All tests for the phase must pass
+   - PR title: `[v1.3.0] Phase N: <Phase Name>`
+   - PR description includes checklist of completed items
+   - Request review before merging
+
+3. **PR Naming Convention**:
+   - `feature/v1.3-phase1-cache-warming`
+   - `feature/v1.3-phase2-helm-chart`
+   - `feature/v1.3-phase3-kustomize`
+   - `feature/v1.3-phase4-docker-examples`
+   - `feature/v1.3-phase5-k8s-examples`
+   - `feature/v1.3-phase6-documentation`
+   - `feature/v1.3-phase7-integration`
+
+4. **Merge to master only after**:
+   - CI passes
+   - Code review approved (if applicable)
+   - All phase tests are marked complete in plan
+
+---
+
 ## Estimated Effort
 
 | Phase | Items | Complexity |
