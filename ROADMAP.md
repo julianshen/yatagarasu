@@ -1,471 +1,84 @@
 # Yatagarasu - Product Roadmap
 
-**Current Version**: v1.0.0 (Production Ready)  
-**Status**: Released November 15, 2025  
+**Current Version**: v1.2.0
 **Project**: High-Performance S3 Proxy built with Rust and Pingora
 
 ---
 
-## v1.0.0 - Production Release ✅ **COMPLETE**
+## Released Versions
 
-**Released**: November 15, 2025  
-**Status**: All 25 implementation phases complete
+### v1.2.0 - Production Hardening ✅ **RELEASED** (December 2025)
 
-### What's Included
+- SIGHUP hot reload with ArcSwap (zero dropped requests)
+- OpenFGA fine-grained authorization (ReBAC)
+- Multi-architecture Docker images on GHCR
+- CI pipeline stabilization
+- Project structure reorganization
 
-**Core Features**:
-- ✅ High-performance S3 proxy built on Cloudflare Pingora framework
-- ✅ Multi-bucket routing with path-based bucket selection
-- ✅ Per-bucket credential isolation for enhanced security
-- ✅ JWT-based authentication (optional per-bucket)
-- ✅ HTTP Range request support for video streaming and parallel downloads
-- ✅ Zero-copy streaming architecture for large files (constant ~64KB memory per connection)
-- ✅ Configuration hot reload via SIGHUP signal and /admin/reload API endpoint
+### v1.1.0 - Enhanced Features ✅ **RELEASED** (November 2025)
 
-**Authentication & Security**:
-- ✅ Flexible JWT validation from multiple sources (Authorization header, query params, custom headers)
-- ✅ Custom claims verification with operators (equals, contains, in, gt, lt)
-- ✅ Mixed public/private bucket support in single instance
-- ✅ SQL injection prevention in request paths
-- ✅ Path traversal attack protection
-- ✅ Read-only enforcement (PUT/POST/DELETE/PATCH blocked)
-- ✅ Rate limiting (global, per-IP, per-bucket)
-- ✅ Circuit breaker pattern for backend protection
+- Multi-tier caching (Memory/Disk/Redis) with 80%+ hit rates
+- Advanced JWT (RS256/ES256, JWKS endpoints)
+- OPA policy-based authorization
+- Comprehensive audit logging
+- OpenTelemetry distributed tracing
+- IP allowlist/blocklist, per-user rate limiting
 
-**Health & Observability**:
-- ✅ `/health` endpoint for liveness probes
-- ✅ `/ready` endpoint for readiness probes with S3 backend health checks
-- ✅ `/metrics` endpoint with comprehensive Prometheus metrics
-- ✅ Structured logging with request correlation (UUIDs)
-- ✅ Graceful shutdown with SIGTERM/SIGINT/SIGQUIT handling
-- ✅ Startup validation for configuration and dependencies
+### v1.0.0 - Production Release ✅ **RELEASED** (November 2025)
 
-**Performance** (Verified via K6 load testing):
-- ✅ Throughput: 726 req/s baseline (test-limited, capable of 1,000+ req/s)
-- ✅ P95 Latency: 6.7ms (small files), 15.95ms (100 concurrent users)
-- ✅ Streaming TTFB: 24.45ms P95 (4x better than 100ms target)
-- ✅ Stability: 1-hour sustained load, zero crashes, 115GB transferred
-- ✅ Error Rate: 0.00% across all load tests
-- ✅ Memory: Stable usage, ~60-70MB under sustained load
-
-**Deployment & Operations**:
-- ✅ Docker support with official Dockerfile
-- ✅ Docker Compose setup for local development
-- ✅ Kubernetes-ready (liveness/readiness probes)
-- ✅ Configuration via YAML with environment variable substitution
-- ✅ Graceful configuration reload without downtime
-
-**High Availability & Resilience**:
-- ✅ HA bucket replication with automatic failover (see [docs/HA_BUCKET_REPLICATION.md](docs/HA_BUCKET_REPLICATION.md))
-  - Priority-based replica selection
-  - Health monitoring per replica
-  - Circuit breaker integration
-  - Per-replica metrics
-- ✅ Connection pooling (Pingora built-in)
-  - Automatic connection reuse
-  - Connection pool cleanup on shutdown
-  - Per-bucket connection management
-
-**Documentation**:
-- ✅ Complete technical specification (spec.md)
-- ✅ TDD implementation plan with 200+ tests (plan.md)
-- ✅ Comprehensive guides (streaming, caching, config reload, security)
-- ✅ Performance testing report
-- ✅ Docker deployment guide
-- ✅ Specification compliance report
-
-**Testing**:
-- ✅ 200+ unit and integration tests across 25 phases
-- ✅ Comprehensive K6 load testing suite
-- ✅ Performance benchmarks documented
-- ✅ Security testing (SQL injection, path traversal, rate limiting)
-- ✅ Circuit breaker verification
-
-### Deliverables
-
-- **Binary**: Single production-ready binary
-- **Docker**: Multi-stage Dockerfile with optimized image
-- **Docker Compose**: Full local development environment with MinIO
-- **Documentation**: Complete user and developer documentation
-- **Test Suite**: >200 tests with comprehensive coverage
-- **Performance Report**: Verified production-ready performance
-
-### What You Can Do with v1.0.0
-
-```bash
-# Run with Docker
-docker pull ghcr.io/julianshen/yatagarasu:v1.0.0
-docker run -p 8080:8080 -v ./config.yaml:/etc/yatagarasu/config.yaml yatagarasu:v1.0.0
-
-# Run with Docker Compose (includes MinIO for testing)
-docker-compose up
-
-# Run from source
-cargo build --release
-./target/release/yatagarasu --config config.yaml
-
-# Check health
-curl http://localhost:8080/health
-curl http://localhost:8080/ready
-curl http://localhost:8080/metrics
-
-# Proxy S3 requests
-curl http://localhost:8080/public/image.png
-curl -H "Range: bytes=0-1023" http://localhost:8080/public/video.mp4
-
-# Hot reload configuration
-kill -HUP $(pgrep yatagarasu)
-# or via API
-curl -X POST -H "Authorization: Bearer $JWT" http://localhost:8080/admin/reload
-```
-
-### Known Limitations (Acceptable for v1.0)
-
-1. **JWT Algorithms**: HS256 only (RS256/ES256 → v1.1)
-2. **Caching**: ❌ NOT implemented in v1.0 (All files stream directly from S3 → Full caching in v1.1)
-3. **Read-Only**: Write operations intentionally blocked (design decision)
-4. **Pure Streaming**: No local buffering/caching (stateless design, horizontal scaling works)
+- Core S3 proxy on Pingora framework
+- Multi-bucket routing with credential isolation
+- JWT authentication (HS256)
+- HTTP Range requests, zero-copy streaming
+- Health endpoints, Prometheus metrics
+- HA bucket replication with failover
+- Rate limiting, circuit breaker
 
 ---
 
-## v1.1.0 - Enhanced Features 📋 **PLANNED**
+## Planned Features
 
-**Target**: Q1 2026
-**Focus**: Cost optimization through caching + enhanced authentication
+### v1.3.0 - Advanced Operations (Q1 2026)
 
-### Planned Features
+**Focus**: Operational improvements and debugging
 
-#### 1. Advanced Caching Layers 🔴 CRITICAL
-**Priority**: 🔴 **CRITICAL** (Primary v1.1 goal)
-**Effort**: HIGH (1-2 weeks)
+- [ ] Admin dashboard web UI
+- [ ] Cache warming/preloading API
+- [ ] Enhanced metrics (SLO tracking, percentile histograms)
+- [ ] Request replay for debugging
+- [ ] Configuration validation endpoint
 
-- [ ] In-memory LRU cache (heap-based)
-  - Configurable max item size (e.g., cache files <10MB, user can adjust)
-  - Configurable max cache size (e.g., 1GB total, user can adjust)
-  - Configurable TTL per bucket or globally
-- [ ] Disk cache layer (persistent across restarts)
-  - Configurable cache directory and size limits
-- [ ] Redis cache layer (distributed caching)
-  - Configurable Redis connection and eviction policies
-- [ ] Configurable cache hierarchy (memory → disk → Redis)
-  - User defines which layers to enable and in what order
-- [ ] Cache statistics dashboard
-- [ ] Cache purge/invalidation API
+### v2.0.0 - Extended Capabilities (Future)
 
-**Why**:
-- **Cost Optimization**: Dramatically reduce S3 GET request costs (can save 80-95% on AWS bills)
-- **Performance**: Sub-10ms response times for cached content vs 100ms+ from S3
-- **Scalability**: Reduce S3 backend load, enable higher request rates
-- **Reliability**: Continue serving cached content during S3 outages
+**Focus**: New proxy capabilities
 
-**Business Impact**: For high-traffic sites, caching can reduce monthly S3 costs from thousands of dollars to hundreds.
-
-**Example Cost Savings**:
-- Without cache: 10M requests/month × $0.0004/request = **$4,000/month**
-- With 90% cache hit rate: 1M S3 requests × $0.0004 = **$400/month** (90% savings)
-
-#### 2. Advanced JWT Algorithms
-**Priority**: HIGH
-**Effort**: MEDIUM (2-3 days)
-
-- [ ] RS256 (RSA Signature with SHA-256)
-- [ ] ES256 (ECDSA with P-256 and SHA-256)
-- [ ] Multiple key support (key rotation)
-- [ ] JWKS (JSON Web Key Set) endpoint support
-
-**Why**: Support enterprise authentication systems that use RSA/ECDSA
-
-#### 3. Enhanced Observability ✅ COMPLETE
-**Priority**: MEDIUM
-**Effort**: MEDIUM (1 week)
-**Status**: ✅ Implemented in Phase 34
-
-- [x] Distributed tracing (OpenTelemetry)
-  - OTLP, Jaeger, and Zipkin exporters
-  - Configurable sampling ratio
-  - Trace context propagation
-- [x] Request/response logging with filtering
-  - Path filtering (include/exclude patterns)
-  - Status code filtering
-  - Header redaction for sensitive info
-  - Body truncation with configurable max size
-- [x] Slow query logging
-  - Configurable threshold
-  - Phase timing (auth, cache, S3)
-  - Correlation ID inclusion
-- [ ] Enhanced metrics (percentiles, SLOs) - Partial (percentiles exist, SLOs pending)
-
-**Why**: Better debugging and performance monitoring
-
-#### 4. Audit Logging & Compliance ✅ COMPLETE
-**Priority**: HIGH (Elevated - Critical for security/compliance)
-**Effort**: MEDIUM (3-5 days)
-**Status**: ✅ Implemented in Phase 33
-
-- [x] Comprehensive audit log for all requests (who, what, when, from where)
-- [x] Structured JSON audit logs with correlation IDs
-- [x] Audit log includes: client IP, user (from JWT), bucket, object key, action, response status, timestamp
-- [x] Configurable audit log retention and rotation
-  - File-based output with rotation support
-  - Async file writer for performance
-- [x] Audit log export to S3, syslog, or external system
-  - Syslog output support
-  - S3 export with batching logic
-- [x] Sensitive data redaction (e.g., JWT tokens in logs)
-
-**Why**: Essential for security audits, compliance (SOC2, GDPR, HIPAA), incident investigation, and access tracking
-
-#### 5. Advanced Security Features ✅ COMPLETE
-**Priority**: MEDIUM
-**Effort**: LOW-MEDIUM (3-5 days)
-**Status**: ✅ Implemented in Phase 35
-
-- [x] IP allowlist/blocklist per bucket
-  - IpFilterConfig with allowlist and blocklist support
-  - IpRange for single IP and CIDR notation (IPv4/IPv6)
-  - Precedence logic (allowlist > blocklist)
-- [x] Advanced rate limiting (token bucket, sliding window algorithms)
-  - Per-user rate limiting from JWT claims
-  - check_all_with_user() for comprehensive checks
-  - Memory management with cleanup_stale_users()
-- [ ] Enhanced DDoS protection - Partial (rate limiting covers basic DDoS)
-
-**Why**: Additional security hardening for production environments
-
-### v1.1.0 Release Criteria
-
-**🔴 CRITICAL - Must Have**:
-- ✅ **In-memory LRU cache implementation** (Primary v1.1 goal)
-  - Fully configurable: max item size, max cache size, TTL (per-bucket or global)
-  - Example config: cache files <10MB (default, user adjustable)
-  - Target: 80%+ cache hit rate for static assets
-  - Cost savings validation: Reduce S3 requests by 70%+
-- ✅ **At least one persistent cache layer** (disk OR Redis)
-  - Configurable storage limits, eviction policies, directories
-- ✅ **Cache purge/invalidation API**
-- ✅ All v1.0.0 features remain stable
-- ✅ Backward compatible with v1.0.0 configurations
-- ✅ Performance does not regress
-
-**HIGH - Must Have**:
-- ✅ RS256/ES256 JWT support
-- ✅ Audit logging (comprehensive request/access tracking) - Phase 33 COMPLETE
-
-**Nice to Have** ✅ COMPLETE:
-- ✅ OpenTelemetry tracing (Phase 34)
-- ✅ Advanced security features (IP allowlists, enhanced rate limiting) (Phase 35)
-
-**Timeline**: 6-8 weeks development + 2 weeks testing
-
-**Success Metrics**:
-- Primary: Demonstrate 80%+ reduction in S3 costs for typical workload
-
-### v1.1.0 Non-Functional Requirements (Must Pass Before Release)
-
-**Performance & Load Testing**:
-- ✅ **1000+ concurrent users** accessing small files (30+ min sustained)
-  - Test with cache COLD (all cache misses → S3)
-  - Test with cache HOT (90%+ cache hit rate)
-  - P95 latency: <50ms (cached), <200ms (uncached)
-  - Error rate: <0.1%
-  - Memory growth: <10% over 30 minutes
-
-- ✅ **100 concurrent users** downloading large files (>5GB each, 30+ min)
-  - Zero-copy streaming must hold: ~64KB memory per connection
-  - Total memory: <500MB (100 × 5MB buffer allowance)
-  - No memory leaks: Memory stable after 30 minutes
-  - P95 TTFB: <500ms
-  - Throughput: Sustain full network bandwidth
-  - No crashes or connection drops
-
-- ✅ **10000+ concurrent users** downloading 1KB files (5 min stress test)
-  - Maximum concurrency stress test (10x baseline)
-  - P95 latency: <100ms
-  - Throughput: >1000 req/s sustained
-  - Error rate: <0.1%
-  - No connection pool exhaustion
-  - No file descriptor leaks
-  - Memory stable (no unbounded growth)
-
-**Resilience & Chaos Testing**:
-- ✅ **Chaos engineering scenarios** (all must recover gracefully)
-  - S3 backend failure (503 errors) → Circuit breaker opens, metrics track
-  - Network partition (S3 unreachable) → 504 Gateway Timeout, no crashes
-  - Slow S3 responses (2s+ latency) → Timeouts work, requests don't pile up
-  - Replica failover → Primary fails, backup serves within 5 seconds
-  - High error rate (50% 500s from S3) → Circuit breaker protects proxy
-  - Resource exhaustion → Graceful degradation (503, not crash)
-
-- ✅ **HA replication failover testing**
-  - Primary replica failure → Automatic failover to backup <5s
-  - Backup failure → Falls back to tertiary (if configured)
-  - Primary recovery → Returns to primary (circuit breaker closes)
-  - Metrics validation → Failover events tracked correctly
-  - Zero data corruption → ETags, content verification
-  - Load test during failover → <1% error rate spike
-
-**Stability & Reliability**:
-- ✅ **24-hour soak test** (recommended, not required for v1.1.0)
-  - Mixed workload (small + large files, cached + uncached)
-  - Moderate load (50-100 concurrent users)
-  - Zero crashes, zero memory leaks
-  - Metrics remain healthy (no degradation)
-
-**Security & Compliance**:
-- ✅ **Audit log completeness** (Phase 33 IMPLEMENTED - needs validation testing)
-  - 100% of requests logged (no gaps)
-  - Correlation IDs match across all log entries
-  - Sensitive data properly redacted
-  - Log rotation works under high load (1000+ req/s)
-
-- ✅ **Rate limiting effectiveness** (Phase 35 IMPLEMENTED - needs validation testing)
-  - Blocks malicious traffic (10,000 req/s from single IP)
-  - Per-user rate limiting from JWT claims
-  - Legitimate traffic unaffected
-  - Metrics track blocked requests
-
-**Cache Validation** (CRITICAL for v1.1):
-- ✅ **Cache consistency testing**
-  - Content matches S3 source (byte-for-byte)
-  - ETag validation works correctly
-  - Stale content not served after TTL expiry
-  - Purge/invalidation works under load
-  - No cache corruption after crashes/restarts
-
-- ✅ **Cache performance validation**
-  - Hit rate >80% for static workload
-  - Cache misses don't slow down hits
-  - Eviction works correctly (LRU)
-  - Concurrent access to same cached file (no corruption)
-
-**Operational Testing**:
-- ✅ **Hot reload under load**
-  - Configuration reload while serving 100+ req/s
-  - Zero dropped requests during reload
-  - New config applies immediately
-  - Old connections complete gracefully
-
-- ✅ **Graceful shutdown under load**
-  - SIGTERM while serving 1000+ active connections
-  - All in-flight requests complete (up to timeout)
-  - No broken pipes or connection resets
-  - Cache state preserved (if applicable)
-
----
-
-## v1.2.0 - Enhanced Resilience 🌍 **FUTURE**
-
-**Target**: Q2 2026
-**Focus**: Advanced multi-region capabilities and enhanced connection management
-
-**Note**: Basic HA bucket replication and connection pooling are ALREADY in v1.0.0
-
-### Planned Features
-
-#### 1. Multi-Region S3 Support
-- [ ] Automatic failover between AWS regions (not just buckets)
-- [ ] Geographic latency-based routing (route to nearest region)
-- [ ] Configuration for primary/secondary/tertiary regions
-- [ ] Cross-region health monitoring
-
-**Why**: Global deployments need region-level failover, not just bucket-level
-
-#### 2. Enhanced Connection Pooling
-- [ ] Dynamic pool sizing based on load
-- [ ] Advanced connection health checks (application-level ping)
-- [ ] Configurable per-bucket connection limits
-- [ ] Connection pool metrics and tuning
-
-**Why**: Fine-grained control over connection resources
-
-**Timeline**: TBD based on user demand
-
----
-
-## v2.0.0 - Advanced Features 🚀 **FUTURE**
-
-**Target**: TBD  
-**Focus**: Advanced proxy features and optimizations
-
-### Ideas Under Consideration
-
-1. **WebSocket Support**: Real-time S3 event streaming
-2. **Request/Response Transformation**: Custom hooks for modification
-3. **GraphQL API**: Query S3 objects via GraphQL
-4. **Object Transformation**: Image resizing, video transcoding on-the-fly
-5. **S3 Write Support**: Enable PUT/POST with validation (optional, behind feature flag)
-
-**Note**: These are ideas, not commitments. Prioritization based on user feedback.
+Ideas under consideration:
+- WebSocket support for real-time S3 events
+- GraphQL API for object queries
+- Image/video transformation on-the-fly
+- Optional write support (PUT/POST behind feature flag)
+- Multi-region latency-based routing
 
 ---
 
 ## Development Principles
 
-Throughout all versions, we maintain:
-
-### TDD Discipline
-- **Red**: Write failing test first
-- **Green**: Implement minimum code to pass
-- **Refactor**: Improve structure while keeping tests green
-- **Commit**: Separate [STRUCTURAL] and [BEHAVIORAL] commits
-
-### Quality Standards
-- All tests must pass before committing
-- No clippy warnings (cargo clippy -- -D warnings)
-- Code properly formatted (cargo fmt)
-- Test coverage >90%
-- Clear, descriptive commit messages
-
-### Architecture Principles
-- Separation of concerns
-- Explicit dependencies
-- Minimal state and side effects
-- Fail fast and loudly
-- Security by default
-- Performance by design
+- **TDD**: Red → Green → Refactor
+- **Quality**: All tests pass, no clippy warnings, >90% coverage
+- **Architecture**: Separation of concerns, explicit dependencies, fail fast
 
 ---
 
-## Success Metrics
+## Contributing
 
-### v1.0.0 ✅ ACHIEVED
-- ✅ Can proxy GET/HEAD requests to multiple S3 buckets
-- ✅ JWT authentication works with 3 token sources
-- ✅ Multi-bucket routing with longest-prefix matching
-- ✅ Handles 1,000+ req/s (verified via K6)
-- ✅ Memory usage constant during streaming (~64KB per connection)
-- ✅ P95 latency 6.7ms - 24.45ms (exceeded all targets)
-- ✅ Zero crashes during 1-hour stability test
-- ✅ 115GB transferred with 0.00% error rate
-
-### v1.1.0 Targets
-- RS256/ES256 JWT support working
-- Disk or Redis cache operational
-- Cache hit rate >50% for common workloads
-- Performance parity or better than v1.0.0
-- Backward compatible configuration
-
-### v1.2.0 Targets
-- Automatic failover works within 5 seconds
-- Multi-region latency-based routing reduces P95 by >20%
-- HA setup survives single-region outage
-
----
-
-## Contributing & Feedback
-
-**Current Status**: v1.0.0 is production-ready and battle-tested
-
-**How to Help**:
-1. Deploy v1.0.0 in your environment
+1. Deploy and test in your environment
 2. Report issues via GitHub Issues
-3. Request features for v1.1.0+
-4. Contribute code via Pull Requests
+3. Request features for future versions
+4. Contribute via Pull Requests
 
-**Roadmap Updates**: This roadmap is updated quarterly based on user feedback and project priorities.
+**Docker**: `ghcr.io/julianshen/yatagarasu:1.2.0`
 
 ---
 
-**Last Updated**: November 15, 2025  
-**Maintainers**: Yatagarasu Team  
+**Last Updated**: December 2025
 **License**: MIT
