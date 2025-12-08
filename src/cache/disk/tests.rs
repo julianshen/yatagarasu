@@ -1609,11 +1609,10 @@ fn test_can_create_uring_backend() {
     // Verify UringBackend can be created on Linux
     use super::uring_backend::UringBackend;
 
-    let backend = UringBackend::new();
+    let _backend = UringBackend::new();
 
     // Backend should be created successfully
     // This is a compile-time test - if it compiles, the struct exists
-    drop(backend);
 }
 
 #[test]

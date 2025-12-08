@@ -25,9 +25,16 @@ use std::path::Path;
 pub struct UringBackend;
 
 #[cfg(target_os = "linux")]
+impl Default for UringBackend {
+    fn default() -> Self {
+        Self
+    }
+}
+
+#[cfg(target_os = "linux")]
 impl UringBackend {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
