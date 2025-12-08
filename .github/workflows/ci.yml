@@ -226,7 +226,17 @@ jobs:
             echo "Waiting... ($i/30)"
             sleep 2
           done
-          
+
+          echo "Waiting for minio-setup to complete (creates test files)..."
+          for i in {1..60}; do
+            if docker compose ps minio-setup | grep -q "exited"; then
+              echo "✅ MinIO setup complete"
+              break
+            fi
+            echo "Waiting for minio-setup... ($i/60)"
+            sleep 2
+          done
+
           echo "Waiting for Yatagarasu proxy to be ready..."
           for i in {1..30}; do
             if curl -sf http://localhost:8080/health > /dev/null; then
@@ -236,6 +246,9 @@ jobs:
             echo "Waiting... ($i/30)"
             sleep 2
           done
+
+          # Extra wait to ensure all services are stable
+          sleep 5
 
       - name: Run integration tests
         run: |
