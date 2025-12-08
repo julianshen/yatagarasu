@@ -40,6 +40,11 @@ impl ReloadManager {
         self.reload_requested.load(Ordering::Relaxed)
     }
 
+    /// Check if reload was requested and clear the flag atomically
+    pub fn check_and_clear_reload_request(&self) -> bool {
+        self.reload_requested.swap(false, Ordering::Relaxed)
+    }
+
     /// Clear the reload request flag
     pub fn clear_reload_request(&self) {
         self.reload_requested.store(false, Ordering::Relaxed);

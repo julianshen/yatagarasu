@@ -515,9 +515,8 @@ impl YatagarasuProxy {
     /// Check for reload request and reload if needed
     fn check_reload(&self) {
         if let Some(reload_manager) = &self.reload_manager {
-            if reload_manager.is_reload_requested() {
+            if reload_manager.check_and_clear_reload_request() {
                 tracing::info!("SIGHUP received, triggering configuration reload");
-                reload_manager.clear_reload_request();
                 let _ = self.reload_configuration();
             }
         }
