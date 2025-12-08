@@ -80,6 +80,9 @@ secretGenerator:
     options:
       disableNameSuffixHash: true
 
+  # IMPORTANT: If you change POSTGRES_PASSWORD, you must also update POSTGRES_URI
+  # to match. Consider using external secret management (e.g., Sealed Secrets,
+  # External Secrets Operator) for production deployments.
   - name: postgres-credentials
     literals:
       - POSTGRES_USER=openfga

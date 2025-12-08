@@ -7,9 +7,3 @@ metadata:
   labels:
     app.kubernetes.io/name: yatagarasu
     environment: production
-  annotations:
-    # Resource quota annotations
-    scheduler.alpha.kubernetes.io/defaultTolerations: "[]"
-    # Network policy annotations
-    net.beta.kubernetes.io/network-policy: |
-      {"ingress":{"isolation":"DefaultDeny"}}

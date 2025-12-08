@@ -17,6 +17,7 @@ resources:
   - base
   - namespace.yaml
   - pdb.yaml
+  - network-policy.yaml
 
 # Override namespace for this deployment
 namespace: yatagarasu-prod
@@ -100,27 +101,11 @@ configMapGenerator:
     options:
       disableNameSuffixHash: true
 
-# Reference secrets that must be created separately
-# See README.md for secret creation instructions
-secretGenerator:
-  - name: yatagarasu-s3-credentials
-    type: Opaque
-    literals:
-      - AWS_ACCESS_KEY_ASSETS=REPLACE_ME
-      - AWS_SECRET_KEY_ASSETS=REPLACE_ME
-      - AWS_ACCESS_KEY_MEDIA=REPLACE_ME
-      - AWS_SECRET_KEY_MEDIA=REPLACE_ME
-      - AWS_ACCESS_KEY_PRIVATE=REPLACE_ME
-      - AWS_SECRET_KEY_PRIVATE=REPLACE_ME
-    options:
-      disableNameSuffixHash: true
-
-  - name: yatagarasu-jwt-secret
-    type: Opaque
-    literals:
-      - JWT_SECRET=REPLACE_ME
-    options:
-      disableNameSuffixHash: true
+# IMPORTANT: Secrets must be created separately before deploying.
+# This example expects the following secrets to exist:
+#   - yatagarasu-s3-credentials (with AWS_ACCESS_KEY_*, AWS_SECRET_KEY_* keys)
+#   - yatagarasu-jwt-secret (with JWT_SECRET key)
+# See README.md for secret creation instructions using kubectl create secret.
 
 # Image customization for site-specific registry
 images:
