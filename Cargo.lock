@@ -5849,6 +5849,7 @@ name = "yatagarasu"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-trait",
  "aws-config",
  "aws-credential-types",
