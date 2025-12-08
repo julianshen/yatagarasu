@@ -57,16 +57,19 @@ Buckets are configured in the `buckets` array. Each bucket supports:
 | Parameter | Description | Required |
 |-----------|-------------|----------|
 | `name` | Bucket identifier | Yes |
-| `path_prefix` | URL path prefix for routing | Yes |
+| `pathPrefix` | URL path prefix for routing | Yes |
 | `s3.bucket` | S3 bucket name | Yes |
 | `s3.region` | AWS region | Yes |
 | `s3.endpoint` | Custom S3 endpoint (for MinIO, etc.) | No |
 | `s3.accessKey` | S3 access key (stored in Secret) | No* |
 | `s3.secretKey` | S3 secret key (stored in Secret) | No* |
 | `s3.existingSecret` | Use existing secret for credentials | No* |
+| `s3.accessKeySecretKey` | Key in existing secret for access key | No |
+| `s3.secretKeySecretKey` | Key in existing secret for secret key | No |
 | `auth.enabled` | Enable authentication for this bucket | No |
 | `auth.jwt.secret` | JWT secret for validation | No |
 | `auth.jwt.existingSecret` | Use existing secret for JWT | No |
+| `auth.jwt.secretKeySecretKey` | Key in existing secret for JWT secret | No |
 
 *Either provide `accessKey`/`secretKey` or use `existingSecret`
 
@@ -273,4 +276,4 @@ helm install test ./charts/yatagarasu --dry-run --debug
 
 ## License
 
-Apache 2.0
+MIT
