@@ -1,0 +1,117 @@
+# Yatagarasu HA Redis Example
+# High availability setup with multiple proxy instances, Redis cache, and nginx load balancer
+#
+# Usage:
+#   docker compose up -d
+#   curl http://localhost:8080/public/hello.txt
+#
+# Scale proxy instances:
+#   docker compose up -d --scale yatagarasu=3
+#
+# Cleanup:
+#   docker compose down -v
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: yatagarasu-ha-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-ha
+
+  # MinIO setup - creates bucket and test files
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-ha-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting up MinIO...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing myminio/public-assets;
+      mc anonymous set public myminio/public-assets;
+      echo 'Hello from Yatagarasu HA!' | mc pipe myminio/public-assets/hello.txt;
+      for i in 1 2 3 4 5; do
+        dd if=/dev/urandom of=/tmp/file-$$i.bin bs=10K count=1 2>/dev/null;
+        mc cp /tmp/file-$$i.bin myminio/public-assets/file-$$i.bin;
+      done;
+      dd if=/dev/urandom of=/tmp/large.bin bs=1M count=1 2>/dev/null;
+      mc cp /tmp/large.bin myminio/public-assets/large.bin;
+      echo 'MinIO setup complete!';
+      "
+    networks:
+      - yatagarasu-ha
+
+  # Redis shared cache
+  redis:
+    image: redis:7-alpine
+    container_name: yatagarasu-ha-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - yatagarasu-ha
+
+  # Yatagarasu proxy instances (scaled)
+  yatagarasu:
+    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    environment:
+      AWS_ACCESS_KEY: minioadmin
+      AWS_SECRET_KEY: minioadmin
+      RUST_LOG: info
+    volumes:
+      - ./config.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - yatagarasu-ha
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 256M
+
+  # Nginx load balancer
+  nginx:
+    image: nginx:alpine
+    container_name: yatagarasu-ha-nginx
+    ports:
+      - "8080:80"
+      - "9090:9090"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - yatagarasu
+    networks:
+      - yatagarasu-ha
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  yatagarasu-ha:
+    driver: bridge

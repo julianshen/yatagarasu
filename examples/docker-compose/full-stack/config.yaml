@@ -1,0 +1,88 @@
+# Yatagarasu Full Stack Configuration
+# HA setup with Redis cache, OPA, and OpenFGA authorization
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  # Public bucket - no authentication
+  - name: "public-assets"
+    path_prefix: "/public"
+    s3:
+      bucket: "public-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+  # OPA-protected bucket - policy-based authorization
+  - name: "opa-protected"
+    path_prefix: "/opa"
+    s3:
+      bucket: "opa-protected"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+      jwt:
+        token_sources:
+          - type: "header"
+            name: "Authorization"
+            prefix: "Bearer "
+        secret: "${JWT_SECRET}"
+        algorithm: "HS256"
+    authorization:
+      type: opa
+      url: "http://opa:8181"
+      policy_path: "yatagarasu/authz/allow"
+      timeout_ms: 100
+      cache_ttl_seconds: 60
+
+  # OpenFGA-protected bucket - fine-grained authorization
+  # NOTE: Update store_id after running openfga-setup
+  - name: "openfga-protected"
+    path_prefix: "/fga"
+    s3:
+      bucket: "openfga-protected"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+      jwt:
+        token_sources:
+          - type: "header"
+            name: "Authorization"
+            prefix: "Bearer "
+        secret: "${JWT_SECRET}"
+        algorithm: "HS256"
+    # Uncomment after getting store_id from openfga-setup logs
+    # authorization:
+    #   type: openfga
+    #   url: "http://openfga:8080"
+    #   store_id: "YOUR_STORE_ID_HERE"
+
+# Multi-tier caching
+cache:
+  enabled: true
+  memory:
+    max_capacity: 104857600  # 100MB
+    ttl_seconds: 300
+  redis:
+    url: "redis://redis:6379"
+    ttl_seconds: 3600
+    max_item_size: 10485760  # 10MB
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

@@ -1,0 +1,39 @@
+# Yatagarasu HA Configuration with Redis Cache
+# Multiple instances share the same Redis cache for consistency
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "public-assets"
+    path_prefix: "/public"
+    s3:
+      bucket: "public-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+# Multi-tier caching with Redis as shared layer
+cache:
+  enabled: true
+  # Local memory cache (per instance)
+  memory:
+    max_capacity: 104857600  # 100MB
+    ttl_seconds: 300
+  # Shared Redis cache (across all instances)
+  redis:
+    url: "redis://redis:6379"
+    ttl_seconds: 3600
+    max_item_size: 10485760  # 10MB
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

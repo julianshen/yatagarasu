@@ -1,0 +1,237 @@
+# Yatagarasu Full Stack Example
+# Complete production-like setup with HA, Redis, OPA, and OpenFGA
+#
+# Usage:
+#   docker compose up -d
+#   # Wait for setup to complete
+#   docker compose logs -f openfga-setup
+#   # Test public bucket
+#   curl http://localhost:8080/public/hello.txt
+#   # Test OPA-protected bucket (requires JWT)
+#   curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/opa/test.txt
+#
+# Cleanup:
+#   docker compose down -v
+
+services:
+  # ============================================
+  # Storage Backend
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: yatagarasu-full-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-full
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-full-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting up MinIO buckets...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing myminio/public-assets;
+      mc mb --ignore-existing myminio/opa-protected;
+      mc mb --ignore-existing myminio/openfga-protected;
+      mc anonymous set public myminio/public-assets;
+      echo 'Hello from Public Bucket!' | mc pipe myminio/public-assets/hello.txt;
+      echo 'OPA Protected Content' | mc pipe myminio/opa-protected/test.txt;
+      echo 'OpenFGA Protected Content' | mc pipe myminio/openfga-protected/secret.txt;
+      dd if=/dev/urandom of=/tmp/data.bin bs=100K count=1 2>/dev/null;
+      mc cp /tmp/data.bin myminio/public-assets/data.bin;
+      mc cp /tmp/data.bin myminio/opa-protected/data.bin;
+      mc cp /tmp/data.bin myminio/openfga-protected/data.bin;
+      echo 'MinIO setup complete!';
+      "
+    networks:
+      - yatagarasu-full
+
+  # ============================================
+  # Cache Layer
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: yatagarasu-full-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - yatagarasu-full
+
+  # ============================================
+  # OPA (Open Policy Agent)
+  # ============================================
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: yatagarasu-full-opa
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "/policies"
+    volumes:
+      - ./opa/policy.rego:/policies/policy.rego:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-full
+
+  # ============================================
+  # OpenFGA
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: yatagarasu-full-postgres
+    environment:
+      POSTGRES_USER: openfga
+      POSTGRES_PASSWORD: openfga
+      POSTGRES_DB: openfga
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openfga"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - yatagarasu-full
+
+  openfga:
+    image: openfga/openfga:latest
+    container_name: yatagarasu-full-openfga
+    ports:
+      - "8082:8080"
+    command: run
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/openfga", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - yatagarasu-full
+
+  openfga-setup:
+    image: curlimages/curl:latest
+    container_name: yatagarasu-full-openfga-setup
+    depends_on:
+      openfga:
+        condition: service_healthy
+    volumes:
+      - ./openfga:/openfga:ro
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting up OpenFGA...';
+      sleep 3;
+
+      echo 'Creating store...';
+      STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \
+        -H 'Content-Type: application/json' \
+        -d '{\"name\": \"yatagarasu\"}');
+      STORE_ID=$$(echo $$STORE_RESPONSE | sed 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/');
+      echo \"Store ID: $$STORE_ID\";
+
+      echo 'Writing authorization model...';
+      curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/authorization-models\" \
+        -H 'Content-Type: application/json' \
+        -d @/openfga/model.json;
+
+      echo 'Writing tuples...';
+      curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/write\" \
+        -H 'Content-Type: application/json' \
+        -d @/openfga/tuples.json;
+
+      echo '';
+      echo '========================================';
+      echo 'OpenFGA Setup Complete!';
+      echo '========================================';
+      echo \"OPENFGA_STORE_ID=$$STORE_ID\";
+      echo '';
+      echo 'Update config.yaml with this store ID';
+      echo '========================================';
+      "
+    networks:
+      - yatagarasu-full
+
+  # ============================================
+  # Yatagarasu Proxy (HA)
+  # ============================================
+  yatagarasu:
+    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    environment:
+      AWS_ACCESS_KEY: minioadmin
+      AWS_SECRET_KEY: minioadmin
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      RUST_LOG: info
+    volumes:
+      - ./config.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      openfga:
+        condition: service_healthy
+    networks:
+      - yatagarasu-full
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 256M
+
+  # ============================================
+  # Load Balancer
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: yatagarasu-full-nginx
+    ports:
+      - "8080:80"
+      - "9090:9090"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - yatagarasu
+    networks:
+      - yatagarasu-full
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  yatagarasu-full:
+    driver: bridge

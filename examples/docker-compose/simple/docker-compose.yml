@@ -1,0 +1,80 @@
+# Yatagarasu Simple Example
+# Minimal setup with single proxy instance and MinIO
+#
+# Usage:
+#   docker compose up -d
+#   curl http://localhost:8080/public/hello.txt
+#
+# Cleanup:
+#   docker compose down -v
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: yatagarasu-simple-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-simple
+
+  # MinIO setup - creates bucket and test files
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-simple-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting up MinIO...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing myminio/public-assets;
+      mc anonymous set public myminio/public-assets;
+      echo 'Hello from Yatagarasu!' | mc pipe myminio/public-assets/hello.txt;
+      echo '{\"message\": \"Welcome to Yatagarasu S3 Proxy\"}' | mc pipe myminio/public-assets/welcome.json;
+      dd if=/dev/urandom of=/tmp/sample.bin bs=1K count=100 2>/dev/null;
+      mc cp /tmp/sample.bin myminio/public-assets/sample.bin;
+      echo 'MinIO setup complete!';
+      "
+    networks:
+      - yatagarasu-simple
+
+  # Yatagarasu S3 Proxy
+  yatagarasu:
+    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    container_name: yatagarasu-simple-proxy
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      AWS_ACCESS_KEY: minioadmin
+      AWS_SECRET_KEY: minioadmin
+      RUST_LOG: info
+    volumes:
+      - ./config.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - yatagarasu-simple
+
+networks:
+  yatagarasu-simple:
+    driver: bridge
