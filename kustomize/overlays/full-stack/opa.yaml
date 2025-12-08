@@ -17,7 +17,7 @@ kind: Deployment
 metadata:
   name: opa
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: opa
@@ -26,9 +26,13 @@ spec:
       labels:
         app.kubernetes.io/name: opa
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: opa
-          image: openpolicyagent/opa:latest-static
+          image: openpolicyagent/opa:0.60.0-static
           args:
             - "run"
             - "--server"
@@ -37,6 +41,12 @@ spec:
           ports:
             - containerPort: 8181
               name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 50m

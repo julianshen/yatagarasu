@@ -32,6 +32,16 @@ configMapGenerator:
     files:
       - policy.rego
 
+# Secret for PostgreSQL credentials
+# IMPORTANT: Change these values in production!
+# Consider using external secret management (Sealed Secrets, External Secrets Operator)
+secretGenerator:
+  - name: postgres-credentials
+    literals:
+      - POSTGRES_USER=openfga
+      - POSTGRES_PASSWORD=change-me-in-production
+      - POSTGRES_DB=openfga
+
 images:
   - name: ghcr.io/julianshen/yatagarasu
     newTag: "1.2.0"

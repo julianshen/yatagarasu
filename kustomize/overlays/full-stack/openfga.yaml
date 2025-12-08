@@ -23,7 +23,7 @@ kind: Deployment
 metadata:
   name: openfga
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: openfga
@@ -32,20 +32,43 @@ spec:
       labels:
         app.kubernetes.io/name: openfga
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       initContainers:
         - name: wait-for-postgres
           image: busybox:1.36
-          command: ['sh', '-c', 'until nc -z postgres 5432; do echo waiting for postgres; sleep 2; done']
+          command: ['sh', '-c', 'until nc -z full-postgres 5432; do echo waiting for postgres; sleep 2; done']
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
       containers:
         - name: openfga
-          image: openfga/openfga:latest
+          image: openfga/openfga:v1.5.3
           args:
             - "run"
           env:
             - name: OPENFGA_DATASTORE_ENGINE
               value: "postgres"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_DB
+            # Construct URI from secret values at runtime
             - name: OPENFGA_DATASTORE_URI
-              value: "postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable"
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@full-postgres:5432/$(POSTGRES_DB)?sslmode=disable"
             - name: OPENFGA_PLAYGROUND_ENABLED
               value: "true"
           ports:
@@ -55,6 +78,9 @@ spec:
               name: grpc
             - containerPort: 3000
               name: playground
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
           resources:
             requests:
               cpu: 100m
