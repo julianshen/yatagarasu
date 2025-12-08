@@ -35,9 +35,9 @@ use crate::retry::RetryPolicy;
 use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
 use crate::security::{self, SecurityLimits};
+use arc_swap::ArcSwap;
 use std::path::PathBuf;
 use std::str::FromStr;
-use arc_swap::ArcSwap;
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
 /// Handles routing, authentication, and S3 proxying
