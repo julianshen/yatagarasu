@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "yatagarasu.fullname" . }}
+  labels:
+    {{- include "yatagarasu.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "yatagarasu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "yatagarasu.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "yatagarasu.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "yatagarasu.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/yatagarasu/config.yaml"
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          env:
+            {{- range $index, $bucket := .Values.buckets }}
+            {{- if $bucket.s3.existingSecret }}
+            - name: AWS_ACCESS_KEY_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $bucket.s3.existingSecret }}
+                  key: {{ $bucket.s3.accessKeySecretKey | default "access-key" }}
+            - name: AWS_SECRET_KEY_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $bucket.s3.existingSecret }}
+                  key: {{ $bucket.s3.secretKeySecretKey | default "secret-key" }}
+            {{- else if or $bucket.s3.accessKey $bucket.s3.secretKey }}
+            - name: AWS_ACCESS_KEY_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yatagarasu.secretName" $ }}
+                  key: AWS_ACCESS_KEY_{{ $index }}
+            - name: AWS_SECRET_KEY_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yatagarasu.secretName" $ }}
+                  key: AWS_SECRET_KEY_{{ $index }}
+            {{- end }}
+            {{- if and $bucket.auth.enabled $bucket.auth.jwt }}
+            {{- if $bucket.auth.jwt.existingSecret }}
+            - name: JWT_SECRET_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $bucket.auth.jwt.existingSecret }}
+                  key: {{ $bucket.auth.jwt.secretKeySecretKey | default "jwt-secret" }}
+            {{- else if $bucket.auth.jwt.secret }}
+            - name: JWT_SECRET_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yatagarasu.secretName" $ }}
+                  key: JWT_SECRET_{{ $index }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/yatagarasu
+              readOnly: true
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "yatagarasu.configmapName" . }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

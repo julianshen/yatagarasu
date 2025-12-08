@@ -1,0 +1,32 @@
+apiVersion: v2
+name: yatagarasu
+description: High-performance S3 proxy built with Rust and Cloudflare Pingora
+type: application
+version: 0.1.0
+appVersion: "1.2.0"
+
+home: https://github.com/julianshen/yatagarasu
+sources:
+  - https://github.com/julianshen/yatagarasu
+
+maintainers:
+  - name: Julian Shen
+    url: https://github.com/julianshen
+
+keywords:
+  - s3
+  - proxy
+  - cache
+  - jwt
+  - authentication
+  - authorization
+  - opa
+  - openfga
+
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/julianshen/yatagarasu/tree/master/docs
+    - name: Docker Image
+      url: https://ghcr.io/julianshen/yatagarasu

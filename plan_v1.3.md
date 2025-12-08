@@ -82,55 +82,55 @@ This plan implements four main areas:
 ## Phase 2: Helm Chart
 
 ### 2.1 Chart Structure
-- [ ] Test: Chart.yaml has correct apiVersion (v2)
-- [ ] Test: Chart.yaml has name, version, appVersion
-- [ ] Test: values.yaml has documented defaults
-- [ ] Test: Chart validates with `helm lint`
-- [ ] Test: Chart templates render without errors
+- [x] Test: Chart.yaml has correct apiVersion (v2)
+- [x] Test: Chart.yaml has name, version, appVersion
+- [x] Test: values.yaml has documented defaults
+- [x] Test: Chart validates with `helm lint`
+- [x] Test: Chart templates render without errors
 
 ### 2.2 Core Templates
-- [ ] Test: Deployment template creates valid Deployment
-- [ ] Test: Service template creates ClusterIP service
-- [ ] Test: ConfigMap template includes config.yaml
-- [ ] Test: Secret template handles credentials
-- [ ] Test: ServiceAccount template created
-- [ ] Test: RBAC templates (Role, RoleBinding) created
+- [x] Test: Deployment template creates valid Deployment
+- [x] Test: Service template creates ClusterIP service
+- [x] Test: ConfigMap template includes config.yaml
+- [x] Test: Secret template handles credentials
+- [x] Test: ServiceAccount template created
+- [x] Test: RBAC templates (Role, RoleBinding) created
 
 ### 2.3 Configuration Values
-- [ ] Test: image.repository defaults to ghcr.io/julianshen/yatagarasu
-- [ ] Test: image.tag defaults to appVersion
-- [ ] Test: replicaCount configurable (default: 1)
-- [ ] Test: resources.limits/requests configurable
-- [ ] Test: nodeSelector, tolerations, affinity supported
-- [ ] Test: podAnnotations and podLabels supported
+- [x] Test: image.repository defaults to ghcr.io/julianshen/yatagarasu
+- [x] Test: image.tag defaults to appVersion
+- [x] Test: replicaCount configurable (default: 1)
+- [x] Test: resources.limits/requests configurable
+- [x] Test: nodeSelector, tolerations, affinity supported
+- [x] Test: podAnnotations and podLabels supported
 
 ### 2.4 S3 Bucket Configuration
-- [ ] Test: buckets[] array configures multiple buckets
-- [ ] Test: Each bucket has name, pathPrefix, s3 settings
-- [ ] Test: Credentials can reference existing secrets
-- [ ] Test: Credentials can be created from values
+- [x] Test: buckets[] array configures multiple buckets
+- [x] Test: Each bucket has name, pathPrefix, s3 settings
+- [x] Test: Credentials can reference existing secrets
+- [x] Test: Credentials can be created from values
 
 ### 2.5 Optional Components
-- [ ] Test: ingress.enabled creates Ingress resource
-- [ ] Test: Ingress supports className and annotations
-- [ ] Test: Ingress supports TLS configuration
-- [ ] Test: serviceMonitor.enabled creates ServiceMonitor
-- [ ] Test: ServiceMonitor has correct endpoints
-- [ ] Test: podDisruptionBudget.enabled creates PDB
-- [ ] Test: horizontalPodAutoscaler.enabled creates HPA
+- [x] Test: ingress.enabled creates Ingress resource
+- [x] Test: Ingress supports className and annotations
+- [x] Test: Ingress supports TLS configuration
+- [x] Test: serviceMonitor.enabled creates ServiceMonitor
+- [x] Test: ServiceMonitor has correct endpoints
+- [x] Test: podDisruptionBudget.enabled creates PDB
+- [x] Test: horizontalPodAutoscaler.enabled creates HPA
 
 ### 2.6 Health and Probes
-- [ ] Test: livenessProbe points to /health
-- [ ] Test: readinessProbe points to /ready
-- [ ] Test: Probe settings (initialDelaySeconds, etc.) configurable
+- [x] Test: livenessProbe points to /health
+- [x] Test: readinessProbe points to /ready
+- [x] Test: Probe settings (initialDelaySeconds, etc.) configurable
 
 ### 2.7 Advanced Features
-- [ ] Test: auth.jwt.* configures JWT authentication
-- [ ] Test: cache.* configures caching layer
-- [ ] Test: cache.redis.enabled adds Redis config
-- [ ] Test: authorization.opa.enabled adds OPA config
-- [ ] Test: authorization.openfga.enabled adds OpenFGA config
-- [ ] Test: metrics.enabled configures metrics port
+- [x] Test: auth.jwt.* configures JWT authentication
+- [x] Test: cache.* configures caching layer
+- [x] Test: cache.redis.enabled adds Redis config
+- [x] Test: authorization.opa.enabled adds OPA config
+- [x] Test: authorization.openfga.enabled adds OpenFGA config
+- [x] Test: metrics.enabled configures metrics port
 
 ---
 

@@ -1,0 +1,268 @@
+# Default values for yatagarasu
+# This is a YAML-formatted file.
+
+# -- Number of replicas
+replicaCount: 1
+
+image:
+  # -- Image repository
+  repository: ghcr.io/julianshen/yatagarasu
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag (default is appVersion)
+  tag: ""
+
+# -- Image pull secrets
+imagePullSecrets: []
+
+# -- Override the name
+nameOverride: ""
+
+# -- Override the fullname
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create service account
+  create: true
+  # -- Annotations for service account
+  annotations: {}
+  # -- Service account name (auto-generated if not set)
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod labels
+podLabels: {}
+
+# -- Pod security context
+podSecurityContext: {}
+  # fsGroup: 2000
+
+# -- Container security context
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- Proxy port
+  port: 8080
+  # -- Metrics port
+  metricsPort: 9090
+
+ingress:
+  # -- Enable ingress
+  enabled: false
+  # -- Ingress class name
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: yatagarasu.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration
+  tls: []
+  #  - secretName: yatagarasu-tls
+  #    hosts:
+  #      - yatagarasu.local
+
+resources:
+  # -- Resource limits
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  # -- Resource requests
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# -- Liveness probe configuration
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# -- Readiness probe configuration
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+autoscaling:
+  # -- Enable HPA
+  enabled: false
+  # -- Minimum replicas
+  minReplicas: 1
+  # -- Maximum replicas
+  maxReplicas: 10
+  # -- Target CPU utilization
+  targetCPUUtilizationPercentage: 80
+  # -- Target memory utilization (optional)
+  # targetMemoryUtilizationPercentage: 80
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+podDisruptionBudget:
+  # -- Enable PDB
+  enabled: false
+  # -- Minimum available pods
+  minAvailable: 1
+  # -- Maximum unavailable pods (alternative to minAvailable)
+  # maxUnavailable: 1
+
+serviceMonitor:
+  # -- Enable ServiceMonitor for Prometheus Operator
+  enabled: false
+  # -- ServiceMonitor namespace (defaults to release namespace)
+  namespace: ""
+  # -- Scrape interval
+  interval: 30s
+  # -- Scrape timeout
+  scrapeTimeout: 10s
+  # -- Additional labels
+  labels: {}
+
+# ===========================================
+# Yatagarasu Configuration
+# ===========================================
+
+# -- Server configuration
+server:
+  # -- Listen address
+  address: "0.0.0.0"
+  # -- Listen port
+  port: 8080
+
+# -- S3 bucket configurations
+buckets:
+  # Example public bucket
+  - name: "public"
+    pathPrefix: "/public"
+    s3:
+      bucket: "my-public-bucket"
+      region: "us-east-1"
+      # -- S3 endpoint (for MinIO/custom S3)
+      endpoint: ""
+      # -- Use existing secret for credentials
+      existingSecret: ""
+      # -- Secret key for access key
+      accessKeySecretKey: "access-key"
+      # -- Secret key for secret key
+      secretKeySecretKey: "secret-key"
+      # -- Or provide credentials directly (not recommended for production)
+      accessKey: ""
+      secretKey: ""
+    auth:
+      enabled: false
+
+  # Example private bucket with JWT auth
+  # - name: "private"
+  #   pathPrefix: "/private"
+  #   s3:
+  #     bucket: "my-private-bucket"
+  #     region: "us-east-1"
+  #     existingSecret: "s3-credentials"
+  #   auth:
+  #     enabled: true
+  #     jwt:
+  #       # -- Existing secret for JWT
+  #       existingSecret: ""
+  #       # -- Secret key in the secret
+  #       secretKeySecretKey: "jwt-secret"
+  #       # -- Or provide directly (not recommended)
+  #       secret: ""
+  #       algorithm: "HS256"
+  #       tokenSources:
+  #         - type: "header"
+  #           name: "Authorization"
+  #           prefix: "Bearer "
+  #         - type: "query"
+  #           name: "token"
+  #       claimsVerification: []
+  #         # - claim: "role"
+  #         #   operator: "equals"
+  #         #   value: "admin"
+  #   authorization:
+  #     # -- Authorization type: none, opa, openfga
+  #     type: "none"
+  #     # OPA configuration
+  #     opa:
+  #       url: "http://opa:8181"
+  #       policyPath: "yatagarasu/authz/allow"
+  #       timeoutMs: 100
+  #       cacheTtlSeconds: 60
+  #     # OpenFGA configuration
+  #     openfga:
+  #       url: "http://openfga:8080"
+  #       storeId: ""
+
+# -- Cache configuration
+cache:
+  # -- Enable caching
+  enabled: true
+  # -- Memory cache settings
+  memory:
+    # -- Maximum capacity in bytes
+    maxCapacity: 104857600  # 100MB
+    # -- TTL in seconds
+    ttlSeconds: 300
+  # -- Redis cache settings
+  redis:
+    # -- Enable Redis cache
+    enabled: false
+    # -- Redis URL
+    url: "redis://redis:6379"
+    # -- TTL in seconds
+    ttlSeconds: 3600
+    # -- Maximum item size in bytes
+    maxItemSize: 10485760  # 10MB
+
+# -- Logging configuration
+logging:
+  # -- Log level: trace, debug, info, warn, error
+  level: "info"
+  # -- Log format: json, pretty
+  format: "json"
+
+# -- Metrics configuration
+metrics:
+  # -- Enable metrics endpoint
+  enabled: true
+  # -- Metrics port
+  port: 9090
+
+# -- Extra environment variables
+extraEnv: []
+  # - name: RUST_LOG
+  #   value: "info"
+
+# -- Extra volume mounts
+extraVolumeMounts: []
+
+# -- Extra volumes
+extraVolumes: []
