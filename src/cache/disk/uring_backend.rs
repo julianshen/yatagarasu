@@ -34,7 +34,7 @@ impl Default for UringBackend {
 #[cfg(target_os = "linux")]
 impl UringBackend {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 
