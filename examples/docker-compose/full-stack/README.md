@@ -167,7 +167,7 @@ docker compose down -v
 
 ```bash
 # Get store ID
-STORE_ID=$(docker compose logs openfga-setup | grep "Store ID:" | awk '{print $3}')
+STORE_ID=$(docker compose logs openfga-setup | grep "OPENFGA_STORE_ID" | cut -d= -f2)
 
 # Add a new user with reader access
 curl -X POST "http://localhost:8082/stores/$STORE_ID/write" \

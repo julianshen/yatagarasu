@@ -157,7 +157,7 @@ services:
       STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \
         -H 'Content-Type: application/json' \
         -d '{\"name\": \"yatagarasu\"}');
-      STORE_ID=$$(echo $$STORE_RESPONSE | sed 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/');
+      STORE_ID=$$(echo $$STORE_RESPONSE | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4);
       echo \"Store ID: $$STORE_ID\";
 
       echo 'Writing authorization model...';
