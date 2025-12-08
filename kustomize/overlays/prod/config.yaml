@@ -1,0 +1,29 @@
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "default"
+    path_prefix: "/"
+    s3:
+      bucket: "${S3_BUCKET}"
+      region: "${S3_REGION}"
+      endpoint: "${S3_ENDPOINT}"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+cache:
+  enabled: true
+  memory:
+    max_capacity: 536870912  # 512MB for production
+    ttl_seconds: 600
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

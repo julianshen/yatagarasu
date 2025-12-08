@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: yatagarasu-dev
+
+namespace: yatagarasu-dev
+
+namePrefix: dev-
+
+commonLabels:
+  environment: development
+
+resources:
+  - ../../base
+
+patches:
+  - path: deployment-patch.yaml
+
+configMapGenerator:
+  - name: yatagarasu-config
+    behavior: replace
+    files:
+      - config.yaml
+
+images:
+  - name: ghcr.io/julianshen/yatagarasu
+    newTag: latest

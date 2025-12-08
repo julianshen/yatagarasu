@@ -1,0 +1,77 @@
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  # Public bucket - no auth
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "${S3_BUCKET}"
+      region: "${S3_REGION}"
+      endpoint: "${S3_ENDPOINT}"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+  # OPA-protected bucket
+  - name: "opa-protected"
+    path_prefix: "/opa"
+    s3:
+      bucket: "${S3_BUCKET}"
+      region: "${S3_REGION}"
+      endpoint: "${S3_ENDPOINT}"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+      jwt:
+        secret: "${JWT_SECRET}"
+        algorithm: "HS256"
+        token_sources:
+          - type: "bearer_header"
+    authorization:
+      opa:
+        enabled: true
+        url: "http://full-opa:8181/v1/data/yatagarasu/authz/allow"
+
+  # OpenFGA-protected bucket
+  - name: "openfga-protected"
+    path_prefix: "/fga"
+    s3:
+      bucket: "${S3_BUCKET}"
+      region: "${S3_REGION}"
+      endpoint: "${S3_ENDPOINT}"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+      jwt:
+        secret: "${JWT_SECRET}"
+        algorithm: "HS256"
+        token_sources:
+          - type: "bearer_header"
+    authorization:
+      openfga:
+        enabled: true
+        url: "http://full-openfga:8080"
+        store_id: "${OPENFGA_STORE_ID}"
+
+cache:
+  enabled: true
+  memory:
+    max_capacity: 104857600  # 100MB local memory cache
+    ttl_seconds: 300
+  redis:
+    enabled: true
+    url: "redis://full-redis:6379"
+    ttl_seconds: 3600
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
