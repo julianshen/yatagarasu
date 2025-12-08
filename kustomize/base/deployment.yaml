@@ -32,24 +32,23 @@ spec:
               containerPort: 9090
               protocol: TCP
           env:
+            # Required secrets - pods will fail to start if these don't exist
+            # This ensures misconfigurations are caught immediately
             - name: AWS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: yatagarasu-s3-credentials
                   key: access-key
-                  optional: true
             - name: AWS_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: yatagarasu-s3-credentials
                   key: secret-key
-                  optional: true
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: yatagarasu-jwt-secret
                   key: jwt-secret
-                  optional: true
           livenessProbe:
             httpGet:
               path: /health

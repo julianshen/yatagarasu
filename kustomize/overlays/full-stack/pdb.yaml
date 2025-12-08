@@ -7,3 +7,23 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: yatagarasu
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: opa
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: openfga
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openfga
