@@ -589,7 +589,7 @@ pub struct S3Replica {
     pub timeout: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct S3Config {
     // Legacy single-bucket fields (for backward compatibility - kept as non-optional to avoid breaking existing code)
     #[serde(default)]

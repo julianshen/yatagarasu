@@ -1,5 +1,6 @@
 use crate::cache::{Cache, CacheEntry, CacheKey};
 use crate::config::S3Config;
+use crate::metrics::Metrics;
 use crate::s3::S3Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,6 +34,31 @@ impl Default for PrewarmOptions {
             max_files: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrewarmConfig {
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit: u32,
+}
+
+impl Default for PrewarmConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: default_concurrency(),
+            rate_limit: default_rate_limit(),
+        }
+    }
+}
+
+fn default_concurrency() -> usize {
+    10
+}
+
+fn default_rate_limit() -> u32 {
+    100
 }
 
 fn default_recursive() -> bool {
@@ -149,6 +175,9 @@ impl PrewarmManager {
         };
         let tasks_map = self.tasks.clone();
 
+        // Update metrics
+        Metrics::global().increment_prewarm_tasks();
+
         tokio::spawn(async move {
             worker(
                 task_id_clone,
@@ -214,6 +243,7 @@ async fn worker(
             task.error_message = Some("Cache is not enabled/configured".to_string());
             task.end_time = Some(SystemTime::now());
         }
+        Metrics::global().increment_prewarm_errors();
         return;
     }
     let cache = cache.unwrap();
@@ -319,12 +349,16 @@ async fn worker(
                                     if let Some(task) = t.get_mut(&task_id) {
                                         task.files_cached += 1;
                                         task.bytes_cached += len as u64;
+                                        
+                                        Metrics::global().increment_prewarm_files(1);
+                                        Metrics::global().increment_prewarm_bytes(len as u64);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
                             tracing::warn!("Failed to download object {}: {}", obj.key, e);
+                            Metrics::global().increment_prewarm_errors();
                             // Continue to next object
                         }
                     }
@@ -342,6 +376,7 @@ async fn worker(
                     task.error_message = Some(e);
                     task.end_time = Some(SystemTime::now());
                 }
+                Metrics::global().increment_prewarm_errors();
                 return;
             }
         }
@@ -354,6 +389,10 @@ async fn worker(
             if task.status == TaskStatus::Running {
                 task.status = TaskStatus::Completed;
                 task.end_time = Some(SystemTime::now());
+                
+                if let Some(duration) = task.duration_seconds() {
+                    Metrics::global().record_prewarm_duration(duration);
+                }
             }
         }
     }
@@ -365,5 +404,59 @@ fn is_cancelled(tasks: &Arc<Mutex<HashMap<String, PrewarmTask>>>, task_id: &str)
         task.status == TaskStatus::Cancelled
     } else {
         true // If task is gone, treat as cancelled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prewarm_config_defaults() {
+        let config = PrewarmConfig::default();
+        assert_eq!(config.concurrency, 10);
+        assert_eq!(config.rate_limit, 100);
+    }
+
+    #[test]
+    fn test_prewarm_task_creation() {
+        let options = PrewarmOptions::default();
+        let task = PrewarmTask::new("bucket".to_string(), "path".to_string(), options);
+        
+        assert_eq!(task.bucket, "bucket");
+        assert_eq!(task.path, "path");
+        assert_eq!(task.status, TaskStatus::Pending);
+        assert!(!task.id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_prewarm_manager() {
+        let manager = PrewarmManager::new(None);
+        let options = PrewarmOptions::default();
+        let s3_config = S3Config {
+            bucket: "bucket".to_string(),
+            region: "region".to_string(),
+            endpoint: Some("endpoint".to_string()),
+            access_key: "key".to_string(),
+            secret_key: "secret".to_string(),
+            ..Default::default()
+        };
+
+        let task_id = manager.create_task("bucket".to_string(), "path".to_string(), options, s3_config);
+        
+        let task = manager.get_task(&task_id);
+        assert!(task.is_some());
+        assert_eq!(task.unwrap().status, TaskStatus::Pending); // Worker might not have updated it yet
+        
+        // List tasks
+        let tasks = manager.list_tasks();
+        assert_eq!(tasks.len(), 1);
+        
+        // Cancel task
+        let cancelled = manager.cancel_task(&task_id);
+        assert!(cancelled);
+        
+        let task = manager.get_task(&task_id).unwrap();
+        assert_eq!(task.status, TaskStatus::Cancelled);
     }
 }

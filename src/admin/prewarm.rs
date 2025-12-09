@@ -154,3 +154,18 @@ async fn send_json_response(session: &mut Session, status: u16, body: serde_json
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_task_request_deserialization() {
+        let json = r#"{"bucket": "test-bucket", "path": "test/path", "recursive": true}"#;
+        let req: CreateTaskRequest = serde_json::from_str(json).unwrap();
+        
+        assert_eq!(req.bucket, "test-bucket");
+        assert_eq!(req.path, "test/path");
+        assert_eq!(req.options.recursive, true);
+    }
+}
