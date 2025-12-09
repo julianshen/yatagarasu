@@ -24,7 +24,7 @@ keywords:
   - openfga
 
 annotations:
-  artifacthub.io/license: MIT
+  artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Documentation
       url: https://github.com/julianshen/yatagarasu/tree/master/docs

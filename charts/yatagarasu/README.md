@@ -276,4 +276,4 @@ helm install test ./charts/yatagarasu --dry-run --debug
 
 ## License
 
-MIT
+Apache-2.0

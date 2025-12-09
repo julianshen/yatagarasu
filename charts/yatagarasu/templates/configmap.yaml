@@ -53,14 +53,14 @@ data:
         authorization:
           type: {{ $bucket.authorization.type | quote }}
           {{- if eq $bucket.authorization.type "opa" }}
-          url: {{ $bucket.authorization.opa.url | quote }}
-          policy_path: {{ $bucket.authorization.opa.policyPath | quote }}
+          opa_url: {{ $bucket.authorization.opa.url | quote }}
+          opa_policy_path: {{ $bucket.authorization.opa.policyPath | quote }}
           timeout_ms: {{ $bucket.authorization.opa.timeoutMs | default 100 }}
           cache_ttl_seconds: {{ $bucket.authorization.opa.cacheTtlSeconds | default 60 }}
           {{- end }}
           {{- if eq $bucket.authorization.type "openfga" }}
-          url: {{ $bucket.authorization.openfga.url | quote }}
-          store_id: {{ $bucket.authorization.openfga.storeId | quote }}
+          openfga_endpoint: {{ $bucket.authorization.openfga.url | quote }}
+          openfga_store_id: {{ $bucket.authorization.openfga.storeId | quote }}
           {{- end }}
         {{- end }}
     {{- end }}
@@ -73,7 +73,7 @@ data:
         ttl_seconds: {{ .Values.cache.memory.ttlSeconds }}
       {{- if .Values.cache.redis.enabled }}
       redis:
-        url: {{ .Values.cache.redis.url | quote }}
+        redis_url: {{ .Values.cache.redis.url | quote }}
         ttl_seconds: {{ .Values.cache.redis.ttlSeconds }}
         max_item_size: {{ .Values.cache.redis.maxItemSize }}
       {{- end }}
