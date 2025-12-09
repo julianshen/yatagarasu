@@ -17,8 +17,8 @@ buckets:
 cache:
   enabled: true
   memory:
-    max_capacity: 52428800  # 50MB - smaller for dev
-    ttl_seconds: 60
+    max_cache_size_mb: 50  # 50MB - smaller for dev
+    default_ttl_seconds: 60
 
 logging:
   level: "debug"

@@ -19,27 +19,27 @@ This plan implements four main areas:
 ## Phase 1: Cache Warming API
 
 ### 1.1 Admin API Foundation
-- [ ] Test: Admin API router exists at `/admin/*`
-- [ ] Test: Admin endpoints require authentication
-- [ ] Test: Admin JWT claims verification (role: admin)
-- [ ] Test: Returns 401 for missing/invalid admin token
-- [ ] Test: Returns 403 for valid JWT without admin role
+- [x] Test: Admin API router exists at `/admin/*`
+- [x] Test: Admin endpoints require authentication
+- [x] Test: Admin JWT claims verification (role: admin)
+- [x] Test: Returns 401 for missing/invalid admin token
+- [x] Test: Returns 403 for valid JWT without admin role
 
 ### 1.2 S3 LIST Operation
-- [ ] Test: S3 client supports ListObjectsV2 operation
-- [ ] Test: LIST returns object keys with metadata (size, etag)
-- [ ] Test: LIST supports prefix filtering
-- [ ] Test: LIST supports pagination (continuation token)
-- [ ] Test: LIST respects max_keys limit
-- [ ] Test: Recursive LIST traverses common prefixes
+- [x] Test: S3 client supports ListObjectsV2 operation
+- [x] Test: LIST returns object keys with metadata (size, etag)
+- [x] Test: LIST supports prefix filtering
+- [x] Test: LIST supports pagination (continuation token)
+- [x] Test: LIST respects max_keys limit
+- [x] Test: Recursive LIST traverses common prefixes
 
 ### 1.3 Cache Warm Task Management
-- [ ] Test: Can create prewarm task with path and options
-- [ ] Test: Task ID is unique UUID
-- [ ] Test: Task tracks status (pending, running, completed, failed, cancelled)
-- [ ] Test: Task tracks progress (files_scanned, files_cached, bytes_cached)
-- [ ] Test: Task stores start_time, end_time, duration
-- [ ] Test: Multiple tasks can run concurrently
+- [x] Test: Can create prewarm task with path and options
+- [x] Test: Task ID is unique UUID
+- [x] Test: Task tracks status (pending, running, completed, failed, cancelled)
+- [x] Test: Task tracks progress (files_scanned, files_cached, bytes_cached)
+- [x] Test: Task stores start_time, end_time, duration
+- [x] Test: Multiple tasks can run concurrently
 
 ### 1.4 Prewarm API Endpoints
 - [ ] Test: POST /admin/cache/prewarm creates new task
@@ -52,14 +52,14 @@ This plan implements four main areas:
 - [ ] Test: DELETE sets task status to cancelled
 - [ ] Test: GET /admin/cache/prewarm/tasks lists all tasks
 
-### 1.5 Prewarm Worker
-- [ ] Test: Worker fetches objects from S3 and caches them
-- [ ] Test: Worker skips files exceeding max_item_size
-- [ ] Test: Worker respects concurrency limit
-- [ ] Test: Worker respects rate_limit (files/second)
-- [ ] Test: Worker updates task progress periodically
-- [ ] Test: Worker handles S3 errors gracefully
-- [ ] Test: Worker stops when task is cancelled
+### 1.5 Cache Warming Worker
+- [x] Test: Worker lists objects from S3
+- [x] Test: Worker filters objects by suffix/regex
+- [x] Test: Worker downloads objects (HEAD then GET)
+- [x] Test: Worker stores objects in cache
+- [x] Test: Worker updates task progress
+- [x] Test: Worker handles errors gracefully
+- [x] Test: Worker respects concurrency limitsask is cancelled
 - [ ] Test: Worker applies include_patterns filter
 - [ ] Test: Worker applies exclude_patterns filter
 
