@@ -95,6 +95,9 @@ time curl -s http://localhost:8080/public/large.bin > /dev/null
 # Check Redis cache
 docker exec yatagarasu-ha-redis redis-cli keys '*'
 
+# Check MinIO cluster status
+docker exec yatagarasu-ha-minio1 mc admin info local
+
 # Check metrics
 curl http://localhost:9090/metrics | grep cache_hit
 ```
@@ -104,6 +107,28 @@ curl http://localhost:9090/metrics | grep cache_hit
 - **Memory cache**: Per-instance, 100MB, 5 min TTL
 - **Redis cache**: Shared across instances, 256MB, 1 hour TTL
 - **Cache hits**: All instances share Redis, so cached data is available everywhere
+
+## MinIO Distributed Storage
+
+This example uses MinIO in distributed mode with erasure coding:
+
+- **2 nodes** (minio1, minio2), each with **2 drives** = 4 drives total
+- **Erasure coding** protects data from drive/node failures
+- **Automatic healing**: Data is automatically repaired when a failed node comes back
+- **No single point of failure**: System continues operating if one node fails
+
+To test node failure resilience:
+
+```bash
+# Stop one MinIO node
+docker stop yatagarasu-ha-minio2
+
+# Data is still accessible (verify)
+curl http://localhost:8080/public/hello.txt
+
+# Restart the node (data will auto-heal)
+docker start yatagarasu-ha-minio2
+```
 
 ## Configuration
 
