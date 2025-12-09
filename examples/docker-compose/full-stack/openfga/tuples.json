@@ -1,0 +1,21 @@
+{
+  "writes": {
+    "tuple_keys": [
+      {
+        "user": "user:alice",
+        "relation": "owner",
+        "object": "bucket:openfga-protected"
+      },
+      {
+        "user": "user:bob",
+        "relation": "reader",
+        "object": "bucket:openfga-protected"
+      },
+      {
+        "user": "user:admin",
+        "relation": "owner",
+        "object": "bucket:openfga-protected"
+      }
+    ]
+  }
+}

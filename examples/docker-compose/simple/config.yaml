@@ -1,0 +1,26 @@
+# Yatagarasu Simple Configuration
+# Single public bucket with no authentication
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "public-assets"
+    path_prefix: "/public"
+    s3:
+      bucket: "public-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

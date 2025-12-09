@@ -182,36 +182,36 @@ This plan implements four main areas:
 ## Phase 4: Docker Compose Examples
 
 ### 4.1 Simple Example
-- [ ] Test: examples/docker-compose/simple/docker-compose.yml exists
-- [ ] Test: Simple has yatagarasu + minio services
-- [ ] Test: Simple has README.md with instructions
-- [ ] Test: `docker compose config` validates
+- [x] Test: examples/docker-compose/simple/docker-compose.yml exists
+- [x] Test: Simple has yatagarasu + minio services
+- [x] Test: Simple has README.md with instructions
+- [x] Test: `docker compose config` validates
 - [ ] Test: Example starts successfully
 
 ### 4.2 HA with Redis Example
-- [ ] Test: examples/docker-compose/ha-redis/docker-compose.yml exists
-- [ ] Test: HA has multiple yatagarasu replicas
-- [ ] Test: HA has Redis service
-- [ ] Test: HA has nginx load balancer
-- [ ] Test: Example config enables Redis cache
-- [ ] Test: `docker compose config` validates
+- [x] Test: examples/docker-compose/ha-redis/docker-compose.yml exists
+- [x] Test: HA has multiple yatagarasu replicas
+- [x] Test: HA has Redis service
+- [x] Test: HA has nginx load balancer
+- [x] Test: Example config enables Redis cache
+- [x] Test: `docker compose config` validates
 
 ### 4.3 Full Stack Example (HA + OPA + OpenFGA)
-- [ ] Test: examples/docker-compose/full-stack/docker-compose.yml exists
-- [ ] Test: Full stack has OPA service
-- [ ] Test: Full stack has OpenFGA service
-- [ ] Test: Full stack has PostgreSQL for OpenFGA
-- [ ] Test: Includes sample OPA policy file
-- [ ] Test: Includes OpenFGA model file
-- [ ] Test: README explains all components
-- [ ] Test: `docker compose config` validates
+- [x] Test: examples/docker-compose/full-stack/docker-compose.yml exists
+- [x] Test: Full stack has OPA service
+- [x] Test: Full stack has OpenFGA service
+- [x] Test: Full stack has PostgreSQL for OpenFGA
+- [x] Test: Includes sample OPA policy file
+- [x] Test: Includes OpenFGA model file
+- [x] Test: README explains all components
+- [x] Test: `docker compose config` validates
 
 ### 4.4 Example Documentation
-- [ ] Test: Each example has README.md
-- [ ] Test: README has prerequisites
-- [ ] Test: README has quick start commands
-- [ ] Test: README has verification steps
-- [ ] Test: README has cleanup commands
+- [x] Test: Each example has README.md
+- [x] Test: README has prerequisites
+- [x] Test: README has quick start commands
+- [x] Test: README has verification steps
+- [x] Test: README has cleanup commands
 
 ---
 
