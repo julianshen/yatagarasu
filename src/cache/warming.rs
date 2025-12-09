@@ -93,15 +93,34 @@ impl PrewarmTask {
 #[derive(Clone)]
 pub struct PrewarmManager {
     tasks: Arc<Mutex<HashMap<String, PrewarmTask>>>,
-    cache: Option<Arc<dyn Cache>>,
+    cache: Arc<std::sync::RwLock<Option<Arc<dyn Cache>>>>,
 }
 
 impl PrewarmManager {
     pub fn new(cache: Option<Arc<dyn Cache>>) -> Self {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            cache,
+            cache: Arc::new(std::sync::RwLock::new(cache)),
         }
+    }
+
+    pub fn set_cache(&self, cache: Arc<dyn Cache>) {
+        let mut w = self.cache.write().unwrap();
+        *w = Some(cache);
+    }
+
+    fn cleanup_old_tasks(&self) {
+        let mut tasks = self.tasks.lock().unwrap();
+        let now = SystemTime::now();
+        // Remove tasks older than 1 hour (3600 seconds)
+        tasks.retain(|_, task| {
+            if let Some(end_time) = task.end_time {
+                if let Ok(duration) = now.duration_since(end_time) {
+                    return duration.as_secs() < 3600;
+                }
+            }
+            true
+        });
     }
 
     pub fn create_task(
@@ -111,6 +130,9 @@ impl PrewarmManager {
         options: PrewarmOptions,
         s3_config: S3Config,
     ) -> String {
+        // Cleanup old tasks before creating new one
+        self.cleanup_old_tasks();
+
         let task = PrewarmTask::new(bucket.clone(), path.clone(), options.clone());
         let task_id = task.id.clone();
 
@@ -121,7 +143,10 @@ impl PrewarmManager {
 
         // Spawn worker
         let task_id_clone = task_id.clone();
-        let cache_clone = self.cache.clone();
+        let cache_opt = {
+            let r = self.cache.read().unwrap();
+            r.clone()
+        };
         let tasks_map = self.tasks.clone();
 
         tokio::spawn(async move {
@@ -131,7 +156,7 @@ impl PrewarmManager {
                 path,
                 options,
                 s3_config,
-                cache_clone,
+                cache_opt,
                 tasks_map,
             )
             .await;
