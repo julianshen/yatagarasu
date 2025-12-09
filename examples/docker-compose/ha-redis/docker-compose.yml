@@ -1,5 +1,6 @@
 # Yatagarasu HA Redis Example
-# High availability setup with multiple proxy instances, Redis cache, and nginx load balancer
+# High availability setup with multiple proxy instances, Redis cache, nginx load balancer,
+# and MinIO distributed storage (2 nodes with erasure coding for data protection)
 #
 # Usage:
 #   docker compose up -d
@@ -12,22 +13,44 @@
 #   docker compose down -v
 
 services:
-  # MinIO S3-compatible storage
-  minio:
-    image: minio/minio:latest
-    container_name: yatagarasu-ha-minio
+  # MinIO Node 1 - Distributed storage with erasure coding
+  minio1:
+    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    container_name: yatagarasu-ha-minio1
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
+    command: server --console-address ":9001" http://minio{1...2}/data{1...2}
+    volumes:
+      - minio1-data1:/data1
+      - minio1-data2:/data2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+    networks:
+      - yatagarasu-ha
+
+  # MinIO Node 2 - Distributed storage with erasure coding
+  minio2:
+    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    container_name: yatagarasu-ha-minio2
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server --console-address ":9001" http://minio{1...2}/data{1...2}
+    volumes:
+      - minio2-data1:/data1
+      - minio2-data2:/data2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - yatagarasu-ha
 
@@ -36,22 +59,24 @@ services:
     image: minio/mc:latest
     container_name: yatagarasu-ha-minio-setup
     depends_on:
-      minio:
+      minio1:
+        condition: service_healthy
+      minio2:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      echo 'Setting up MinIO...';
-      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      echo 'Setting up MinIO distributed cluster...';
+      mc alias set myminio http://minio1:9000 minioadmin minioadmin;
       mc mb --ignore-existing myminio/public-assets;
       mc anonymous set public myminio/public-assets;
       echo 'Hello from Yatagarasu HA!' | mc pipe myminio/public-assets/hello.txt;
       for i in 1 2 3 4 5; do
-        dd if=/dev/urandom of=/tmp/file-$$i.bin bs=10K count=1 2>/dev/null;
-        mc cp /tmp/file-$$i.bin myminio/public-assets/file-$$i.bin;
+        dd if=/dev/urandom of=/tmp/file-\$$i.bin bs=10K count=1 2>/dev/null;
+        mc cp /tmp/file-\$$i.bin myminio/public-assets/file-\$$i.bin;
       done;
       dd if=/dev/urandom of=/tmp/large.bin bs=1M count=1 2>/dev/null;
       mc cp /tmp/large.bin myminio/public-assets/large.bin;
-      echo 'MinIO setup complete!';
+      echo 'MinIO distributed cluster setup complete!';
       "
     networks:
       - yatagarasu-ha
@@ -81,7 +106,9 @@ services:
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
     depends_on:
-      minio:
+      minio1:
+        condition: service_healthy
+      minio2:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -115,3 +142,9 @@ services:
 networks:
   yatagarasu-ha:
     driver: bridge
+
+volumes:
+  minio1-data1:
+  minio1-data2:
+  minio2-data1:
+  minio2-data2:

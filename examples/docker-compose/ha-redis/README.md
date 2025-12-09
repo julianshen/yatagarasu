@@ -1,6 +1,6 @@
 # HA Redis Docker Compose Example
 
-High availability setup with multiple Yatagarasu proxy instances, shared Redis cache, and nginx load balancer.
+High availability setup with multiple Yatagarasu proxy instances, shared Redis cache, nginx load balancer, and MinIO distributed storage.
 
 ## Architecture
 
@@ -28,10 +28,12 @@ High availability setup with multiple Yatagarasu proxy instances, shared Redis c
                     │ Shared Cache│
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐
-                    │    MinIO    │ :9000
-                    │  S3 Backend │
-                    └─────────────┘
+           ┌───────────────┴───────────────┐
+           │                               │
+    ┌──────▼──────┐                 ┌──────▼──────┐
+    │   MinIO 1   │ :9000           │   MinIO 2   │
+    │  (2 drives) │◄───────────────►│  (2 drives) │
+    └─────────────┘  Erasure Coding └─────────────┘
 ```
 
 ## Prerequisites
@@ -71,8 +73,9 @@ docker compose up -d --scale yatagarasu=5
 | nginx | 8080 | Load balancer (entry point) |
 | nginx | 9090 | Aggregated metrics |
 | redis | 6379 | Shared cache |
-| minio | 9000 | S3 API |
-| minio | 9001 | MinIO Console |
+| minio1 | 9000 | S3 API (primary node) |
+| minio1 | 9001 | MinIO Console |
+| minio2 | - | S3 replica node (internal only) |
 
 ## Verification
 

@@ -11,7 +11,7 @@ buckets:
     s3:
       bucket: "public-assets"
       region: "us-east-1"
-      endpoint: "http://minio:9000"
+      endpoint: "http://minio1:9000"
       access_key: "${AWS_ACCESS_KEY}"
       secret_key: "${AWS_SECRET_KEY}"
     auth:
@@ -22,13 +22,13 @@ cache:
   enabled: true
   # Local memory cache (per instance)
   memory:
-    max_capacity: 104857600  # 100MB
-    ttl_seconds: 300
+    max_cache_size_mb: 100  # 100MB
+    default_ttl_seconds: 300
   # Shared Redis cache (across all instances)
   redis:
-    url: "redis://redis:6379"
-    ttl_seconds: 3600
-    max_item_size: 10485760  # 10MB
+    enabled: true
+    redis_url: "redis://redis:6379"
+    redis_ttl_seconds: 3600
 
 logging:
   level: "info"
