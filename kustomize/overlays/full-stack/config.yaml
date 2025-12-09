@@ -32,9 +32,9 @@ buckets:
         token_sources:
           - type: "bearer_header"
     authorization:
-      opa:
-        enabled: true
-        url: "http://full-opa:8181/v1/data/yatagarasu/authz/allow"
+      type: "opa"
+      opa_url: "http://full-opa:8181"
+      opa_policy_path: "yatagarasu/authz/allow"
 
   # OpenFGA-protected bucket
   - name: "openfga-protected"
@@ -53,10 +53,9 @@ buckets:
         token_sources:
           - type: "bearer_header"
     authorization:
-      openfga:
-        enabled: true
-        url: "http://full-openfga:8080"
-        store_id: "${OPENFGA_STORE_ID}"
+      type: "openfga"
+      openfga_endpoint: "http://full-openfga:8080"
+      openfga_store_id: "${OPENFGA_STORE_ID}"
 
 cache:
   enabled: true
@@ -65,7 +64,7 @@ cache:
     ttl_seconds: 300
   redis:
     enabled: true
-    url: "redis://full-redis:6379"
+    redis_url: "redis://full-redis:6379"
     ttl_seconds: 3600
 
 logging:

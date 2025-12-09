@@ -21,7 +21,7 @@ cache:
     ttl_seconds: 300
   redis:
     enabled: true
-    url: "redis://ha-redis:6379"
+    redis_url: "redis://ha-redis:6379"
     ttl_seconds: 3600
 
 logging:
