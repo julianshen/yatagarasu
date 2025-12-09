@@ -1,0 +1,33 @@
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "default"
+    path_prefix: "/"
+    s3:
+      bucket: "${S3_BUCKET}"
+      region: "${S3_REGION}"
+      endpoint: "${S3_ENDPOINT}"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+cache:
+  enabled: true
+  memory:
+    max_cache_size_mb: 100  # 100MB local memory cache
+    default_ttl_seconds: 300
+  redis:
+    enabled: true
+    redis_url: "redis://ha-redis:6379"
+    redis_ttl_seconds: 3600
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
