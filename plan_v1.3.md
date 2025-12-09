@@ -218,26 +218,26 @@ This plan implements four main areas:
 ## Phase 5: Kubernetes Examples
 
 ### 5.1 Basic Helm Example
-- [ ] Test: examples/kubernetes/helm-basic/ directory exists
-- [ ] Test: Has values.yaml with minimal config
-- [ ] Test: Has README.md with helm install commands
-- [ ] Test: README shows how to verify deployment
-- [ ] Test: README shows how to test proxy
+- [x] Test: examples/kubernetes/helm-basic/ directory exists
+- [x] Test: Has values.yaml with minimal config
+- [x] Test: Has README.md with helm install commands
+- [x] Test: README shows how to verify deployment
+- [x] Test: README shows how to test proxy
 
 ### 5.2 Production Kustomize Example
-- [ ] Test: examples/kubernetes/kustomize-prod/ directory exists
-- [ ] Test: Uses overlays/prod as base
-- [ ] Test: Has site-specific patches
-- [ ] Test: Has README.md with kubectl apply commands
-- [ ] Test: Shows namespace creation
-- [ ] Test: Shows secret creation from env vars
+- [x] Test: examples/kubernetes/kustomize-prod/ directory exists
+- [x] Test: Uses base with production patches (standalone)
+- [x] Test: Has site-specific patches
+- [x] Test: Has README.md with kubectl apply commands
+- [x] Test: Shows namespace creation
+- [x] Test: Shows secret creation from env vars
 
 ### 5.3 Full Stack Kubernetes Example
-- [ ] Test: examples/kubernetes/full-stack/ directory exists
-- [ ] Test: Deploys yatagarasu + Redis + OPA + OpenFGA
-- [ ] Test: Has Ingress configuration
-- [ ] Test: Has NetworkPolicy for security
-- [ ] Test: README is comprehensive walkthrough
+- [x] Test: examples/kubernetes/full-stack/ directory exists
+- [x] Test: Deploys yatagarasu + Redis + OPA + OpenFGA
+- [x] Test: Has Ingress configuration
+- [x] Test: Has NetworkPolicy for security
+- [x] Test: README is comprehensive walkthrough
 
 ---
 

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yatagarasu-full
+  labels:
+    app.kubernetes.io/name: yatagarasu
+    app.kubernetes.io/part-of: yatagarasu-stack

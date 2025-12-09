@@ -1,0 +1,71 @@
+# Yatagarasu Helm Basic Example
+# Minimal configuration for getting started
+#
+# Usage:
+#   helm install yatagarasu ../../charts/yatagarasu -f values.yaml
+#
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/julianshen/yatagarasu
+  tag: "1.2.0"
+  pullPolicy: IfNotPresent
+
+# S3 bucket configuration
+buckets:
+  - name: demo
+    pathPrefix: /demo
+    s3Bucket: my-bucket
+    s3Region: us-east-1
+    # For AWS S3
+    # s3Endpoint: https://s3.us-east-1.amazonaws.com
+    # For MinIO or other S3-compatible storage
+    s3Endpoint: http://minio:9000
+    s3AccessKey: minioadmin
+    s3SecretKey: minioadmin
+    authEnabled: false
+
+# Resource limits for small deployments
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+# Optional: Enable metrics
+metrics:
+  enabled: true
+  port: 9090
+
+# Optional: Enable ingress for external access
+ingress:
+  enabled: false
+  # className: nginx
+  # hosts:
+  #   - host: yatagarasu.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix

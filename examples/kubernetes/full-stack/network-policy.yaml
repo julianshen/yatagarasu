@@ -1,0 +1,199 @@
+# Network Policies for Zero-Trust Security
+#
+# These policies implement the principle of least privilege:
+# - Each component can only communicate with explicitly allowed services
+# - Default deny for all ingress traffic
+# - Egress restricted to necessary destinations
+
+---
+# Default deny all ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    app.kubernetes.io/part-of: yatagarasu-stack
+spec:
+  podSelector: {}  # Apply to all pods
+  policyTypes:
+    - Ingress
+
+---
+# Yatagarasu: Allow ingress from Ingress controller and metrics scraping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: yatagarasu-ingress
+  labels:
+    app.kubernetes.io/name: yatagarasu
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: yatagarasu
+      app.kubernetes.io/component: proxy
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Allow to Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow to OPA
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opa
+      ports:
+        - protocol: TCP
+          port: 8181
+    # Allow to OpenFGA
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openfga
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Allow to S3 (external)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 9000  # MinIO
+
+---
+# Redis: Only allow connections from Yatagarasu
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress
+  labels:
+    app.kubernetes.io/name: redis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: cache
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: yatagarasu
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# OPA: Only allow connections from Yatagarasu
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opa-ingress
+  labels:
+    app.kubernetes.io/name: opa
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opa
+      app.kubernetes.io/component: authorization
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: yatagarasu
+      ports:
+        - protocol: TCP
+          port: 8181
+
+---
+# OpenFGA: Allow connections from Yatagarasu
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openfga-ingress
+  labels:
+    app.kubernetes.io/name: openfga
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openfga
+      app.kubernetes.io/component: authorization
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: yatagarasu
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
+  egress:
+    # Allow to PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# PostgreSQL: Only allow connections from OpenFGA
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openfga
+      ports:
+        - protocol: TCP
+          port: 5432

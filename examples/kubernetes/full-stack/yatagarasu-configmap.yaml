@@ -1,0 +1,10 @@
+# This is a placeholder - actual config comes from ConfigMapGenerator
+# in kustomization.yaml using config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yatagarasu-config-placeholder
+  labels:
+    app.kubernetes.io/name: yatagarasu
+data:
+  note: "This placeholder is replaced by ConfigMapGenerator"

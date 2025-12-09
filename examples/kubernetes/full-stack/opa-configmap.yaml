@@ -1,0 +1,10 @@
+# This is a placeholder - actual policy comes from ConfigMapGenerator
+# in kustomization.yaml using policy.rego
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policy-placeholder
+  labels:
+    app.kubernetes.io/name: opa
+data:
+  note: "This placeholder is replaced by ConfigMapGenerator"

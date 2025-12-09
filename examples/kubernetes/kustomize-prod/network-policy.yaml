@@ -1,0 +1,43 @@
+# Default deny all ingress traffic
+# This enforces zero-trust networking - pods must explicitly allow traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    app.kubernetes.io/name: yatagarasu
+spec:
+  podSelector: {}  # Apply to all pods in namespace
+  policyTypes:
+    - Ingress
+---
+# Allow ingress to Yatagarasu from ingress controller
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: yatagarasu-ingress
+  labels:
+    app.kubernetes.io/name: yatagarasu
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: yatagarasu
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from ingress controller namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090

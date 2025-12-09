@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: yatagarasu
+  labels:
+    app.kubernetes.io/name: yatagarasu
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: yatagarasu
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
