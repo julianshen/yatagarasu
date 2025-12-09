@@ -2,12 +2,13 @@
 # This overrides the base configuration for production
 
 server:
-  addr: "0.0.0.0:8080"
+  address: "0.0.0.0"
+  port: 8080
   threads: 8
 
 metrics:
   enabled: true
-  addr: "0.0.0.0:9090"
+  port: 9090
 
 logging:
   level: info
@@ -22,14 +23,14 @@ buckets:
       bucket: company-assets-prod
       region: us-west-2
       endpoint: https://s3.us-west-2.amazonaws.com
-      access_key: ${AWS_ACCESS_KEY_ASSETS}
-      secret_key: ${AWS_SECRET_KEY_ASSETS}
+      access_key: "${AWS_ACCESS_KEY_ASSETS}"
+      secret_key: "${AWS_SECRET_KEY_ASSETS}"
     auth:
       enabled: false
     cache:
       enabled: true
-      max_size: 104857600  # 100MB
-      ttl: 3600
+      max_item_size_mb: 100  # 100MB
+      default_ttl_seconds: 3600
 
   - name: media
     path_prefix: /media
@@ -37,24 +38,24 @@ buckets:
       bucket: company-media-prod
       region: us-west-2
       endpoint: https://s3.us-west-2.amazonaws.com
-      access_key: ${AWS_ACCESS_KEY_MEDIA}
-      secret_key: ${AWS_SECRET_KEY_MEDIA}
+      access_key: "${AWS_ACCESS_KEY_MEDIA}"
+      secret_key: "${AWS_SECRET_KEY_MEDIA}"
     auth:
       enabled: true
       jwt:
-        secret: ${JWT_SECRET}
+        secret: "${JWT_SECRET}"
         token_sources:
           - type: bearer_header
           - type: query_param
             param_name: token
-        required_claims:
+        claims_verification:
           - claim: aud
             operator: equals
             value: media-service
     cache:
       enabled: true
-      max_size: 524288000  # 500MB
-      ttl: 7200
+      max_item_size_mb: 500  # 500MB
+      default_ttl_seconds: 7200
 
   - name: private
     path_prefix: /private
@@ -62,29 +63,21 @@ buckets:
       bucket: company-private-prod
       region: us-west-2
       endpoint: https://s3.us-west-2.amazonaws.com
-      access_key: ${AWS_ACCESS_KEY_PRIVATE}
-      secret_key: ${AWS_SECRET_KEY_PRIVATE}
+      access_key: "${AWS_ACCESS_KEY_PRIVATE}"
+      secret_key: "${AWS_SECRET_KEY_PRIVATE}"
     auth:
       enabled: true
       jwt:
-        secret: ${JWT_SECRET}
+        secret: "${JWT_SECRET}"
         token_sources:
           - type: bearer_header
-        required_claims:
+        claims_verification:
           - claim: role
             operator: in
-            value: ["admin", "internal-service"]
+            value: "admin,internal-service"
     cache:
       enabled: false  # No caching for private content
 
 # Cache warming for frequently accessed content
-cache:
-  warming:
-    enabled: true
-    endpoints:
-      - bucket: assets
-        paths:
-          - /css/main.css
-          - /js/app.js
-          - /images/logo.png
-    interval: 300  # 5 minutes
+# cache:
+#   warming: ... (Not supported in config)
