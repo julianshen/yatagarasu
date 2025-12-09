@@ -17,8 +17,8 @@ buckets:
 cache:
   enabled: true
   memory:
-    max_capacity: 536870912  # 512MB for production
-    ttl_seconds: 600
+    max_cache_size_mb: 512  # 512MB for production
+    default_ttl_seconds: 600
 
 logging:
   level: "info"

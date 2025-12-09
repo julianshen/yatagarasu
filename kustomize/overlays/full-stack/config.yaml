@@ -60,12 +60,12 @@ buckets:
 cache:
   enabled: true
   memory:
-    max_capacity: 104857600  # 100MB local memory cache
-    ttl_seconds: 300
+    max_cache_size_mb: 100  # 100MB local memory cache
+    default_ttl_seconds: 300
   redis:
     enabled: true
     redis_url: "redis://full-redis:6379"
-    ttl_seconds: 3600
+    redis_ttl_seconds: 3600
 
 logging:
   level: "info"
