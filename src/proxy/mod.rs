@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 use crate::audit::AsyncAuditFileWriter;
 use crate::auth::{authenticate_request, AuthError};
 use crate::cache::tiered::TieredCache;
+use crate::cache::warming::PrewarmManager;
 use crate::cache::{Cache, CacheKey};
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
@@ -72,6 +73,8 @@ pub struct YatagarasuProxy {
     openfga_clients: Arc<HashMap<String, Arc<OpenFgaClient>>>,
     /// Audit writer for logging requests
     audit_writer: Option<Arc<AsyncAuditFileWriter>>,
+    /// Cache warming task manager (Phase 1.3)
+    prewarm_manager: Arc<PrewarmManager>,
 }
 
 impl YatagarasuProxy {
@@ -274,6 +277,12 @@ impl YatagarasuProxy {
         // Initialize audit writer if enabled
         let audit_writer = Self::initialize_audit_writer(&config);
 
+        // Initialize prewarm manager
+        // Initialize prewarm manager
+        let prewarm_manager = Arc::new(PrewarmManager::new(
+            cache.clone().map(|c| c as Arc<dyn Cache>),
+        ));
+
         Self {
             config: ArcSwap::from_pointee(config),
             router: ArcSwap::from_pointee(router),
@@ -292,6 +301,7 @@ impl YatagarasuProxy {
             opa_cache,
             openfga_clients: Arc::new(openfga_clients),
             audit_writer,
+            prewarm_manager,
         }
     }
 
@@ -484,6 +494,12 @@ impl YatagarasuProxy {
         // Initialize audit writer if enabled
         let audit_writer = Self::initialize_audit_writer(&config);
 
+        // Initialize prewarm manager
+        // Initialize prewarm manager
+        let prewarm_manager = Arc::new(PrewarmManager::new(
+            cache.clone().map(|c| c as Arc<dyn Cache>),
+        ));
+
         Self {
             config: ArcSwap::from_pointee(config),
             router: ArcSwap::from_pointee(router),
@@ -502,6 +518,7 @@ impl YatagarasuProxy {
             opa_cache,
             openfga_clients: Arc::new(openfga_clients),
             audit_writer,
+            prewarm_manager,
         }
     }
 
@@ -1403,6 +1420,28 @@ impl ProxyHttp for YatagarasuProxy {
             self.metrics.increment_status_count(200);
 
             return Ok(true); // Short-circuit (response already sent)
+        }
+
+        // Admin API Router (Phase 1)
+        // Delegates to admin module for centralized handling and authentication
+        // Note: Returns true if handled, false if not handled (allowing legacy fallbacks)
+        if crate::admin::is_handled_path(&path) {
+            let headers_map = Self::extract_headers(req);
+            let query_map = Self::extract_query_params(req);
+
+            crate::admin::handle_request(
+                session,
+                &path,
+                &method,
+                &headers_map,
+                &query_map,
+                &config,
+                &self.metrics,
+                &self.prewarm_manager,
+            )
+            .await;
+
+            return Ok(true);
         }
 
         // Special handling for /admin/reload endpoint (config hot reload)

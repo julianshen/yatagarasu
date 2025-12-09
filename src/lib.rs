@@ -1,6 +1,7 @@
 // Yatagarasu S3 Proxy Library
 // Module declarations will be added as we implement them
 
+pub mod admin; // Phase 1 (v1.3): Admin API
 pub mod audit; // Phase 33: Audit Logging
 pub mod auth;
 pub mod cache;

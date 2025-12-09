@@ -1,10 +1,31 @@
 // S3 client module
 
 use crate::config::S3Config;
+use aws_config::BehaviorVersion;
+use aws_credential_types::Credentials;
+use aws_sdk_s3::{config::Region, Client as AwsS3Client};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Metadata for an S3 object
+#[derive(Debug, Clone)]
+pub struct ObjectMeta {
+    pub key: String,
+    pub size: i64,
+    pub etag: String,
+    pub last_modified: String,
+}
+
+/// Result of a LIST operation
+#[derive(Debug, Clone)]
+pub struct ListResult {
+    pub objects: Vec<ObjectMeta>,
+    pub is_truncated: bool,
+    pub next_continuation_token: Option<String>,
+    pub common_prefixes: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct S3Client {
@@ -29,6 +50,87 @@ pub fn create_s3_client(config: &S3Config) -> Result<S3Client, String> {
     Ok(S3Client {
         config: config.clone(),
     })
+}
+
+impl S3Client {
+    pub async fn create_aws_client(&self) -> AwsS3Client {
+        let creds = Credentials::new(
+            self.config.access_key.clone(),
+            self.config.secret_key.clone(),
+            None,
+            None,
+            "static",
+        );
+
+        let region = Region::new(self.config.region.clone());
+
+        let mut config_builder = aws_sdk_s3::config::Builder::new()
+            .behavior_version(BehaviorVersion::latest())
+            .region(region)
+            .credentials_provider(creds);
+
+        if let Some(endpoint) = &self.config.endpoint {
+            config_builder = config_builder.endpoint_url(endpoint.clone());
+            config_builder = config_builder.force_path_style(true);
+        }
+
+        AwsS3Client::from_conf(config_builder.build())
+    }
+
+    /// List objects in the bucket (ListObjectsV2)
+    pub async fn list_objects(
+        &self,
+        prefix: Option<&str>,
+        continuation_token: Option<&str>,
+        max_keys: Option<i32>,
+    ) -> Result<ListResult, String> {
+        let client = self.create_aws_client().await;
+
+        let mut req = client.list_objects_v2().bucket(&self.config.bucket);
+
+        if let Some(p) = prefix {
+            req = req.prefix(p);
+        }
+
+        if let Some(token) = continuation_token {
+            req = req.continuation_token(token);
+        }
+
+        if let Some(max) = max_keys {
+            req = req.max_keys(max);
+        }
+
+        match req.send().await {
+            Ok(output) => {
+                let objects = output
+                    .contents()
+                    .iter()
+                    .map(|o| ObjectMeta {
+                        key: o.key().unwrap_or("").to_string(),
+                        size: o.size().unwrap_or(0),
+                        etag: o.e_tag().unwrap_or("").to_string(),
+                        last_modified: o.last_modified().map(|d| d.to_string()).unwrap_or_default(),
+                    })
+                    .collect();
+
+                let common_prefixes = output
+                    .common_prefixes()
+                    .iter()
+                    .map(|p| p.prefix().unwrap_or("").to_string())
+                    .collect();
+
+                Ok(ListResult {
+                    objects,
+                    is_truncated: output.is_truncated().unwrap_or(false),
+                    next_continuation_token: output
+                        .next_continuation_token()
+                        .map(|s| s.to_string()),
+                    common_prefixes,
+                })
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
 }
 
 // AWS Signature v4 implementation

@@ -79,6 +79,9 @@ pub mod redis;
 // Tiered cache submodule (Phase 30)
 pub mod tiered;
 
+// Cache warming submodule (Phase 1.3)
+pub mod warming;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     #[serde(default)]
