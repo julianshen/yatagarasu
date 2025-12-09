@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "yatagarasu.configmapName" . }}
+  labels:
+    {{- include "yatagarasu.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      address: {{ .Values.server.address | quote }}
+      port: {{ .Values.server.port }}
+
+    buckets:
+    {{- range $index, $bucket := .Values.buckets }}
+      - name: {{ $bucket.name | quote }}
+        path_prefix: {{ $bucket.pathPrefix | quote }}
+        s3:
+          bucket: {{ $bucket.s3.bucket | quote }}
+          region: {{ $bucket.s3.region | quote }}
+          {{- if $bucket.s3.endpoint }}
+          endpoint: {{ $bucket.s3.endpoint | quote }}
+          {{- end }}
+          access_key: "${AWS_ACCESS_KEY_{{ $index }}}"
+          secret_key: "${AWS_SECRET_KEY_{{ $index }}}"
+        auth:
+          enabled: {{ $bucket.auth.enabled }}
+          {{- if $bucket.auth.enabled }}
+          {{- if $bucket.auth.jwt }}
+          jwt:
+            secret: "${JWT_SECRET_{{ $index }}}"
+            algorithm: {{ $bucket.auth.jwt.algorithm | default "HS256" | quote }}
+            token_sources:
+            {{- range $bucket.auth.jwt.tokenSources }}
+              - type: {{ .type | quote }}
+                {{- if .name }}
+                name: {{ .name | quote }}
+                {{- end }}
+                {{- if .prefix }}
+                prefix: {{ .prefix | quote }}
+                {{- end }}
+            {{- end }}
+            {{- if $bucket.auth.jwt.claimsVerification }}
+            claims_verification:
+            {{- range $bucket.auth.jwt.claimsVerification }}
+              - claim: {{ .claim | quote }}
+                operator: {{ .operator | quote }}
+                value: {{ .value | quote }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- end }}
+        {{- if and $bucket.authorization (ne $bucket.authorization.type "none") }}
+        authorization:
+          type: {{ $bucket.authorization.type | quote }}
+          {{- if eq $bucket.authorization.type "opa" }}
+          opa_url: {{ $bucket.authorization.opa.url | quote }}
+          opa_policy_path: {{ $bucket.authorization.opa.policyPath | quote }}
+          timeout_ms: {{ $bucket.authorization.opa.timeoutMs | default 100 }}
+          cache_ttl_seconds: {{ $bucket.authorization.opa.cacheTtlSeconds | default 60 }}
+          {{- end }}
+          {{- if eq $bucket.authorization.type "openfga" }}
+          openfga_endpoint: {{ $bucket.authorization.openfga.url | quote }}
+          openfga_store_id: {{ $bucket.authorization.openfga.storeId | quote }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+
+    {{- if .Values.cache.enabled }}
+    cache:
+      enabled: true
+      memory:
+        max_cache_size_mb: {{ .Values.cache.memory.maxCapacity }}
+        default_ttl_seconds: {{ .Values.cache.memory.ttlSeconds }}
+      {{- if .Values.cache.redis.enabled }}
+      redis:
+        redis_url: {{ .Values.cache.redis.url | quote }}
+        redis_ttl_seconds: {{ .Values.cache.redis.ttlSeconds }}
+      {{- end }}
+    {{- end }}
+
+    logging:
+      level: {{ .Values.logging.level | quote }}
+      format: {{ .Values.logging.format | quote }}
+
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+      port: {{ .Values.metrics.port }}
