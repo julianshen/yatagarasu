@@ -151,7 +151,12 @@ services:
     entrypoint: >
       /bin/sh -c "
       echo 'Setting up OpenFGA...';
-      sleep 3;
+
+      echo 'Waiting for OpenFGA to be ready...';
+      until curl -s -f http://openfga:8080/healthz > /dev/null; do
+        echo 'Waiting for OpenFGA...';
+        sleep 2;
+      done;
 
       echo 'Creating store...';
       STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \

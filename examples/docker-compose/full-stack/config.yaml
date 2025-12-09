@@ -38,7 +38,7 @@ buckets:
         algorithm: "HS256"
     authorization:
       type: opa
-      url: "http://opa:8181"
+      opa_url: "http://opa:8181"
       policy_path: "yatagarasu/authz/allow"
       timeout_ms: 100
       cache_ttl_seconds: 60
@@ -65,7 +65,7 @@ buckets:
     # Uncomment after getting store_id from openfga-setup logs
     # authorization:
     #   type: openfga
-    #   url: "http://openfga:8080"
+    #   openfga_endpoint: "http://openfga:8080"
     #   store_id: "YOUR_STORE_ID_HERE"
 
 # Multi-tier caching

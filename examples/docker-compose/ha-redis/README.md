@@ -46,7 +46,9 @@ High availability setup with multiple Yatagarasu proxy instances, shared Redis c
 docker compose up -d
 
 # Wait for services to be ready
-sleep 15
+until [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)" == "200" ]; do
+  echo "Waiting for services..."; sleep 2
+done
 
 # Test the proxy
 curl http://localhost:8080/public/hello.txt

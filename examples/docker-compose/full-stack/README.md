@@ -39,6 +39,7 @@ Complete production-like setup with HA proxy instances, Redis cache, OPA policy 
 
 - Docker and Docker Compose installed
 - Ports 8080, 8181, 8082, 6379, 9000, 9001, 9090 available
+- Python 3 with PyJWT for token generation: `pip install pyjwt`
 
 ## Quick Start
 
@@ -167,7 +168,7 @@ docker compose down -v
 
 ```bash
 # Get store ID
-STORE_ID=$(docker compose logs openfga-setup | grep "OPENFGA_STORE_ID" | cut -d= -f2)
+STORE_ID=$(docker compose logs openfga-setup | grep "OPENFGA_STORE_ID=" | cut -d= -f2)
 
 # Add a new user with reader access
 curl -X POST "http://localhost:8082/stores/$STORE_ID/write" \

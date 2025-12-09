@@ -13,8 +13,10 @@ Minimal Yatagarasu setup with a single proxy instance and MinIO S3-compatible st
 # Start the services
 docker compose up -d
 
-# Wait for services to be ready (about 10 seconds)
-sleep 10
+# Wait for services to be ready
+until [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)" == "200" ]; do
+  echo "Waiting for services..."; sleep 2
+done
 
 # Test the proxy
 curl http://localhost:8080/public/hello.txt
