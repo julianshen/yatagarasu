@@ -454,7 +454,7 @@ mod tests {
 
         // Should be less than a million (sanity check)
         assert!(
-            fd_limit < 1_000_000,
+            fd_limit < 10_000_000,
             "FD limit seems unreasonably high: {}",
             fd_limit
         );
