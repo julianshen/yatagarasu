@@ -69,13 +69,12 @@ data:
     cache:
       enabled: true
       memory:
-        max_capacity: {{ .Values.cache.memory.maxCapacity }}
-        ttl_seconds: {{ .Values.cache.memory.ttlSeconds }}
+        max_cache_size_mb: {{ .Values.cache.memory.maxCapacity }}
+        default_ttl_seconds: {{ .Values.cache.memory.ttlSeconds }}
       {{- if .Values.cache.redis.enabled }}
       redis:
         redis_url: {{ .Values.cache.redis.url | quote }}
-        ttl_seconds: {{ .Values.cache.redis.ttlSeconds }}
-        max_item_size: {{ .Values.cache.redis.maxItemSize }}
+        redis_ttl_seconds: {{ .Values.cache.redis.ttlSeconds }}
       {{- end }}
     {{- end }}
 

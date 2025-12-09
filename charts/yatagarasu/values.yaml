@@ -227,8 +227,8 @@ cache:
   enabled: true
   # -- Memory cache settings
   memory:
-    # -- Maximum capacity in bytes
-    maxCapacity: 104857600  # 100MB
+    # -- Maximum capacity in MB
+    maxCapacity: 100  # 100MB
     # -- TTL in seconds
     ttlSeconds: 300
   # -- Redis cache settings
@@ -239,8 +239,6 @@ cache:
     url: "redis://redis:6379"
     # -- TTL in seconds
     ttlSeconds: 3600
-    # -- Maximum item size in bytes
-    maxItemSize: 10485760  # 10MB
 
 # -- Logging configuration
 logging:
