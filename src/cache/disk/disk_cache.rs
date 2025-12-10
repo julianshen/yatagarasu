@@ -17,6 +17,10 @@ pub struct DiskCache {
     cache_dir: PathBuf,
     max_size_bytes: u64,
     eviction_count: Arc<AtomicU64>,
+    /// Cache hit counter
+    hit_count: Arc<AtomicU64>,
+    /// Cache miss counter
+    miss_count: Arc<AtomicU64>,
 }
 
 impl Default for DiskCache {
@@ -42,6 +46,8 @@ impl DiskCache {
             cache_dir,
             max_size_bytes,
             eviction_count: Arc::new(AtomicU64::new(0)),
+            hit_count: Arc::new(AtomicU64::new(0)),
+            miss_count: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -56,7 +62,10 @@ impl Cache for DiskCache {
         // Check if entry exists in index
         let metadata = match self.index.get(key) {
             Some(meta) => meta,
-            None => return Ok(None),
+            None => {
+                self.miss_count.fetch_add(1, Ordering::Relaxed);
+                return Ok(None);
+            }
         };
 
         // Check if expired
@@ -67,6 +76,7 @@ impl Cache for DiskCache {
         if metadata.is_expired(now) {
             // Remove expired entry
             let _ = self.delete(key).await;
+            self.miss_count.fetch_add(1, Ordering::Relaxed);
             return Ok(None);
         }
 
@@ -79,17 +89,21 @@ impl Cache for DiskCache {
             Err(_) => {
                 // File doesn't exist - remove from index
                 let _ = self.delete(key).await;
+                self.miss_count.fetch_add(1, Ordering::Relaxed);
                 return Ok(None);
             }
         };
 
-        // Reconstruct CacheEntry
+        // Track cache hit
+        self.hit_count.fetch_add(1, Ordering::Relaxed);
+
+        // Reconstruct CacheEntry with metadata fields
         let entry = CacheEntry {
             data: data.clone(),
-            content_type: "application/octet-stream".to_string(), // TODO: Store in metadata
+            content_type: metadata.content_type.clone(),
             content_length: data.len(),
-            etag: "".to_string(), // TODO: Store in metadata
-            last_modified: None,  // TODO: Store in metadata
+            etag: metadata.etag.clone(),
+            last_modified: metadata.last_modified.clone(),
             created_at: SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_secs(metadata.created_at),
             expires_at: SystemTime::UNIX_EPOCH
@@ -149,6 +163,9 @@ impl Cache for DiskCache {
             entry.data.len() as u64,
             now,
             expires_at_unix,
+            entry.content_type.clone(),
+            entry.etag.clone(),
+            entry.last_modified.clone(),
         );
 
         // Write metadata file
@@ -213,8 +230,8 @@ impl Cache for DiskCache {
 
     async fn stats(&self) -> Result<CacheStats, CacheError> {
         Ok(CacheStats {
-            hits: 0,   // TODO: Track hits
-            misses: 0, // TODO: Track misses
+            hits: self.hit_count.load(Ordering::Relaxed),
+            misses: self.miss_count.load(Ordering::Relaxed),
             evictions: self.eviction_count.load(Ordering::SeqCst),
             current_size_bytes: self.index.total_size(),
             current_item_count: self.index.entry_count() as u64,

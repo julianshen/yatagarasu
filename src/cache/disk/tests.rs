@@ -2,6 +2,28 @@
 
 use super::*;
 
+/// Helper to create EntryMetadata with default content_type, etag, last_modified.
+/// Used by tests that don't care about these new fields.
+#[cfg(test)]
+fn test_entry_metadata(
+    cache_key: crate::cache::CacheKey,
+    file_path: std::path::PathBuf,
+    size_bytes: u64,
+    created_at: u64,
+    expires_at: u64,
+) -> types::EntryMetadata {
+    types::EntryMetadata::new(
+        cache_key,
+        file_path,
+        size_bytes,
+        created_at,
+        expires_at,
+        "application/octet-stream".to_string(),
+        "".to_string(),
+        None,
+    )
+}
+
 #[test]
 fn test_module_compiles() {
     // Initial test to verify module structure compiles
@@ -149,7 +171,7 @@ fn test_entry_metadata_creation() {
         etag: None,
     };
 
-    let metadata = EntryMetadata::new(
+    let metadata = test_entry_metadata(
         key,
         PathBuf::from("/cache/entries/abc123.data"),
         1024,
@@ -180,7 +202,7 @@ fn test_entry_metadata_serialization() {
         etag: None,
     };
 
-    let metadata = EntryMetadata::new(
+    let metadata = test_entry_metadata(
         key,
         PathBuf::from("/cache/test.data"),
         2048,
@@ -216,7 +238,7 @@ fn test_entry_metadata_expiration() {
         etag: None,
     };
 
-    let metadata = EntryMetadata::new(
+    let metadata = test_entry_metadata(
         key,
         PathBuf::from("/cache/test.data"),
         1024,
@@ -250,7 +272,7 @@ fn test_cache_index_thread_safe_operations() {
         etag: None,
     };
 
-    let metadata = EntryMetadata::new(
+    let metadata = test_entry_metadata(
         key.clone(),
         PathBuf::from("/cache/test.data"),
         1024,
@@ -294,7 +316,7 @@ fn test_cache_index_atomic_size_tracking() {
         object_key: "key1".to_string(),
         etag: None,
     };
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         PathBuf::from("/cache/1.data"),
         1024,
@@ -312,7 +334,7 @@ fn test_cache_index_atomic_size_tracking() {
         object_key: "key2".to_string(),
         etag: None,
     };
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         PathBuf::from("/cache/2.data"),
         2048,
@@ -817,7 +839,7 @@ async fn test_metadata_file_stores_json() {
     };
 
     // Create metadata
-    let metadata = EntryMetadata::new(
+    let metadata = test_entry_metadata(
         key,
         PathBuf::from("/cache/entries/test.data"),
         4096,
@@ -905,7 +927,7 @@ async fn test_both_data_and_meta_files_created() {
     };
 
     // Write metadata file
-    let metadata = EntryMetadata::new(key, data_path.clone(), data.len() as u64, 1000000, 2000000);
+    let metadata = test_entry_metadata(key, data_path.clone(), data.len() as u64, 1000000, 2000000);
     let meta_json = serde_json::to_string(&metadata).unwrap();
     backend
         .write_file_atomic(&meta_path, Bytes::from(meta_json))
@@ -950,7 +972,7 @@ async fn test_index_can_save_to_json() {
         object_key: "key1".to_string(),
         etag: None,
     };
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         PathBuf::from("/cache/1.data"),
         1024,
@@ -994,7 +1016,7 @@ async fn test_index_can_load_from_json() {
         object_key: "test-key".to_string(),
         etag: Some("etag123".to_string()),
     };
-    let metadata = EntryMetadata::new(
+    let metadata = test_entry_metadata(
         key.clone(),
         PathBuf::from("/cache/test.data"),
         2048,
@@ -1116,8 +1138,8 @@ async fn test_index_scans_entries_directory_on_startup() {
         .unwrap()
         .as_secs();
 
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 5, now, 0);
-    let metadata2 = EntryMetadata::new(key2.clone(), data_path2.clone(), 5, now, 0);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 5, now, 0);
+    let metadata2 = test_entry_metadata(key2.clone(), data_path2.clone(), 5, now, 0);
 
     let meta_json1 = serde_json::to_string(&metadata1).unwrap();
     let meta_json2 = serde_json::to_string(&metadata2).unwrap();
@@ -1189,8 +1211,8 @@ async fn test_index_removes_orphaned_files() {
         .unwrap()
         .as_secs();
 
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 5, now, 0);
-    let metadata2 = EntryMetadata::new(key2.clone(), data_path2.clone(), 5, now, 0);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 5, now, 0);
+    let metadata2 = test_entry_metadata(key2.clone(), data_path2.clone(), 5, now, 0);
 
     let meta_json1 = serde_json::to_string(&metadata1).unwrap();
     let meta_json2 = serde_json::to_string(&metadata2).unwrap();
@@ -1262,7 +1284,7 @@ async fn test_index_removes_entries_without_files() {
         .unwrap()
         .as_secs();
 
-    let metadata = EntryMetadata::new(key1.clone(), data_path1.clone(), 5, now, 0);
+    let metadata = test_entry_metadata(key1.clone(), data_path1.clone(), 5, now, 0);
     let meta_json = serde_json::to_string(&metadata).unwrap();
     backend
         .write_file_atomic(&meta_path1, Bytes::from(meta_json))
@@ -1271,7 +1293,7 @@ async fn test_index_removes_entries_without_files() {
 
     // Create index with both keys (but key2 has no files)
     let index = CacheIndex::new();
-    let metadata2 = EntryMetadata::new(key2.clone(), PathBuf::from("/nonexistent"), 5, now, 0);
+    let metadata2 = test_entry_metadata(key2.clone(), PathBuf::from("/nonexistent"), 5, now, 0);
     index.insert(key1.clone(), metadata.clone());
     index.insert(key2.clone(), metadata2.clone());
 
@@ -1326,7 +1348,7 @@ async fn test_index_recalculates_total_size_from_files() {
         .as_secs();
 
     // Create metadata with WRONG size
-    let wrong_metadata = EntryMetadata::new(key1.clone(), data_path.clone(), 999, now, 0); // Wrong size!
+    let wrong_metadata = test_entry_metadata(key1.clone(), data_path.clone(), 999, now, 0); // Wrong size!
     let meta_json = serde_json::to_string(&wrong_metadata).unwrap();
     backend
         .write_file_atomic(&meta_path, Bytes::from(meta_json))
@@ -1403,11 +1425,11 @@ async fn test_index_removes_expired_entries() {
     // key1 expired 1 hour ago
     let expired_time = now - 3600;
     let expired_metadata =
-        EntryMetadata::new(key1.clone(), data_path1.clone(), 5, now, expired_time);
+        test_entry_metadata(key1.clone(), data_path1.clone(), 5, now, expired_time);
 
     // key2 expires in 1 hour (still valid)
     let future_time = now + 3600;
-    let valid_metadata = EntryMetadata::new(key2.clone(), data_path2.clone(), 5, now, future_time);
+    let valid_metadata = test_entry_metadata(key2.clone(), data_path2.clone(), 5, now, future_time);
 
     let meta_json1 = serde_json::to_string(&expired_metadata).unwrap();
     let meta_json2 = serde_json::to_string(&valid_metadata).unwrap();
@@ -3550,7 +3572,7 @@ async fn test_loads_index_from_json() {
         object_key: "file1.txt".to_string(),
         etag: None,
     };
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         PathBuf::from("/cache/entries/hash1.data"),
         1024,
@@ -3564,7 +3586,7 @@ async fn test_loads_index_from_json() {
         object_key: "file2.txt".to_string(),
         etag: None,
     };
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         PathBuf::from("/cache/entries/hash2.data"),
         2048,
@@ -3625,7 +3647,7 @@ async fn test_validates_index_against_filesystem() {
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
 
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         data_path1.clone(),
         1024,
@@ -3643,7 +3665,7 @@ async fn test_validates_index_against_filesystem() {
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
 
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         data_path2.clone(),
         2048,
@@ -3718,7 +3740,7 @@ async fn test_removes_orphaned_files() {
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
 
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         data_path1.clone(),
         1024,
@@ -3822,7 +3844,7 @@ async fn test_removes_invalid_index_entries() {
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
 
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         data_path1.clone(),
         1024,
@@ -3853,7 +3875,7 @@ async fn test_removes_invalid_index_entries() {
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
 
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         data_path2.clone(),
         2048,
@@ -3917,7 +3939,7 @@ async fn test_recalculates_total_size() {
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
 
     // Metadata says 1024 bytes, but actual file will be 2048 bytes
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         data_path1.clone(),
         1024, // Incorrect size
@@ -3936,7 +3958,7 @@ async fn test_recalculates_total_size() {
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
 
     // Metadata says 512 bytes, but actual file will be 1024 bytes
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         data_path2.clone(),
         512, // Incorrect size
@@ -4031,7 +4053,7 @@ async fn test_triggers_eviction_if_oversized_after_recovery() {
     let hash1 = key_to_hash(&key1);
     let data_path1 = cache_dir.join("entries").join(format!("{}.data", hash1));
 
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         data_path1.clone(),
         1000,
@@ -4049,7 +4071,7 @@ async fn test_triggers_eviction_if_oversized_after_recovery() {
     let hash2 = key_to_hash(&key2);
     let data_path2 = cache_dir.join("entries").join(format!("{}.data", hash2));
 
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         data_path2.clone(),
         1500,
@@ -4139,7 +4161,7 @@ async fn test_handles_corrupted_data_file() {
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
 
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
     index.insert(key1.clone(), metadata1.clone());
 
     // Create valid files for entry 1
@@ -4165,7 +4187,7 @@ async fn test_handles_corrupted_data_file() {
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
 
-    let metadata2 = EntryMetadata::new(key2.clone(), data_path2.clone(), 2048, 1100, 9999999999);
+    let metadata2 = test_entry_metadata(key2.clone(), data_path2.clone(), 2048, 1100, 9999999999);
     index.insert(key2.clone(), metadata2.clone());
 
     // Create only meta file for entry 2 (data file missing/corrupted)
@@ -4228,7 +4250,7 @@ async fn test_handles_corrupted_meta_file() {
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
 
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
     index.insert(key1.clone(), metadata1.clone());
 
     // Create valid files for entry 1
@@ -4254,7 +4276,7 @@ async fn test_handles_corrupted_meta_file() {
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
     let _meta_path2 = entries_dir.join(format!("{}.meta", hash2)); // Intentionally unused - simulating missing file
 
-    let metadata2 = EntryMetadata::new(key2.clone(), data_path2.clone(), 2048, 1100, 9999999999);
+    let metadata2 = test_entry_metadata(key2.clone(), data_path2.clone(), 2048, 1100, 9999999999);
     index.insert(key2.clone(), metadata2.clone());
 
     // Create only data file for entry 2 (meta file missing/corrupted)
@@ -4348,7 +4370,7 @@ async fn test_logs_errors_but_continues_operation() {
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
     index.insert(key1.clone(), metadata1.clone());
     backend
         .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
@@ -4370,7 +4392,7 @@ async fn test_logs_errors_but_continues_operation() {
     };
     let hash2 = key_to_hash(&key2);
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         entries_dir.join(format!("{}.data", hash2)),
         512,
@@ -4394,7 +4416,7 @@ async fn test_logs_errors_but_continues_operation() {
     };
     let hash3 = key_to_hash(&key3);
     let data_path3 = entries_dir.join(format!("{}.data", hash3));
-    let metadata3 = EntryMetadata::new(key3.clone(), data_path3.clone(), 256, 1200, 9999999999);
+    let metadata3 = test_entry_metadata(key3.clone(), data_path3.clone(), 256, 1200, 9999999999);
     index.insert(key3.clone(), metadata3);
     backend
         .write_file_atomic(&data_path3, Bytes::from(vec![2u8; 256]))
@@ -4453,7 +4475,7 @@ async fn test_removes_corrupted_entries_from_cache() {
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
-    let metadata1 = EntryMetadata::new(
+    let metadata1 = test_entry_metadata(
         key1.clone(),
         data_path1.clone(),
         1024,
@@ -4482,7 +4504,7 @@ async fn test_removes_corrupted_entries_from_cache() {
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
-    let metadata2 = EntryMetadata::new(
+    let metadata2 = test_entry_metadata(
         key2.clone(),
         data_path2.clone(),
         512,
@@ -4571,7 +4593,7 @@ async fn test_deletes_tmp_files_from_failed_writes() {
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
     index.insert(key1.clone(), metadata1.clone());
     backend
         .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
@@ -4657,7 +4679,7 @@ async fn test_doesnt_delete_legitimate_files() {
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
     let meta_path1 = entries_dir.join(format!("{}.meta", hash1));
-    let metadata1 = EntryMetadata::new(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
+    let metadata1 = test_entry_metadata(key1.clone(), data_path1.clone(), 1024, 1000, 9999999999);
     index.insert(key1.clone(), metadata1.clone());
     backend
         .write_file_atomic(&data_path1, Bytes::from(vec![0u8; 1024]))
@@ -4679,7 +4701,7 @@ async fn test_doesnt_delete_legitimate_files() {
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
-    let metadata2 = EntryMetadata::new(key2.clone(), data_path2.clone(), 512, 1100, 9999999999);
+    let metadata2 = test_entry_metadata(key2.clone(), data_path2.clone(), 512, 1100, 9999999999);
     index.insert(key2.clone(), metadata2.clone());
     backend
         .write_file_atomic(&data_path2, Bytes::from(vec![1u8; 512]))
@@ -5221,7 +5243,7 @@ async fn test_integration_index_persistence_and_recovery() {
         backend.write_file_atomic(&data_path, data).await.unwrap();
 
         // Create metadata
-        let metadata = EntryMetadata::new(
+        let metadata = test_entry_metadata(
             key.clone(),
             data_path.clone(),
             1024,
