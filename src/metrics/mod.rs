@@ -191,7 +191,7 @@ impl Metrics {
             opa_cache_hits: AtomicU64::new(0),
             opa_cache_misses: AtomicU64::new(0),
             opa_evaluation_durations: Mutex::new(Vec::new()),
-            
+
             // Phase 1.6: Prewarm metrics
             prewarm_tasks_total: AtomicU64::new(0),
             prewarm_files_total: AtomicU64::new(0),
@@ -1496,6 +1496,55 @@ impl Metrics {
                 output.push_str(&format!(
                     "yatagarasu_cache_items_by_layer{{layer=\"{}\"}} {}\n",
                     layer, count
+                ));
+            }
+        }
+
+        // Phase 1.6: Prewarm metrics
+        output.push_str("\n# HELP yatagarasu_prewarm_tasks_total Total prewarm tasks created\n");
+        output.push_str("# TYPE yatagarasu_prewarm_tasks_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_tasks_total {}\n",
+            self.prewarm_tasks_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_files_total Total files cached by prewarm\n");
+        output.push_str("# TYPE yatagarasu_prewarm_files_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_files_total {}\n",
+            self.prewarm_files_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_bytes_total Total bytes cached by prewarm\n");
+        output.push_str("# TYPE yatagarasu_prewarm_bytes_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_bytes_total {}\n",
+            self.prewarm_bytes_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_errors_total Total prewarm errors\n");
+        output.push_str("# TYPE yatagarasu_prewarm_errors_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_errors_total {}\n",
+            self.prewarm_errors_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_duration_seconds Prewarm task durations\n");
+        output.push_str("# TYPE yatagarasu_prewarm_duration_seconds summary\n");
+        if let Ok(durations) = self.prewarm_duration_seconds.lock() {
+            if !durations.is_empty() {
+                let histogram = calculate_histogram(&durations);
+                output.push_str(&format!(
+                    "yatagarasu_prewarm_duration_seconds{{quantile=\"0.5\"}} {:.3}\n",
+                    histogram.p50
+                ));
+                output.push_str(&format!(
+                    "yatagarasu_prewarm_duration_seconds{{quantile=\"0.95\"}} {:.3}\n",
+                    histogram.p95
+                ));
+                output.push_str(&format!(
+                    "yatagarasu_prewarm_duration_seconds{{quantile=\"0.99\"}} {:.3}\n",
+                    histogram.p99
                 ));
             }
         }
