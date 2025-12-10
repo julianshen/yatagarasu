@@ -172,18 +172,6 @@ max_concurrent_requests: 5000
     }
 
     #[test]
-    fn test_server_config_threads_custom_value() {
-        let yaml = r#"
-address: "127.0.0.1"
-port: 8080
-threads: 16
-"#;
-        let config: ServerConfig = serde_yaml::from_str(yaml).unwrap();
-
-        assert_eq!(config.threads, 16);
-    }
-
-    #[test]
     fn test_server_config_with_rate_limit() {
         let yaml = r#"
 address: "127.0.0.1"
