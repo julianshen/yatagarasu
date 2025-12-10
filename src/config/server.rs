@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{
     DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_CONCURRENT_REQUESTS, DEFAULT_MAX_HEADER_SIZE,
-    DEFAULT_MAX_URI_LENGTH, DEFAULT_REQUEST_TIMEOUT_SECS,
+    DEFAULT_MAX_URI_LENGTH, DEFAULT_REQUEST_TIMEOUT_SECS, DEFAULT_THREADS,
 };
 
 use super::rate_limit::RateLimitConfigYaml;
@@ -25,6 +25,11 @@ fn default_request_timeout() -> u64 {
 // Default connection pool values
 fn default_max_concurrent_requests() -> usize {
     DEFAULT_MAX_CONCURRENT_REQUESTS
+}
+
+// Default worker thread count
+fn default_threads() -> usize {
+    DEFAULT_THREADS
 }
 
 // Default security limit values
@@ -79,6 +84,9 @@ impl SecurityLimitsConfig {
 pub struct ServerConfig {
     pub address: String,
     pub port: u16,
+    /// Number of worker threads (default: 4)
+    #[serde(default = "default_threads")]
+    pub threads: usize,
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
     #[serde(default = "default_max_concurrent_requests")]
@@ -136,6 +144,7 @@ port: 8080
 
         assert_eq!(config.address, "127.0.0.1");
         assert_eq!(config.port, 8080);
+        assert_eq!(config.threads, DEFAULT_THREADS);
         assert_eq!(config.request_timeout, DEFAULT_REQUEST_TIMEOUT_SECS);
         assert_eq!(
             config.max_concurrent_requests,
@@ -149,6 +158,7 @@ port: 8080
         let yaml = r#"
 address: "0.0.0.0"
 port: 9090
+threads: 8
 request_timeout: 60
 max_concurrent_requests: 5000
 "#;
@@ -156,8 +166,21 @@ max_concurrent_requests: 5000
 
         assert_eq!(config.address, "0.0.0.0");
         assert_eq!(config.port, 9090);
+        assert_eq!(config.threads, 8);
         assert_eq!(config.request_timeout, 60);
         assert_eq!(config.max_concurrent_requests, 5000);
+    }
+
+    #[test]
+    fn test_server_config_threads_custom_value() {
+        let yaml = r#"
+address: "127.0.0.1"
+port: 8080
+threads: 16
+"#;
+        let config: ServerConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.threads, 16);
     }
 
     #[test]

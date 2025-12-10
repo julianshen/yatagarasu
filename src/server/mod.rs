@@ -50,7 +50,7 @@ impl ServerConfig {
 
         Self {
             address,
-            threads: DEFAULT_THREADS,
+            threads: config.server.threads,
         }
     }
 }
@@ -268,5 +268,41 @@ mod tests {
             threads: 8,
         };
         assert_eq!(config.threads, 8);
+    }
+
+    #[test]
+    fn test_server_config_from_config_uses_threads() {
+        // Create a Config with custom threads value
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+  threads: 16
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // ServerConfig::from_config should use the threads value from config
+        let server_config = ServerConfig::from_config(&config);
+
+        assert_eq!(server_config.address, "127.0.0.1:8080");
+        assert_eq!(server_config.threads, 16);
+    }
+
+    #[test]
+    fn test_server_config_from_config_default_threads() {
+        // Create a Config without explicit threads value
+        let yaml = r#"
+server:
+  address: "127.0.0.1"
+  port: 8080
+buckets: []
+"#;
+        let config = Config::from_yaml_with_env(yaml).unwrap();
+
+        // ServerConfig::from_config should use default threads
+        let server_config = ServerConfig::from_config(&config);
+
+        assert_eq!(server_config.threads, DEFAULT_THREADS);
     }
 }
