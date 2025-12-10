@@ -1,6 +1,7 @@
 // Server module - Pingora HTTP server setup and configuration
 
 use crate::config::Config;
+use crate::constants::*;
 use pingora::server::configuration::Opt as ServerOpt;
 use pingora::server::Server;
 
@@ -38,7 +39,7 @@ impl ServerConfig {
     pub fn new(address: String) -> Self {
         Self {
             address,
-            threads: 4, // Default to 4 threads
+            threads: DEFAULT_THREADS,
         }
     }
 
@@ -49,7 +50,7 @@ impl ServerConfig {
 
         Self {
             address,
-            threads: 4, // TODO: Add threads configuration to Config
+            threads: DEFAULT_THREADS,
         }
     }
 }

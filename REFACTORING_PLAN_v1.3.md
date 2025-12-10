@@ -359,9 +359,9 @@ Focus areas:
 
 ### Sprint 1: Structural Cleanup (Week 1)
 1. [x] Review codebase - DONE
-2. [ ] 1.1 Extract common initialization in proxy
-3. [ ] 1.3 Improve Router performance
-4. [ ] 3.1 Replace magic numbers with constants
+2. [x] 1.1 Extract common initialization in proxy - DONE
+3. [x] 1.3 Improve Router performance - DONE
+4. [x] 3.1 Replace magic numbers with constants - DONE
 
 ### Sprint 2: Module Splitting (Week 2)
 1. [ ] 1.2.1 Split cache/mod.rs
