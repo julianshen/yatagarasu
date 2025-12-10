@@ -5,6 +5,33 @@ All notable changes to Yatagarasu S3 Proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2025-12-10
+
+### Added
+
+**Cache Warming**:
+- **Admin API**: New endpoints (`/admin/cache/prewarm`) for triggering cache warming jobs.
+- **Background Worker**: Async worker that lists S3 objects and populates cache layers.
+- **Configuration**: New `warming` section in `CacheConfig` for concurrency and rate limiting.
+- **Metrics**: Comprehensive metrics (`prewarm_tasks_total`, `prewarm_bytes_total`, etc.) for monitoring.
+
+**Kubernetes Integration**:
+- **Helm Chart**: Production-ready Helm chart in `charts/yatagarasu`.
+- **Kustomize Overlays**: Environment-specific overlays (`dev`, `prod`, `ha-redis`, `full-stack`).
+- **Examples**: Kubernetes manifests covering various deployment scenarios.
+
+**Documentation**:
+- **Documentation Website**: Comprehensive guide built with `mdBook`.
+- **Tutorials**: Guides for Authentication, Caching, and Basic Setup.
+- **API Reference**: Detailed documentation of the Admin API.
+
+### Changed
+- `CacheConfig`: Added `warming` field (backward compatible).
+- `S3Config`: Improved struct definition for better maintainability.
+- `S3 Client`: Added `ListObjectsV2` support with filtering and pagination.
+
+---
+
 ## [1.2.0] - 2025-12-08
 
 ### Added

@@ -82,6 +82,8 @@ pub mod tiered;
 // Cache warming submodule (Phase 1.3)
 pub mod warming;
 
+use warming::PrewarmConfig;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     #[serde(default)]
@@ -92,6 +94,8 @@ pub struct CacheConfig {
     pub disk: DiskCacheConfig,
     #[serde(default)]
     pub redis: RedisCacheConfig,
+    #[serde(default)]
+    pub warming: Option<PrewarmConfig>,
     #[serde(default = "default_cache_layers")]
     pub cache_layers: Vec<String>,
 }
@@ -103,6 +107,7 @@ impl Default for CacheConfig {
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: default_cache_layers(),
         }
     }
@@ -1102,6 +1107,7 @@ enabled: false
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
         assert!(config.enabled);
@@ -1111,6 +1117,7 @@ enabled: false
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
         assert!(!config.enabled);
@@ -1739,6 +1746,7 @@ max_item_size_mb: 5
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -1760,6 +1768,7 @@ max_item_size_mb: 5
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -1782,6 +1791,7 @@ max_item_size_mb: 5
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -1807,6 +1817,7 @@ max_item_size_mb: 5
             },
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -1866,6 +1877,7 @@ max_item_size_mb: 5
                 max_disk_cache_size_mb: 10240,
             },
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -1887,6 +1899,7 @@ max_item_size_mb: 5
                 max_disk_cache_size_mb: 10240,
             },
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec![], // Would be invalid if enabled
         };
 
@@ -6040,6 +6053,7 @@ cache:
             },
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -6056,6 +6070,7 @@ cache:
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -6077,6 +6092,7 @@ cache:
             },
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 
@@ -6110,6 +6126,7 @@ cache:
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec![],
         };
 
@@ -6143,6 +6160,7 @@ cache:
             memory: MemoryCacheConfig::default(),
             disk: DiskCacheConfig::default(),
             redis: RedisCacheConfig::default(),
+            warming: None,
             cache_layers: vec!["memory".to_string()],
         };
 

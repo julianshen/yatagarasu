@@ -119,6 +119,13 @@ pub struct Metrics {
     opa_cache_hits: AtomicU64,
     opa_cache_misses: AtomicU64,
     opa_evaluation_durations: Mutex<Vec<u64>>, // microseconds
+
+    // Phase 1.6: Prewarm metrics
+    prewarm_tasks_total: AtomicU64,
+    prewarm_files_total: AtomicU64,
+    prewarm_bytes_total: AtomicU64,
+    prewarm_errors_total: AtomicU64,
+    prewarm_duration_seconds: Mutex<Vec<u64>>, // microseconds
 }
 
 /// Global singleton instance of metrics
@@ -184,6 +191,13 @@ impl Metrics {
             opa_cache_hits: AtomicU64::new(0),
             opa_cache_misses: AtomicU64::new(0),
             opa_evaluation_durations: Mutex::new(Vec::new()),
+
+            // Phase 1.6: Prewarm metrics
+            prewarm_tasks_total: AtomicU64::new(0),
+            prewarm_files_total: AtomicU64::new(0),
+            prewarm_bytes_total: AtomicU64::new(0),
+            prewarm_errors_total: AtomicU64::new(0),
+            prewarm_duration_seconds: Mutex::new(Vec::new()),
         }
     }
 
@@ -618,6 +632,50 @@ impl Metrics {
                 p95: 0.0,
                 p99: 0.0,
             })
+    }
+
+    // =========================================================================
+    // Phase 1.6: Prewarm Metrics
+    // =========================================================================
+
+    /// Increment total prewarm tasks counter
+    pub fn increment_prewarm_tasks(&self) {
+        self.prewarm_tasks_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment prewarm cached files counter
+    pub fn increment_prewarm_files(&self, count: u64) {
+        self.prewarm_files_total.fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Increment prewarm cached bytes counter
+    pub fn increment_prewarm_bytes(&self, bytes: u64) {
+        self.prewarm_bytes_total.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Increment prewarm errors counter
+    pub fn increment_prewarm_errors(&self) {
+        self.prewarm_errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record prewarm task duration in seconds
+    pub fn record_prewarm_duration(&self, duration_secs: u64) {
+        let duration_us = duration_secs * 1_000_000;
+        if let Ok(mut durations) = self.prewarm_duration_seconds.lock() {
+            durations.push(duration_us);
+        }
+    }
+
+    /// Get prewarm tasks count (for testing)
+    #[cfg(test)]
+    pub fn get_prewarm_tasks_count(&self) -> u64 {
+        self.prewarm_tasks_total.load(Ordering::Relaxed)
+    }
+
+    /// Get prewarm files count (for testing)
+    #[cfg(test)]
+    pub fn get_prewarm_files_count(&self) -> u64 {
+        self.prewarm_files_total.load(Ordering::Relaxed)
     }
 
     /// Increment counter for a specific S3 operation
@@ -1438,6 +1496,55 @@ impl Metrics {
                 output.push_str(&format!(
                     "yatagarasu_cache_items_by_layer{{layer=\"{}\"}} {}\n",
                     layer, count
+                ));
+            }
+        }
+
+        // Phase 1.6: Prewarm metrics
+        output.push_str("\n# HELP yatagarasu_prewarm_tasks_total Total prewarm tasks created\n");
+        output.push_str("# TYPE yatagarasu_prewarm_tasks_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_tasks_total {}\n",
+            self.prewarm_tasks_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_files_total Total files cached by prewarm\n");
+        output.push_str("# TYPE yatagarasu_prewarm_files_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_files_total {}\n",
+            self.prewarm_files_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_bytes_total Total bytes cached by prewarm\n");
+        output.push_str("# TYPE yatagarasu_prewarm_bytes_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_bytes_total {}\n",
+            self.prewarm_bytes_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_errors_total Total prewarm errors\n");
+        output.push_str("# TYPE yatagarasu_prewarm_errors_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_prewarm_errors_total {}\n",
+            self.prewarm_errors_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_prewarm_duration_seconds Prewarm task durations\n");
+        output.push_str("# TYPE yatagarasu_prewarm_duration_seconds summary\n");
+        if let Ok(durations) = self.prewarm_duration_seconds.lock() {
+            if !durations.is_empty() {
+                let histogram = calculate_histogram(&durations);
+                output.push_str(&format!(
+                    "yatagarasu_prewarm_duration_seconds{{quantile=\"0.5\"}} {:.3}\n",
+                    histogram.p50
+                ));
+                output.push_str(&format!(
+                    "yatagarasu_prewarm_duration_seconds{{quantile=\"0.95\"}} {:.3}\n",
+                    histogram.p95
+                ));
+                output.push_str(&format!(
+                    "yatagarasu_prewarm_duration_seconds{{quantile=\"0.99\"}} {:.3}\n",
+                    histogram.p99
                 ));
             }
         }
