@@ -364,7 +364,7 @@ Focus areas:
 4. [x] 3.1 Replace magic numbers with constants - DONE
 
 ### Sprint 2: Module Splitting (Week 2)
-1. [ ] 1.2.1 Split cache/mod.rs
+1. [x] 1.2.1 Split cache/mod.rs - DONE (7603 lines → 6 focused modules, largest 1061 lines)
 2. [ ] 1.2.2 Split config/mod.rs
 3. [ ] 1.2.3 Split proxy/mod.rs
 
