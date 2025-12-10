@@ -365,7 +365,7 @@ Focus areas:
 
 ### Sprint 2: Module Splitting (Week 2)
 1. [x] 1.2.1 Split cache/mod.rs - DONE (7603 lines → 6 focused modules, largest 1061 lines)
-2. [ ] 1.2.2 Split config/mod.rs
+2. [x] 1.2.2 Split config/mod.rs - DONE (3498 lines → 9 focused modules, largest 822 lines)
 3. [ ] 1.2.3 Split proxy/mod.rs
 
 ### Sprint 3: Complete TODOs (Week 3)
