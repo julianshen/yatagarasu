@@ -349,7 +349,7 @@ async fn worker(
                                     if let Some(task) = t.get_mut(&task_id) {
                                         task.files_cached += 1;
                                         task.bytes_cached += len as u64;
-                                        
+
                                         Metrics::global().increment_prewarm_files(1);
                                         Metrics::global().increment_prewarm_bytes(len as u64);
                                     }
@@ -389,7 +389,7 @@ async fn worker(
             if task.status == TaskStatus::Running {
                 task.status = TaskStatus::Completed;
                 task.end_time = Some(SystemTime::now());
-                
+
                 if let Some(duration) = task.duration_seconds() {
                     Metrics::global().record_prewarm_duration(duration);
                 }
@@ -422,7 +422,7 @@ mod tests {
     fn test_prewarm_task_creation() {
         let options = PrewarmOptions::default();
         let task = PrewarmTask::new("bucket".to_string(), "path".to_string(), options);
-        
+
         assert_eq!(task.bucket, "bucket");
         assert_eq!(task.path, "path");
         assert_eq!(task.status, TaskStatus::Pending);
@@ -442,20 +442,21 @@ mod tests {
             ..Default::default()
         };
 
-        let task_id = manager.create_task("bucket".to_string(), "path".to_string(), options, s3_config);
-        
+        let task_id =
+            manager.create_task("bucket".to_string(), "path".to_string(), options, s3_config);
+
         let task = manager.get_task(&task_id);
         assert!(task.is_some());
         assert_eq!(task.unwrap().status, TaskStatus::Pending); // Worker might not have updated it yet
-        
+
         // List tasks
         let tasks = manager.list_tasks();
         assert_eq!(tasks.len(), 1);
-        
+
         // Cancel task
         let cancelled = manager.cancel_task(&task_id);
         assert!(cancelled);
-        
+
         let task = manager.get_task(&task_id).unwrap();
         assert_eq!(task.status, TaskStatus::Cancelled);
     }

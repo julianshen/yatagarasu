@@ -118,15 +118,14 @@ pub async fn handle_request(
         if manager.cancel_task(task_id) {
             return send_json_response(session, 200, serde_json::json!({"status": "cancelled"}))
                 .await;
+        } else if manager.get_task(task_id).is_none() {
+            return send_json_response(
+                session,
+                404,
+                serde_json::json!({"error": "Task not found"}),
+            )
+            .await;
         } else {
-            if manager.get_task(task_id).is_none() {
-                return send_json_response(
-                    session,
-                    404,
-                    serde_json::json!({"error": "Task not found"}),
-                )
-                .await;
-            }
             return send_json_response(session, 409, serde_json::json!({"error": "Task cannot be cancelled (already completed or failed)"})).await;
         }
     }
@@ -163,7 +162,7 @@ mod tests {
     fn test_create_task_request_deserialization() {
         let json = r#"{"bucket": "test-bucket", "path": "test/path", "recursive": true}"#;
         let req: CreateTaskRequest = serde_json::from_str(json).unwrap();
-        
+
         assert_eq!(req.bucket, "test-bucket");
         assert_eq!(req.path, "test/path");
         assert_eq!(req.options.recursive, true);
