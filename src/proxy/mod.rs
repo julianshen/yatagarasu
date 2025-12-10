@@ -1,5 +1,15 @@
-// Proxy module - Pingora ProxyHttp implementation
-// Implements the HTTP proxy logic for Yatagarasu S3 proxy
+//! Proxy module - Pingora ProxyHttp implementation.
+//!
+//! Implements the HTTP proxy logic for Yatagarasu S3 proxy, including:
+//! - Request routing to S3 backends
+//! - JWT authentication and claim validation
+//! - OPA and OpenFGA authorization
+//! - Caching with tiered storage
+//! - Rate limiting and circuit breakers
+//! - Health and metrics endpoints
+
+mod helpers;
+mod init;
 
 use async_trait::async_trait;
 use pingora_core::upstreams::peer::HttpPeer;
@@ -20,8 +30,8 @@ use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::opa::{
-    AuthorizationDecision as OpaAuthorizationDecision, FailMode as OpaFailMode, OpaCache,
-    OpaClient, OpaClientConfig, OpaInput, SharedOpaClient,
+    AuthorizationDecision as OpaAuthorizationDecision, FailMode as OpaFailMode, OpaCache, OpaInput,
+    SharedOpaClient,
 };
 use crate::openfga::{
     build_openfga_object, extract_user_id, http_method_to_relation,
@@ -40,26 +50,8 @@ use arc_swap::ArcSwap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-/// Components initialized from configuration
-/// Used internally to avoid code duplication between new() and with_reload()
-struct ProxyComponents {
-    config: Config,
-    router: Router,
-    metrics: Arc<Metrics>,
-    resource_monitor: Arc<ResourceMonitor>,
-    request_semaphore: Arc<Semaphore>,
-    circuit_breakers: HashMap<String, Arc<CircuitBreaker>>,
-    rate_limit_manager: Option<Arc<RateLimitManager>>,
-    retry_policies: HashMap<String, RetryPolicy>,
-    security_limits: SecurityLimits,
-    replica_sets: HashMap<String, crate::replica_set::ReplicaSet>,
-    cache: Option<Arc<TieredCache>>,
-    opa_clients: HashMap<String, SharedOpaClient>,
-    opa_cache: Option<Arc<OpaCache>>,
-    openfga_clients: HashMap<String, Arc<OpenFgaClient>>,
-    audit_writer: Option<Arc<AsyncAuditFileWriter>>,
-    prewarm_manager: Arc<PrewarmManager>,
-}
+// ProxyComponents is defined in init.rs
+use init::ProxyComponents;
 
 /// YatagarasuProxy implements the Pingora ProxyHttp trait
 /// Handles routing, authentication, and S3 proxying
@@ -99,233 +91,7 @@ pub struct YatagarasuProxy {
 }
 
 impl YatagarasuProxy {
-    /// Initialize audit writer from configuration
-    fn initialize_audit_writer(config: &Config) -> Option<Arc<AsyncAuditFileWriter>> {
-        let audit_config = config.audit_log.as_ref()?;
-        if !audit_config.enabled {
-            return None;
-        }
-        let file_config = audit_config.file.as_ref()?;
-        match AsyncAuditFileWriter::new(
-            &file_config.path,
-            file_config.max_file_size_mb,
-            file_config.max_backup_files,
-            file_config.rotation_policy.clone(),
-            file_config.buffer_size,
-        ) {
-            Ok(writer) => Some(Arc::new(writer)),
-            Err(e) => {
-                tracing::error!("Failed to initialize audit file writer: {}", e);
-                None
-            }
-        }
-    }
-
-    /// Initialize all proxy components from configuration
-    /// This is the common initialization logic shared by new() and with_reload()
-    fn initialize_from_config(config: Config) -> ProxyComponents {
-        // Normalize config to ensure all buckets have replicas populated (Phase 23: HA support)
-        let config = config.normalize();
-        let router = Router::new(config.buckets.clone());
-        let metrics = Arc::new(Metrics::new());
-        // Initialize resource monitor with auto-detected system limits
-        let resource_monitor = Arc::new(ResourceMonitor::new_auto_detect());
-        // Initialize request semaphore with max concurrent requests limit
-        let request_semaphore = Arc::new(Semaphore::new(config.server.max_concurrent_requests));
-
-        // Initialize circuit breakers for buckets that have circuit_breaker config
-        let mut circuit_breakers = HashMap::new();
-        for bucket in &config.buckets {
-            if let Some(ref cb_config) = bucket.s3.circuit_breaker {
-                let breaker = CircuitBreaker::new(cb_config.to_circuit_breaker_config());
-                circuit_breakers.insert(bucket.name.clone(), Arc::new(breaker));
-            }
-        }
-
-        // Initialize rate limit manager if enabled
-        let rate_limit_manager = if let Some(ref rate_limit_config) = config.server.rate_limit {
-            if rate_limit_config.enabled {
-                let global_rps = rate_limit_config
-                    .global
-                    .as_ref()
-                    .map(|g| g.requests_per_second);
-                let per_ip_rps = rate_limit_config
-                    .per_ip
-                    .as_ref()
-                    .map(|p| p.requests_per_second);
-                let manager = RateLimitManager::new(global_rps, per_ip_rps);
-
-                // Add per-bucket rate limiters
-                for bucket in &config.buckets {
-                    if let Some(ref bucket_rate_limit) = bucket.s3.rate_limit {
-                        manager.add_bucket_limiter(
-                            bucket.name.clone(),
-                            bucket_rate_limit.requests_per_second,
-                        );
-                    }
-                }
-
-                Some(Arc::new(manager))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Initialize retry policies for buckets that have retry config
-        let mut retry_policies = HashMap::new();
-        for bucket in &config.buckets {
-            if let Some(ref retry_config) = bucket.s3.retry {
-                let policy = retry_config.to_retry_policy();
-                retry_policies.insert(bucket.name.clone(), policy);
-            } else {
-                // Use default retry policy if not configured
-                retry_policies.insert(bucket.name.clone(), RetryPolicy::default());
-            }
-        }
-
-        // Initialize replica sets for each bucket (Phase 23: HA bucket replication)
-        let mut replica_sets = HashMap::new();
-        for bucket in &config.buckets {
-            // After normalization, all buckets have replicas populated (either from replicas array or converted from legacy fields)
-            if let Some(ref replicas) = bucket.s3.replicas {
-                match crate::replica_set::ReplicaSet::new(replicas) {
-                    Ok(replica_set) => {
-                        replica_sets.insert(bucket.name.clone(), replica_set);
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            bucket = %bucket.name,
-                            error = %e,
-                            "Failed to create ReplicaSet for bucket, skipping"
-                        );
-                        // Skip this bucket - it won't have failover support
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    bucket = %bucket.name,
-                    "Bucket has no replicas configured after normalization, skipping"
-                );
-            }
-        }
-
-        let security_limits = config.server.security_limits.to_security_limits();
-
-        // TODO Phase 30: Initialize cache from config if enabled
-        let cache = None; // Temporarily None until cache initialization is implemented
-
-        // Phase 32: Initialize OPA clients and cache for buckets with authorization config
-        let mut opa_clients = HashMap::new();
-        let mut max_cache_ttl = 0u64;
-        for bucket in &config.buckets {
-            if let Some(ref auth_config) = bucket.authorization {
-                if auth_config.auth_type == "opa" {
-                    if let (Some(opa_url), Some(policy_path)) =
-                        (&auth_config.opa_url, &auth_config.opa_policy_path)
-                    {
-                        let client_config = OpaClientConfig {
-                            url: opa_url.clone(),
-                            policy_path: policy_path.clone(),
-                            timeout_ms: auth_config.opa_timeout_ms,
-                            cache_ttl_seconds: auth_config.opa_cache_ttl_seconds,
-                        };
-                        max_cache_ttl = max_cache_ttl.max(client_config.cache_ttl_seconds);
-                        let client = Arc::new(OpaClient::new(client_config));
-                        opa_clients.insert(bucket.name.clone(), client);
-                        tracing::info!(
-                            bucket = %bucket.name,
-                            opa_url = %opa_url,
-                            policy_path = %policy_path,
-                            "OPA authorization enabled for bucket"
-                        );
-                    }
-                }
-            }
-        }
-        // Create shared OPA cache if any bucket uses OPA
-        let opa_cache = if !opa_clients.is_empty() {
-            Some(Arc::new(OpaCache::new(max_cache_ttl.max(60))))
-        } else {
-            None
-        };
-
-        // Phase 49: Initialize OpenFGA clients for buckets with authorization config
-        let mut openfga_clients = HashMap::new();
-        for bucket in &config.buckets {
-            if let Some(ref auth_config) = bucket.authorization {
-                if auth_config.auth_type == "openfga" {
-                    if let (Some(endpoint), Some(store_id)) =
-                        (&auth_config.openfga_endpoint, &auth_config.openfga_store_id)
-                    {
-                        let mut builder = OpenFgaClient::builder(endpoint, store_id);
-
-                        // Set optional API token
-                        if let Some(ref api_token) = auth_config.openfga_api_token {
-                            builder = builder.api_token(api_token);
-                        }
-
-                        // Set optional authorization model ID
-                        if let Some(ref model_id) = auth_config.openfga_authorization_model_id {
-                            builder = builder.authorization_model_id(model_id);
-                        }
-
-                        // Set timeout (default: 100ms)
-                        builder = builder.timeout_ms(auth_config.openfga_timeout_ms);
-
-                        match builder.build() {
-                            Ok(client) => {
-                                openfga_clients.insert(bucket.name.clone(), Arc::new(client));
-                                tracing::info!(
-                                    bucket = %bucket.name,
-                                    endpoint = %endpoint,
-                                    store_id = %store_id,
-                                    "OpenFGA authorization enabled for bucket"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    bucket = %bucket.name,
-                                    error = %e,
-                                    "Failed to create OpenFGA client for bucket"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Initialize audit writer if enabled
-        let audit_writer = Self::initialize_audit_writer(&config);
-
-        // Initialize prewarm manager
-        let prewarm_manager = Arc::new(PrewarmManager::new(
-            cache.clone().map(|c| c as Arc<dyn Cache>),
-        ));
-
-        ProxyComponents {
-            config,
-            router,
-            metrics,
-            resource_monitor,
-            request_semaphore,
-            circuit_breakers,
-            rate_limit_manager,
-            retry_policies,
-            security_limits,
-            replica_sets,
-            cache,
-            opa_clients,
-            opa_cache,
-            openfga_clients,
-            audit_writer,
-            prewarm_manager,
-        }
-    }
-
-    /// Build YatagarasuProxy from initialized components
+    /// Build YatagarasuProxy from initialized components.
     fn build_from_components(
         components: ProxyComponents,
         reload_manager: Option<Arc<ReloadManager>>,
@@ -352,15 +118,15 @@ impl YatagarasuProxy {
         }
     }
 
-    /// Create a new YatagarasuProxy instance from configuration
+    /// Create a new YatagarasuProxy instance from configuration.
     pub fn new(config: Config) -> Self {
-        let components = Self::initialize_from_config(config);
+        let components = init::initialize_from_config(config);
         Self::build_from_components(components, None)
     }
 
-    /// Create a new YatagarasuProxy with reload support
+    /// Create a new YatagarasuProxy with reload support.
     pub fn with_reload(config: Config, config_path: PathBuf) -> Self {
-        let components = Self::initialize_from_config(config);
+        let components = init::initialize_from_config(config);
 
         let reload_manager = Arc::new(ReloadManager::new(config_path));
 
@@ -482,100 +248,24 @@ impl YatagarasuProxy {
         Arc::clone(&self.metrics)
     }
 
-    /// Extract headers from Pingora RequestHeader into HashMap
+    /// Extract headers from Pingora RequestHeader into HashMap.
     fn extract_headers(req: &RequestHeader) -> HashMap<String, String> {
-        let mut headers = HashMap::new();
-        for (name, value) in req.headers.iter() {
-            if let Ok(value_str) = value.to_str() {
-                headers.insert(name.to_string(), value_str.to_string());
-            }
-        }
-        headers
+        helpers::extract_headers(req)
     }
 
-    /// Extract query parameters from URI
+    /// Extract query parameters from URI.
     fn extract_query_params(req: &RequestHeader) -> HashMap<String, String> {
-        let mut params = HashMap::new();
-        if let Some(query) = req.uri.query() {
-            for pair in query.split('&') {
-                if let Some((key, value)) = pair.split_once('=') {
-                    params.insert(
-                        key.to_string(),
-                        urlencoding::decode(value).unwrap_or_default().to_string(),
-                    );
-                }
-            }
-        }
-        params
+        helpers::extract_query_params(req)
     }
 
-    /// Extract client IP address from session (X-Forwarded-For aware)
-    ///
-    /// Checks X-Forwarded-For header first (for proxies/load balancers),
-    /// then falls back to direct connection IP from session.
+    /// Extract client IP address from session (X-Forwarded-For aware).
     fn get_client_ip(&self, session: &Session) -> String {
-        // Check X-Forwarded-For header first (common in reverse proxy setups)
-        if let Some(forwarded_for) = session
-            .req_header()
-            .headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-        {
-            // X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-            // The first IP is the original client
-            if let Some(client_ip) = forwarded_for.split(',').next() {
-                return client_ip.trim().to_string();
-            }
-        }
-
-        // Fall back to direct connection IP
-        session
-            .client_addr()
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|| "unknown".to_string())
+        helpers::get_client_ip(session)
     }
 
-    /// Export circuit breaker metrics for Prometheus
+    /// Export circuit breaker metrics for Prometheus.
     fn export_circuit_breaker_metrics(&self) -> String {
-        let mut output = String::new();
-
-        // Circuit breaker state metric (gauge: 0=closed, 1=open, 2=half-open)
-        output.push_str("\n# HELP circuit_breaker_state Circuit breaker state per bucket (0=closed, 1=open, 2=half-open)\n");
-        output.push_str("# TYPE circuit_breaker_state gauge\n");
-
-        for (bucket_name, circuit_breaker) in self.circuit_breakers.iter() {
-            let state_value = circuit_breaker.state() as u8;
-            output.push_str(&format!(
-                "circuit_breaker_state{{bucket=\"{}\"}} {}\n",
-                bucket_name, state_value
-            ));
-        }
-
-        // Circuit breaker failure count metric (gauge)
-        output.push_str("\n# HELP circuit_breaker_failures Current consecutive failure count\n");
-        output.push_str("# TYPE circuit_breaker_failures gauge\n");
-
-        for (bucket_name, circuit_breaker) in self.circuit_breakers.iter() {
-            output.push_str(&format!(
-                "circuit_breaker_failures{{bucket=\"{}\"}} {}\n",
-                bucket_name,
-                circuit_breaker.failure_count()
-            ));
-        }
-
-        // Circuit breaker success count in half-open state (gauge)
-        output.push_str("\n# HELP circuit_breaker_successes Success count in half-open state\n");
-        output.push_str("# TYPE circuit_breaker_successes gauge\n");
-
-        for (bucket_name, circuit_breaker) in self.circuit_breakers.iter() {
-            output.push_str(&format!(
-                "circuit_breaker_successes{{bucket=\"{}\"}} {}\n",
-                bucket_name,
-                circuit_breaker.success_count()
-            ));
-        }
-
-        output
+        helpers::export_circuit_breaker_metrics(&self.circuit_breakers)
     }
 }
 
