@@ -1,5 +1,5 @@
 use clap::Parser;
-use pingora_core::server::configuration::Opt;
+use pingora_core::server::configuration::{Opt, ServerConf};
 use pingora_core::server::Server;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,12 +103,13 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Create Pingora server
-    let mut server = Server::new(Some(opt)).unwrap_or_else(|e| {
-        eprintln!("Error: Failed to create Pingora server");
-        eprintln!("Reason: {}", e);
-        std::process::exit(1);
-    });
+    // Create Pingora server with configured thread count
+    let server_conf = ServerConf {
+        threads: config.server.threads,
+        ..Default::default()
+    };
+
+    let mut server = Server::new_with_opt_and_conf(opt, server_conf);
     server.bootstrap();
 
     // Create YatagarasuProxy instance with reload support and cache initialization
