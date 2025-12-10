@@ -1,14 +1,26 @@
 // Router module
 
 use crate::config::BucketConfig;
+use std::collections::HashMap;
 
 pub struct Router {
     buckets: Vec<BucketConfig>,
+    /// Index for O(1) bucket lookup by name
+    bucket_by_name: HashMap<String, usize>,
 }
 
 impl Router {
     pub fn new(buckets: Vec<BucketConfig>) -> Self {
-        Router { buckets }
+        let bucket_by_name: HashMap<String, usize> = buckets
+            .iter()
+            .enumerate()
+            .map(|(idx, bucket)| (bucket.name.clone(), idx))
+            .collect();
+
+        Router {
+            buckets,
+            bucket_by_name,
+        }
     }
 
     pub fn route(&self, path: &str) -> Option<&BucketConfig> {
@@ -34,10 +46,9 @@ impl Router {
 
     /// Get a bucket configuration by name
     ///
-    /// This is an O(n) linear search through buckets.
-    /// Use `route()` for path-based lookups which is the primary use case.
+    /// This is an O(1) lookup using a HashMap index.
     pub fn get_bucket_by_name(&self, name: &str) -> Option<&BucketConfig> {
-        self.buckets.iter().find(|b| b.name == name)
+        self.bucket_by_name.get(name).map(|&idx| &self.buckets[idx])
     }
 
     fn normalize_path(path: &str) -> String {
