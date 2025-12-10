@@ -4,6 +4,7 @@
 //! authorization decisions. It includes an HTTP client for communicating
 //! with OPA and types for request/response handling.
 
+use crate::constants::DEFAULT_OPA_TIMEOUT_MS;
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -13,9 +14,6 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-
-/// Default timeout for OPA requests in milliseconds
-const DEFAULT_OPA_TIMEOUT_MS: u64 = 100;
 
 /// Error type for OPA operations
 #[derive(Debug, Clone)]

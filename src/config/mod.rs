@@ -6,6 +6,16 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::cache::{BucketCacheOverride, CacheConfig};
+use crate::constants::{
+    DEFAULT_AUDIT_BUFFER_SIZE, DEFAULT_CB_TIMEOUT_SECS, DEFAULT_CONNECTION_POOL_SIZE,
+    DEFAULT_EXPORT_INTERVAL_SECS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_HALF_OPEN_MAX_REQUESTS,
+    DEFAULT_INITIAL_BACKOFF_MS, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_BACKOFF_MS,
+    DEFAULT_MAX_BACKUP_FILES, DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_CONCURRENT_REQUESTS,
+    DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_MAX_HEADER_SIZE, DEFAULT_MAX_URI_LENGTH,
+    DEFAULT_OPA_CACHE_TTL_SECS, DEFAULT_OPA_TIMEOUT_MS, DEFAULT_OPENFGA_CACHE_TTL_SECS,
+    DEFAULT_OPENFGA_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_SECS, DEFAULT_S3_TIMEOUT_SECS,
+    DEFAULT_SUCCESS_THRESHOLD,
+};
 use crate::observability::ObservabilityConfig;
 pub use crate::security::IpFilterConfig; // Re-export for tests
 
@@ -57,19 +67,19 @@ pub enum RotationPolicy {
     Daily,
 }
 
-/// Default max file size for audit logs (50 MB)
+/// Default max file size for audit logs
 fn default_max_file_size_mb() -> u64 {
-    50
+    DEFAULT_MAX_FILE_SIZE_MB
 }
 
 /// Default max backup files to keep
 fn default_max_backup_files() -> u32 {
-    5
+    DEFAULT_MAX_BACKUP_FILES
 }
 
-/// Default audit buffer size (1MB)
+/// Default audit buffer size
 fn default_audit_buffer_size() -> usize {
-    1024 * 1024
+    DEFAULT_AUDIT_BUFFER_SIZE
 }
 
 /// File output configuration for audit logs
@@ -147,7 +157,7 @@ pub struct AuditSyslogConfig {
 
 /// Default export interval in seconds (60s = 1 minute)
 fn default_export_interval_seconds() -> u64 {
-    60
+    DEFAULT_EXPORT_INTERVAL_SECS
 }
 
 /// S3 export configuration for audit logs
@@ -480,33 +490,33 @@ impl Config {
 
 // Default timeout values
 fn default_request_timeout() -> u64 {
-    30 // 30 seconds
+    DEFAULT_REQUEST_TIMEOUT_SECS
 }
 
 fn default_s3_timeout() -> u64 {
-    20 // 20 seconds
+    DEFAULT_S3_TIMEOUT_SECS
 }
 
 // Default connection pool values
 fn default_max_concurrent_requests() -> usize {
-    1000 // 1000 concurrent requests
+    DEFAULT_MAX_CONCURRENT_REQUESTS
 }
 
 fn default_connection_pool_size() -> usize {
-    50 // 50 connections per S3 bucket
+    DEFAULT_CONNECTION_POOL_SIZE
 }
 
 // Default security limit values
 fn default_max_body_size() -> usize {
-    10 * 1024 * 1024 // 10 MB
+    DEFAULT_MAX_BODY_SIZE
 }
 
 fn default_max_header_size() -> usize {
-    64 * 1024 // 64 KB
+    DEFAULT_MAX_HEADER_SIZE
 }
 
 fn default_max_uri_length() -> usize {
-    8192 // 8 KB
+    DEFAULT_MAX_URI_LENGTH
 }
 
 /// Security validation limits configuration
@@ -625,22 +635,22 @@ pub struct AuthConfig {
 
 /// Default OPA timeout in milliseconds
 fn default_opa_timeout_ms() -> u64 {
-    100
+    DEFAULT_OPA_TIMEOUT_MS
 }
 
 /// Default OPA cache TTL in seconds
 fn default_opa_cache_ttl_seconds() -> u64 {
-    60
+    DEFAULT_OPA_CACHE_TTL_SECS
 }
 
 /// Default OpenFGA timeout in milliseconds
 fn default_openfga_timeout_ms() -> u64 {
-    100
+    DEFAULT_OPENFGA_TIMEOUT_MS
 }
 
 /// Default OpenFGA cache TTL in seconds
 fn default_openfga_cache_ttl_seconds() -> u64 {
-    60
+    DEFAULT_OPENFGA_CACHE_TTL_SECS
 }
 
 /// Authorization configuration for bucket-level access control
@@ -788,19 +798,19 @@ pub struct CircuitBreakerConfigYaml {
 }
 
 fn default_failure_threshold() -> u32 {
-    5
+    DEFAULT_FAILURE_THRESHOLD
 }
 
 fn default_success_threshold() -> u32 {
-    2
+    DEFAULT_SUCCESS_THRESHOLD
 }
 
 fn default_timeout_seconds() -> u64 {
-    60
+    DEFAULT_CB_TIMEOUT_SECS
 }
 
 fn default_half_open_max_requests() -> u32 {
-    3
+    DEFAULT_HALF_OPEN_MAX_REQUESTS
 }
 
 impl CircuitBreakerConfigYaml {
@@ -865,15 +875,15 @@ pub struct RetryConfigYaml {
 }
 
 fn default_max_attempts() -> u32 {
-    3
+    DEFAULT_MAX_ATTEMPTS
 }
 
 fn default_initial_backoff_ms() -> u64 {
-    100
+    DEFAULT_INITIAL_BACKOFF_MS
 }
 
 fn default_max_backoff_ms() -> u64 {
-    1000
+    DEFAULT_MAX_BACKOFF_MS
 }
 
 impl RetryConfigYaml {
