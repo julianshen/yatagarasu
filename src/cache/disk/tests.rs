@@ -1578,6 +1578,16 @@ async fn test_cleans_up_temp_file_on_error() {
     use bytes::Bytes;
     use std::path::Path;
 
+    // Skip this test if running as root (uid 0) since root can write anywhere
+    #[cfg(unix)]
+    {
+        let is_root = unsafe { libc::getuid() == 0 };
+        if is_root {
+            eprintln!("Skipping test: running as root, permission test not applicable");
+            return;
+        }
+    }
+
     let backend = TokioFsBackend::new();
 
     // Try to write to a path that will fail (e.g., root directory without permissions)
@@ -1677,10 +1687,27 @@ fn test_uring_backend_not_available_on_non_linux() {
 // Functional tests for UringBackend (Linux only)
 // These tests verify basic file operations work correctly
 
+/// Helper function to check if io_uring is available on this kernel
+/// Returns true if io_uring can be initialized, false otherwise (e.g., kernel < 5.1)
+#[cfg(target_os = "linux")]
+fn is_io_uring_available() -> bool {
+    // Try to create an io_uring instance - will fail on kernels < 5.1
+    match io_uring::IoUring::new(8) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
 #[tokio::test]
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_read_file_successfully() {
     // Test: read_file() successfully reads existing file
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -1705,6 +1732,12 @@ async fn test_uring_backend_read_file_successfully() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_read_missing_file_returns_error() {
     // Test: read_file() returns error for missing file
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use tempfile::TempDir;
@@ -1740,6 +1773,12 @@ async fn test_uring_backend_read_missing_file_returns_error() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_read_file_binary_data_integrity() {
     // Test: read_file() returns Bytes with correct content (binary data)
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -1789,6 +1828,12 @@ async fn test_uring_backend_read_file_binary_data_integrity() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_read_large_file() {
     // Test: Handles large files (>1MB) correctly
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -1846,6 +1891,12 @@ async fn test_uring_backend_read_large_file() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_write_creates_parent_dirs() {
     // Test: write_file_atomic() creates parent directories
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -1885,6 +1936,12 @@ async fn test_uring_backend_write_creates_parent_dirs() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_write_uses_temp_file() {
     // Test: write_file_atomic() writes to temp file first
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -1924,6 +1981,12 @@ async fn test_uring_backend_write_uses_temp_file() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_write_atomic_rename() {
     // Test: write_file_atomic() atomically renames temp to final
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -1970,6 +2033,12 @@ async fn test_uring_backend_write_atomic_rename() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_write_handles_errors() {
     // Test: write_file_atomic() handles write errors gracefully
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -2016,6 +2085,12 @@ async fn test_uring_backend_write_handles_errors() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_delete_removes_file() {
     // Test: delete_file() removes existing file
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -2043,6 +2118,12 @@ async fn test_uring_backend_delete_removes_file() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_delete_is_idempotent() {
     // Test: delete_file() is idempotent (ignores missing files)
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use tempfile::TempDir;
@@ -2074,6 +2155,12 @@ async fn test_uring_backend_delete_is_idempotent() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_create_dir_all_nested() {
     // Test: create_dir_all() creates nested directories
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use tempfile::TempDir;
@@ -2104,6 +2191,12 @@ async fn test_uring_backend_create_dir_all_nested() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_create_dir_all_idempotent() {
     // Test: create_dir_all() is idempotent
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use tempfile::TempDir;
@@ -2136,6 +2229,12 @@ async fn test_uring_backend_create_dir_all_idempotent() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_file_size() {
     // Test: file_size() returns correct size for existing file
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;
@@ -2166,6 +2265,12 @@ async fn test_uring_backend_file_size() {
 #[cfg(target_os = "linux")]
 async fn test_uring_backend_read_dir() {
     // Test: read_dir() lists directory contents
+    // Skip if io_uring is not available (kernel < 5.1)
+    if !is_io_uring_available() {
+        eprintln!("Skipping test: io_uring not available on this kernel");
+        return;
+    }
+
     use super::backend::DiskBackend;
     use super::uring_backend::UringBackend;
     use bytes::Bytes;

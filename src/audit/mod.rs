@@ -2463,17 +2463,21 @@ mod tests {
     #[test]
     fn test_handles_file_write_errors_gracefully() {
         // Test: Handles file write errors gracefully
-        // Try to create writer in a non-writable location (on most systems, root is not writable)
+        // Try to create writer in a non-writable location
         #[cfg(unix)]
         {
-            let invalid_path = "/root/nonexistent_dir_12345/audit.log";
-            let result = AuditFileWriter::new(invalid_path);
+            // Skip this check if running as root (uid 0) since root can write anywhere
+            let is_root = unsafe { libc::getuid() == 0 };
+            if !is_root {
+                let invalid_path = "/root/nonexistent_dir_12345/audit.log";
+                let result = AuditFileWriter::new(invalid_path);
 
-            // Should return an error, not panic
-            assert!(
-                result.is_err(),
-                "Should fail gracefully for non-writable path"
-            );
+                // Should return an error, not panic
+                assert!(
+                    result.is_err(),
+                    "Should fail gracefully for non-writable path"
+                );
+            }
         }
 
         // Also test that write returns error when file is closed
