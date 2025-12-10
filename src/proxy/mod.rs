@@ -495,7 +495,7 @@ impl YatagarasuProxy {
 
         // Initialize prewarm manager
         let prewarm_manager = Arc::new(PrewarmManager::new(
-             cache.clone().map(|c| c as Arc<dyn Cache>),
+            cache.clone().map(|c| c as Arc<dyn Cache>),
         ));
 
         Self {
@@ -597,7 +597,7 @@ impl YatagarasuProxy {
                             "Cache initialized successfully"
                         );
                         self.cache = Some(Arc::new(tiered_cache));
-                        
+
                         // Update prewarm manager with new cache instance
                         if let Some(ref cache) = self.cache {
                             self.prewarm_manager.set_cache(cache.clone());
