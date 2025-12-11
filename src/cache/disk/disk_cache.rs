@@ -10,10 +10,8 @@ use std::sync::Arc;
 
 /// Disk-based cache implementation
 pub struct DiskCache {
-    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache::get/set implementation)
     backend: Arc<dyn DiskBackend>,
     pub(crate) index: Arc<CacheIndex>, // pub(crate) for testing
-    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache::set for file paths)
     cache_dir: PathBuf,
     max_size_bytes: u64,
     eviction_count: Arc<AtomicU64>,
