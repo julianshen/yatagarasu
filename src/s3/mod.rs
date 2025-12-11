@@ -300,6 +300,61 @@ pub fn build_head_object_request(bucket: &str, key: &str, region: &str) -> S3Req
     }
 }
 
+/// Structured S3 error information extracted from XML error response
+///
+/// S3 returns errors in XML format like:
+/// ```xml
+/// <?xml version="1.0" encoding="UTF-8"?>
+/// <Error>
+///   <Code>NoSuchKey</Code>
+///   <Message>The specified key does not exist.</Message>
+///   <Key>example-key</Key>
+///   <RequestId>ABC123</RequestId>
+///   <HostId>xyz789</HostId>
+/// </Error>
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct S3Error {
+    /// S3 error code (e.g., "NoSuchKey", "AccessDenied")
+    pub code: String,
+    /// Human-readable error message
+    pub message: String,
+    /// The key that caused the error (if applicable)
+    pub key: Option<String>,
+    /// AWS request ID for support/debugging
+    pub request_id: Option<String>,
+}
+
+impl S3Error {
+    /// Create a new S3Error with code and message
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        S3Error {
+            code: code.into(),
+            message: message.into(),
+            key: None,
+            request_id: None,
+        }
+    }
+
+    /// Create a descriptive error string for logging/display
+    pub fn to_descriptive_string(&self) -> String {
+        let mut parts = vec![format!("[{}] {}", self.code, self.message)];
+        if let Some(ref key) = self.key {
+            parts.push(format!("Key: {}", key));
+        }
+        if let Some(ref req_id) = self.request_id {
+            parts.push(format!("RequestId: {}", req_id));
+        }
+        parts.join(" | ")
+    }
+}
+
+impl std::fmt::Display for S3Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_descriptive_string())
+    }
+}
+
 /// Represents an S3 response
 #[derive(Debug)]
 pub struct S3Response {
@@ -335,34 +390,97 @@ impl S3Response {
         self.headers.get(name)
     }
 
+    /// Extracts content from an XML tag, handling whitespace
+    ///
+    /// Looks for `<tag_name>content</tag_name>` and returns the trimmed content.
+    /// Returns None if the tag is not found or body is not valid UTF-8.
+    fn extract_xml_tag(&self, tag_name: &str) -> Option<String> {
+        // Use from_utf8 with borrow to avoid cloning the body
+        let body_str = std::str::from_utf8(&self.body).ok()?;
+        extract_xml_tag_content(body_str, tag_name)
+    }
+
     /// Extracts the error code from S3 XML error response
     pub fn get_error_code(&self) -> Option<String> {
-        let body_str = String::from_utf8(self.body.clone()).ok()?;
-
-        // Find <Code> tag and extract its content
-        let start_tag = "<Code>";
-        let end_tag = "</Code>";
-
-        let start_pos = body_str.find(start_tag)?;
-        let content_start = start_pos + start_tag.len();
-        let content_end = body_str[content_start..].find(end_tag)?;
-
-        Some(body_str[content_start..content_start + content_end].to_string())
+        self.extract_xml_tag("Code")
     }
 
     /// Extracts the error message from S3 XML error response
     pub fn get_error_message(&self) -> Option<String> {
-        let body_str = String::from_utf8(self.body.clone()).ok()?;
+        self.extract_xml_tag("Message")
+    }
 
-        // Find <Message> tag and extract its content
-        let start_tag = "<Message>";
-        let end_tag = "</Message>";
+    /// Parses the complete S3 error from XML response body
+    ///
+    /// Returns a structured S3Error with code, message, key, and request_id
+    /// if the response body contains valid S3 error XML.
+    ///
+    /// # Example
+    /// ```ignore
+    /// if !response.is_success() {
+    ///     if let Some(error) = response.parse_error() {
+    ///         tracing::error!("S3 error: {}", error);
+    ///         // Access individual fields
+    ///         println!("Code: {}", error.code);
+    ///         println!("Message: {}", error.message);
+    ///     }
+    /// }
+    /// ```
+    pub fn parse_error(&self) -> Option<S3Error> {
+        // Convert body to string once to avoid repeated UTF-8 validation
+        let body_str = std::str::from_utf8(&self.body).ok()?;
+        let code = extract_xml_tag_content(body_str, "Code")?;
+        let message = extract_xml_tag_content(body_str, "Message").unwrap_or_default();
+        let key = extract_xml_tag_content(body_str, "Key");
+        let request_id = extract_xml_tag_content(body_str, "RequestId");
 
-        let start_pos = body_str.find(start_tag)?;
-        let content_start = start_pos + start_tag.len();
-        let content_end = body_str[content_start..].find(end_tag)?;
+        Some(S3Error {
+            code,
+            message,
+            key,
+            request_id,
+        })
+    }
 
-        Some(body_str[content_start..content_start + content_end].to_string())
+    /// Returns true if this is a "not found" error (NoSuchKey, NoSuchBucket)
+    pub fn is_not_found(&self) -> bool {
+        self.status_code == 404
+            || self
+                .get_error_code()
+                .map(|c| c == "NoSuchKey" || c == "NoSuchBucket")
+                .unwrap_or(false)
+    }
+
+    /// Returns true if this is an access denied error
+    pub fn is_access_denied(&self) -> bool {
+        self.status_code == 403
+            || self
+                .get_error_code()
+                .map(|c| c == "AccessDenied" || c == "InvalidAccessKeyId")
+                .unwrap_or(false)
+    }
+}
+
+/// Helper function to extract content from an XML tag
+///
+/// Handles basic XML parsing including:
+/// - Whitespace trimming
+/// - Empty tags
+/// - Missing tags (returns None)
+fn extract_xml_tag_content(xml: &str, tag_name: &str) -> Option<String> {
+    let start_tag = format!("<{}>", tag_name);
+    let end_tag = format!("</{}>", tag_name);
+
+    let start_pos = xml.find(&start_tag)?;
+    let content_start = start_pos + start_tag.len();
+    let remaining = &xml[content_start..];
+    let content_end = remaining.find(&end_tag)?;
+
+    let content = remaining[..content_end].trim();
+    if content.is_empty() {
+        None
+    } else {
+        Some(content.to_string())
     }
 }
 
@@ -559,4 +677,261 @@ pub fn sign_request(params: &SigningParams) -> String {
         "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
         params.access_key, credential_scope, signed_headers, signature
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn create_error_response(body: &str) -> S3Response {
+        S3Response::new(404, "Not Found", HashMap::new(), body.as_bytes().to_vec())
+    }
+
+    // S3Error tests
+    #[test]
+    fn test_s3_error_new() {
+        let error = S3Error::new("NoSuchKey", "The specified key does not exist.");
+        assert_eq!(error.code, "NoSuchKey");
+        assert_eq!(error.message, "The specified key does not exist.");
+        assert!(error.key.is_none());
+        assert!(error.request_id.is_none());
+    }
+
+    #[test]
+    fn test_s3_error_display() {
+        let error = S3Error {
+            code: "NoSuchKey".to_string(),
+            message: "The specified key does not exist.".to_string(),
+            key: Some("my-file.txt".to_string()),
+            request_id: Some("ABC123".to_string()),
+        };
+        let display = format!("{}", error);
+        assert!(display.contains("[NoSuchKey]"));
+        assert!(display.contains("The specified key does not exist."));
+        assert!(display.contains("Key: my-file.txt"));
+        assert!(display.contains("RequestId: ABC123"));
+    }
+
+    #[test]
+    fn test_s3_error_to_descriptive_string_minimal() {
+        let error = S3Error::new("AccessDenied", "Access Denied");
+        let desc = error.to_descriptive_string();
+        assert_eq!(desc, "[AccessDenied] Access Denied");
+    }
+
+    // XML extraction tests
+    #[test]
+    fn test_extract_xml_tag_content_simple() {
+        let xml = "<Error><Code>NoSuchKey</Code></Error>";
+        assert_eq!(
+            extract_xml_tag_content(xml, "Code"),
+            Some("NoSuchKey".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_xml_tag_content_with_whitespace() {
+        let xml = "<Error><Code>  NoSuchKey  </Code></Error>";
+        assert_eq!(
+            extract_xml_tag_content(xml, "Code"),
+            Some("NoSuchKey".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_xml_tag_content_with_newlines() {
+        let xml = r#"<Error>
+            <Code>
+                AccessDenied
+            </Code>
+        </Error>"#;
+        assert_eq!(
+            extract_xml_tag_content(xml, "Code"),
+            Some("AccessDenied".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_xml_tag_content_empty_tag() {
+        let xml = "<Error><Code></Code></Error>";
+        assert_eq!(extract_xml_tag_content(xml, "Code"), None);
+    }
+
+    #[test]
+    fn test_extract_xml_tag_content_missing_tag() {
+        let xml = "<Error><Message>Error</Message></Error>";
+        assert_eq!(extract_xml_tag_content(xml, "Code"), None);
+    }
+
+    #[test]
+    fn test_extract_xml_tag_content_multiple_tags() {
+        let xml = r#"<Error>
+            <Code>NoSuchKey</Code>
+            <Message>The specified key does not exist.</Message>
+            <Key>example.txt</Key>
+        </Error>"#;
+        assert_eq!(
+            extract_xml_tag_content(xml, "Code"),
+            Some("NoSuchKey".to_string())
+        );
+        assert_eq!(
+            extract_xml_tag_content(xml, "Message"),
+            Some("The specified key does not exist.".to_string())
+        );
+        assert_eq!(
+            extract_xml_tag_content(xml, "Key"),
+            Some("example.txt".to_string())
+        );
+    }
+
+    // S3Response error parsing tests
+    #[test]
+    fn test_get_error_code() {
+        let response = create_error_response("<Error><Code>NoSuchKey</Code></Error>");
+        assert_eq!(response.get_error_code(), Some("NoSuchKey".to_string()));
+    }
+
+    #[test]
+    fn test_get_error_message() {
+        let response = create_error_response("<Error><Message>Key not found</Message></Error>");
+        assert_eq!(
+            response.get_error_message(),
+            Some("Key not found".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_error_full() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+        <Error>
+            <Code>NoSuchKey</Code>
+            <Message>The specified key does not exist.</Message>
+            <Key>my-file.txt</Key>
+            <RequestId>ABC123XYZ</RequestId>
+            <HostId>somehost</HostId>
+        </Error>"#;
+        let response = create_error_response(xml);
+        let error = response.parse_error().expect("Should parse error");
+
+        assert_eq!(error.code, "NoSuchKey");
+        assert_eq!(error.message, "The specified key does not exist.");
+        assert_eq!(error.key, Some("my-file.txt".to_string()));
+        assert_eq!(error.request_id, Some("ABC123XYZ".to_string()));
+    }
+
+    #[test]
+    fn test_parse_error_minimal() {
+        let xml = "<Error><Code>AccessDenied</Code></Error>";
+        let response = create_error_response(xml);
+        let error = response.parse_error().expect("Should parse error");
+
+        assert_eq!(error.code, "AccessDenied");
+        assert_eq!(error.message, ""); // Empty default
+        assert!(error.key.is_none());
+        assert!(error.request_id.is_none());
+    }
+
+    #[test]
+    fn test_parse_error_invalid_xml() {
+        let response = create_error_response("not xml at all");
+        assert!(response.parse_error().is_none());
+    }
+
+    #[test]
+    fn test_parse_error_no_code() {
+        let xml = "<Error><Message>Something went wrong</Message></Error>";
+        let response = create_error_response(xml);
+        assert!(response.parse_error().is_none()); // Code is required
+    }
+
+    // is_not_found tests
+    #[test]
+    fn test_is_not_found_by_status() {
+        let response = S3Response::new(404, "Not Found", HashMap::new(), Vec::new());
+        assert!(response.is_not_found());
+    }
+
+    #[test]
+    fn test_is_not_found_by_code() {
+        let response = S3Response::new(
+            500,
+            "Internal Error",
+            HashMap::new(),
+            b"<Error><Code>NoSuchKey</Code></Error>".to_vec(),
+        );
+        assert!(response.is_not_found());
+    }
+
+    #[test]
+    fn test_is_not_found_false() {
+        let response = S3Response::new(
+            403,
+            "Forbidden",
+            HashMap::new(),
+            b"<Error><Code>AccessDenied</Code></Error>".to_vec(),
+        );
+        assert!(!response.is_not_found());
+    }
+
+    // is_access_denied tests
+    #[test]
+    fn test_is_access_denied_by_status() {
+        let response = S3Response::new(403, "Forbidden", HashMap::new(), Vec::new());
+        assert!(response.is_access_denied());
+    }
+
+    #[test]
+    fn test_is_access_denied_by_code() {
+        let response = S3Response::new(
+            500,
+            "Internal Error",
+            HashMap::new(),
+            b"<Error><Code>AccessDenied</Code></Error>".to_vec(),
+        );
+        assert!(response.is_access_denied());
+    }
+
+    #[test]
+    fn test_is_access_denied_false() {
+        let response = S3Response::new(
+            404,
+            "Not Found",
+            HashMap::new(),
+            b"<Error><Code>NoSuchKey</Code></Error>".to_vec(),
+        );
+        assert!(!response.is_access_denied());
+    }
+
+    // map_s3_error_to_status tests
+    #[test]
+    fn test_map_s3_error_to_status_not_found() {
+        assert_eq!(map_s3_error_to_status("NoSuchKey"), 404);
+        assert_eq!(map_s3_error_to_status("NoSuchBucket"), 404);
+    }
+
+    #[test]
+    fn test_map_s3_error_to_status_forbidden() {
+        assert_eq!(map_s3_error_to_status("AccessDenied"), 403);
+        assert_eq!(map_s3_error_to_status("InvalidAccessKeyId"), 403);
+        assert_eq!(map_s3_error_to_status("SignatureDoesNotMatch"), 403);
+    }
+
+    #[test]
+    fn test_map_s3_error_to_status_bad_request() {
+        assert_eq!(map_s3_error_to_status("InvalidArgument"), 400);
+        assert_eq!(map_s3_error_to_status("MalformedXML"), 400);
+    }
+
+    #[test]
+    fn test_map_s3_error_to_status_conflict() {
+        assert_eq!(map_s3_error_to_status("BucketAlreadyExists"), 409);
+        assert_eq!(map_s3_error_to_status("BucketNotEmpty"), 409);
+    }
+
+    #[test]
+    fn test_map_s3_error_to_status_service_unavailable() {
+        assert_eq!(map_s3_error_to_status("SlowDown"), 503);
+        assert_eq!(map_s3_error_to_status("ServiceUnavailable"), 503);
+    }
 }
