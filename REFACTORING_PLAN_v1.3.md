@@ -10,10 +10,22 @@ This document outlines a comprehensive refactoring plan for the Yatagarasu S3 pr
 - Test coverage (>70%, target 90%)
 
 **Current State:**
-- 876 unit tests passing (100%)
+- 813 unit tests passing (100%)
 - Zero clippy warnings
 - ~45,000 lines of Rust code across 60+ source files
 - Test coverage on library code: ~98.43%
+
+**Completed PRs:**
+- PR #17: Split cache/mod.rs
+- PR #18: Split config/mod.rs
+- PR #19: Split proxy/mod.rs
+- PR #20: Disk cache metadata + hit/miss tracking
+- PR #21: Server threads configuration
+- PR #22: Async cache promotion
+- PR #23: Error classification for failover
+- PR #24: S3 error handling improvements
+- PR #25: Token extraction allocation optimization
+- PR #26: Dead code cleanup
 
 **No Test Cheats Found:** Code review confirmed all tests are legitimate with no hardcoded bypasses.
 
@@ -366,19 +378,19 @@ Focus areas:
 ### Sprint 2: Module Splitting (Week 2)
 1. [x] 1.2.1 Split cache/mod.rs - DONE (7603 lines → 6 focused modules, largest 1061 lines)
 2. [x] 1.2.2 Split config/mod.rs - DONE (3498 lines → 9 focused modules, largest 822 lines)
-3. [ ] 1.2.3 Split proxy/mod.rs
+3. [x] 1.2.3 Split proxy/mod.rs - DONE (PR #19: extracted init.rs + helpers.rs)
 
 ### Sprint 3: Complete TODOs (Week 3)
-1. [ ] 2.1 Disk cache metadata storage
-2. [ ] 2.2 Track disk cache hits/misses
-3. [ ] 2.3 Server threads configuration
-4. [ ] 2.4 Async cache write-through
+1. [x] 2.1 Disk cache metadata storage - DONE (PR #20)
+2. [x] 2.2 Track disk cache hits/misses - DONE (PR #20)
+3. [x] 2.3 Server threads configuration - DONE (PR #21)
+4. [x] 2.4 Async cache write-through - DONE (PR #22)
 
 ### Sprint 4: Quality & Cleanup (Week 4)
-1. [ ] 2.5 Error classification for failover
-2. [ ] 3.2 Improve error handling
-3. [ ] 3.3 Reduce allocations in hot paths
-4. [ ] 4.1 Remove dead code
+1. [x] 2.5 Error classification for failover - DONE (PR #23: FailoverDecision + try_request_with_classifier)
+2. [x] 3.2 Improve error handling - DONE (PR #24: S3Error struct with structured parsing)
+3. [x] 3.3 Reduce allocations in hot paths - DONE (PR #25: filter before map optimization)
+4. [x] 4.1 Remove dead code - DONE (PR #26: removed outdated dead_code annotations)
 5. [ ] 5.1 Add missing documentation
 
 ---
