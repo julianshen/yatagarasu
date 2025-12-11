@@ -96,10 +96,10 @@ fn get_header_case_insensitive(
 
 pub fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String> {
     get_header_case_insensitive(headers, "Authorization").and_then(|value| {
-        value
-            .strip_prefix("Bearer ")
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.trim().to_string())
+        value.strip_prefix("Bearer ").and_then(|s| {
+            let trimmed = s.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
     })
 }
 
@@ -107,19 +107,20 @@ pub fn extract_header_token(
     headers: &HashMap<String, String>,
     header_name: &str,
 ) -> Option<String> {
-    get_header_case_insensitive(headers, header_name)
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_string())
+    get_header_case_insensitive(headers, header_name).and_then(|s| {
+        let trimmed = s.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
 }
 
 pub fn extract_query_token(
     query_params: &HashMap<String, String>,
     param_name: &str,
 ) -> Option<String> {
-    query_params
-        .get(param_name)
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_string())
+    query_params.get(param_name).and_then(|s| {
+        let trimmed = s.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
 }
 
 pub fn try_extract_token(
