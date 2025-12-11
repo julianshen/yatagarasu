@@ -95,10 +95,12 @@ fn get_header_case_insensitive(
 }
 
 pub fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String> {
-    get_header_case_insensitive(headers, "Authorization")
-        .and_then(|value| value.strip_prefix("Bearer ").map(|s| s.to_string()))
-        .map(|token| token.trim().to_string())
-        .filter(|token| !token.is_empty())
+    get_header_case_insensitive(headers, "Authorization").and_then(|value| {
+        value
+            .strip_prefix("Bearer ")
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_string())
+    })
 }
 
 pub fn extract_header_token(
@@ -106,8 +108,8 @@ pub fn extract_header_token(
     header_name: &str,
 ) -> Option<String> {
     get_header_case_insensitive(headers, header_name)
+        .filter(|s| !s.trim().is_empty())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
 }
 
 pub fn extract_query_token(
@@ -116,8 +118,8 @@ pub fn extract_query_token(
 ) -> Option<String> {
     query_params
         .get(param_name)
+        .filter(|s| !s.trim().is_empty())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
 }
 
 pub fn try_extract_token(
