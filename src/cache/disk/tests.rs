@@ -161,7 +161,6 @@ fn test_all_imports_compile() {
 #[test]
 fn test_entry_metadata_creation() {
     // Verify EntryMetadata struct can be created
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
 
@@ -228,7 +227,6 @@ fn test_entry_metadata_serialization() {
 #[test]
 fn test_entry_metadata_expiration() {
     // Verify EntryMetadata expiration check works
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
 
@@ -260,7 +258,6 @@ fn test_entry_metadata_expiration() {
 fn test_cache_index_thread_safe_operations() {
     // Verify CacheIndex supports thread-safe operations
     use super::index::CacheIndex;
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
 
@@ -301,7 +298,6 @@ fn test_cache_index_thread_safe_operations() {
 fn test_cache_index_atomic_size_tracking() {
     // Verify CacheIndex tracks total size atomically
     use super::index::CacheIndex;
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
 
@@ -901,7 +897,6 @@ async fn test_both_data_and_meta_files_created() {
     // Verify both .data and .meta files can be created for same entry
     use super::backend::DiskBackend;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use super::utils::generate_paths;
     use bytes::Bytes;
 
@@ -956,7 +951,6 @@ async fn test_index_can_save_to_json() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1000,7 +994,6 @@ async fn test_index_can_load_from_json() {
 
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1095,7 +1088,6 @@ async fn test_index_scans_entries_directory_on_startup() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use super::utils::cache_key_to_file_path;
     use crate::cache::CacheKey;
     use tempfile::TempDir;
@@ -1170,7 +1162,6 @@ async fn test_index_removes_orphaned_files() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use super::utils::cache_key_to_file_path;
     use crate::cache::CacheKey;
     use tempfile::TempDir;
@@ -1249,7 +1240,6 @@ async fn test_index_removes_entries_without_files() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use super::utils::cache_key_to_file_path;
     use crate::cache::CacheKey;
     use tempfile::TempDir;
@@ -1316,7 +1306,6 @@ async fn test_index_recalculates_total_size_from_files() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use super::utils::cache_key_to_file_path;
     use crate::cache::CacheKey;
     use tempfile::TempDir;
@@ -1380,7 +1369,6 @@ async fn test_index_removes_expired_entries() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use super::utils::cache_key_to_file_path;
     use crate::cache::CacheKey;
     use std::time::SystemTime;
@@ -3557,7 +3545,6 @@ async fn test_stops_when_enough_space_freed() {
 async fn test_loads_index_from_json() {
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use std::path::PathBuf;
 
@@ -3626,7 +3613,6 @@ async fn test_validates_index_against_filesystem() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -3719,7 +3705,6 @@ async fn test_removes_orphaned_files() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -3822,7 +3807,6 @@ async fn test_removes_invalid_index_entries() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -3917,7 +3901,6 @@ async fn test_recalculates_total_size() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -4031,7 +4014,6 @@ async fn test_recalculates_total_size() {
 #[tokio::test]
 async fn test_triggers_eviction_if_oversized_after_recovery() {
     use super::disk_cache::DiskCache;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::{Cache, CacheEntry, CacheKey};
     use bytes::Bytes;
@@ -4139,7 +4121,6 @@ async fn test_handles_corrupted_data_file() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -4228,7 +4209,6 @@ async fn test_handles_corrupted_meta_file() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -4349,7 +4329,6 @@ async fn test_logs_errors_but_continues_operation() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -4455,7 +4434,6 @@ async fn test_removes_corrupted_entries_from_cache() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -4573,7 +4551,6 @@ async fn test_deletes_tmp_files_from_failed_writes() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -4659,7 +4636,6 @@ async fn test_doesnt_delete_legitimate_files() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::mock_backend::MockDiskBackend;
-    use super::types::EntryMetadata;
     use super::utils::key_to_hash;
     use crate::cache::CacheKey;
     use bytes::Bytes;
@@ -5212,7 +5188,6 @@ async fn test_integration_index_persistence_and_recovery() {
     use super::backend::DiskBackend;
     use super::index::CacheIndex;
     use super::tokio_backend::TokioFsBackend;
-    use super::types::EntryMetadata;
     use crate::cache::CacheKey;
     use bytes::Bytes;
 
