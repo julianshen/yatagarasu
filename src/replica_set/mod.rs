@@ -1434,8 +1434,8 @@ mod tests {
         let calls = RefCell::new(Vec::new());
 
         // Simulate: first replica returns HTTP 403 (client error - forbidden)
-        // Currently, try_request will try all replicas on ANY error
-        // TODO: In future, we should implement error classification to skip failover for 4xx errors
+        // Note: try_request tries all replicas on ANY error for backward compatibility.
+        // Use try_request_with_classifier() for error classification that skips failover on 4xx errors.
         let result = replica_set.try_request(|replica| {
             calls.borrow_mut().push(replica.name.clone());
             if replica.name == "primary" {
@@ -1455,24 +1455,18 @@ mod tests {
             "Should return 403 Forbidden error"
         );
 
-        // CURRENT BEHAVIOR: try_request tries all replicas on any error
-        // This test documents current behavior - both replicas are called
-        // In a future enhancement, we could add error classification to stop trying on 4xx errors
+        // Verify both replicas were called (backward compatible behavior)
         let calls = calls.borrow();
         assert_eq!(
             calls.len(),
             2,
-            "Current behavior: try_request tries all replicas even for 4xx errors"
+            "try_request tries all replicas even for 4xx errors"
         );
         assert_eq!(calls[0], "primary", "Should call primary replica first");
         assert_eq!(
             calls[1], "replica-eu",
-            "Current behavior: tries second replica even though 403 is a client error"
+            "try_request tries second replica even though 403 is a client error"
         );
-
-        // NOTE: This test documents CURRENT behavior where all replicas are tried.
-        // Future enhancement: Add error classification to skip failover for 4xx errors.
-        // When that's implemented, this test should be updated to verify only primary is called.
     }
 
     #[test]
@@ -1511,8 +1505,8 @@ mod tests {
         let calls = RefCell::new(Vec::new());
 
         // Simulate: first replica returns HTTP 404 (client error - file not found)
-        // Currently, try_request will try all replicas on ANY error
-        // TODO: In future, we should implement error classification to skip failover for 4xx errors
+        // Note: try_request tries all replicas on ANY error for backward compatibility.
+        // Use try_request_with_classifier() for error classification that skips failover on 4xx errors.
         let result = replica_set.try_request(|replica| {
             calls.borrow_mut().push(replica.name.clone());
             if replica.name == "primary" {
@@ -1532,24 +1526,18 @@ mod tests {
             "Should return 404 Not Found error"
         );
 
-        // CURRENT BEHAVIOR: try_request tries all replicas on any error
-        // This test documents current behavior - both replicas are called
-        // In a future enhancement, we could add error classification to stop trying on 4xx errors
+        // Verify both replicas were called (backward compatible behavior)
         let calls = calls.borrow();
         assert_eq!(
             calls.len(),
             2,
-            "Current behavior: try_request tries all replicas even for 4xx errors"
+            "try_request tries all replicas even for 4xx errors"
         );
         assert_eq!(calls[0], "primary", "Should call primary replica first");
         assert_eq!(
             calls[1], "replica-eu",
-            "Current behavior: tries second replica even though 404 is a client error"
+            "try_request tries second replica even though 404 is a client error"
         );
-
-        // NOTE: This test documents CURRENT behavior where all replicas are tried.
-        // Future enhancement: Add error classification to skip failover for 4xx errors.
-        // When that's implemented, this test should be updated to verify only primary is called.
     }
 
     #[test]

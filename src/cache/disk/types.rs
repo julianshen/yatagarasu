@@ -54,7 +54,6 @@ impl EntryMetadata {
         }
     }
 
-    #[allow(dead_code)] // Will be used in Phase 28.9 (Cache Trait Implementation)
     pub fn is_expired(&self, now: u64) -> bool {
         self.expires_at > 0 && now >= self.expires_at
     }
