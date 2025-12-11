@@ -190,6 +190,7 @@ mod tests {
     use super::*;
 
     // Helper to create minimal config YAML with audit section
+    #[allow(dead_code)]
     fn create_yaml_with_audit(audit_section: &str) -> String {
         format!(
             r#"

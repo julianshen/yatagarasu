@@ -1702,7 +1702,7 @@ fn test_uring_backend_not_available_on_non_linux() {
 #[cfg(target_os = "linux")]
 fn is_io_uring_available() -> bool {
     // Try to create an io_uring instance - will fail on kernels < 5.1
-    matches!(io_uring::IoUring::new(8), Ok(_))
+    io_uring::IoUring::new(8).is_ok()
 }
 
 /// Macro to skip test if io_uring is not available on this kernel

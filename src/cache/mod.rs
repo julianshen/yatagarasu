@@ -175,6 +175,7 @@ mod tests {
     }
 
     // Mock Cache implementation for integration tests
+    #[allow(dead_code)]
     struct MockCache;
 
     #[async_trait]

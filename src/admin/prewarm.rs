@@ -165,6 +165,6 @@ mod tests {
 
         assert_eq!(req.bucket, "test-bucket");
         assert_eq!(req.path, "test/path");
-        assert_eq!(req.options.recursive, true);
+        assert!(req.options.recursive);
     }
 }
