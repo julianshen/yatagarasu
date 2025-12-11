@@ -37,6 +37,7 @@ use bytes::Bytes;
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode, Throughput,
 };
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use testcontainers::{clients::Cli, RunnableImage};
@@ -834,7 +835,7 @@ fn bench_memory_cache_hit_rate_zipfian(c: &mut Criterion) {
                     let idx = zipfian_index(1000, 0.99, rng.next_f64());
                     let key = create_cache_key("bench", "zipf", idx);
 
-                    if cache.get(black_box(&key)).await.is_none() {
+                    if cache.get(black_box(&key)).await.unwrap().is_none() {
                         // Cache miss - insert the entry
                         let entry = create_cache_entry(SIZE_1KB);
                         cache.set(key, entry).await.unwrap();
@@ -863,7 +864,7 @@ fn bench_memory_cache_hit_rate_zipfian(c: &mut Criterion) {
                     let idx = zipfian_index(1000, 0.7, rng.next_f64());
                     let key = create_cache_key("bench", "zipf-low", idx);
 
-                    if cache.get(black_box(&key)).await.is_none() {
+                    if cache.get(black_box(&key)).await.unwrap().is_none() {
                         let entry = create_cache_entry(SIZE_1KB);
                         cache.set(key, entry).await.unwrap();
                     }
@@ -915,7 +916,7 @@ fn bench_memory_cache_hit_rate_adaptation(c: &mut Criterion) {
                     let idx = base_idx + (rng.next_f64() * 100.0) as usize;
                     let key = create_cache_key("bench", "adapt", idx % 1000);
 
-                    if cache.get(black_box(&key)).await.is_none() {
+                    if cache.get(black_box(&key)).await.unwrap().is_none() {
                         let entry = create_cache_entry(SIZE_1KB);
                         cache.set(key, entry).await.unwrap();
                     }
@@ -1879,7 +1880,7 @@ fn bench_cache_comparison_set(c: &mut Criterion) {
 fn create_tiered_cache_memory_disk(temp_dir: &TempDir) -> TieredCache {
     let memory_cache = create_memory_cache();
     let disk_cache = create_disk_cache(temp_dir);
-    TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)])
+    TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)])
 }
 
 /// Benchmark tiered cache L1 hit (memory layer)
@@ -1938,7 +1939,7 @@ fn bench_tiered_cache_l2_hit(c: &mut Criterion) {
     });
 
     // Create tiered cache with populated disk layer
-    let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+    let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
     let mut group = c.benchmark_group("tiered_cache_l2_hit");
     group.warm_up_time(Duration::from_secs(1));
@@ -1992,9 +1993,9 @@ fn bench_tiered_cache_l3_hit(c: &mut Criterion) {
 
     // Create 3-layer tiered cache
     let tiered = TieredCache::new(vec![
-        Box::new(memory_cache),
-        Box::new(disk_cache),
-        Box::new(redis_cache),
+        Arc::new(memory_cache),
+        Arc::new(disk_cache),
+        Arc::new(redis_cache),
     ]);
 
     let mut group = c.benchmark_group("tiered_cache_l3_hit");
@@ -2092,9 +2093,9 @@ fn bench_tiered_cache_set_3_layers(c: &mut Criterion) {
     let redis_cache = rt.block_on(async { RedisCache::new(redis_config).await.unwrap() });
 
     let tiered = TieredCache::new(vec![
-        Box::new(memory_cache),
-        Box::new(disk_cache),
-        Box::new(redis_cache),
+        Arc::new(memory_cache),
+        Arc::new(disk_cache),
+        Arc::new(redis_cache),
     ]);
 
     let mut group = c.benchmark_group("tiered_cache_set_3_layers");

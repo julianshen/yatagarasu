@@ -9,6 +9,7 @@ use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheSt
 use crate::metrics::Metrics;
 use async_trait::async_trait;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Tiered cache with multiple layers (memory, disk, redis)
 ///
@@ -17,10 +18,12 @@ use std::path::PathBuf;
 /// - Layer 2 (disk): Medium speed, checked if memory misses
 /// - Layer 3 (redis): Distributed, checked if disk misses
 ///
-/// Cache hits in slower layers are promoted to faster layers asynchronously.
+/// Cache hits in slower layers are promoted to faster layers asynchronously
+/// using background tasks (tokio::spawn) to avoid blocking the response.
 pub struct TieredCache {
     // Ordered list of cache layers from fastest to slowest
-    layers: Vec<Box<dyn Cache + Send + Sync>>,
+    // Uses Arc for background promotion tasks
+    layers: Vec<Arc<dyn Cache + Send + Sync>>,
 }
 
 impl TieredCache {
@@ -36,12 +39,12 @@ impl TieredCache {
     /// let redis_cache = RedisCache::new(config).await?;
     ///
     /// let tiered = TieredCache::new(vec![
-    ///     Box::new(memory_cache),
-    ///     Box::new(disk_cache),
-    ///     Box::new(redis_cache),
+    ///     Arc::new(memory_cache),
+    ///     Arc::new(disk_cache),
+    ///     Arc::new(redis_cache),
     /// ]);
     /// ```
-    pub fn new(layers: Vec<Box<dyn Cache + Send + Sync>>) -> Self {
+    pub fn new(layers: Vec<Arc<dyn Cache + Send + Sync>>) -> Self {
         Self { layers }
     }
 
@@ -71,7 +74,7 @@ impl TieredCache {
     /// let tiered = TieredCache::from_config(config).await?;
     /// ```
     pub async fn from_config(config: &CacheConfig) -> Result<Self, CacheError> {
-        let mut layers: Vec<Box<dyn Cache + Send + Sync>> = Vec::new();
+        let mut layers: Vec<Arc<dyn Cache + Send + Sync>> = Vec::new();
 
         // Iterate through configured cache layers in order
         for layer_name in &config.cache_layers {
@@ -79,14 +82,14 @@ impl TieredCache {
                 "memory" => {
                     // Create MemoryCache from configuration
                     let memory_cache = MemoryCache::new(&config.memory);
-                    layers.push(Box::new(memory_cache));
+                    layers.push(Arc::new(memory_cache));
                 }
                 "disk" => {
                     // Create DiskCache from configuration
                     let cache_dir = PathBuf::from(&config.disk.cache_dir);
                     let max_size_bytes = config.disk.max_disk_cache_size_mb * 1024 * 1024;
                     let disk_cache = DiskCache::with_config(cache_dir, max_size_bytes);
-                    layers.push(Box::new(disk_cache));
+                    layers.push(Arc::new(disk_cache));
                 }
                 "redis" => {
                     // Create RedisCache from configuration
@@ -106,7 +109,7 @@ impl TieredCache {
 
                     // Create RedisCache (async)
                     let redis_cache = RedisCache::new(redis_config).await?;
-                    layers.push(Box::new(redis_cache));
+                    layers.push(Arc::new(redis_cache));
                 }
                 unknown => {
                     return Err(CacheError::ConfigurationError(format!(
@@ -133,25 +136,33 @@ impl Cache for TieredCache {
 
                     // If found in a slower layer (not the first/fastest), promote to faster layers
                     if layer_index > 0 {
-                        // Clone data needed for promotion
+                        // Clone data needed for background promotion
                         let key_clone = key.clone();
                         let entry_clone = entry.clone();
 
-                        // Promote to all faster layers (0..layer_index)
-                        // NOTE: This is currently synchronous (blocks the get response)
-                        // TODO: Make this truly async (tokio::spawn) to avoid blocking
-                        // Requires Arc-wrapping layers or using channels
-                        for promote_to_index in 0..layer_index {
-                            if let Some(faster_layer) = self.layers.get(promote_to_index) {
-                                // Ignore promotion errors - they shouldn't block the get
-                                let _ = faster_layer
+                        // Clone Arc references to layers that need promotion
+                        let layers_to_promote: Vec<Arc<dyn Cache + Send + Sync>> =
+                            self.layers.iter().take(layer_index).cloned().collect();
+
+                        // Spawn background task for promotion - doesn't block the response
+                        tokio::spawn(async move {
+                            for faster_layer in layers_to_promote {
+                                // Ignore promotion errors - they shouldn't affect the get
+                                if let Err(e) = faster_layer
                                     .set(key_clone.clone(), entry_clone.clone())
-                                    .await;
+                                    .await
+                                {
+                                    tracing::debug!(
+                                        error = %e,
+                                        key = %format!("{}/{}", key_clone.bucket, key_clone.object_key),
+                                        "Background cache promotion failed (non-critical)"
+                                    );
+                                }
                             }
-                        }
+                        });
                     }
 
-                    // Return the entry immediately
+                    // Return the entry immediately (promotion happens in background)
                     return Ok(Some(entry));
                 }
                 Ok(None) => {
@@ -598,9 +609,9 @@ mod tests {
 
         // Create tiered cache with 3 layers
         let tiered = TieredCache::new(vec![
-            Box::new(mock_memory),
-            Box::new(mock_disk),
-            Box::new(mock_redis),
+            Arc::new(mock_memory),
+            Arc::new(mock_disk),
+            Arc::new(mock_redis),
         ]);
 
         // Verify the struct was created
@@ -613,7 +624,7 @@ mod tests {
         let mock_memory = MockCache::new("memory");
         let mock_disk = MockCache::new("disk");
 
-        let tiered = TieredCache::new(vec![Box::new(mock_memory), Box::new(mock_disk)]);
+        let tiered = TieredCache::new(vec![Arc::new(mock_memory), Arc::new(mock_disk)]);
 
         // Verify we have 2 layers in order
         assert_eq!(tiered.layer_count(), 2);
@@ -630,9 +641,9 @@ mod tests {
         let mock_redis = MockCache::new("redis");
 
         let tiered = TieredCache::new(vec![
-            Box::new(mock_memory), // Layer 0: memory (fastest)
-            Box::new(mock_disk),   // Layer 1: disk
-            Box::new(mock_redis),  // Layer 2: redis (slowest)
+            Arc::new(mock_memory), // Layer 0: memory (fastest)
+            Arc::new(mock_disk),   // Layer 1: disk
+            Arc::new(mock_redis),  // Layer 2: redis (slowest)
         ]);
 
         // Verify layer count matches expected order
@@ -644,21 +655,21 @@ mod tests {
         // Test: TieredCache can have 1, 2, or 3 layers
 
         // 1 layer (memory only)
-        let tiered_1 = TieredCache::new(vec![Box::new(MockCache::new("memory"))]);
+        let tiered_1 = TieredCache::new(vec![Arc::new(MockCache::new("memory"))]);
         assert_eq!(tiered_1.layer_count(), 1);
 
         // 2 layers (memory + disk)
         let tiered_2 = TieredCache::new(vec![
-            Box::new(MockCache::new("memory")),
-            Box::new(MockCache::new("disk")),
+            Arc::new(MockCache::new("memory")),
+            Arc::new(MockCache::new("disk")),
         ]);
         assert_eq!(tiered_2.layer_count(), 2);
 
         // 3 layers (memory + disk + redis)
         let tiered_3 = TieredCache::new(vec![
-            Box::new(MockCache::new("memory")),
-            Box::new(MockCache::new("disk")),
-            Box::new(MockCache::new("redis")),
+            Arc::new(MockCache::new("memory")),
+            Arc::new(MockCache::new("disk")),
+            Arc::new(MockCache::new("redis")),
         ]);
         assert_eq!(tiered_3.layer_count(), 3);
     }
@@ -755,7 +766,7 @@ mod tests {
         memory_cache.set(key.clone(), entry.clone()).await.unwrap();
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Get from tiered cache - should find in memory layer
         let result = tiered.get(&key).await.unwrap();
@@ -796,7 +807,7 @@ mod tests {
         disk_cache.set(key.clone(), entry.clone()).await.unwrap();
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Get from tiered cache - should miss memory, find in disk
         let result = tiered.get(&key).await.unwrap();
@@ -820,7 +831,7 @@ mod tests {
         let disk_cache = MockCache::new("disk");
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Try to get a key that doesn't exist in any layer
         let key = CacheKey {
@@ -865,7 +876,7 @@ mod tests {
         disk_cache.set(key.clone(), entry.clone()).await.unwrap();
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Get from tiered cache - should find in disk and promote to memory
         let result = tiered.get(&key).await.unwrap();
@@ -911,7 +922,7 @@ mod tests {
         let disk_entries = disk_cache.entries.clone(); // Keep reference to check writes
 
         // Create tiered cache with memory + disk
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Create entry to set
         let key = CacheKey {
@@ -1008,7 +1019,7 @@ mod tests {
         }
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Delete from tiered cache
         let deleted = tiered.delete(&key).await.unwrap();
@@ -1079,7 +1090,7 @@ mod tests {
         }
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Clear all layers
         tiered.clear().await.unwrap();
@@ -1109,7 +1120,7 @@ mod tests {
         let disk_cache = MockCache::new("disk");
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Get stats from tiered cache
         let stats = tiered.stats().await.unwrap();
@@ -1145,7 +1156,7 @@ mod tests {
         let disk_cache = MockCache::new("disk");
 
         // Create tiered cache
-        let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+        let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
         // Get per-layer stats breakdown
         let per_layer = tiered.per_layer_stats().await.unwrap();
@@ -1261,7 +1272,7 @@ mod tests {
 
         // Create tiered cache: failing redis first, then working disk
         // In real scenario, memory -> disk -> redis, but redis might be down
-        let tiered = TieredCache::new(vec![Box::new(failing_redis), Box::new(working_disk)]);
+        let tiered = TieredCache::new(vec![Arc::new(failing_redis), Arc::new(working_disk)]);
 
         // Get from tiered cache - should skip failing layer and find in disk
         let result = tiered.get(&key).await;
@@ -1285,7 +1296,7 @@ mod tests {
         let failing_redis = FailingMockCache::new("redis");
         let empty_disk = MockCache::new("disk"); // Empty, will return None
 
-        let tiered = TieredCache::new(vec![Box::new(failing_redis), Box::new(empty_disk)]);
+        let tiered = TieredCache::new(vec![Arc::new(failing_redis), Arc::new(empty_disk)]);
 
         let key = CacheKey {
             bucket: "test-bucket".to_string(),
@@ -1335,9 +1346,9 @@ mod tests {
 
         // Create tiered cache: failing memory -> working disk -> working redis
         let tiered = TieredCache::new(vec![
-            Box::new(failing_memory),
-            Box::new(working_disk),
-            Box::new(working_redis),
+            Arc::new(failing_memory),
+            Arc::new(working_disk),
+            Arc::new(working_redis),
         ]);
 
         // Get from tiered cache - should skip failing memory, find in disk

@@ -9,6 +9,7 @@ fn bench_routing_single_bucket(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
@@ -80,6 +81,7 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
@@ -126,6 +128,7 @@ fn bench_routing_path_lengths(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
@@ -191,6 +194,7 @@ fn bench_s3_key_extraction(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
@@ -257,6 +261,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
@@ -391,6 +396,7 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
             server: ServerConfig {
                 address: "127.0.0.1".to_string(),
                 port: 8080,
+                threads: 4,
                 request_timeout: 30,
                 max_concurrent_requests: 1000,
                 rate_limit: None,
@@ -434,6 +440,7 @@ fn bench_path_normalization(c: &mut Criterion) {
         server: ServerConfig {
             address: "127.0.0.1".to_string(),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
