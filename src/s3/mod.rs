@@ -395,8 +395,9 @@ impl S3Response {
     /// Looks for `<tag_name>content</tag_name>` and returns the trimmed content.
     /// Returns None if the tag is not found or body is not valid UTF-8.
     fn extract_xml_tag(&self, tag_name: &str) -> Option<String> {
-        let body_str = String::from_utf8(self.body.clone()).ok()?;
-        extract_xml_tag_content(&body_str, tag_name)
+        // Use from_utf8 with borrow to avoid cloning the body
+        let body_str = std::str::from_utf8(&self.body).ok()?;
+        extract_xml_tag_content(body_str, tag_name)
     }
 
     /// Extracts the error code from S3 XML error response
@@ -426,10 +427,12 @@ impl S3Response {
     /// }
     /// ```
     pub fn parse_error(&self) -> Option<S3Error> {
-        let code = self.extract_xml_tag("Code")?;
-        let message = self.extract_xml_tag("Message").unwrap_or_default();
-        let key = self.extract_xml_tag("Key");
-        let request_id = self.extract_xml_tag("RequestId");
+        // Convert body to string once to avoid repeated UTF-8 validation
+        let body_str = std::str::from_utf8(&self.body).ok()?;
+        let code = extract_xml_tag_content(body_str, "Code")?;
+        let message = extract_xml_tag_content(body_str, "Message").unwrap_or_default();
+        let key = extract_xml_tag_content(body_str, "Key");
+        let request_id = extract_xml_tag_content(body_str, "RequestId");
 
         Some(S3Error {
             code,
