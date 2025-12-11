@@ -10,10 +10,40 @@
 // - Try replicas in priority order (1, 2, 3...)
 // - Skip replicas with open circuit breakers
 // - Return first successful response
+// - Error classification: Only failover on server/network errors, not client errors (4xx)
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::S3Replica;
 use crate::s3::S3Client;
+
+/// Decision on whether to failover to the next replica after an error
+///
+/// Used by `try_request_with_classifier` to determine if an error should
+/// trigger attempting the next replica or if the error should be returned immediately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailoverDecision {
+    /// Error is transient or server-side - try next replica
+    /// Examples: 5xx errors, network timeouts, connection refused
+    Failover,
+    /// Error is client-side - don't waste time trying other replicas
+    /// Examples: 4xx errors (400 Bad Request, 403 Forbidden, 404 Not Found)
+    Stop,
+}
+
+impl FailoverDecision {
+    /// Create a failover decision based on HTTP status code
+    ///
+    /// - 4xx errors (client errors): Stop - these won't succeed on other replicas
+    /// - 5xx errors (server errors): Failover - another replica might be healthy
+    /// - Other codes: Failover - treat as potentially transient
+    pub fn from_status_code(status: u16) -> Self {
+        if (400..500).contains(&status) {
+            FailoverDecision::Stop
+        } else {
+            FailoverDecision::Failover
+        }
+    }
+}
 
 /// A single replica with its S3 client and circuit breaker
 #[derive(Debug, Clone)]
@@ -139,6 +169,130 @@ impl ReplicaSet {
                     all_errors.push(error_msg);
                     last_error = Some(e);
                     // Continue to next replica on failure
+                }
+            }
+        }
+
+        // All replicas failed - log error details
+        // unwrap is safe here because we know replicas is not empty (validated in new())
+        tracing::error!(
+            attempted = attempt,
+            errors = ?all_errors,
+            "All replicas failed"
+        );
+
+        Err(last_error.unwrap())
+    }
+
+    /// Try to execute a request against replicas with error classification.
+    ///
+    /// Unlike `try_request` which always fails over to the next replica on any error,
+    /// this method uses a classifier function to decide whether to failover or stop.
+    ///
+    /// Use this when you want to avoid unnecessary failover attempts for client errors
+    /// (4xx HTTP status codes) that will fail on all replicas anyway.
+    ///
+    /// Skips replicas with open circuit breakers (unhealthy replicas).
+    ///
+    /// # Arguments
+    /// * `request_fn` - A closure that takes a replica and attempts to execute a request
+    /// * `classifier` - A closure that examines an error and returns a `FailoverDecision`
+    ///
+    /// # Returns
+    /// * `Ok(T)` - The successful result from the first working replica
+    /// * `Err(E)` - The error (either from first non-failover error, or last error if all failed)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = replica_set.try_request_with_classifier(
+    ///     |replica| make_request(replica),
+    ///     |error| {
+    ///         if error.contains("HTTP 4") {
+    ///             FailoverDecision::Stop  // Client error, don't try other replicas
+    ///         } else {
+    ///             FailoverDecision::Failover  // Server/network error, try next replica
+    ///         }
+    ///     },
+    /// );
+    /// ```
+    pub fn try_request_with_classifier<F, T, E, C>(
+        &self,
+        mut request_fn: F,
+        classifier: C,
+    ) -> Result<T, E>
+    where
+        F: FnMut(&ReplicaEntry) -> Result<T, E>,
+        E: std::fmt::Display,
+        C: Fn(&E) -> FailoverDecision,
+    {
+        let mut last_error = None;
+        let mut last_failed_replica: Option<&str> = None;
+        let mut attempt = 0;
+        let mut all_errors: Vec<String> = Vec::new();
+
+        for replica in &self.replicas {
+            // Skip replicas with open circuit breakers
+            if !replica.circuit_breaker.should_allow_request() {
+                tracing::debug!(
+                    replica_name = %replica.name,
+                    circuit_state = ?replica.circuit_breaker.state(),
+                    "Skipping replica due to open circuit breaker"
+                );
+                continue;
+            }
+
+            attempt += 1;
+
+            // Log failover if we're moving from a failed replica to a new one
+            if let Some(from_replica) = last_failed_replica {
+                tracing::warn!(
+                    from = from_replica,
+                    to = replica.name.as_str(),
+                    attempt = attempt,
+                    "Failover: {} → {}",
+                    from_replica,
+                    replica.name
+                );
+            }
+
+            tracing::info!(
+                replica_name = %replica.name,
+                "Trying replica"
+            );
+
+            match request_fn(replica) {
+                Ok(result) => {
+                    tracing::info!(
+                        replica_name = %replica.name,
+                        "Replica succeeded"
+                    );
+                    return Ok(result);
+                }
+                Err(e) => {
+                    let error_msg = format!("{}", e);
+                    let decision = classifier(&e);
+
+                    tracing::warn!(
+                        replica_name = %replica.name,
+                        error = %e,
+                        failover_decision = ?decision,
+                        "Replica failed"
+                    );
+
+                    // Check if we should stop or continue to next replica
+                    if decision == FailoverDecision::Stop {
+                        tracing::info!(
+                            replica_name = %replica.name,
+                            error = %e,
+                            "Stopping failover: error classified as non-retriable"
+                        );
+                        return Err(e);
+                    }
+
+                    last_failed_replica = Some(&replica.name);
+                    all_errors.push(error_msg);
+                    last_error = Some(e);
+                    // Continue to next replica on failover decision
                 }
             }
         }
@@ -1396,6 +1550,294 @@ mod tests {
         // NOTE: This test documents CURRENT behavior where all replicas are tried.
         // Future enhancement: Add error classification to skip failover for 4xx errors.
         // When that's implemented, this test should be updated to verify only primary is called.
+    }
+
+    #[test]
+    fn test_failover_decision_from_status_code() {
+        // Test: FailoverDecision::from_status_code correctly classifies HTTP status codes
+        use super::FailoverDecision;
+
+        // 4xx errors should stop (client errors)
+        assert_eq!(
+            FailoverDecision::from_status_code(400),
+            FailoverDecision::Stop,
+            "400 Bad Request should stop failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(401),
+            FailoverDecision::Stop,
+            "401 Unauthorized should stop failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(403),
+            FailoverDecision::Stop,
+            "403 Forbidden should stop failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(404),
+            FailoverDecision::Stop,
+            "404 Not Found should stop failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(429),
+            FailoverDecision::Stop,
+            "429 Too Many Requests should stop failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(499),
+            FailoverDecision::Stop,
+            "499 Client Closed Request should stop failover"
+        );
+
+        // 5xx errors should failover (server errors)
+        assert_eq!(
+            FailoverDecision::from_status_code(500),
+            FailoverDecision::Failover,
+            "500 Internal Server Error should failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(502),
+            FailoverDecision::Failover,
+            "502 Bad Gateway should failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(503),
+            FailoverDecision::Failover,
+            "503 Service Unavailable should failover"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(504),
+            FailoverDecision::Failover,
+            "504 Gateway Timeout should failover"
+        );
+
+        // 2xx/3xx should failover (treat as potentially transient)
+        assert_eq!(
+            FailoverDecision::from_status_code(200),
+            FailoverDecision::Failover,
+            "200 OK should failover (non-error)"
+        );
+        assert_eq!(
+            FailoverDecision::from_status_code(301),
+            FailoverDecision::Failover,
+            "301 Moved Permanently should failover"
+        );
+    }
+
+    #[test]
+    fn test_classifier_stops_on_4xx_errors() {
+        // Test: try_request_with_classifier stops failover on 4xx errors
+        // HTTP 403 (Forbidden) should NOT trigger failover when using classifier
+        use super::FailoverDecision;
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+        let calls = RefCell::new(Vec::new());
+
+        // Define a classifier that stops on 4xx errors
+        let classifier = |error: &String| {
+            if error.contains("HTTP 4") {
+                FailoverDecision::Stop
+            } else {
+                FailoverDecision::Failover
+            }
+        };
+
+        // Simulate: first replica returns HTTP 403 (client error)
+        let result = replica_set.try_request_with_classifier(
+            |replica| {
+                calls.borrow_mut().push(replica.name.clone());
+                Err::<String, String>("HTTP 403: Forbidden".to_string())
+            },
+            classifier,
+        );
+
+        // Verify request failed with 403
+        assert!(result.is_err(), "Request should fail with 403 Forbidden");
+        assert_eq!(
+            result.unwrap_err(),
+            "HTTP 403: Forbidden",
+            "Should return 403 Forbidden error"
+        );
+
+        // With classifier: Only primary replica should be called
+        // Classifier recognizes 4xx as client error and stops immediately
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            1,
+            "With classifier: should stop after first replica on 4xx error"
+        );
+        assert_eq!(calls[0], "primary", "Should call only primary replica");
+    }
+
+    #[test]
+    fn test_classifier_continues_on_5xx_errors() {
+        // Test: try_request_with_classifier continues failover on 5xx errors
+        // HTTP 504 (Gateway Timeout) SHOULD trigger failover when using classifier
+        use super::FailoverDecision;
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+        let calls = RefCell::new(Vec::new());
+
+        // Define a classifier that stops on 4xx, continues on 5xx
+        let classifier = |error: &String| {
+            if error.contains("HTTP 4") {
+                FailoverDecision::Stop
+            } else {
+                FailoverDecision::Failover
+            }
+        };
+
+        // Simulate: first replica returns 504, second replica succeeds
+        let result = replica_set.try_request_with_classifier(
+            |replica| {
+                calls.borrow_mut().push(replica.name.clone());
+                if replica.name == "primary" {
+                    Err::<String, String>("HTTP 504: Gateway Timeout".to_string())
+                } else {
+                    Ok("Success from EU replica".to_string())
+                }
+            },
+            classifier,
+        );
+
+        // Verify request succeeded on second replica
+        assert!(result.is_ok(), "Request should succeed on second replica");
+        assert_eq!(
+            result.unwrap(),
+            "Success from EU replica",
+            "Should return success from EU replica"
+        );
+
+        // With classifier: Both replicas should be called (5xx triggers failover)
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            2,
+            "With classifier: should try second replica on 5xx error"
+        );
+        assert_eq!(calls[0], "primary", "Should call primary replica first");
+        assert_eq!(
+            calls[1], "replica-eu",
+            "Should failover to EU replica after 504"
+        );
+    }
+
+    #[test]
+    fn test_classifier_with_404_stops_failover() {
+        // Test: HTTP 404 (Not Found) should NOT trigger failover when using classifier
+        // The file doesn't exist - trying another replica won't help
+        use super::FailoverDecision;
+        use std::cell::RefCell;
+
+        let replicas = vec![
+            S3Replica {
+                name: "primary".to_string(),
+                bucket: "products-us-west-2".to_string(),
+                region: "us-west-2".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE1".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY1".to_string(),
+                endpoint: Some("https://s3.us-west-2.amazonaws.com".to_string()),
+                priority: 1,
+                timeout: 30,
+            },
+            S3Replica {
+                name: "replica-eu".to_string(),
+                bucket: "products-eu-west-1".to_string(),
+                region: "eu-west-1".to_string(),
+                access_key: "AKIAIOSFODNN7EXAMPLE2".to_string(),
+                secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY2".to_string(),
+                endpoint: Some("https://s3.eu-west-1.amazonaws.com".to_string()),
+                priority: 2,
+                timeout: 25,
+            },
+        ];
+
+        let replica_set = ReplicaSet::new(&replicas).expect("Should create ReplicaSet");
+        let calls = RefCell::new(Vec::new());
+
+        // Define a classifier that stops on 4xx errors
+        let classifier = |error: &String| {
+            if error.contains("HTTP 4") {
+                FailoverDecision::Stop
+            } else {
+                FailoverDecision::Failover
+            }
+        };
+
+        // Simulate: first replica returns HTTP 404 (file not found)
+        let result = replica_set.try_request_with_classifier(
+            |replica| {
+                calls.borrow_mut().push(replica.name.clone());
+                Err::<String, String>("HTTP 404: Not Found".to_string())
+            },
+            classifier,
+        );
+
+        // Verify request failed with 404
+        assert!(result.is_err(), "Request should fail with 404 Not Found");
+        assert_eq!(
+            result.unwrap_err(),
+            "HTTP 404: Not Found",
+            "Should return 404 Not Found error"
+        );
+
+        // With classifier: Only primary replica should be called
+        let calls = calls.borrow();
+        assert_eq!(
+            calls.len(),
+            1,
+            "With classifier: should stop after first replica on 404 error"
+        );
+        assert_eq!(calls[0], "primary", "Should call only primary replica");
     }
 
     #[test]
