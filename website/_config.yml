@@ -9,7 +9,8 @@ remote_theme: just-the-docs/just-the-docs@v0.10.0
 color_scheme: dark
 
 # Logo and favicon
-logo: "/assets/images/logo.svg"
+logo: "/assets/images/logo.png"
+favicon_ico: "/assets/images/favicon.ico"
 
 # Aux links for top navigation
 aux_links:
