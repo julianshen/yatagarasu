@@ -1455,9 +1455,7 @@ mod tests {
             "Should return 403 Forbidden error"
         );
 
-        // BEHAVIOR: try_request tries all replicas on any error (backward compatible)
-        // This test documents this behavior - both replicas are called.
-        // For error classification, use try_request_with_classifier() instead.
+        // Verify both replicas were called (backward compatible behavior)
         let calls = calls.borrow();
         assert_eq!(
             calls.len(),
@@ -1469,9 +1467,6 @@ mod tests {
             calls[1], "replica-eu",
             "try_request tries second replica even though 403 is a client error"
         );
-
-        // NOTE: This test documents try_request behavior where all replicas are tried.
-        // For 4xx error classification that stops on client errors, use try_request_with_classifier().
     }
 
     #[test]
@@ -1531,9 +1526,7 @@ mod tests {
             "Should return 404 Not Found error"
         );
 
-        // BEHAVIOR: try_request tries all replicas on any error (backward compatible)
-        // This test documents this behavior - both replicas are called.
-        // For error classification, use try_request_with_classifier() instead.
+        // Verify both replicas were called (backward compatible behavior)
         let calls = calls.borrow();
         assert_eq!(
             calls.len(),
@@ -1545,9 +1538,6 @@ mod tests {
             calls[1], "replica-eu",
             "try_request tries second replica even though 404 is a client error"
         );
-
-        // NOTE: This test documents try_request behavior where all replicas are tried.
-        // For 4xx error classification that stops on client errors, use try_request_with_classifier().
     }
 
     #[test]
