@@ -3,6 +3,7 @@
 // Tests that verify cache layers work together correctly in a multi-tier setup
 
 use bytes::Bytes;
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use yatagarasu::cache::tiered::TieredCache;
@@ -101,16 +102,16 @@ async fn test_cache_promotion_disk_to_memory() {
     let cache_dir = temp_dir.path();
 
     // Create separate memory and disk cache instances
-    let memory_cache: Box<dyn Cache + Send + Sync> = Box::new(MemoryCache::new(
+    let memory_cache: Arc<dyn Cache + Send + Sync> = Arc::new(MemoryCache::new(
         &yatagarasu::cache::MemoryCacheConfig::default(),
     ));
-    let disk_cache: Box<dyn Cache + Send + Sync> = Box::new(DiskCache::with_config(
+    let disk_cache: Arc<dyn Cache + Send + Sync> = Arc::new(DiskCache::with_config(
         cache_dir.to_path_buf(),
         100 * 1024 * 1024, // 100 MB
     ));
 
     // Get references to check state later
-    // Note: We can't easily inspect internal state of Box<dyn Cache>,
+    // Note: We can't easily inspect internal state of Arc<dyn Cache>,
     // so we'll test indirectly through behavior
 
     // Create tiered cache with memory + disk
@@ -631,10 +632,10 @@ async fn test_promotion_is_async_and_does_not_slow_response() {
     let cache_dir = temp_dir.path();
 
     // Create separate memory and disk cache instances
-    let memory_cache: Box<dyn Cache + Send + Sync> = Box::new(MemoryCache::new(
+    let memory_cache: Arc<dyn Cache + Send + Sync> = Arc::new(MemoryCache::new(
         &yatagarasu::cache::MemoryCacheConfig::default(),
     ));
-    let disk_cache: Box<dyn Cache + Send + Sync> = Box::new(DiskCache::with_config(
+    let disk_cache: Arc<dyn Cache + Send + Sync> = Arc::new(DiskCache::with_config(
         cache_dir.to_path_buf(),
         100 * 1024 * 1024, // 100 MB
     ));

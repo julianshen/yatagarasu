@@ -11,6 +11,7 @@
 //! Run with: cargo test --test integration_tests layer_failure -- --ignored
 
 use bytes::Bytes;
+use std::sync::Arc;
 use std::time::Duration;
 use testcontainers::clients::Cli;
 use testcontainers::core::WaitFor;
@@ -88,17 +89,17 @@ async fn test_tiered_cache_fallback_when_redis_unavailable() {
 
     // Try to create Redis cache - it may fail to connect
     // If it fails, we create tiered cache with just memory + disk
-    let layers: Vec<Box<dyn Cache + Send + Sync>> =
+    let layers: Vec<Arc<dyn Cache + Send + Sync>> =
         if let Ok(redis_cache) = RedisCache::new(redis_config).await {
             vec![
-                Box::new(memory_cache),
-                Box::new(disk_cache),
-                Box::new(redis_cache),
+                Arc::new(memory_cache),
+                Arc::new(disk_cache),
+                Arc::new(redis_cache),
             ]
         } else {
             // Redis connection failed - test with just memory + disk
             // This still tests the graceful handling
-            vec![Box::new(memory_cache), Box::new(disk_cache)]
+            vec![Arc::new(memory_cache), Arc::new(disk_cache)]
         };
 
     let tiered = TieredCache::new(layers);
@@ -166,9 +167,9 @@ async fn test_tiered_cache_survives_redis_failure() {
 
     // Create tiered cache: memory -> disk -> redis
     let tiered = TieredCache::new(vec![
-        Box::new(memory_cache),
-        Box::new(disk_cache),
-        Box::new(redis_cache),
+        Arc::new(memory_cache),
+        Arc::new(disk_cache),
+        Arc::new(redis_cache),
     ]);
 
     // Set data in all layers
@@ -208,7 +209,7 @@ async fn test_memory_only_cache_resilience() {
     };
     let memory_cache = MemoryCache::new(&memory_config);
 
-    let tiered = TieredCache::new(vec![Box::new(memory_cache)]);
+    let tiered = TieredCache::new(vec![Arc::new(memory_cache)]);
 
     // Set and get data
     let key = test_key("test-bucket", "memory-only.txt");
@@ -240,7 +241,7 @@ async fn test_multiple_layer_failures_fallback() {
     let disk_cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 100 * 1024 * 1024);
 
     // Create tiered cache: memory -> disk
-    let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+    let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
     // Key that doesn't exist - tests miss handling through all layers
     let missing_key = test_key("test-bucket", "nonexistent.txt");
@@ -282,7 +283,7 @@ async fn test_layer_recovery_after_failure() {
     let disk_cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 100 * 1024 * 1024);
 
     // Start with just memory + disk (simulating Redis being down)
-    let tiered_no_redis = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+    let tiered_no_redis = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
     // Set data while "Redis is down"
     let key1 = test_key("test-bucket", "before-recovery.txt");
@@ -325,9 +326,9 @@ async fn test_layer_recovery_after_failure() {
         .expect("Should connect to recovered Redis");
 
     let tiered_with_redis = TieredCache::new(vec![
-        Box::new(memory_cache2),
-        Box::new(disk_cache2),
-        Box::new(redis_cache),
+        Arc::new(memory_cache2),
+        Arc::new(disk_cache2),
+        Arc::new(redis_cache),
     ]);
 
     // Set new data (should go to all layers including Redis)
@@ -362,7 +363,7 @@ async fn test_stats_with_partial_layer_failure() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let disk_cache = DiskCache::with_config(temp_dir.path().to_path_buf(), 100 * 1024 * 1024);
 
-    let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+    let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
     // Set some data
     for i in 0..10 {
@@ -409,7 +410,7 @@ async fn test_disk_failure_handled_gracefully() {
     );
 
     // Create tiered cache: memory -> disk (disk will fail)
-    let tiered = TieredCache::new(vec![Box::new(memory_cache), Box::new(disk_cache)]);
+    let tiered = TieredCache::new(vec![Arc::new(memory_cache), Arc::new(disk_cache)]);
 
     // Set data - should succeed in memory even if disk fails
     let key = test_key("test-bucket", "disk-fail-test.txt");

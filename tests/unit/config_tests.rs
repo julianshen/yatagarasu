@@ -9,6 +9,7 @@ fn test_can_create_empty_config_struct() {
         server: ServerConfig {
             address: String::from("127.0.0.1"),
             port: 8080,
+            threads: 4,
             request_timeout: 30,
             max_concurrent_requests: 1000,
             rate_limit: None,
