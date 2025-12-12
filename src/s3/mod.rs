@@ -6,7 +6,7 @@
 //! # Features
 //!
 //! - **AWS SigV4 signing**: Full implementation of AWS Signature Version 4 for request authentication
-//! - **Streaming support**: Efficient streaming for large file transfers without buffering
+//! - **Response handling**: Buffers S3 responses for processing (streaming handled at proxy layer)
 //! - **Error parsing**: Structured parsing of S3 XML error responses into [`S3Error`] type
 //! - **HTTP Range requests**: Support for partial content requests (video seeking, parallel downloads)
 //!
@@ -19,8 +19,8 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! let client = S3Client::new(&s3_config);
-//! let response = client.get_object("my-bucket", "path/to/file.txt", None).await?;
+//! let s3_client = create_s3_client(&s3_config)?;
+//! let list_result = s3_client.list_objects(Some("prefix/"), None, Some(100)).await?;
 //! ```
 
 use crate::config::S3Config;

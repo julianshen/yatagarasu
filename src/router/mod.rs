@@ -5,7 +5,7 @@
 //!
 //! # Routing Algorithm
 //!
-//! 1. Normalize the request path (ensure leading `/`, handle `//`)
+//! 1. Normalize the request path (collapse duplicate slashes like `//`)
 //! 2. Find all buckets whose `path_prefix` matches the start of the path
 //! 3. Select the bucket with the longest matching prefix (most specific)
 //! 4. Strip the matched prefix from the path for the upstream S3 request

@@ -8,7 +8,7 @@
 //! - **Multiple token sources**: Extract tokens from Authorization header, custom headers, or query parameters
 //! - **Algorithm support**: HS256, HS384, HS512 (HMAC), RS256/384/512 (RSA), ES256/384 (ECDSA)
 //! - **Key management**: Static secrets, PEM files, or dynamic JWKS endpoints
-//! - **Custom claim rules**: Verify claims with operators (equals, contains, in, gt, lt)
+//! - **Custom claim rules**: Verify claims with the `equals` operator
 //! - **Admin claim support**: Separate claims for admin access verification
 //!
 //! # Token Sources
