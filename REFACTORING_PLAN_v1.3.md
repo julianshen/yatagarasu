@@ -26,6 +26,7 @@ This document outlines a comprehensive refactoring plan for the Yatagarasu S3 pr
 - PR #24: S3 error handling improvements
 - PR #25: Token extraction allocation optimization
 - PR #26: Dead code cleanup
+- PR #27: Module documentation (slow_query, s3, auth, router)
 
 **No Test Cheats Found:** Code review confirmed all tests are legitimate with no hardcoded bypasses.
 
@@ -391,7 +392,7 @@ Focus areas:
 2. [x] 3.2 Improve error handling - DONE (PR #24: S3Error struct with structured parsing)
 3. [x] 3.3 Reduce allocations in hot paths - DONE (PR #25: filter before map optimization)
 4. [x] 4.1 Remove dead code - DONE (PR #26: removed outdated dead_code annotations)
-5. [ ] 5.1 Add missing documentation
+5. [x] 5.1 Add missing documentation - DONE (PR #27: module docs for slow_query, s3, auth, router)
 
 ---
 

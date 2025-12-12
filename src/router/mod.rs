@@ -1,4 +1,31 @@
-// Router module
+//! Request Router Module
+//!
+//! Routes incoming requests to the appropriate S3 bucket based on URL path prefixes.
+//! Uses longest-prefix matching to select the most specific bucket configuration.
+//!
+//! # Routing Algorithm
+//!
+//! 1. Normalize the request path (ensure leading `/`, handle `//`)
+//! 2. Find all buckets whose `path_prefix` matches the start of the path
+//! 3. Select the bucket with the longest matching prefix (most specific)
+//! 4. Strip the matched prefix from the path for the upstream S3 request
+//!
+//! # Example
+//!
+//! Given buckets configured with prefixes:
+//! - `/api/v1/` → bucket-a
+//! - `/api/` → bucket-b
+//! - `/` → bucket-default
+//!
+//! Request paths are routed as:
+//! - `/api/v1/users` → bucket-a (stripped path: `users`)
+//! - `/api/docs` → bucket-b (stripped path: `docs`)
+//! - `/images/logo.png` → bucket-default (stripped path: `images/logo.png`)
+//!
+//! # Performance
+//!
+//! - O(n) routing where n = number of configured buckets
+//! - O(1) bucket lookup by name via HashMap index
 
 use crate::config::BucketConfig;
 use std::collections::HashMap;

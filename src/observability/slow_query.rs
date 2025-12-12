@@ -1,5 +1,25 @@
-// Slow query logging module
-// Phase 34: Enhanced Observability
+//! Slow Query Logging Module
+//!
+//! Detects and logs requests that exceed a configurable time threshold,
+//! helping identify performance bottlenecks and degraded upstream responses.
+//!
+//! # Features
+//!
+//! - **Configurable threshold**: Set minimum duration (in milliseconds) to trigger logging
+//! - **Timing breakdown**: Optionally include detailed timing for each request phase
+//! - **Configurable log level**: Output slow queries at warn, info, debug, or error level
+//! - **Correlation ID tracking**: Links slow query logs to full request traces
+//!
+//! # Example
+//!
+//! ```yaml
+//! observability:
+//!   slow_query:
+//!     enabled: true
+//!     threshold_ms: 1000  # Log requests taking > 1 second
+//!     log_level: warn
+//!     include_breakdown: true
+//! ```
 
 use crate::observability::config::SlowQueryConfig;
 use crate::observability::tracing::RequestTiming;

@@ -1,4 +1,27 @@
-// S3 client module
+//! S3 Client Module
+//!
+//! Provides S3-compatible storage operations with AWS Signature Version 4 authentication.
+//! This module handles all communication with S3 backends (AWS S3, MinIO, etc.).
+//!
+//! # Features
+//!
+//! - **AWS SigV4 signing**: Full implementation of AWS Signature Version 4 for request authentication
+//! - **Streaming support**: Efficient streaming for large file transfers without buffering
+//! - **Error parsing**: Structured parsing of S3 XML error responses into [`S3Error`] type
+//! - **HTTP Range requests**: Support for partial content requests (video seeking, parallel downloads)
+//!
+//! # Key Types
+//!
+//! - [`S3Client`]: Main client for S3 operations (GET, PUT, HEAD, DELETE, LIST)
+//! - [`S3Response`]: Response wrapper with body, headers, and error parsing
+//! - [`S3Error`]: Structured error type extracted from S3 XML error responses
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! let client = S3Client::new(&s3_config);
+//! let response = client.get_object("my-bucket", "path/to/file.txt", None).await?;
+//! ```
 
 use crate::config::S3Config;
 use aws_config::BehaviorVersion;
