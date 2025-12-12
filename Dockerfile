@@ -2,8 +2,8 @@
 # Optimized for minimal image size and security
 
 # Stage 1: Build stage
-# Use Rust 1.80+ for edition 2024 support
-FROM rust:1-slim as builder
+# Use Rust with Debian 12 (bookworm) to match distroless runtime glibc version
+FROM rust:1-slim-bookworm as builder
 
 # Install build dependencies
 # cmake and g++ needed for libz-ng-sys compilation
