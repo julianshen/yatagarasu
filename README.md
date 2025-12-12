@@ -6,6 +6,9 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/julianshen/yatagarasu/actions/workflows/ci.yml/badge.svg)](https://github.com/julianshen/yatagarasu/actions)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/julianshen/yatagarasu)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/julianshen/yatagarasu/releases)
+
+[![logo](https://raw.githubusercontent.com/julianshen/yatagarasu/master/logo.png)](https://github.com/julianshen/yatagarasu)
 
 A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framework, providing intelligent routing, multi-bucket support, and flexible authentication for secure content delivery.
 
