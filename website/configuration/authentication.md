@@ -164,6 +164,12 @@ jwt:
 
 Validate specific JWT claims.
 
+{: .note }
+> **When to use claims_verification vs authorization (OPA/OpenFGA)?**
+> Use `claims_verification` for simple, static checks (e.g., role equals "admin").
+> Use [OPA/OpenFGA authorization](/yatagarasu/configuration/authorization/) for complex, dynamic policies
+> (e.g., resource-based access, relationship-based permissions).
+
 | | |
 |:--|:--|
 | **Type** | `array` |
