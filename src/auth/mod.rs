@@ -1,4 +1,40 @@
-// Authentication module
+//! JWT Authentication Module
+//!
+//! Provides flexible JWT token validation with support for multiple algorithms,
+//! key sources, and custom claim verification.
+//!
+//! # Features
+//!
+//! - **Multiple token sources**: Extract tokens from Authorization header, custom headers, or query parameters
+//! - **Algorithm support**: HS256, HS384, HS512 (HMAC), RS256/384/512 (RSA), ES256/384 (ECDSA)
+//! - **Key management**: Static secrets, PEM files, or dynamic JWKS endpoints
+//! - **Custom claim rules**: Verify claims with the `equals` operator
+//! - **Admin claim support**: Separate claims for admin access verification
+//!
+//! # Token Sources
+//!
+//! Tokens can be extracted from (configured per bucket):
+//! - `bearer`: Standard `Authorization: Bearer <token>` header
+//! - `header`: Custom header with optional prefix (e.g., `X-Auth-Token`)
+//! - `query`: Query parameter (e.g., `?token=<jwt>`)
+//!
+//! # Example Configuration
+//!
+//! ```yaml
+//! jwt:
+//!   enabled: true
+//!   algorithm: RS256
+//!   keys:
+//!     - id: primary
+//!       algorithm: RS256
+//!       path: /etc/jwt/public.pem
+//!   token_sources:
+//!     - source_type: bearer
+//!   claims:
+//!     - claim: role
+//!       operator: in
+//!       value: ["admin", "user"]
+//! ```
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
