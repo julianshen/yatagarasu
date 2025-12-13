@@ -146,28 +146,7 @@ services:
         condition: service_started
     volumes:
       - ./openfga:/openfga:ro
-    entrypoint: >
-      /bin/sh -c " echo 'Setting up OpenFGA...';
-
-      echo 'Waiting for OpenFGA to be ready...'; until curl -s -f http://openfga:8080/healthz > /dev/null; do
-        echo 'Waiting for OpenFGA...';
-        sleep 2;
-      done;
-
-      echo 'Creating store...'; STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \
-        -H 'Content-Type: application/json' \
-        -d '{\"name\": \"yatagarasu\"}');
-      STORE_ID=$$(echo $$STORE_RESPONSE | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4); echo \"Store ID: $$STORE_ID\";
-
-      echo 'Writing authorization model...'; curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/authorization-models\" \
-        -H 'Content-Type: application/json' \
-        -d @/openfga/model.json;
-
-      echo 'Writing tuples...'; curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/write\" \
-        -H 'Content-Type: application/json' \
-        -d @/openfga/tuples.json;
-
-      echo ''; echo '========================================'; echo 'OpenFGA Setup Complete!'; echo '========================================'; echo \"OPENFGA_STORE_ID=$$STORE_ID\"; echo ''; echo 'Update config.yaml with this store ID'; echo '========================================'; "
+    entrypoint: ["/bin/sh", "-c", "echo 'Setting up OpenFGA...'; echo 'Waiting for OpenFGA to be ready...'; until curl -s -f http://openfga:8080/healthz > /dev/null; do echo 'Waiting for OpenFGA...'; sleep 2; done; echo 'Creating store...'; STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores -H 'Content-Type: application/json' -d '{\"name\": \"yatagarasu\"}'); STORE_ID=$$(echo $$STORE_RESPONSE | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4); echo \"Store ID: $$STORE_ID\"; echo 'Writing authorization model...'; curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/authorization-models\" -H 'Content-Type: application/json' -d @/openfga/model.json; echo ''; echo 'Writing tuples...'; curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/write\" -H 'Content-Type: application/json' -d @/openfga/tuples.json; echo ''; echo '========================================'; echo 'OpenFGA Setup Complete!'; echo '========================================'; echo \"OPENFGA_STORE_ID=$$STORE_ID\"; echo ''; echo 'Update config.yaml with this store ID'; echo '========================================'"]
     networks:
       - yatagarasu-full
 
