@@ -20,6 +20,8 @@ buckets:
 # Multi-tier caching with Redis as shared layer
 cache:
   enabled: true
+  # Layers to use (in order: fastest to slowest)
+  cache_layers: ["memory", "redis"]
   # Local memory cache (per instance)
   memory:
     max_cache_size_mb: 100  # 100MB
