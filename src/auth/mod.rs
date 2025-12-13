@@ -481,17 +481,86 @@ pub fn verify_claims(claims: &Claims, rules: &[ClaimRule]) -> bool {
     for rule in rules {
         let claim_value = claims.custom.get(&rule.claim);
 
-        match rule.operator.as_str() {
+        let matches = match rule.operator.as_str() {
             "equals" => {
-                if claim_value != Some(&rule.value) {
-                    return false;
+                // Exact match
+                claim_value == Some(&rule.value)
+            }
+            "in" => {
+                // Check if claim value is in the rule's array
+                if let Some(claim_val) = claim_value {
+                    if let Some(allowed_values) = rule.value.as_array() {
+                        allowed_values.contains(claim_val)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
                 }
             }
-            _ => return false, // Unknown operator
+            "contains" => {
+                // Check if claim string contains the rule value substring
+                if let (Some(claim_val), Some(search_str)) =
+                    (claim_value.and_then(|v| v.as_str()), rule.value.as_str())
+                {
+                    claim_val.contains(search_str)
+                } else {
+                    false
+                }
+            }
+            "gt" => {
+                // Greater than (numeric)
+                compare_numeric(claim_value, &rule.value, |a, b| a > b)
+            }
+            "lt" => {
+                // Less than (numeric)
+                compare_numeric(claim_value, &rule.value, |a, b| a < b)
+            }
+            "gte" => {
+                // Greater than or equal (numeric)
+                compare_numeric(claim_value, &rule.value, |a, b| a >= b)
+            }
+            "lte" => {
+                // Less than or equal (numeric)
+                compare_numeric(claim_value, &rule.value, |a, b| a <= b)
+            }
+            _ => {
+                tracing::warn!("Unknown claim operator: {}", rule.operator);
+                false
+            }
+        };
+
+        if !matches {
+            return false;
         }
     }
 
     true
+}
+
+/// Helper function for numeric comparisons
+fn compare_numeric<F>(
+    claim_value: Option<&serde_json::Value>,
+    rule_value: &serde_json::Value,
+    cmp: F,
+) -> bool
+where
+    F: Fn(f64, f64) -> bool,
+{
+    let claim_num = claim_value.and_then(|v| {
+        v.as_f64()
+            .or_else(|| v.as_i64().map(|i| i as f64))
+            .or_else(|| v.as_u64().map(|u| u as f64))
+    });
+    let rule_num = rule_value
+        .as_f64()
+        .or_else(|| rule_value.as_i64().map(|i| i as f64))
+        .or_else(|| rule_value.as_u64().map(|u| u as f64));
+
+    match (claim_num, rule_num) {
+        (Some(a), Some(b)) => cmp(a, b),
+        _ => false,
+    }
 }
 
 /// Verify admin claims for cache management API access (Phase 65.1)
@@ -706,4 +775,328 @@ pub async fn authenticate_request_with_jwks(
 
     tracing::debug!("JWT authentication with JWKS successful");
     Ok(claims)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // Helper to create Claims with custom fields
+    fn make_claims(custom: serde_json::Map<String, serde_json::Value>) -> Claims {
+        Claims {
+            sub: None,
+            exp: None,
+            iat: None,
+            nbf: None,
+            iss: None,
+            custom,
+        }
+    }
+
+    fn make_rule(claim: &str, operator: &str, value: serde_json::Value) -> ClaimRule {
+        ClaimRule {
+            claim: claim.to_string(),
+            operator: operator.to_string(),
+            value,
+        }
+    }
+
+    // ========================
+    // equals operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_equals_string_match() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("admin"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("role", "equals", json!("admin"))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_equals_string_mismatch() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("user"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("role", "equals", json!("admin"))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_equals_missing_claim() {
+        let claims = make_claims(serde_json::Map::new());
+        let rules = vec![make_rule("role", "equals", json!("admin"))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // in operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_in_string_found() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("editor"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule(
+            "role",
+            "in",
+            json!(["admin", "editor", "viewer"]),
+        )];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_in_string_not_found() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("guest"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule(
+            "role",
+            "in",
+            json!(["admin", "editor", "viewer"]),
+        )];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_in_number_found() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("level".to_string(), json!(5));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("level", "in", json!([1, 3, 5, 7]))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_in_empty_array() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("admin"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("role", "in", json!([]))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // contains operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_contains_substring_found() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("email".to_string(), json!("user@company.com"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("email", "contains", json!("@company.com"))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_contains_substring_not_found() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("email".to_string(), json!("user@gmail.com"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("email", "contains", json!("@company.com"))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_contains_non_string_fails() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("count".to_string(), json!(123));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("count", "contains", json!("12"))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // gt operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_gt_true() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("age".to_string(), json!(25));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("age", "gt", json!(18))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_gt_false_equal() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("age".to_string(), json!(18));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("age", "gt", json!(18))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_gt_false_less() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("age".to_string(), json!(15));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("age", "gt", json!(18))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // lt operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_lt_true() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("priority".to_string(), json!(3));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("priority", "lt", json!(5))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_lt_false() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("priority".to_string(), json!(7));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("priority", "lt", json!(5))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // gte operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_gte_greater() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("score".to_string(), json!(100));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("score", "gte", json!(50))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_gte_equal() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("score".to_string(), json!(50));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("score", "gte", json!(50))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_gte_less() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("score".to_string(), json!(30));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("score", "gte", json!(50))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // lte operator tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_lte_less() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("limit".to_string(), json!(5));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("limit", "lte", json!(10))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_lte_equal() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("limit".to_string(), json!(10));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("limit", "lte", json!(10))];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_lte_greater() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("limit".to_string(), json!(15));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("limit", "lte", json!(10))];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // Multiple rules tests
+    // ========================
+
+    #[test]
+    fn test_verify_claims_multiple_rules_all_pass() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("admin"));
+        custom.insert("age".to_string(), json!(25));
+        custom.insert("email".to_string(), json!("admin@company.com"));
+        let claims = make_claims(custom);
+
+        let rules = vec![
+            make_rule("role", "equals", json!("admin")),
+            make_rule("age", "gte", json!(18)),
+            make_rule("email", "contains", json!("@company.com")),
+        ];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_multiple_rules_one_fails() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("admin"));
+        custom.insert("age".to_string(), json!(15)); // Too young
+        let claims = make_claims(custom);
+
+        let rules = vec![
+            make_rule("role", "equals", json!("admin")),
+            make_rule("age", "gte", json!(18)),
+        ];
+        assert!(!verify_claims(&claims, &rules));
+    }
+
+    #[test]
+    fn test_verify_claims_empty_rules_passes() {
+        let claims = make_claims(serde_json::Map::new());
+        let rules: Vec<ClaimRule> = vec![];
+        assert!(verify_claims(&claims, &rules));
+    }
+
+    // ========================
+    // Unknown operator test
+    // ========================
+
+    #[test]
+    fn test_verify_claims_unknown_operator_fails() {
+        let mut custom = serde_json::Map::new();
+        custom.insert("role".to_string(), json!("admin"));
+        let claims = make_claims(custom);
+
+        let rules = vec![make_rule("role", "unknown", json!("admin"))];
+        assert!(!verify_claims(&claims, &rules));
+    }
 }
