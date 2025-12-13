@@ -3,7 +3,7 @@ name: yatagarasu
 description: High-performance S3 proxy built with Rust and Cloudflare Pingora
 type: application
 version: 0.1.0
-appVersion: "1.2.0"
+appVersion: "1.3.0"
 
 home: https://github.com/julianshen/yatagarasu
 sources:

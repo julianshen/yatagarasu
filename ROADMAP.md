@@ -1,11 +1,20 @@
 # Yatagarasu - Product Roadmap
 
-**Current Version**: v1.2.0
+**Current Version**: v1.3.0
 **Project**: High-Performance S3 Proxy built with Rust and Pingora
 
 ---
 
 ## Released Versions
+
+### v1.3.0 - Deployment & Documentation ✅ **RELEASED** (December 2025)
+
+- Cache warming/preloading API (pre-fetch frequently accessed objects)
+- Helm chart with configurable values
+- Kustomize base and overlays (dev, prod, ha-redis, full-stack)
+- Docker Compose examples (simple, HA Redis, full-stack)
+- Kubernetes deployment examples
+- Documentation website with mdBook (GitHub Pages)
 
 ### v1.2.0 - Production Hardening ✅ **RELEASED** (December 2025)
 
@@ -37,32 +46,6 @@
 ---
 
 ## Planned Features
-
-### v1.3.0 - Deployment & Documentation (Q1 2026)
-
-**Focus**: Production-ready deployment and comprehensive documentation
-
-#### Cache API
-- [ ] Cache warming/preloading API (pre-fetch frequently accessed objects)
-
-#### Kubernetes Deployment
-- [ ] Helm chart with configurable values
-- [ ] Kustomize base and overlays
-
-#### Deployment Examples
-- [ ] **Docker Compose**: Simple single-instance setup
-- [ ] **Docker Compose**: HA setup with Redis cache
-- [ ] **Docker Compose**: Full stack (HA + OPA + OpenFGA)
-- [ ] **Kubernetes**: Basic deployment with Helm
-- [ ] **Kubernetes**: Production setup with Kustomize overlays
-
-#### Documentation Website (GitHub Pages)
-- [ ] Quick start guide
-- [ ] Configuration tutorials
-- [ ] Architecture & design documents
-- [ ] Deployment examples walkthrough
-- [ ] API reference
-- [ ] Troubleshooting guide
 
 ### v2.0.0 - Extended Capabilities (Future)
 

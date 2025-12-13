@@ -1,6 +1,6 @@
-# YATAGARASU v1.2.0 - OPERATIONS GUIDE
+# YATAGARASU v1.3.0 - OPERATIONS GUIDE
 
-**Version**: v1.2.0
+**Version**: v1.3.0
 **Purpose**: Production operations, monitoring, and incident response
 
 ---
@@ -19,7 +19,7 @@
 
 ### 24-Hour Stability Summary
 
-Yatagarasu v1.2.0 has been validated through extended endurance testing:
+Yatagarasu v1.3.0 has been validated through extended endurance testing:
 
 | Test | Duration | VUs | Result | Memory |
 |------|----------|-----|--------|--------|
@@ -492,4 +492,4 @@ grep "duration_ms" /var/log/yatagarasu/*.log | awk -F'duration_ms=' '$2 > 100'
 ---
 
 *Generated: December 2025*
-*Yatagarasu v1.2.0 Operations Guide*
+*Yatagarasu v1.3.0 Operations Guide*

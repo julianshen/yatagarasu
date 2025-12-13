@@ -141,7 +141,7 @@ curl http://localhost:9090/metrics
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of replicas | `1` |
-| `image.tag` | Image version | `1.2.0` |
+| `image.tag` | Image version | `1.3.0` |
 | `buckets[].name` | Bucket config name | `demo` |
 | `buckets[].pathPrefix` | URL path prefix | `/demo` |
 | `buckets[].s3Bucket` | S3 bucket name | `my-bucket` |

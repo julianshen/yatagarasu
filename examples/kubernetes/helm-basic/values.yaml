@@ -9,7 +9,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/julianshen/yatagarasu
-  tag: "1.2.0"
+  tag: "1.3.0"
   pullPolicy: IfNotPresent
 
 # S3 bucket configuration

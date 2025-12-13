@@ -1,6 +1,6 @@
 # Yatagarasu Documentation Index
 
-**Version**: v1.2.0 (Production Ready)
+**Version**: v1.3.0 (Production Ready)
 **Status**: Released December 2025
 
 ---
@@ -46,7 +46,8 @@
 - **[../ROADMAP.md](../ROADMAP.md)** - Product roadmap (v1.0 → v1.1 → v1.2+)
   - v1.0.0 release summary
   - v1.1.0 planned features (RS256/ES256 JWT, advanced caching)
-  - v1.2.0 multi-region HA plans
+  - v1.2.0 features: hot reload, OpenFGA
+  - v1.3.0 features: cache warming, Helm, docs
   - Future ideas (v2.0+)
 
 ### Changelog
@@ -164,7 +165,7 @@
 
 ---
 
-## v1.2.0 Documentation (NEW)
+## v1.3.0 Documentation (NEW)
 
 ### Performance & Benchmarks
 - **[BENCHMARK_RESULTS_V1.2.md](BENCHMARK_RESULTS_V1.2.md)** - Criterion Benchmark Results

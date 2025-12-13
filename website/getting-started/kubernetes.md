@@ -35,7 +35,7 @@ helm install yatagarasu yatagarasu/yatagarasu
 # Or install with custom values
 helm install yatagarasu yatagarasu/yatagarasu \
   --set replicaCount=3 \
-  --set image.tag=1.2.0
+  --set image.tag=1.3.0
 ```
 
 ### Custom Values File
@@ -48,7 +48,7 @@ replicaCount: 3
 
 image:
   repository: ghcr.io/julianshen/yatagarasu
-  tag: "1.2.0"
+  tag: "1.3.0"
   pullPolicy: IfNotPresent
 
 service:
@@ -295,7 +295,7 @@ replicas:
 
 images:
   - name: ghcr.io/julianshen/yatagarasu
-    newTag: "1.2.0"
+    newTag: "1.3.0"
 
 patches:
   - patch: |-

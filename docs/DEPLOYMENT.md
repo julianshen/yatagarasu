@@ -1,6 +1,6 @@
 # YATAGARASU - MULTI-INSTANCE DEPLOYMENT GUIDE
 
-**Version**: v1.2.0
+**Version**: v1.3.0
 **Purpose**: Horizontal scaling and production deployment patterns
 
 ---
@@ -261,7 +261,7 @@ spec:
     spec:
       containers:
         - name: yatagarasu
-          image: yatagarasu:v1.2.0
+          image: yatagarasu:v1.3.0
           ports:
             - containerPort: 8080
               name: http
@@ -415,7 +415,7 @@ services:
       - yatagarasu-3
 
   yatagarasu-1:
-    image: yatagarasu:v1.2.0
+    image: yatagarasu:v1.3.0
     environment:
       - JWT_SECRET=${JWT_SECRET}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -427,7 +427,7 @@ services:
       - minio
 
   yatagarasu-2:
-    image: yatagarasu:v1.2.0
+    image: yatagarasu:v1.3.0
     environment:
       - JWT_SECRET=${JWT_SECRET}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -439,7 +439,7 @@ services:
       - minio
 
   yatagarasu-3:
-    image: yatagarasu:v1.2.0
+    image: yatagarasu:v1.3.0
     environment:
       - JWT_SECRET=${JWT_SECRET}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -568,4 +568,4 @@ memory_per_instance = cache_size_mb + 256MB  # Base overhead
 ---
 
 *Generated: December 2025*
-*Yatagarasu v1.2.0 Deployment Guide*
+*Yatagarasu v1.3.0 Deployment Guide*

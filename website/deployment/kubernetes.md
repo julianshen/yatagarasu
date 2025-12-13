@@ -47,7 +47,7 @@ replicaCount: 3
 
 image:
   repository: ghcr.io/julianshen/yatagarasu
-  tag: "1.2.0"
+  tag: "1.3.0"
   pullPolicy: IfNotPresent
 
 service:
@@ -275,7 +275,7 @@ replicas:
 
 images:
   - name: ghcr.io/julianshen/yatagarasu
-    newTag: "1.2.0"
+    newTag: "1.3.0"
 
 patches:
   - path: patches/resources.yaml

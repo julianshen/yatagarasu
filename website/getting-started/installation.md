@@ -30,7 +30,7 @@ docker pull ghcr.io/julianshen/yatagarasu:latest
 
 | Tag | Description |
 |:----|:------------|
-| `1.2.0` | Latest stable release |
+| `1.3.0` | Latest stable release |
 | `1.1.0` | Previous stable release |
 | `latest` | Latest build from main branch |
 | `sha-<commit>` | Specific commit builds |
@@ -133,19 +133,19 @@ Download pre-built binaries from GitHub Releases.
 
 ```bash
 # Linux x86_64
-curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.2.0/yatagarasu-linux-x86_64.tar.gz
+curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.3.0/yatagarasu-linux-x86_64.tar.gz
 tar xzf yatagarasu-linux-x86_64.tar.gz
 
 # Linux ARM64
-curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.2.0/yatagarasu-linux-aarch64.tar.gz
+curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.3.0/yatagarasu-linux-aarch64.tar.gz
 tar xzf yatagarasu-linux-aarch64.tar.gz
 
 # macOS x86_64
-curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.2.0/yatagarasu-darwin-x86_64.tar.gz
+curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.3.0/yatagarasu-darwin-x86_64.tar.gz
 tar xzf yatagarasu-darwin-x86_64.tar.gz
 
 # macOS ARM64 (Apple Silicon)
-curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.2.0/yatagarasu-darwin-aarch64.tar.gz
+curl -LO https://github.com/julianshen/yatagarasu/releases/download/v1.3.0/yatagarasu-darwin-aarch64.tar.gz
 tar xzf yatagarasu-darwin-aarch64.tar.gz
 ```
 

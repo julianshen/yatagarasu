@@ -94,4 +94,4 @@ secretGenerator:
 
 images:
   - name: ghcr.io/julianshen/yatagarasu
-    newTag: "1.2.0"
+    newTag: "1.3.0"

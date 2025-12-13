@@ -3,7 +3,7 @@
 ## Overview
 
 **Product Name:** Yatagarasu (八咫烏)
-**Version:** 1.2.0
+**Version:** 1.3.0
 **Last Updated:** December 2025
 **Repository:** https://github.com/julianshen/yatagarasu
 
@@ -38,6 +38,13 @@ _Yatagarasu (八咫烏) is the three-legged crow in Japanese mythology that serv
 - SIGHUP hot reload with ArcSwap
 - OpenFGA fine-grained authorization
 - Multi-architecture Docker images (GHCR)
+
+### Deployment & Documentation (v1.3.0)
+- Cache warming API for pre-warming frequently accessed objects
+- Production-ready Helm chart with configurable values
+- Kustomize overlays (dev, prod, ha-redis, full-stack)
+- Docker Compose examples (simple, HA, full-stack)
+- Documentation website with mdBook
 
 ## Architecture
 
@@ -289,6 +296,7 @@ cargo build --release
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3.0 | Dec 2025 | Cache warming, Helm, Kustomize, docs website |
 | 1.2.0 | Dec 2025 | Hot reload, OpenFGA, GHCR |
 | 1.1.0 | Nov 2025 | Caching, RS256/ES256, OPA, audit, tracing |
 | 1.0.0 | Nov 2025 | Initial production release |

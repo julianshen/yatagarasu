@@ -1,6 +1,6 @@
 # YATAGARASU - JWT AUTHENTICATION GUIDE
 
-**Version**: v1.2.0
+**Version**: v1.3.0
 **Feature**: JWT Authentication with RS256/ES256/JWKS Support
 
 ---
@@ -479,4 +479,4 @@ Look for log entries with:
 ---
 
 *Generated: December 2025*
-*Yatagarasu v1.2.0 JWT Authentication Guide*
+*Yatagarasu v1.3.0 JWT Authentication Guide*

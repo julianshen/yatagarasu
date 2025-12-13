@@ -146,7 +146,7 @@ Edit `kustomization.yaml`:
 images:
   - name: ghcr.io/julianshen/yatagarasu
     newName: your-registry.example.com/yatagarasu
-    newTag: "1.2.0"
+    newTag: "1.3.0"
 ```
 
 ### Add Custom Environment Variables
