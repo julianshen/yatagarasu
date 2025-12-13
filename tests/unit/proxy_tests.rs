@@ -17092,7 +17092,7 @@ fn test_no_race_conditions_during_config_swap() {
         handles2.push(handle);
     }
 
-    // Rapid updates
+    // Rapid updates with small yield to let readers run
     for i in 0..100 {
         let new_config = Config {
             field_a: i,
@@ -17100,6 +17100,8 @@ fn test_no_race_conditions_during_config_swap() {
             field_c: i * 2,
         };
         holder2.update_config(new_config);
+        // Small yield to allow reader threads to be scheduled
+        thread::yield_now();
     }
 
     // Stop readers
