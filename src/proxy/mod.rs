@@ -2165,6 +2165,7 @@ impl ProxyHttp for YatagarasuProxy {
                 // No matching bucket found - return 404
                 let mut header = ResponseHeader::build(404, None)?;
                 header.insert_header("Content-Type", "text/plain")?;
+                header.insert_header("Content-Length", "0")?;
                 session
                     .write_response_header(Box::new(header), true)
                     .await?;
@@ -2309,6 +2310,7 @@ impl ProxyHttp for YatagarasuProxy {
                             let mut header = ResponseHeader::build(401, None)?;
                             header.insert_header("Content-Type", "text/plain")?;
                             header.insert_header("WWW-Authenticate", "Bearer")?;
+                            header.insert_header("Content-Length", "0")?;
                             session
                                 .write_response_header(Box::new(header), true)
                                 .await?;
@@ -2324,6 +2326,7 @@ impl ProxyHttp for YatagarasuProxy {
                             // Return 403 Forbidden (invalid token or claims)
                             let mut header = ResponseHeader::build(403, None)?;
                             header.insert_header("Content-Type", "text/plain")?;
+                            header.insert_header("Content-Length", "0")?;
                             session
                                 .write_response_header(Box::new(header), true)
                                 .await?;
@@ -2421,6 +2424,7 @@ impl ProxyHttp for YatagarasuProxy {
             if !decision.is_allowed() {
                 let mut header = ResponseHeader::build(403, None)?;
                 header.insert_header("Content-Type", "text/plain")?;
+                header.insert_header("Content-Length", "0")?;
                 session
                     .write_response_header(Box::new(header), true)
                     .await?;
@@ -2504,6 +2508,7 @@ impl ProxyHttp for YatagarasuProxy {
                 if !decision.is_allowed() {
                     let mut header = ResponseHeader::build(403, None)?;
                     header.insert_header("Content-Type", "text/plain")?;
+                    header.insert_header("Content-Length", "0")?;
                     session
                         .write_response_header(Box::new(header), true)
                         .await?;
@@ -2532,6 +2537,7 @@ impl ProxyHttp for YatagarasuProxy {
                 if fail_mode == OpenFgaFailMode::Closed {
                     let mut header = ResponseHeader::build(403, None)?;
                     header.insert_header("Content-Type", "text/plain")?;
+                    header.insert_header("Content-Length", "0")?;
                     session
                         .write_response_header(Box::new(header), true)
                         .await?;
