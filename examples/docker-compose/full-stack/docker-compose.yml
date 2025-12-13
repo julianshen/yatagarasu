@@ -28,7 +28,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -42,22 +42,7 @@ services:
       minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
-      echo 'Setting up MinIO buckets...';
-      mc alias set myminio http://minio:9000 minioadmin minioadmin;
-      mc mb --ignore-existing myminio/public-assets;
-      mc mb --ignore-existing myminio/opa-protected;
-      mc mb --ignore-existing myminio/openfga-protected;
-      mc anonymous set public myminio/public-assets;
-      echo 'Hello from Public Bucket!' | mc pipe myminio/public-assets/hello.txt;
-      echo 'OPA Protected Content' | mc pipe myminio/opa-protected/test.txt;
-      echo 'OpenFGA Protected Content' | mc pipe myminio/openfga-protected/secret.txt;
-      dd if=/dev/urandom of=/tmp/data.bin bs=100K count=1 2>/dev/null;
-      mc cp /tmp/data.bin myminio/public-assets/data.bin;
-      mc cp /tmp/data.bin myminio/opa-protected/data.bin;
-      mc cp /tmp/data.bin myminio/openfga-protected/data.bin;
-      echo 'MinIO setup complete!';
-      "
+      /bin/sh -c " echo 'Setting up MinIO buckets...'; mc alias set myminio http://minio:9000 minioadmin minioadmin; mc mb --ignore-existing myminio/public-assets; mc mb --ignore-existing myminio/opa-protected; mc mb --ignore-existing myminio/openfga-protected; mc anonymous set public myminio/public-assets; echo 'Hello from Public Bucket!' | mc pipe myminio/public-assets/hello.txt; echo 'OPA Protected Content' | mc pipe myminio/opa-protected/test.txt; echo 'OpenFGA Protected Content' | mc pipe myminio/openfga-protected/secret.txt; dd if=/dev/urandom of=/tmp/data.bin bs=100K count=1 2>/dev/null; mc cp /tmp/data.bin myminio/public-assets/data.bin; mc cp /tmp/data.bin myminio/opa-protected/data.bin; mc cp /tmp/data.bin myminio/openfga-protected/data.bin; echo 'MinIO setup complete!'; "
     networks:
       - yatagarasu-full
 
@@ -71,7 +56,7 @@ services:
       - "6379:6379"
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -82,7 +67,7 @@ services:
   # OPA (Open Policy Agent)
   # ============================================
   opa:
-    image: openpolicyagent/opa:latest
+    image: openpolicyagent/opa:latest-debug
     container_name: yatagarasu-full-opa
     ports:
       - "8181:8181"
@@ -94,7 +79,7 @@ services:
     volumes:
       - ./opa/policy.rego:/policies/policy.rego:ro
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8181/health || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -112,10 +97,23 @@ services:
       POSTGRES_PASSWORD: openfga
       POSTGRES_DB: openfga
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U openfga"]
+      test: [ "CMD-SHELL", "pg_isready -U openfga" ]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - yatagarasu-full
+
+  openfga-migrate:
+    image: openfga/openfga:latest
+    container_name: yatagarasu-full-openfga-migrate
+    command: migrate
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - yatagarasu-full
 
@@ -131,12 +129,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "/openfga", "healthcheck"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      openfga-migrate:
+        condition: service_completed_successfully
+    # Note: OpenFGA distroless image lacks curl/wget/grpc_health_probe.
+    # openfga-setup container handles retry logic for full readiness.
     networks:
       - yatagarasu-full
 
@@ -145,45 +141,31 @@ services:
     container_name: yatagarasu-full-openfga-setup
     depends_on:
       openfga:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - ./openfga:/openfga:ro
     entrypoint: >
-      /bin/sh -c "
-      echo 'Setting up OpenFGA...';
+      /bin/sh -c " echo 'Setting up OpenFGA...';
 
-      echo 'Waiting for OpenFGA to be ready...';
-      until curl -s -f http://openfga:8080/healthz > /dev/null; do
+      echo 'Waiting for OpenFGA to be ready...'; until curl -s -f http://openfga:8080/healthz > /dev/null; do
         echo 'Waiting for OpenFGA...';
         sleep 2;
       done;
 
-      echo 'Creating store...';
-      STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \
+      echo 'Creating store...'; STORE_RESPONSE=$$(curl -s -X POST http://openfga:8080/stores \
         -H 'Content-Type: application/json' \
         -d '{\"name\": \"yatagarasu\"}');
-      STORE_ID=$$(echo $$STORE_RESPONSE | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4);
-      echo \"Store ID: $$STORE_ID\";
+      STORE_ID=$$(echo $$STORE_RESPONSE | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4); echo \"Store ID: $$STORE_ID\";
 
-      echo 'Writing authorization model...';
-      curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/authorization-models\" \
+      echo 'Writing authorization model...'; curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/authorization-models\" \
         -H 'Content-Type: application/json' \
         -d @/openfga/model.json;
 
-      echo 'Writing tuples...';
-      curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/write\" \
+      echo 'Writing tuples...'; curl -s -X POST \"http://openfga:8080/stores/$$STORE_ID/write\" \
         -H 'Content-Type: application/json' \
         -d @/openfga/tuples.json;
 
-      echo '';
-      echo '========================================';
-      echo 'OpenFGA Setup Complete!';
-      echo '========================================';
-      echo \"OPENFGA_STORE_ID=$$STORE_ID\";
-      echo '';
-      echo 'Update config.yaml with this store ID';
-      echo '========================================';
-      "
+      echo ''; echo '========================================'; echo 'OpenFGA Setup Complete!'; echo '========================================'; echo \"OPENFGA_STORE_ID=$$STORE_ID\"; echo ''; echo 'Update config.yaml with this store ID'; echo '========================================'; "
     networks:
       - yatagarasu-full
 
@@ -206,8 +188,8 @@ services:
         condition: service_healthy
       opa:
         condition: service_healthy
-      openfga:
-        condition: service_healthy
+      openfga-setup:
+        condition: service_completed_successfully
     networks:
       - yatagarasu-full
     deploy:
@@ -232,7 +214,7 @@ services:
     networks:
       - yatagarasu-full
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
