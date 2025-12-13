@@ -10,7 +10,7 @@
         "owner": {
           "this": {}
         },
-        "reader": {
+        "viewer": {
           "union": {
             "child": [
               { "this": {} },
@@ -18,7 +18,7 @@
             ]
           }
         },
-        "writer": {
+        "editor": {
           "union": {
             "child": [
               { "this": {} },
@@ -32,17 +32,17 @@
           "owner": {
             "directly_related_user_types": [{ "type": "user" }]
           },
-          "reader": {
+          "viewer": {
             "directly_related_user_types": [{ "type": "user" }]
           },
-          "writer": {
+          "editor": {
             "directly_related_user_types": [{ "type": "user" }]
           }
         }
       }
     },
     {
-      "type": "object",
+      "type": "file",
       "relations": {
         "parent": {
           "this": {}
@@ -60,7 +60,7 @@
             ]
           }
         },
-        "reader": {
+        "viewer": {
           "union": {
             "child": [
               { "this": {} },
@@ -68,7 +68,7 @@
               {
                 "tupleToUserset": {
                   "tupleset": { "relation": "parent" },
-                  "computedUserset": { "relation": "reader" }
+                  "computedUserset": { "relation": "viewer" }
                 }
               }
             ]
@@ -83,7 +83,7 @@
           "owner": {
             "directly_related_user_types": [{ "type": "user" }]
           },
-          "reader": {
+          "viewer": {
             "directly_related_user_types": [{ "type": "user" }]
           }
         }

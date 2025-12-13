@@ -48,7 +48,8 @@ buckets:
       opa_policy_path: "yatagarasu/authz/allow"
 
   # OpenFGA-protected bucket - fine-grained authorization
-  # NOTE: Update store_id after running openfga-setup
+  # NOTE: OPENFGA_STORE_ID must be set after running openfga-setup
+  # Run: export OPENFGA_STORE_ID=$(docker logs yatagarasu-full-openfga-setup 2>&1 | grep OPENFGA_STORE_ID | cut -d= -f2)
   - name: "openfga-protected"
     path_prefix: "/fga"
     s3:
@@ -59,11 +60,10 @@ buckets:
       secret_key: "${AWS_SECRET_KEY}"
     auth:
       enabled: true  # Uses top-level JWT config
-    # Uncomment after getting store_id from openfga-setup logs
-    # authorization:
-    #   type: openfga
-    #   openfga_endpoint: "http://openfga:8080"
-    #   store_id: "YOUR_STORE_ID_HERE"
+    authorization:
+      type: openfga
+      openfga_endpoint: "http://openfga:8080"
+      openfga_store_id: "${OPENFGA_STORE_ID}"
 
 # Multi-tier caching
 cache:
