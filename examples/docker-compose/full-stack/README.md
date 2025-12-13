@@ -44,11 +44,15 @@ Complete production-like setup with HA proxy instances, Redis cache, OPA policy 
 ## Quick Start
 
 ```bash
-# Start all services
+# Step 1: Start all services
 docker compose up -d
 
-# Wait for OpenFGA setup to complete (check logs)
-docker compose logs -f openfga-setup
+# Step 2: Get OpenFGA store ID (created by openfga-setup)
+export OPENFGA_STORE_ID=$(docker logs yatagarasu-full-openfga-setup 2>&1 | grep OPENFGA_STORE_ID | cut -d= -f2)
+echo "Store ID: $OPENFGA_STORE_ID"
+
+# Step 3: Restart yatagarasu with the store ID
+docker compose up -d yatagarasu
 
 # Test public bucket (no auth required)
 curl http://localhost:8080/public/hello.txt
@@ -67,6 +71,9 @@ print(token)
 
 # Test OPA-protected bucket
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/opa/test.txt
+
+# Test OpenFGA-protected bucket (alice=owner, bob=viewer, charlie=denied)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/fga/secret.txt
 ```
 
 ## Services
@@ -104,7 +111,7 @@ curl -X POST http://localhost:8181/v1/data/yatagarasu/authz/allow \
   -H "Content-Type: application/json" \
   -d '{
     "input": {
-      "claims": {"sub": "alice", "role": "reader"},
+      "jwt_claims": {"sub": "alice", "role": "reader"},
       "method": "GET",
       "path": "/opa/test.txt"
     }
@@ -113,18 +120,27 @@ curl -X POST http://localhost:8181/v1/data/yatagarasu/authz/allow \
 
 ## OpenFGA Setup
 
-After starting the services, get the store ID from the setup logs:
+OpenFGA requires a store ID which is created dynamically by the `openfga-setup` container.
 
 ```bash
-docker compose logs openfga-setup | grep OPENFGA_STORE_ID
+# Get the store ID from setup logs
+export OPENFGA_STORE_ID=$(docker logs yatagarasu-full-openfga-setup 2>&1 | grep OPENFGA_STORE_ID | cut -d= -f2)
+echo "Store ID: $OPENFGA_STORE_ID"
+
+# Restart yatagarasu with the store ID
+docker compose up -d yatagarasu
 ```
 
-Then update `config.yaml` with the store ID and restart:
+**Note:** The store ID changes each time `openfga-setup` runs. If you restart all services with `docker compose down && docker compose up -d`, you'll need to get the new store ID and restart yatagarasu again.
 
-```bash
-# Edit config.yaml, uncomment authorization section, add store_id
-docker compose restart yatagarasu
-```
+### Authorization Model
+
+The model defines three relation types:
+- **viewer**: Read access (GET/HEAD requests)
+- **editor**: Write access (PUT/POST requests)
+- **owner**: Full access including delete (inherits viewer and editor)
+
+Files inherit permissions from their parent bucket via the `parent` relation.
 
 ## Configuration Files
 
@@ -168,17 +184,30 @@ docker compose down -v
 
 ```bash
 # Get store ID
-STORE_ID=$(docker compose logs openfga-setup | grep "OPENFGA_STORE_ID=" | cut -d= -f2)
+STORE_ID=$(docker logs yatagarasu-full-openfga-setup 2>&1 | grep "OPENFGA_STORE_ID=" | cut -d= -f2)
 
-# Add a new user with reader access
+# Add a new user with viewer access to the bucket
 curl -X POST "http://localhost:8082/stores/$STORE_ID/write" \
   -H "Content-Type: application/json" \
   -d '{
     "writes": {
       "tuple_keys": [{
-        "user": "user:charlie",
-        "relation": "reader",
+        "user": "user:dave",
+        "relation": "viewer",
         "object": "bucket:openfga-protected"
+      }]
+    }
+  }'
+
+# For file-level access, also add the parent relationship
+curl -X POST "http://localhost:8082/stores/$STORE_ID/write" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "writes": {
+      "tuple_keys": [{
+        "user": "bucket:openfga-protected",
+        "relation": "parent",
+        "object": "file:openfga-protected/newfile.txt"
       }]
     }
   }'
