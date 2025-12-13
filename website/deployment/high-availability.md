@@ -254,9 +254,9 @@ services:
     environment:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - REDIS_URL=redis://valkey:6379
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      - valkey
+      - redis
     restart: unless-stopped
     deploy:
       resources:
@@ -271,9 +271,9 @@ services:
     environment:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - REDIS_URL=redis://valkey:6379
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      - valkey
+      - redis
     restart: unless-stopped
     deploy:
       resources:
@@ -288,9 +288,9 @@ services:
     environment:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - REDIS_URL=redis://valkey:6379
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      - valkey
+      - redis
     restart: unless-stopped
     deploy:
       resources:
@@ -298,15 +298,23 @@ services:
           memory: 1G
           cpus: "1"
 
-  valkey:
-    image: valkey/valkey:7-alpine
+  redis:
+    image: redis:7-alpine
+    container_name: yatagarasu-ha-redis
+    ports:
+      - "6379:6379"
     volumes:
-      - valkey-data:/data
-    command: valkey-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+      - redis-data:/data
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
 volumes:
-  valkey-data:
+  redis-data:
 ```
 
 ---

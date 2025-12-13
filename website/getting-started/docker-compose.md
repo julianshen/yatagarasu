@@ -243,108 +243,245 @@ metrics:
 Complete production-like environment with all components:
 
 ```yaml
+```yaml
 version: "3.8"
 
 services:
-  # Load Balancer
+  # ============================================
+  # Load Balancer & Proxy
+  # ============================================
   nginx:
     image: nginx:alpine
+    container_name: yatagarasu-full-nginx
     ports:
-      - "80:80"
+      - "8080:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - yatagarasu-1
       - yatagarasu-2
+    networks:
+      - yatagarasu-full
 
-  # Yatagarasu Instance 1
   yatagarasu-1:
     image: ghcr.io/julianshen/yatagarasu:latest
+    container_name: full-stack-yatagarasu-1
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
-      - cache-1:/var/cache/yatagarasu
     environment:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
-      - REDIS_URL=redis://valkey:6379
-      - JWT_SECRET=your-jwt-secret-here
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - RUST_LOG=info
     depends_on:
       minio:
         condition: service_healthy
-      valkey:
+      redis:
         condition: service_healthy
+      openfga-setup:
+        condition: service_completed_successfully
+      opa:
+        condition: service_healthy
+      openfga:
+        condition: service_started
+    networks:
+      - yatagarasu-full
 
-  # Yatagarasu Instance 2
   yatagarasu-2:
     image: ghcr.io/julianshen/yatagarasu:latest
+    container_name: full-stack-yatagarasu-2
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
-      - cache-2:/var/cache/yatagarasu
     environment:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
-      - REDIS_URL=redis://valkey:6379
-      - JWT_SECRET=your-jwt-secret-here
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - RUST_LOG=info
     depends_on:
       minio:
         condition: service_healthy
-      valkey:
+      redis:
         condition: service_healthy
+      openfga-setup:
+        condition: service_completed_successfully
+      opa:
+        condition: service_healthy
+      openfga:
+        condition: service_started
+    networks:
+      - yatagarasu-full
 
-  # Valkey (Redis-compatible)
-  valkey:
-    image: valkey/valkey:7-alpine
-    volumes:
-      - valkey-data:/data
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  # MinIO S3
+  # ============================================
+  # Storage Backend
+  # ============================================
   minio:
     image: minio/minio:latest
+    container_name: yatagarasu-full-minio
     ports:
-      - "9001:9001"  # Console only
+      - "9000:9000"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 10s
       timeout: 5s
       retries: 3
-    volumes:
-      - minio-data:/data
+    networks:
+      - yatagarasu-full
 
-  # Prometheus (optional monitoring)
-  prometheus:
-    image: prom/prometheus:latest
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-full-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c " echo 'Setting up MinIO buckets...'; mc alias set myminio http://minio:9000 minioadmin minioadmin; mc mb --ignore-existing myminio/public-assets; mc mb --ignore-existing myminio/opa-protected; mc mb --ignore-existing myminio/openfga-protected; mc anonymous set public myminio/public-assets; echo 'Hello from Public Bucket!' | mc pipe myminio/public-assets/hello.txt; echo 'OPA Protected Content' | mc pipe myminio/opa-protected/test.txt; echo 'OpenFGA Protected Content' | mc pipe myminio/openfga-protected/secret.txt; dd if=/dev/urandom of=/tmp/data.bin bs=100K count=1 2>/dev/null; mc cp /tmp/data.bin myminio/public-assets/data.bin; mc cp /tmp/data.bin myminio/opa-protected/data.bin; mc cp /tmp/data.bin myminio/openfga-protected/data.bin; echo 'MinIO setup complete!'; "
+    networks:
+      - yatagarasu-full
+
+  # ============================================
+  # Cache Layer
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: yatagarasu-full-redis
     ports:
-      - "9092:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - yatagarasu-full
+
+  # ============================================
+  # OPA (Open Policy Agent)
+  # ============================================
+  opa:
+    image: openpolicyagent/opa:latest-debug
+    container_name: yatagarasu-full-opa
+    ports:
+      - "8181:8181"
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-
-  # Grafana (optional dashboards)
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "/policies"
     volumes:
-      - grafana-data:/var/lib/grafana
+      - ./opa/policy.rego:/policies/policy.rego:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8181/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-full
 
-volumes:
-  minio-data:
-  valkey-data:
-  cache-1:
-  cache-2:
-  grafana-data:
+  # ============================================
+  # OpenFGA
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: yatagarasu-full-postgres
+    environment:
+      POSTGRES_USER: openfga
+      POSTGRES_PASSWORD: openfga
+      POSTGRES_DB: openfga
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U openfga" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - yatagarasu-full
+
+  openfga-migrate:
+    image: openfga/openfga:latest
+    container_name: yatagarasu-full-openfga-migrate
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - yatagarasu-full
+
+  openfga:
+    image: openfga/openfga:latest
+    container_name: yatagarasu-full-openfga
+    ports:
+      - "8082:8080" # API port
+      - "8083:3000" # Playground port
+      - "3000:3000" # gRPC port
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable
+      OPENFGA_LOG_FORMAT: json
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+    networks:
+      - yatagarasu-full
+
+  openfga-setup:
+    image: curlimages/curl:latest
+    container_name: yatagarasu-full-openfga-setup
+    depends_on:
+      openfga:
+        condition: service_started
+    volumes:
+      - ./openfga/model.json:/model.json:ro
+      - ./openfga/tuples.json:/tuples.json:ro
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for OpenFGA...'
+      while ! curl -s http://openfga:8080/healthz > /dev/null; do
+        echo 'Waiting for OpenFGA to be healthy...'
+        sleep 2
+      done
+
+      echo 'Configuring OpenFGA...'
+      
+      # Determine Store ID - either create or list existing
+      EXISTING_STORES=\$(curl -s http://openfga:8080/stores | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4)
+      
+      if [ -z \"\$EXISTING_STORES\" ]; then
+          echo 'Creating new store...'
+          STORE_ID=\$(curl -s -X POST http://openfga:8080/stores -H 'Content-Type: application/json' -d '{\"name\": \"yatagarasu\"}' | grep -o '\"id\":\"[^\"]*\"' | cut -d'\"' -f4)
+      else
+          echo 'Using existing store...'
+          STORE_ID=\$(echo \$EXISTING_STORES | head -n 1)
+      fi
+      
+      echo \"OPENFGA_STORE_ID=\$STORE_ID\"
+      
+      echo 'Writing Authorization Model...'
+      MODEL_ID=\$(curl -s -X POST http://openfga:8080/stores/\$STORE_ID/authorization-models -H 'Content-Type: application/json' -d @/model.json | grep -o '\"authorization_model_id\":\"[^\"]*\"' | cut -d'\"' -f4)
+      echo \"MODEL_ID=\$MODEL_ID\"
+      
+      echo 'Writing Tuples...'
+      curl -s -X POST http://openfga:8080/stores/\$STORE_ID/write -H 'Content-Type: application/json' -d @/tuples.json
+      
+      echo 'OpenFGA Setup Complete!'
+      echo 'IMPORTANT: Update config.yaml with this Store ID: \$STORE_ID'
+      "
+    networks:
+      - yatagarasu-full
+
+networks:
+  yatagarasu-full:
+    driver: bridge
 ```
 
 Nginx load balancer configuration (`nginx.conf`):
