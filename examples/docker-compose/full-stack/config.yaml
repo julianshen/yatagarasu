@@ -5,6 +5,19 @@ server:
   address: "0.0.0.0"
   port: 8080
 
+# Top-level JWT configuration (required for authentication)
+# Note: JWT must be at the top level, not under bucket.auth
+jwt:
+  enabled: true
+  algorithm: "HS256"
+  secret: "${JWT_SECRET}"
+  token_sources:
+    - type: "header"
+      name: "Authorization"
+      prefix: "Bearer "
+    - type: "query"
+      name: "token"
+
 buckets:
   # Public bucket - no authentication
   - name: "public-assets"
@@ -28,14 +41,7 @@ buckets:
       access_key: "${AWS_ACCESS_KEY}"
       secret_key: "${AWS_SECRET_KEY}"
     auth:
-      enabled: true
-      jwt:
-        token_sources:
-          - type: "header"
-            name: "Authorization"
-            prefix: "Bearer "
-        secret: "${JWT_SECRET}"
-        algorithm: "HS256"
+      enabled: true  # Uses top-level JWT config
     authorization:
       type: opa
       opa_url: "http://opa:8181"
@@ -52,14 +58,7 @@ buckets:
       access_key: "${AWS_ACCESS_KEY}"
       secret_key: "${AWS_SECRET_KEY}"
     auth:
-      enabled: true
-      jwt:
-        token_sources:
-          - type: "header"
-            name: "Authorization"
-            prefix: "Bearer "
-        secret: "${JWT_SECRET}"
-        algorithm: "HS256"
+      enabled: true  # Uses top-level JWT config
     # Uncomment after getting store_id from openfga-setup logs
     # authorization:
     #   type: openfga

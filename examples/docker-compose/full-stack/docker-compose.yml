@@ -41,8 +41,10 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    # Note: All buckets are set to public within Docker network.
+    # Authorization is handled by yatagarasu proxy (JWT + OPA/OpenFGA).
     entrypoint: >
-      /bin/sh -c " echo 'Setting up MinIO buckets...'; mc alias set myminio http://minio:9000 minioadmin minioadmin; mc mb --ignore-existing myminio/public-assets; mc mb --ignore-existing myminio/opa-protected; mc mb --ignore-existing myminio/openfga-protected; mc anonymous set public myminio/public-assets; echo 'Hello from Public Bucket!' | mc pipe myminio/public-assets/hello.txt; echo 'OPA Protected Content' | mc pipe myminio/opa-protected/test.txt; echo 'OpenFGA Protected Content' | mc pipe myminio/openfga-protected/secret.txt; dd if=/dev/urandom of=/tmp/data.bin bs=100K count=1 2>/dev/null; mc cp /tmp/data.bin myminio/public-assets/data.bin; mc cp /tmp/data.bin myminio/opa-protected/data.bin; mc cp /tmp/data.bin myminio/openfga-protected/data.bin; echo 'MinIO setup complete!'; "
+      /bin/sh -c " echo 'Setting up MinIO buckets...'; mc alias set myminio http://minio:9000 minioadmin minioadmin; mc mb --ignore-existing myminio/public-assets; mc mb --ignore-existing myminio/opa-protected; mc mb --ignore-existing myminio/openfga-protected; mc anonymous set public myminio/public-assets; mc anonymous set public myminio/opa-protected; mc anonymous set public myminio/openfga-protected; echo 'Hello from Public Bucket!' | mc pipe myminio/public-assets/hello.txt; echo 'OPA Protected Content' | mc pipe myminio/opa-protected/test.txt; echo 'OpenFGA Protected Content' | mc pipe myminio/openfga-protected/secret.txt; dd if=/dev/urandom of=/tmp/data.bin bs=100K count=1 2>/dev/null; mc cp /tmp/data.bin myminio/public-assets/data.bin; mc cp /tmp/data.bin myminio/opa-protected/data.bin; mc cp /tmp/data.bin myminio/openfga-protected/data.bin; echo 'MinIO setup complete!'; "
     networks:
       - yatagarasu-full
 
