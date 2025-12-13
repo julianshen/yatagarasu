@@ -74,7 +74,7 @@ version: "3.8"
 
 services:
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     ports:
       - "8080:8080"
       - "9090:9090"

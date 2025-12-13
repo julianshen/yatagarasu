@@ -397,7 +397,7 @@ yatagarasu --config config.yaml --validate
 # In Docker
 docker run --rm \
   -v ./config.yaml:/etc/yatagarasu/config.yaml \
-  ghcr.io/julianshen/yatagarasu:1.2.0 \
+  ghcr.io/julianshen/yatagarasu:latest \
   --config /etc/yatagarasu/config.yaml --validate
 ```
 

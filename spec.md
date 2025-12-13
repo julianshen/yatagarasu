@@ -255,9 +255,9 @@ curl http://localhost:8080/ready    # Readiness
 
 ### Docker
 ```bash
-docker pull ghcr.io/julianshen/yatagarasu:1.2.0
+docker pull ghcr.io/julianshen/yatagarasu:latest
 docker run -p 8080:8080 -v ./config.yaml:/etc/yatagarasu/config.yaml \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ### Binary

@@ -60,7 +60,7 @@ version: "3.8"
 services:
   # Yatagarasu Instance 1
   yatagarasu-1:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     ports:
       - "8081:8080"
     volumes:
@@ -77,7 +77,7 @@ services:
 
   # Yatagarasu Instance 2
   yatagarasu-2:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     ports:
       - "8082:8080"
     volumes:

@@ -105,7 +105,7 @@ docker run -d \
   -p 9090:9090 \
   -v $(pwd)/config.yaml:/etc/yatagarasu/config.yaml:ro \
   --add-host=host.docker.internal:host-gateway \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 
 # Check it started successfully
 docker logs yatagarasu

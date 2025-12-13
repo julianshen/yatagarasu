@@ -20,7 +20,7 @@ The easiest way to run Yatagarasu in production.
 
 ```bash
 # Latest stable release
-docker pull ghcr.io/julianshen/yatagarasu:1.2.0
+docker pull ghcr.io/julianshen/yatagarasu:latest
 
 # Latest development
 docker pull ghcr.io/julianshen/yatagarasu:latest
@@ -67,7 +67,7 @@ docker run -d \
   -v $(pwd)/config.yaml:/etc/yatagarasu/config.yaml \
   -e AWS_ACCESS_KEY_ID=your-access-key \
   -e AWS_SECRET_ACCESS_KEY=your-secret-key \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 
 # Verify it's running
 curl http://localhost:8080/health

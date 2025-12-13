@@ -58,7 +58,7 @@ Environment variables like `${AWS_ACCESS_KEY_ID}` are substituted at startup. Yo
 
 ```bash
 # Pull the latest image
-docker pull ghcr.io/julianshen/yatagarasu:1.2.0
+docker pull ghcr.io/julianshen/yatagarasu:latest
 
 # Run with environment variables
 docker run -d \
@@ -68,7 +68,7 @@ docker run -d \
   -v $(pwd)/config.yaml:/etc/yatagarasu/config.yaml:ro \
   -e AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE \
   -e AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ---
@@ -176,7 +176,7 @@ docker run -d \
   -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
   -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
   -e JWT_SECRET=${JWT_SECRET} \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ---
@@ -224,7 +224,7 @@ docker run -d \
   -v $(pwd)/config.yaml:/etc/yatagarasu/config.yaml:ro \
   -e MINIO_ACCESS_KEY=minioadmin \
   -e MINIO_SECRET_KEY=minioadmin \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 
 # Test
 curl http://localhost:8080/files/hello.txt
@@ -260,7 +260,7 @@ docker run -d \
   -v yatagarasu-cache:/var/cache/yatagarasu \
   -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
   -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ---

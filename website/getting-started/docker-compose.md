@@ -50,7 +50,7 @@ version: "3.8"
 
 services:
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     ports:
       - "8080:8080"
       - "9090:9090"
@@ -138,7 +138,7 @@ version: "3.8"
 
 services:
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     ports:
       - "8080:8080"
       - "9090:9090"
@@ -259,7 +259,7 @@ services:
 
   # Yatagarasu Instance 1
   yatagarasu-1:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
       - cache-1:/var/cache/yatagarasu
@@ -276,7 +276,7 @@ services:
 
   # Yatagarasu Instance 2
   yatagarasu-2:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
       - cache-2:/var/cache/yatagarasu
@@ -408,7 +408,7 @@ version: "3.8"
 
 services:
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     ports:
       - "8080:8080"
     volumes:

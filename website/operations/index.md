@@ -300,10 +300,10 @@ logging:
 
 ```bash
 # Scan container image
-trivy image ghcr.io/julianshen/yatagarasu:1.2.0
+trivy image ghcr.io/julianshen/yatagarasu:latest
 
 # Check for vulnerabilities
-grype ghcr.io/julianshen/yatagarasu:1.2.0
+grype ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ---

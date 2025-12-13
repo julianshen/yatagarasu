@@ -144,12 +144,12 @@ Validated benchmarks with K6 load testing:
 
 ```bash
 # Pull the Docker image
-docker pull ghcr.io/julianshen/yatagarasu:1.2.0
+docker pull ghcr.io/julianshen/yatagarasu:latest
 
 # Run with your configuration
 docker run -p 8080:8080 \
   -v ./config.yaml:/etc/yatagarasu/config.yaml \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 
 # Access your S3 content
 curl http://localhost:8080/assets/image.png

@@ -98,7 +98,7 @@ services:
 
   # Yatagarasu proxy instances (scaled)
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     environment:
       AWS_ACCESS_KEY: minioadmin
       AWS_SECRET_KEY: minioadmin

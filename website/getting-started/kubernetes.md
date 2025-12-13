@@ -171,7 +171,7 @@ spec:
     spec:
       containers:
         - name: yatagarasu
-          image: ghcr.io/julianshen/yatagarasu:1.2.0
+          image: ghcr.io/julianshen/yatagarasu:latest
           ports:
             - name: http
               containerPort: 8080
@@ -410,7 +410,7 @@ spec:
     spec:
       containers:
         - name: yatagarasu
-          image: ghcr.io/julianshen/yatagarasu:1.2.0
+          image: ghcr.io/julianshen/yatagarasu:latest
           ports:
             - containerPort: 8080
             - containerPort: 9090

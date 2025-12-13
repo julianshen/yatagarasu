@@ -89,7 +89,7 @@ Ideas under consideration:
 3. Request features for future versions
 4. Contribute via Pull Requests
 
-**Docker**: `ghcr.io/julianshen/yatagarasu:1.2.0`
+**Docker**: `ghcr.io/julianshen/yatagarasu:latest`
 
 ---
 

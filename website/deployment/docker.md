@@ -16,7 +16,7 @@ Deploy Yatagarasu with Docker for production use.
 
 ```bash
 # Latest stable release
-docker pull ghcr.io/julianshen/yatagarasu:1.2.0
+docker pull ghcr.io/julianshen/yatagarasu:latest
 
 # Latest development
 docker pull ghcr.io/julianshen/yatagarasu:latest
@@ -41,7 +41,7 @@ docker run -d \
   -v /path/to/config.yaml:/etc/yatagarasu/config.yaml:ro \
   -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
   -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ---
@@ -62,7 +62,7 @@ docker run -d \
   -v /path/to/config.yaml:/etc/yatagarasu/config.yaml:ro \
   -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
   -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ### With Disk Cache
@@ -79,7 +79,7 @@ docker run -d \
   -v yatagarasu-cache:/var/cache/yatagarasu \
   -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
   -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ### Health Checks
@@ -94,7 +94,7 @@ docker run -d \
   --health-retries=3 \
   -p 8080:8080 \
   -v /path/to/config.yaml:/etc/yatagarasu/config.yaml:ro \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ---
@@ -106,7 +106,7 @@ version: "3.8"
 
 services:
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -162,7 +162,7 @@ services:
     restart: unless-stopped
 
   yatagarasu-1:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
     environment:
@@ -174,7 +174,7 @@ services:
     restart: unless-stopped
 
   yatagarasu-2:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
     environment:
@@ -253,7 +253,7 @@ docker run -d \
   --tmpfs /tmp \
   -v /path/to/config.yaml:/etc/yatagarasu/config.yaml:ro \
   -v yatagarasu-cache:/var/cache/yatagarasu \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ### Drop Capabilities
@@ -264,7 +264,7 @@ docker run -d \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   -v /path/to/config.yaml:/etc/yatagarasu/config.yaml:ro \
-  ghcr.io/julianshen/yatagarasu:1.2.0
+  ghcr.io/julianshen/yatagarasu:latest
 ```
 
 ### Docker Compose Security
@@ -272,7 +272,7 @@ docker run -d \
 ```yaml
 services:
   yatagarasu:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     read_only: true
     tmpfs:
       - /tmp
@@ -318,7 +318,7 @@ docker logs --tail 100 -t yatagarasu
 # Note: Distroless image has no shell
 # Use debug variant for troubleshooting
 docker run -it --rm \
-  ghcr.io/julianshen/yatagarasu:1.2.0-debug \
+  ghcr.io/julianshen/yatagarasu:latest-debug \
   /bin/sh
 ```
 
@@ -367,7 +367,7 @@ docker logs yatagarasu
 # Check configuration
 docker run --rm \
   -v /path/to/config.yaml:/etc/yatagarasu/config.yaml:ro \
-  ghcr.io/julianshen/yatagarasu:1.2.0 \
+  ghcr.io/julianshen/yatagarasu:latest \
   --config /etc/yatagarasu/config.yaml --validate
 ```
 

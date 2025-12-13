@@ -186,7 +186,7 @@ spec:
 
       containers:
         - name: yatagarasu
-          image: ghcr.io/julianshen/yatagarasu:1.2.0
+          image: ghcr.io/julianshen/yatagarasu:latest
           # ... rest of container spec
 ```
 
@@ -248,7 +248,7 @@ services:
     restart: unless-stopped
 
   yatagarasu-1:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
     environment:
@@ -265,7 +265,7 @@ services:
           cpus: "1"
 
   yatagarasu-2:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
     environment:
@@ -282,7 +282,7 @@ services:
           cpus: "1"
 
   yatagarasu-3:
-    image: ghcr.io/julianshen/yatagarasu:1.2.0
+    image: ghcr.io/julianshen/yatagarasu:latest
     volumes:
       - ./config.yaml:/etc/yatagarasu/config.yaml:ro
     environment:
