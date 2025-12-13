@@ -15,7 +15,7 @@
 services:
   # MinIO Node 1 - Distributed storage with erasure coding
   minio1:
-    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    image: minio/minio:latest
     container_name: yatagarasu-ha-minio1
     ports:
       - "9000:9000"
@@ -28,7 +28,7 @@ services:
       - minio1-data1:/data1
       - minio1-data2:/data2
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -37,7 +37,7 @@ services:
 
   # MinIO Node 2 - Distributed storage with erasure coding
   minio2:
-    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    image: minio/minio:latest
     container_name: yatagarasu-ha-minio2
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -47,7 +47,7 @@ services:
       - minio2-data1:/data1
       - minio2-data2:/data2
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
