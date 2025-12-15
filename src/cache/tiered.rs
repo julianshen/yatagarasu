@@ -717,6 +717,7 @@ mod tests {
                 enabled: true,
                 cache_dir: cache_dir.clone(),
                 max_disk_cache_size_mb: 100,
+                sendfile: crate::cache::SendfileConfig::default(),
             },
             ..Default::default()
         };
