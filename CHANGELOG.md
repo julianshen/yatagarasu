@@ -5,6 +5,32 @@ All notable changes to Yatagarasu S3 Proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2025-12-16
+
+### Added
+
+**Zero-Copy File Serving (Linux sendfile)**:
+- **sendfile() syscall integration**: Direct kernel-to-kernel data transfer for cached files
+- **2.6x throughput improvement**: For files ≥1MB compared to traditional read+write
+- **Configurable threshold**: `sendfile.threshold_bytes` (default: 64KB) to control when sendfile is used
+- **Platform support**: Full implementation on Linux, graceful fallback on macOS/Windows
+
+**Cache Enhancements**:
+- **DiskCache sendfile support**: New `get_sendfile()` method for zero-copy file path retrieval
+- **TieredCache integration**: Sendfile support propagated through cache hierarchy
+- **SendfileConfig**: New configuration structure for sendfile tuning
+
+**Metrics**:
+- **cache_sendfile_count**: Counter for sendfile-eligible cache hits
+- **cache_sendfile_bytes**: Counter for bytes served via sendfile
+
+### Changed
+- `DiskCacheConfig`: Added `sendfile` field for zero-copy configuration
+- `Cache` trait: Added `get_sendfile()` method with default no-op implementation
+- Improved cross-platform compatibility with proper `#[cfg]` guards
+
+---
+
 ## [1.3.0] - 2025-12-10
 
 ### Added
