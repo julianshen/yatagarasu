@@ -215,12 +215,21 @@ pub fn sendfile_to_fd(
     Ok(total_sent)
 }
 
-/// Fallback for non-Linux platforms - returns error
-#[cfg(not(target_os = "linux"))]
+/// Fallback for non-Linux Unix platforms (macOS, BSD) - returns error
+#[cfg(all(unix, not(target_os = "linux")))]
 pub fn sendfile_to_fd(
     _dest_fd: std::os::unix::io::RawFd,
     _response: &SendfileResponse,
 ) -> std::io::Result<u64> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "sendfile is only supported on Linux",
+    ))
+}
+
+/// Fallback for non-Unix platforms (Windows) - returns error
+#[cfg(not(unix))]
+pub fn sendfile_to_fd(_dest_fd: i32, _response: &SendfileResponse) -> std::io::Result<u64> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "sendfile is only supported on Linux",
@@ -241,11 +250,21 @@ pub async fn sendfile_to_fd_async(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Async fallback for non-Linux Unix platforms (macOS, BSD)
+#[cfg(all(unix, not(target_os = "linux")))]
 pub async fn sendfile_to_fd_async(
     _dest_fd: std::os::unix::io::RawFd,
     _response: SendfileResponse,
 ) -> std::io::Result<u64> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "sendfile is only supported on Linux",
+    ))
+}
+
+/// Async fallback for non-Unix platforms (Windows)
+#[cfg(not(unix))]
+pub async fn sendfile_to_fd_async(_dest_fd: i32, _response: SendfileResponse) -> std::io::Result<u64> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "sendfile is only supported on Linux",
@@ -582,11 +601,50 @@ threshold_bytes: 131072
     }
 
     // =========================================================================
-    // Non-Linux Tests
+    // Non-Linux Unix Tests (macOS, BSD)
     // =========================================================================
 
-    #[cfg(not(target_os = "linux"))]
-    mod non_linux_tests {
+    #[cfg(all(unix, not(target_os = "linux")))]
+    mod non_linux_unix_tests {
+        use super::*;
+
+        #[test]
+        fn test_sendfile_returns_unsupported_error() {
+            let response = SendfileResponse::new(
+                PathBuf::from("/test/file.bin"),
+                1024,
+                "application/octet-stream".to_string(),
+                None,
+                None,
+            );
+
+            let result = sendfile_to_fd(0, &response);
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::Unsupported);
+        }
+
+        #[tokio::test]
+        async fn test_sendfile_async_returns_unsupported_error() {
+            let response = SendfileResponse::new(
+                PathBuf::from("/test/file.bin"),
+                1024,
+                "application/octet-stream".to_string(),
+                None,
+                None,
+            );
+
+            let result = sendfile_to_fd_async(0, response).await;
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::Unsupported);
+        }
+    }
+
+    // =========================================================================
+    // Non-Unix Tests (Windows)
+    // =========================================================================
+
+    #[cfg(not(unix))]
+    mod non_unix_tests {
         use super::*;
 
         #[test]
