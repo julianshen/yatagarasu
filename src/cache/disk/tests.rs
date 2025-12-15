@@ -5631,15 +5631,16 @@ async fn test_get_sendfile_tracks_cache_hits() {
     let stats = cache.stats().await.unwrap();
     let initial_hits = stats.hits;
 
-    // Call get_sendfile
-    let _ = cache.get_sendfile(&key).await.unwrap();
+    // Call get_sendfile - should NOT increment hit count
+    // (the proxy calls cache.get() first, which already tracks the hit)
+    let sendfile_result = cache.get_sendfile(&key).await.unwrap();
+    assert!(sendfile_result.is_some(), "Should return sendfile response");
 
-    // Check stats increased
+    // Check stats did NOT increase (hit tracking is done by cache.get(), not get_sendfile())
     let stats = cache.stats().await.unwrap();
     assert_eq!(
-        stats.hits,
-        initial_hits + 1,
-        "get_sendfile should increment hit count"
+        stats.hits, initial_hits,
+        "get_sendfile should NOT increment hit count (tracked by get() instead)"
     );
 }
 

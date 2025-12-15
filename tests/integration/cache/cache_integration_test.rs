@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use yatagarasu::cache::tiered::TieredCache;
-use yatagarasu::cache::{Cache, CacheConfig, CacheEntry, CacheKey, MemoryCache};
+use yatagarasu::cache::{Cache, CacheConfig, CacheEntry, CacheKey, MemoryCache, SendfileConfig};
 
 #[tokio::test]
 async fn test_end_to_end_cache_hit_flow() {
@@ -27,6 +27,7 @@ async fn test_end_to_end_cache_hit_flow() {
             enabled: true,
             cache_dir: cache_dir.clone(),
             max_disk_cache_size_mb: 100,
+            sendfile: SendfileConfig::default(),
         },
         ..Default::default()
     };
@@ -173,6 +174,7 @@ async fn test_cache_stats_api_returns_accurate_data() {
             enabled: true,
             cache_dir: cache_dir.clone(),
             max_disk_cache_size_mb: 100,
+            sendfile: SendfileConfig::default(),
         },
         ..Default::default()
     };
@@ -248,6 +250,7 @@ async fn test_cache_clear_api() {
             enabled: true,
             cache_dir: cache_dir.clone(),
             max_disk_cache_size_mb: 100,
+            sendfile: SendfileConfig::default(),
         },
         ..Default::default()
     };
@@ -338,6 +341,7 @@ async fn test_cache_survives_disk_persistence() {
                 enabled: true,
                 cache_dir: cache_dir.clone(),
                 max_disk_cache_size_mb: 100,
+                sendfile: SendfileConfig::default(),
             },
             ..Default::default()
         };
@@ -364,6 +368,7 @@ async fn test_cache_survives_disk_persistence() {
                 enabled: true,
                 cache_dir: cache_dir.clone(),
                 max_disk_cache_size_mb: 100,
+                sendfile: SendfileConfig::default(),
             },
             ..Default::default()
         };
@@ -415,6 +420,7 @@ async fn test_s3_response_populates_cache() {
             enabled: true,
             cache_dir: cache_dir.clone(),
             max_disk_cache_size_mb: 100,
+            sendfile: SendfileConfig::default(),
         },
         ..Default::default()
     };
@@ -504,6 +510,7 @@ async fn test_cache_lookup_adds_less_than_1ms_latency() {
             enabled: false,
             cache_dir: cache_dir.clone(),
             max_disk_cache_size_mb: 100,
+            sendfile: SendfileConfig::default(),
         },
         ..Default::default()
     };
@@ -574,6 +581,7 @@ async fn test_cache_write_is_non_blocking() {
             enabled: false,
             cache_dir: cache_dir.clone(),
             max_disk_cache_size_mb: 100,
+            sendfile: SendfileConfig::default(),
         },
         ..Default::default()
     };

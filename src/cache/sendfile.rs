@@ -165,12 +165,21 @@ pub fn sendfile_to_fd(
     let file = File::open(&response.file_path)?;
     let src_fd = file.as_raw_fd();
 
+    // Validate offset doesn't exceed maximum safe value for off_t (i64)
+    if response.offset > libc::off_t::MAX as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "offset too large for sendfile",
+        ));
+    }
     let mut offset = response.offset as libc::off_t;
+
     let mut total_sent: u64 = 0;
     let to_send = if response.length == 0 {
         // Send entire file from offset
+        // Use saturating_sub to avoid panic if offset > file length
         let metadata = file.metadata()?;
-        metadata.len() - response.offset
+        metadata.len().saturating_sub(response.offset)
     } else {
         response.length
     };

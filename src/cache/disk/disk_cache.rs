@@ -317,6 +317,9 @@ impl Cache for DiskCache {
         }
 
         // Create sendfile response with file metadata
+        // Note: We don't increment hit count here because the proxy calls
+        // cache.get() first, which already tracks the hit. get_sendfile()
+        // is only used to check eligibility for zero-copy serving.
         let response = SendfileResponse::new(
             data_path,
             metadata.size_bytes,
@@ -324,9 +327,6 @@ impl Cache for DiskCache {
             Some(metadata.etag.clone()),
             metadata.last_modified.clone(),
         );
-
-        // Track cache hit
-        self.hit_count.fetch_add(1, Ordering::Relaxed);
 
         Ok(Some(response))
     }
