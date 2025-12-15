@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use super::entry::{CacheEntry, CacheKey};
 use super::error::CacheError;
+use super::sendfile::SendfileResponse;
 use super::stats::CacheStats;
 
 /// Cache trait for different cache implementations (memory, disk, redis)
@@ -42,6 +43,18 @@ pub trait Cache: Send + Sync {
     /// Default implementation is a no-op
     async fn run_pending_tasks(&self) {
         // No-op by default
+    }
+
+    /// Get sendfile response for zero-copy file serving (disk cache only)
+    ///
+    /// Returns a SendfileResponse with file path and metadata if:
+    /// - The cache entry exists and is not expired
+    /// - The file is on disk and larger than the sendfile threshold
+    ///
+    /// Default implementation returns None (not supported by this cache type).
+    /// Only disk-based caches should implement this.
+    async fn get_sendfile(&self, _key: &CacheKey) -> Result<Option<SendfileResponse>, CacheError> {
+        Ok(None)
     }
 }
 

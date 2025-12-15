@@ -88,7 +88,11 @@ impl TieredCache {
                     // Create DiskCache from configuration
                     let cache_dir = PathBuf::from(&config.disk.cache_dir);
                     let max_size_bytes = config.disk.max_disk_cache_size_mb * 1024 * 1024;
-                    let disk_cache = DiskCache::with_config(cache_dir, max_size_bytes);
+                    let disk_cache = DiskCache::with_sendfile_config(
+                        cache_dir,
+                        max_size_bytes,
+                        config.disk.sendfile.clone(),
+                    );
                     layers.push(Arc::new(disk_cache));
                 }
                 "redis" => {
