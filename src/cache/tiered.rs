@@ -5,6 +5,7 @@
 
 use crate::cache::disk::DiskCache;
 use crate::cache::redis::{RedisCache, RedisConfig};
+use crate::cache::sendfile::SendfileResponse;
 use crate::cache::{Cache, CacheConfig, CacheEntry, CacheError, CacheKey, CacheStats, MemoryCache};
 use crate::metrics::Metrics;
 use async_trait::async_trait;
@@ -88,7 +89,11 @@ impl TieredCache {
                     // Create DiskCache from configuration
                     let cache_dir = PathBuf::from(&config.disk.cache_dir);
                     let max_size_bytes = config.disk.max_disk_cache_size_mb * 1024 * 1024;
-                    let disk_cache = DiskCache::with_config(cache_dir, max_size_bytes);
+                    let disk_cache = DiskCache::with_sendfile_config(
+                        cache_dir,
+                        max_size_bytes,
+                        config.disk.sendfile.clone(),
+                    );
                     layers.push(Arc::new(disk_cache));
                 }
                 "redis" => {
@@ -474,6 +479,39 @@ impl Cache for TieredCache {
             max_size_bytes,
         })
     }
+
+    /// Get sendfile response for zero-copy file serving
+    ///
+    /// Iterates through cache layers and returns the first sendfile response found.
+    /// Only disk-based cache layers support sendfile, so this effectively delegates
+    /// to the disk layer if one is present.
+    async fn get_sendfile(&self, key: &CacheKey) -> Result<Option<SendfileResponse>, CacheError> {
+        // Check each layer for sendfile support
+        // Only disk layers will return a response; memory/redis return None
+        for layer in &self.layers {
+            match layer.get_sendfile(key).await {
+                Ok(Some(response)) => {
+                    return Ok(Some(response));
+                }
+                Ok(None) => {
+                    // This layer doesn't support sendfile or key not found
+                    continue;
+                }
+                Err(e) => {
+                    // Log error but continue to next layer (graceful degradation)
+                    tracing::warn!(
+                        error = %e,
+                        key = %format!("{}/{}", key.bucket, key.object_key),
+                        "Cache layer error during get_sendfile, falling back to next layer"
+                    );
+                    continue;
+                }
+            }
+        }
+
+        // No layer returned a sendfile response
+        Ok(None)
+    }
 }
 
 // Additional TieredCache methods (not part of Cache trait)
@@ -717,6 +755,7 @@ mod tests {
                 enabled: true,
                 cache_dir: cache_dir.clone(),
                 max_disk_cache_size_mb: 100,
+                sendfile: crate::cache::SendfileConfig::default(),
             },
             ..Default::default()
         };

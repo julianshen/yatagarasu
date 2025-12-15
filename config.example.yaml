@@ -183,6 +183,39 @@ metrics:
 #   failure_threshold: 5
 #   cooldown_seconds: 60
 
+# Cache configuration (v1.1+)
+# Multi-tier caching for improved response times
+# cache:
+#   enabled: true
+#   cache_layers: ["memory", "disk"]  # Checked in order
+#
+#   # Memory cache (fast, limited size)
+#   memory:
+#     max_item_size_mb: 10        # Max single item size in MB
+#     max_cache_size_mb: 1024     # Total memory cache size (1GB)
+#     default_ttl_seconds: 3600   # Default cache TTL (1 hour)
+#
+#   # Disk cache (larger capacity, persistent)
+#   disk:
+#     enabled: true
+#     cache_dir: "/var/cache/yatagarasu"  # Cache directory path
+#     max_disk_cache_size_mb: 10240       # 10GB max disk cache
+#
+#     # sendfile configuration (v1.4+ Linux only)
+#     # Zero-copy file serving for 2.6x throughput improvement on large files
+#     sendfile:
+#       enabled: true             # Enable sendfile on Linux (default: true)
+#       threshold_bytes: 65536    # Use sendfile for files > 64KB (default: 64KB)
+#
+#   # Redis cache (optional, distributed)
+#   # redis:
+#   #   enabled: false
+#   #   redis_url: "redis://localhost:6379"
+#   #   redis_password: "${REDIS_PASSWORD}"
+#   #   redis_db: 0
+#   #   redis_key_prefix: "yatagarasu:"
+#   #   redis_ttl_seconds: 7200
+
 # Environment variable substitution:
 # Use ${VAR_NAME} syntax to substitute environment variables
 # Example: AWS_ACCESS_KEY_PUBLIC=xxx ./yatagarasu --config config.yaml

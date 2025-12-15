@@ -202,6 +202,7 @@ fn test_multi_layer_write_primary_then_secondary() {
     use yatagarasu::cache::tiered::TieredCache;
     use yatagarasu::cache::{
         Cache, CacheConfig, CacheEntry, CacheKey, DiskCacheConfig, MemoryCacheConfig,
+        SendfileConfig,
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -221,6 +222,7 @@ fn test_multi_layer_write_primary_then_secondary() {
                 enabled: true,
                 cache_dir: temp_dir.to_string_lossy().to_string(),
                 max_disk_cache_size_mb: 100,
+                sendfile: SendfileConfig::default(),
             },
             ..Default::default()
         };

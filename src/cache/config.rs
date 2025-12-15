@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{DEFAULT_MAX_CACHE_SIZE_MB, DEFAULT_MAX_ITEM_SIZE_MB, DEFAULT_TTL_SECONDS};
 
+use super::sendfile::SendfileConfig;
 use super::warming::PrewarmConfig;
 
 /// Main cache configuration structure
@@ -160,6 +161,9 @@ pub struct DiskCacheConfig {
     pub cache_dir: String,
     #[serde(default = "default_max_disk_cache_size_mb")]
     pub max_disk_cache_size_mb: u64,
+    /// sendfile configuration for zero-copy file serving (Linux)
+    #[serde(default)]
+    pub sendfile: SendfileConfig,
 }
 
 impl Default for DiskCacheConfig {
@@ -168,6 +172,7 @@ impl Default for DiskCacheConfig {
             enabled: false,
             cache_dir: default_cache_dir(),
             max_disk_cache_size_mb: default_max_disk_cache_size_mb(),
+            sendfile: SendfileConfig::default(),
         }
     }
 }
@@ -186,6 +191,7 @@ impl DiskCacheConfig {
         if self.enabled && self.cache_dir.is_empty() {
             return Err("cache_dir cannot be empty when disk cache is enabled".to_string());
         }
+        self.sendfile.validate()?;
         Ok(())
     }
 }
@@ -564,6 +570,7 @@ disk:
             enabled: true,
             cache_dir: String::new(),
             max_disk_cache_size_mb: 10240,
+            sendfile: SendfileConfig::default(),
         };
         let result = config.validate();
         assert!(result.is_err());
@@ -576,6 +583,7 @@ disk:
             enabled: false,
             cache_dir: String::new(),
             max_disk_cache_size_mb: 10240,
+            sendfile: SendfileConfig::default(),
         };
         assert!(config.validate().is_ok());
     }
@@ -1029,6 +1037,7 @@ max_item_size_mb: 5
                 enabled: true,
                 cache_dir: "".to_string(),
                 max_disk_cache_size_mb: 10240,
+                sendfile: SendfileConfig::default(),
             },
             redis: RedisCacheConfig::default(),
             warming: None,
@@ -1049,6 +1058,7 @@ max_item_size_mb: 5
                 enabled: true,
                 cache_dir: "".to_string(),
                 max_disk_cache_size_mb: 10240,
+                sendfile: SendfileConfig::default(),
             },
             redis: RedisCacheConfig::default(),
             warming: None,

@@ -5434,3 +5434,284 @@ async fn test_error_injection_permission_denied() {
     let result = backend.delete_file(&cache_dir.join("test.data")).await;
     assert!(result.is_err(), "Delete should fail with permission denied");
 }
+
+// ========================================
+// Phase v1.4: sendfile Tests
+// ========================================
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn test_get_sendfile_returns_path_for_large_files() {
+    use super::disk_cache::DiskCache;
+    use crate::cache::sendfile::SendfileConfig;
+    use crate::cache::{Cache, CacheEntry, CacheKey};
+    use bytes::Bytes;
+    use std::time::{Duration, SystemTime};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    // Create cache with sendfile enabled and 1KB threshold
+    let sendfile_config = SendfileConfig {
+        enabled: true,
+        threshold_bytes: 1024, // 1KB threshold for testing
+    };
+    let cache = DiskCache::with_sendfile_config(
+        temp_dir.path().to_path_buf(),
+        100 * 1024 * 1024,
+        sendfile_config,
+    );
+
+    // Create a large file (2KB - above threshold)
+    let key = CacheKey {
+        bucket: "sendfile-test".to_string(),
+        object_key: "large-file.bin".to_string(),
+        etag: None,
+    };
+    let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
+    let entry = CacheEntry {
+        data: data.clone(),
+        content_type: "application/octet-stream".to_string(),
+        content_length: data.len(),
+        etag: "test-etag".to_string(),
+        last_modified: Some("Tue, 15 Jan 2024 12:00:00 GMT".to_string()),
+        created_at: SystemTime::now(),
+        expires_at: SystemTime::now() + Duration::from_secs(3600),
+        last_accessed_at: SystemTime::now(),
+    };
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // get_sendfile should return a response for large files
+    let result = cache.get_sendfile(&key).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return sendfile response for large files"
+    );
+
+    let response = result.unwrap();
+    assert_eq!(response.length, 2 * 1024);
+    assert_eq!(response.content_type, "application/octet-stream");
+    assert_eq!(response.etag, Some("test-etag".to_string()));
+    assert!(response.file_path.exists(), "File path should exist");
+}
+
+#[tokio::test]
+async fn test_get_sendfile_returns_none_for_small_files() {
+    use super::disk_cache::DiskCache;
+    use crate::cache::sendfile::SendfileConfig;
+    use crate::cache::{Cache, CacheEntry, CacheKey};
+    use bytes::Bytes;
+    use std::time::{Duration, SystemTime};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    // Create cache with sendfile enabled and 64KB threshold
+    let sendfile_config = SendfileConfig {
+        enabled: true,
+        threshold_bytes: 64 * 1024, // 64KB threshold
+    };
+    let cache = DiskCache::with_sendfile_config(
+        temp_dir.path().to_path_buf(),
+        100 * 1024 * 1024,
+        sendfile_config,
+    );
+
+    // Create a small file (1KB - below threshold)
+    let key = CacheKey {
+        bucket: "sendfile-test".to_string(),
+        object_key: "small-file.bin".to_string(),
+        etag: None,
+    };
+    let data = Bytes::from(vec![0u8; 1024]); // 1KB
+    let entry = CacheEntry {
+        data: data.clone(),
+        content_type: "text/plain".to_string(),
+        content_length: data.len(),
+        etag: "small-etag".to_string(),
+        last_modified: None,
+        created_at: SystemTime::now(),
+        expires_at: SystemTime::now() + Duration::from_secs(3600),
+        last_accessed_at: SystemTime::now(),
+    };
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // get_sendfile should return None for small files
+    let result = cache.get_sendfile(&key).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should return None for files below threshold"
+    );
+
+    // Regular get should still work
+    let entry = cache.get(&key).await.unwrap();
+    assert!(entry.is_some(), "Regular get should work for small files");
+}
+
+#[tokio::test]
+async fn test_get_sendfile_returns_none_when_disabled() {
+    use super::disk_cache::DiskCache;
+    use crate::cache::sendfile::SendfileConfig;
+    use crate::cache::{Cache, CacheEntry, CacheKey};
+    use bytes::Bytes;
+    use std::time::{Duration, SystemTime};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    // Create cache with sendfile disabled
+    let sendfile_config = SendfileConfig {
+        enabled: false,
+        threshold_bytes: 1024,
+    };
+    let cache = DiskCache::with_sendfile_config(
+        temp_dir.path().to_path_buf(),
+        100 * 1024 * 1024,
+        sendfile_config,
+    );
+
+    // Create a large file
+    let key = CacheKey {
+        bucket: "sendfile-test".to_string(),
+        object_key: "large-file-disabled.bin".to_string(),
+        etag: None,
+    };
+    let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
+    let entry = CacheEntry {
+        data: data.clone(),
+        content_type: "application/octet-stream".to_string(),
+        content_length: data.len(),
+        etag: "test-etag".to_string(),
+        last_modified: None,
+        created_at: SystemTime::now(),
+        expires_at: SystemTime::now() + Duration::from_secs(3600),
+        last_accessed_at: SystemTime::now(),
+    };
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // get_sendfile should return None when disabled
+    let result = cache.get_sendfile(&key).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should return None when sendfile is disabled"
+    );
+}
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn test_get_sendfile_tracks_cache_hits() {
+    use super::disk_cache::DiskCache;
+    use crate::cache::sendfile::SendfileConfig;
+    use crate::cache::{Cache, CacheEntry, CacheKey};
+    use bytes::Bytes;
+    use std::time::{Duration, SystemTime};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let sendfile_config = SendfileConfig {
+        enabled: true,
+        threshold_bytes: 1024,
+    };
+    let cache = DiskCache::with_sendfile_config(
+        temp_dir.path().to_path_buf(),
+        100 * 1024 * 1024,
+        sendfile_config,
+    );
+
+    let key = CacheKey {
+        bucket: "sendfile-test".to_string(),
+        object_key: "hit-tracking.bin".to_string(),
+        etag: None,
+    };
+    let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
+    let entry = CacheEntry {
+        data: data.clone(),
+        content_type: "application/octet-stream".to_string(),
+        content_length: data.len(),
+        etag: "test-etag".to_string(),
+        last_modified: None,
+        created_at: SystemTime::now(),
+        expires_at: SystemTime::now() + Duration::from_secs(3600),
+        last_accessed_at: SystemTime::now(),
+    };
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // Initial stats
+    let stats = cache.stats().await.unwrap();
+    let initial_hits = stats.hits;
+
+    // Call get_sendfile - should NOT increment hit count
+    // (the proxy calls cache.get() first, which already tracks the hit)
+    let sendfile_result = cache.get_sendfile(&key).await.unwrap();
+    assert!(sendfile_result.is_some(), "Should return sendfile response");
+
+    // Check stats did NOT increase (hit tracking is done by cache.get(), not get_sendfile())
+    let stats = cache.stats().await.unwrap();
+    assert_eq!(
+        stats.hits, initial_hits,
+        "get_sendfile should NOT increment hit count (tracked by get() instead)"
+    );
+}
+
+#[tokio::test]
+async fn test_get_sendfile_returns_none_for_nonexistent_key() {
+    use super::disk_cache::DiskCache;
+    use crate::cache::sendfile::SendfileConfig;
+    use crate::cache::{Cache, CacheKey};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let sendfile_config = SendfileConfig {
+        enabled: true,
+        threshold_bytes: 1024,
+    };
+    let cache = DiskCache::with_sendfile_config(
+        temp_dir.path().to_path_buf(),
+        100 * 1024 * 1024,
+        sendfile_config,
+    );
+
+    let key = CacheKey {
+        bucket: "sendfile-test".to_string(),
+        object_key: "nonexistent.bin".to_string(),
+        etag: None,
+    };
+
+    // get_sendfile should return None for nonexistent keys
+    let result = cache.get_sendfile(&key).await.unwrap();
+    assert!(result.is_none(), "Should return None for nonexistent key");
+}
+
+#[tokio::test]
+async fn test_get_sendfile_returns_none_for_expired_entry() {
+    use super::disk_cache::DiskCache;
+    use crate::cache::sendfile::SendfileConfig;
+    use crate::cache::{Cache, CacheEntry, CacheKey};
+    use bytes::Bytes;
+    use std::time::{Duration, SystemTime};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let sendfile_config = SendfileConfig {
+        enabled: true,
+        threshold_bytes: 1024,
+    };
+    let cache = DiskCache::with_sendfile_config(
+        temp_dir.path().to_path_buf(),
+        100 * 1024 * 1024,
+        sendfile_config,
+    );
+
+    let key = CacheKey {
+        bucket: "sendfile-test".to_string(),
+        object_key: "expired.bin".to_string(),
+        etag: None,
+    };
+    let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
+    let entry = CacheEntry {
+        data: data.clone(),
+        content_type: "application/octet-stream".to_string(),
+        content_length: data.len(),
+        etag: "test-etag".to_string(),
+        last_modified: None,
+        created_at: SystemTime::now() - Duration::from_secs(10),
+        expires_at: SystemTime::now() - Duration::from_secs(1), // Already expired
+        last_accessed_at: SystemTime::now() - Duration::from_secs(10),
+    };
+    cache.set(key.clone(), entry).await.unwrap();
+
+    // get_sendfile should return None for expired entries
+    let result = cache.get_sendfile(&key).await.unwrap();
+    assert!(result.is_none(), "Should return None for expired entry");
+}

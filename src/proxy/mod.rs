@@ -2713,6 +2713,26 @@ impl ProxyHttp for YatagarasuProxy {
 
                             // Only send body for GET requests (not HEAD)
                             if !is_head_request {
+                                // Phase v1.4: Check for sendfile capability
+                                // Track sendfile-eligible responses for observability
+                                // Actual sendfile usage requires Pingora socket fd integration
+                                if let Ok(Some(sendfile_response)) =
+                                    cache.get_sendfile(&cache_key).await
+                                {
+                                    // This cache hit could be served via sendfile
+                                    self.metrics.increment_cache_sendfile();
+                                    self.metrics
+                                        .add_cache_sendfile_bytes(sendfile_response.length);
+                                    tracing::debug!(
+                                        request_id = %ctx.request_id(),
+                                        bucket = %bucket_config.name,
+                                        object_key = %object_key,
+                                        file_path = %sendfile_response.file_path.display(),
+                                        length = sendfile_response.length,
+                                        "Sendfile-eligible cache hit (using regular path for now)"
+                                    );
+                                }
+
                                 session
                                     .write_response_body(Some(cached_entry.data), true)
                                     .await?;

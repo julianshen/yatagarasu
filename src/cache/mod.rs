@@ -69,10 +69,16 @@ pub mod tiered;
 // Cache warming submodule (Phase 1.3)
 pub mod warming;
 
+// sendfile support for zero-copy file serving (v1.4)
+pub mod sendfile;
+
 // Re-export configuration types
 pub use config::{
     BucketCacheOverride, CacheConfig, DiskCacheConfig, MemoryCacheConfig, RedisCacheConfig,
 };
+
+// Re-export sendfile types
+pub use sendfile::{SendfileConfig, SendfileResponse};
 
 // Re-export entry types
 pub use entry::{CacheEntry, CacheKey};
