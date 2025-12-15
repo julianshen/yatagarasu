@@ -115,6 +115,10 @@ pub struct Metrics {
     cache_size_by_layer: Mutex<HashMap<String, u64>>,      // Per-layer size in bytes
     cache_items_by_layer: Mutex<HashMap<String, u64>>,     // Per-layer item count
 
+    // Phase v1.4: sendfile metrics
+    cache_sendfile_count: AtomicU64, // Number of sendfile-eligible responses
+    cache_sendfile_bytes: AtomicU64, // Bytes served via sendfile
+
     // Phase 32: OPA authorization metrics
     opa_cache_hits: AtomicU64,
     opa_cache_misses: AtomicU64,
@@ -187,6 +191,9 @@ impl Metrics {
             cache_evictions_by_layer: Mutex::new(HashMap::new()),
             cache_size_by_layer: Mutex::new(HashMap::new()),
             cache_items_by_layer: Mutex::new(HashMap::new()),
+            // Phase v1.4: sendfile metrics
+            cache_sendfile_count: AtomicU64::new(0),
+            cache_sendfile_bytes: AtomicU64::new(0),
             // Phase 32: OPA metrics
             opa_cache_hits: AtomicU64::new(0),
             opa_cache_misses: AtomicU64::new(0),
@@ -363,6 +370,32 @@ impl Metrics {
             .lock()
             .map(|g| g.clone())
             .unwrap_or_default()
+    }
+
+    // =========================================================================
+    // Phase v1.4: sendfile Metrics
+    // =========================================================================
+
+    /// Increment sendfile response counter (Phase v1.4)
+    /// Call this when serving a cache hit that could use sendfile
+    pub fn increment_cache_sendfile(&self) {
+        self.cache_sendfile_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Add bytes served via sendfile (Phase v1.4)
+    pub fn add_cache_sendfile_bytes(&self, bytes: u64) {
+        self.cache_sendfile_bytes
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Get sendfile response count (Phase v1.4)
+    pub fn get_cache_sendfile_count(&self) -> u64 {
+        self.cache_sendfile_count.load(Ordering::Relaxed)
+    }
+
+    /// Get total bytes served via sendfile (Phase v1.4)
+    pub fn get_cache_sendfile_bytes(&self) -> u64 {
+        self.cache_sendfile_bytes.load(Ordering::Relaxed)
     }
 
     /// Get cache size by layer (Phase 65.2)
@@ -1499,6 +1532,25 @@ impl Metrics {
                 ));
             }
         }
+
+        // Phase v1.4: sendfile metrics
+        output.push_str(
+            "\n# HELP yatagarasu_cache_sendfile_total Total sendfile-eligible cache hits\n",
+        );
+        output.push_str("# TYPE yatagarasu_cache_sendfile_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_cache_sendfile_total {}\n",
+            self.cache_sendfile_count.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP yatagarasu_cache_sendfile_bytes_total Total bytes served via sendfile\n",
+        );
+        output.push_str("# TYPE yatagarasu_cache_sendfile_bytes_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_cache_sendfile_bytes_total {}\n",
+            self.cache_sendfile_bytes.load(Ordering::Relaxed)
+        ));
 
         // Phase 1.6: Prewarm metrics
         output.push_str("\n# HELP yatagarasu_prewarm_tasks_total Total prewarm tasks created\n");
@@ -2684,6 +2736,45 @@ mod tests {
         assert!(
             output.contains("# TYPE yatagarasu_cache_purges_total counter"),
             "Should have TYPE for cache purges"
+        );
+    }
+
+    #[test]
+    fn test_sendfile_metrics() {
+        // Phase v1.4: Test sendfile metrics
+        let metrics = Metrics::new();
+
+        // Initially should be zero
+        assert_eq!(metrics.get_cache_sendfile_count(), 0);
+        assert_eq!(metrics.get_cache_sendfile_bytes(), 0);
+
+        // Increment sendfile count
+        metrics.increment_cache_sendfile();
+        metrics.increment_cache_sendfile();
+        assert_eq!(metrics.get_cache_sendfile_count(), 2);
+
+        // Add sendfile bytes
+        metrics.add_cache_sendfile_bytes(1024);
+        metrics.add_cache_sendfile_bytes(2048);
+        assert_eq!(metrics.get_cache_sendfile_bytes(), 3072);
+
+        // Verify Prometheus export includes sendfile metrics
+        let output = metrics.export_prometheus();
+        assert!(
+            output.contains("yatagarasu_cache_sendfile_total 2"),
+            "Should export sendfile count"
+        );
+        assert!(
+            output.contains("yatagarasu_cache_sendfile_bytes_total 3072"),
+            "Should export sendfile bytes"
+        );
+        assert!(
+            output.contains("# HELP yatagarasu_cache_sendfile_total"),
+            "Should have HELP for sendfile count"
+        );
+        assert!(
+            output.contains("# TYPE yatagarasu_cache_sendfile_total counter"),
+            "Should have TYPE for sendfile count"
         );
     }
 }
