@@ -5440,6 +5440,7 @@ async fn test_error_injection_permission_denied() {
 // ========================================
 
 #[tokio::test]
+#[cfg(target_os = "linux")]
 async fn test_get_sendfile_returns_path_for_large_files() {
     use super::disk_cache::DiskCache;
     use crate::cache::sendfile::SendfileConfig;
@@ -5591,6 +5592,7 @@ async fn test_get_sendfile_returns_none_when_disabled() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "linux")]
 async fn test_get_sendfile_tracks_cache_hits() {
     use super::disk_cache::DiskCache;
     use crate::cache::sendfile::SendfileConfig;
