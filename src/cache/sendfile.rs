@@ -264,7 +264,10 @@ pub async fn sendfile_to_fd_async(
 
 /// Async fallback for non-Unix platforms (Windows)
 #[cfg(not(unix))]
-pub async fn sendfile_to_fd_async(_dest_fd: i32, _response: SendfileResponse) -> std::io::Result<u64> {
+pub async fn sendfile_to_fd_async(
+    _dest_fd: i32,
+    _response: SendfileResponse,
+) -> std::io::Result<u64> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "sendfile is only supported on Linux",
