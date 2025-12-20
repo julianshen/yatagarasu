@@ -10,7 +10,7 @@ mod tests {
     use yatagarasu::request_coalescing::RequestCoalescer;
 
     #[tokio::test]
-    async fn test_request_coalescer_serializes_concurrent_requests() {
+    async fn test_request_coalescer_deduplicates_concurrent_requests() {
         let coalescer = RequestCoalescer::new();
         let key = CacheKey {
             bucket: "test-bucket".to_string(),
@@ -30,13 +30,15 @@ mod tests {
 
             let handle = tokio::spawn(async move {
                 // Acquire coalescing guard
-                let _guard = coalescer_clone.acquire(&key_clone).await;
+                let guard = coalescer_clone.acquire(&key_clone).await;
 
-                // Simulate S3 fetch (only first request should do this)
-                fetch_count_clone.fetch_add(1, Ordering::SeqCst);
-
-                // Simulate processing time
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                // Only the first request should fetch from S3
+                if guard.is_first_request() {
+                    fetch_count_clone.fetch_add(1, Ordering::SeqCst);
+                    // Simulate S3 fetch time
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+                // Subsequent requests don't fetch - they wait for the first request
             });
 
             handles.push(handle);
@@ -47,9 +49,12 @@ mod tests {
             handle.await.unwrap();
         }
 
-        // All 5 requests should have incremented the counter
-        // (In a real scenario, only the first would fetch from S3)
-        assert_eq!(fetch_count.load(Ordering::SeqCst), 5);
+        // Only 1 request should have fetched from S3 (true deduplication)
+        assert_eq!(
+            fetch_count.load(Ordering::SeqCst),
+            1,
+            "Only the first request should fetch from S3"
+        );
     }
 
     #[tokio::test]
