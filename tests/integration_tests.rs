@@ -13,6 +13,7 @@ mod integration {
     mod cache_e2e_test;
     mod cache_metrics_test; // Phase 65.2: Enhanced Cache Metrics
     mod cache_write_through_test; // Phase 65.3: Cache Write-Through Tests
+    mod chaos_engineering_test; // Phase 37: Chaos Engineering Tests (Practical Implementation)
     mod chaos_test; // Phase 37: Chaos Engineering Tests
     mod circuit_breaker_test;
     mod concurrency_test;
@@ -36,6 +37,7 @@ mod integration {
     mod redis_auth_test; // Phase 53.2: Redis Advanced Configuration Tests
     mod replica_failover_test; // Phase 59.3: Replica Failover Integration Tests
     mod replica_set_test;
+    mod request_coalescing_test; // Phase 38: Request Coalescing
     mod retry_test;
     mod security_test;
     mod server_basic_test;
