@@ -34,7 +34,12 @@ impl RequestCoalescer {
     /// Returns a guard that must be held while the request is being processed
     /// If another request for the same key is already in-flight, waits on the semaphore
     pub async fn acquire(&self, key: &CacheKey) -> RequestCoalescingGuard {
-        let key_str = format!("{}:{}", key.bucket, key.object_key);
+        let key_str = format!(
+            "{}:{}:{}",
+            key.bucket,
+            key.object_key,
+            key.etag.as_deref().unwrap_or("")
+        );
 
         // Get or create semaphore for this key
         let semaphore = {
@@ -79,17 +84,28 @@ impl Default for RequestCoalescer {
 
 /// Guard that removes a request from in-flight map when dropped
 pub struct RequestCoalescingGuard {
-    #[allow(dead_code)]
     key: String,
-    #[allow(dead_code)]
     coalescer: RequestCoalescer,
     _permit: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl Drop for RequestCoalescingGuard {
     fn drop(&mut self) {
-        // The permit is automatically released when dropped
-        // The semaphore will be cleaned up by the coalescer when no more requests are in-flight
+        // The permit is automatically released when dropped.
+        // We spawn a task to perform the async cleanup of the semaphore from the map.
+        let coalescer = self.coalescer.clone();
+        let key = self.key.clone();
+        tokio::spawn(async move {
+            let mut in_flight = coalescer.in_flight.lock().await;
+            // If we are the last strong reference holder besides the map itself,
+            // it's safe to remove the semaphore.
+            if let Some(semaphore) = in_flight.get(&key) {
+                // The count is 2 if only the map and our `semaphore` variable hold a reference.
+                if std::sync::Arc::strong_count(semaphore) <= 2 {
+                    in_flight.remove(&key);
+                }
+            }
+        });
     }
 }
 

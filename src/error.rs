@@ -171,7 +171,13 @@ impl ProxyError {
             ProxyError::Config {
                 message: _,
                 context,
-            } => ("config", json!({ "context": context })),
+            } => {
+                let mut ctx = serde_json::Map::new();
+                if let Some(c) = context {
+                    ctx.insert("details".to_string(), json!(c));
+                }
+                ("config", json!(ctx))
+            }
             ProxyError::Auth {
                 message: _,
                 bucket,

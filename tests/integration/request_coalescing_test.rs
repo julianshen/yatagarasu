@@ -10,7 +10,7 @@ mod tests {
     use yatagarasu::request_coalescing::RequestCoalescer;
 
     #[tokio::test]
-    async fn test_request_coalescer_deduplicates_concurrent_requests() {
+    async fn test_request_coalescer_serializes_concurrent_requests() {
         let coalescer = RequestCoalescer::new();
         let key = CacheKey {
             bucket: "test-bucket".to_string(),
@@ -67,8 +67,13 @@ mod tests {
         assert_eq!(coalescer.in_flight_count().await, 1);
 
         drop(guard);
-        // Note: cleanup happens asynchronously, so we may need to wait
+        // Note: cleanup happens asynchronously, so we need to wait
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        assert_eq!(
+            coalescer.in_flight_count().await,
+            0,
+            "in_flight_count should be 0 after guard is dropped and cleanup runs"
+        );
     }
 
     #[tokio::test]
