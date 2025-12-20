@@ -18,6 +18,7 @@
 //! - [`metrics`] - Compression metrics
 
 pub mod algorithms;
+pub mod compress;
 pub mod config;
 pub mod error;
 pub mod negotiation;
@@ -26,6 +27,7 @@ pub mod response;
 
 // Re-export public types
 pub use algorithms::{AlgorithmConfig, Compression};
+pub use compress::{compress, decompress};
 pub use config::CompressionConfig;
 pub use error::CompressionError;
 pub use negotiation::negotiate_compression;
