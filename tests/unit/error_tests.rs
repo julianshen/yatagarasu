@@ -29,57 +29,57 @@ fn test_can_create_proxy_error_enum_with_variants() {
     // - Internal: Unexpected proxy errors (panic, resource exhaustion)
 
     // Scenario 1: Can create Config error variant
-    let config_error = ProxyError::Config("invalid YAML syntax".to_string());
+    let config_error = ProxyError::config("invalid YAML syntax");
 
     // Verify it's the Config variant
     match config_error {
-        ProxyError::Config(msg) => {
-            assert_eq!(msg, "invalid YAML syntax");
+        ProxyError::Config { message, .. } => {
+            assert_eq!(message, "invalid YAML syntax");
         }
         _ => panic!("Expected Config variant"),
     }
 
     // Scenario 2: Can create Auth error variant
-    let auth_error = ProxyError::Auth("invalid JWT signature".to_string());
+    let auth_error = ProxyError::auth("invalid JWT signature");
 
     // Verify it's the Auth variant
     match auth_error {
-        ProxyError::Auth(msg) => {
-            assert_eq!(msg, "invalid JWT signature");
+        ProxyError::Auth { message, .. } => {
+            assert_eq!(message, "invalid JWT signature");
         }
         _ => panic!("Expected Auth variant"),
     }
 
     // Scenario 3: Can create S3 error variant
-    let s3_error = ProxyError::S3("NoSuchKey: object not found".to_string());
+    let s3_error = ProxyError::s3("NoSuchKey: object not found");
 
     // Verify it's the S3 variant
     match s3_error {
-        ProxyError::S3(msg) => {
-            assert_eq!(msg, "NoSuchKey: object not found");
+        ProxyError::S3 { message, .. } => {
+            assert_eq!(message, "NoSuchKey: object not found");
         }
         _ => panic!("Expected S3 variant"),
     }
 
     // Scenario 4: Can create Internal error variant
-    let internal_error = ProxyError::Internal("unexpected panic in handler".to_string());
+    let internal_error = ProxyError::internal("unexpected panic in handler");
 
     // Verify it's the Internal variant
     match internal_error {
-        ProxyError::Internal(msg) => {
-            assert_eq!(msg, "unexpected panic in handler");
+        ProxyError::Internal { message, .. } => {
+            assert_eq!(message, "unexpected panic in handler");
         }
         _ => panic!("Expected Internal variant"),
     }
 
     // Scenario 5: Verify enum implements Debug (required for logging)
-    let error = ProxyError::Config("test".to_string());
+    let error = ProxyError::config("test");
     let debug_str = format!("{:?}", error);
     assert!(debug_str.contains("Config"));
     assert!(debug_str.contains("test"));
 
     // Scenario 6: Verify enum implements Display (required for error messages)
-    let error = ProxyError::Auth("token expired".to_string());
+    let error = ProxyError::auth("token expired");
     let display_str = format!("{}", error);
     assert!(display_str.len() > 0); // Should have some display representation
 
@@ -134,11 +134,11 @@ fn test_can_create_proxy_error_enum_with_variants() {
     // COMMON PATTERNS:
     //
     // Creating errors:
-    // - ProxyError::Config("message".to_string())
+    // - ProxyError::config("message")
     // - ProxyError::Auth(format!("token expired at {}", time))
     //
     // Propagating errors:
-    // - return Err(ProxyError::S3("connection timeout".to_string()));
+    // - return Err(ProxyError::s3("connection timeout"));
     // - .map_err(|e| ProxyError::Internal(e.to_string()))?;
     //
     // Pattern matching:
@@ -190,7 +190,7 @@ fn test_errors_convert_to_http_status_codes_correctly() {
     // - Internal errors → 500 (unexpected proxy error, bug or resource exhaustion)
 
     // Scenario 1: Config error maps to 500 Internal Server Error
-    let config_error = ProxyError::Config("invalid bucket configuration".to_string());
+    let config_error = ProxyError::config("invalid bucket configuration");
     let status_code = config_error.to_http_status();
 
     assert_eq!(status_code, 500);
@@ -198,7 +198,7 @@ fn test_errors_convert_to_http_status_codes_correctly() {
     // Should never happen with proper config validation at startup
 
     // Scenario 2: Auth error maps to 401 Unauthorized
-    let auth_error = ProxyError::Auth("invalid JWT token".to_string());
+    let auth_error = ProxyError::auth("invalid JWT token");
     let status_code = auth_error.to_http_status();
 
     assert_eq!(status_code, 401);
@@ -206,7 +206,7 @@ fn test_errors_convert_to_http_status_codes_correctly() {
     // Client should not retry without fixing auth
 
     // Scenario 3: S3 error maps to 502 Bad Gateway
-    let s3_error = ProxyError::S3("S3 connection timeout".to_string());
+    let s3_error = ProxyError::s3("S3 connection timeout");
     let status_code = s3_error.to_http_status();
 
     assert_eq!(status_code, 502);
@@ -215,7 +215,7 @@ fn test_errors_convert_to_http_status_codes_correctly() {
     // Client can retry (might be transient S3 issue)
 
     // Scenario 4: Internal error maps to 500 Internal Server Error
-    let internal_error = ProxyError::Internal("panic in request handler".to_string());
+    let internal_error = ProxyError::internal("panic in request handler");
     let status_code = internal_error.to_http_status();
 
     assert_eq!(status_code, 500);
@@ -225,9 +225,9 @@ fn test_errors_convert_to_http_status_codes_correctly() {
 
     // Scenario 5: Multiple config errors all map to 500
     let errors = vec![
-        ProxyError::Config("missing env var".to_string()),
-        ProxyError::Config("invalid YAML".to_string()),
-        ProxyError::Config("bucket not found".to_string()),
+        ProxyError::config("missing env var"),
+        ProxyError::config("invalid YAML"),
+        ProxyError::config("bucket not found"),
     ];
 
     for error in errors {
@@ -236,9 +236,9 @@ fn test_errors_convert_to_http_status_codes_correctly() {
 
     // Scenario 6: Multiple auth errors all map to 401
     let errors = vec![
-        ProxyError::Auth("missing token".to_string()),
-        ProxyError::Auth("expired token".to_string()),
-        ProxyError::Auth("invalid signature".to_string()),
+        ProxyError::auth("missing token"),
+        ProxyError::auth("expired token"),
+        ProxyError::auth("invalid signature"),
     ];
 
     for error in errors {
@@ -247,9 +247,9 @@ fn test_errors_convert_to_http_status_codes_correctly() {
 
     // Scenario 7: Multiple S3 errors all map to 502
     let errors = vec![
-        ProxyError::S3("connection refused".to_string()),
-        ProxyError::S3("network timeout".to_string()),
-        ProxyError::S3("S3 internal error".to_string()),
+        ProxyError::s3("connection refused"),
+        ProxyError::s3("network timeout"),
+        ProxyError::s3("S3 internal error"),
     ];
 
     for error in errors {
@@ -258,10 +258,10 @@ fn test_errors_convert_to_http_status_codes_correctly() {
 
     // Scenario 8: Verify status codes are in valid ranges
     let all_errors = vec![
-        ProxyError::Config("test".to_string()),
-        ProxyError::Auth("test".to_string()),
-        ProxyError::S3("test".to_string()),
-        ProxyError::Internal("test".to_string()),
+        ProxyError::config("test"),
+        ProxyError::auth("test"),
+        ProxyError::s3("test"),
+        ProxyError::internal("test"),
     ];
 
     for error in all_errors {
@@ -379,7 +379,7 @@ fn test_error_responses_use_consistent_json_format() {
     // - Machine-parseable (easy to process)
 
     // Scenario 1: Config error produces correct JSON structure
-    let config_error = ProxyError::Config("invalid bucket name".to_string());
+    let config_error = ProxyError::config("invalid bucket name");
     let json = config_error.to_json_response(None);
 
     // Parse JSON to verify structure
@@ -399,7 +399,7 @@ fn test_error_responses_use_consistent_json_format() {
     assert_eq!(parsed["status"], 500);
 
     // Scenario 2: Auth error produces correct JSON structure
-    let auth_error = ProxyError::Auth("token expired".to_string());
+    let auth_error = ProxyError::auth("token expired");
     let json = auth_error.to_json_response(None);
 
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
@@ -408,7 +408,7 @@ fn test_error_responses_use_consistent_json_format() {
     assert_eq!(parsed["status"], 401);
 
     // Scenario 3: S3 error produces correct JSON structure
-    let s3_error = ProxyError::S3("connection timeout".to_string());
+    let s3_error = ProxyError::s3("connection timeout");
     let json = s3_error.to_json_response(None);
 
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
@@ -417,7 +417,7 @@ fn test_error_responses_use_consistent_json_format() {
     assert_eq!(parsed["status"], 502);
 
     // Scenario 4: Internal error produces correct JSON structure
-    let internal_error = ProxyError::Internal("unexpected panic".to_string());
+    let internal_error = ProxyError::internal("unexpected panic");
     let json = internal_error.to_json_response(None);
 
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
@@ -426,7 +426,7 @@ fn test_error_responses_use_consistent_json_format() {
     assert_eq!(parsed["status"], 500);
 
     // Scenario 5: Optional request_id is included when provided
-    let error = ProxyError::Auth("invalid token".to_string());
+    let error = ProxyError::auth("invalid token");
     let request_id = "550e8400-e29b-41d4-a716-446655440000";
     let json = error.to_json_response(Some(request_id.to_string()));
 
@@ -435,7 +435,7 @@ fn test_error_responses_use_consistent_json_format() {
     assert_eq!(parsed["request_id"], request_id);
 
     // Scenario 6: Response is valid UTF-8 (no encoding issues)
-    let error = ProxyError::S3("emoji test 🚀".to_string());
+    let error = ProxyError::s3("emoji test 🚀");
     let json = error.to_json_response(None);
 
     // Should not panic on UTF-8 characters
@@ -443,7 +443,7 @@ fn test_error_responses_use_consistent_json_format() {
     assert!(parsed["message"].as_str().unwrap().contains("🚀"));
 
     // Scenario 7: Special characters are properly escaped
-    let error = ProxyError::Config(r#"path with "quotes" and \backslash"#.to_string());
+    let error = ProxyError::config(r#"path with "quotes" and \backslash"#);
     let json = error.to_json_response(None);
 
     // Should produce valid JSON (not break on special chars)
@@ -454,10 +454,10 @@ fn test_error_responses_use_consistent_json_format() {
     // Scenario 8: All error types have consistent field order
     // (Makes logs easier to read when fields are in same order)
     let errors = vec![
-        ProxyError::Config("test".to_string()),
-        ProxyError::Auth("test".to_string()),
-        ProxyError::S3("test".to_string()),
-        ProxyError::Internal("test".to_string()),
+        ProxyError::config("test"),
+        ProxyError::auth("test"),
+        ProxyError::s3("test"),
+        ProxyError::internal("test"),
     ];
 
     for error in errors {
@@ -583,7 +583,7 @@ fn test_4xx_errors_include_client_friendly_messages() {
     // - Auth errors → 401 (authentication failures)
 
     // Scenario 1: Auth error message is human-readable
-    let auth_error = ProxyError::Auth("missing token".to_string());
+    let auth_error = ProxyError::auth("missing token");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -602,7 +602,7 @@ fn test_4xx_errors_include_client_friendly_messages() {
     assert!(!message.contains("unwrap"));
 
     // Scenario 2: Auth error for expired token is clear
-    let auth_error = ProxyError::Auth("token expired".to_string());
+    let auth_error = ProxyError::auth("token expired");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -611,7 +611,7 @@ fn test_4xx_errors_include_client_friendly_messages() {
     assert!(message.starts_with("Authentication error:"));
 
     // Scenario 3: Auth error for invalid signature is specific
-    let auth_error = ProxyError::Auth("invalid token signature".to_string());
+    let auth_error = ProxyError::auth("invalid token signature");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -620,9 +620,9 @@ fn test_4xx_errors_include_client_friendly_messages() {
 
     // Scenario 4: Message doesn't leak implementation details
     let errors = vec![
-        ProxyError::Auth("missing token".to_string()),
-        ProxyError::Auth("expired token".to_string()),
-        ProxyError::Auth("invalid signature".to_string()),
+        ProxyError::auth("missing token"),
+        ProxyError::auth("expired token"),
+        ProxyError::auth("invalid signature"),
     ];
 
     for error in errors {
@@ -648,7 +648,7 @@ fn test_4xx_errors_include_client_friendly_messages() {
     }
 
     // Scenario 5: Message is concise (not overly verbose)
-    let auth_error = ProxyError::Auth("invalid token".to_string());
+    let auth_error = ProxyError::auth("invalid token");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -662,8 +662,8 @@ fn test_4xx_errors_include_client_friendly_messages() {
 
     // Scenario 6: Message uses consistent formatting
     let errors = vec![
-        ProxyError::Auth("missing token".to_string()),
-        ProxyError::Auth("expired token".to_string()),
+        ProxyError::auth("missing token"),
+        ProxyError::auth("expired token"),
     ];
 
     // All auth errors should start with same prefix
@@ -677,7 +677,7 @@ fn test_4xx_errors_include_client_friendly_messages() {
 
     // Scenario 7: Message includes actionable information
     // (What the client should do to fix the error)
-    let auth_error = ProxyError::Auth("missing Authorization header".to_string());
+    let auth_error = ProxyError::auth("missing Authorization header");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -818,7 +818,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     //
     // Instead, keep it generic:
     // "Configuration error: invalid YAML syntax"
-    let config_error = ProxyError::Config("invalid YAML syntax".to_string());
+    let config_error = ProxyError::config("invalid YAML syntax");
     let json = config_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -847,7 +847,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     // - IP addresses
     //
     // These should NEVER be exposed to clients.
-    let s3_error = ProxyError::S3("connection timeout".to_string());
+    let s3_error = ProxyError::s3("connection timeout");
     let json = s3_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -877,7 +877,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     // - Function names
     // - Module structure
     // - Rust-specific implementation details
-    let internal_error = ProxyError::Internal("unexpected error".to_string());
+    let internal_error = ProxyError::internal("unexpected error");
     let json = internal_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -908,9 +908,9 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     //
     // These should be translated to user-friendly messages.
     let errors = vec![
-        ProxyError::Config("failed to load configuration".to_string()),
-        ProxyError::S3("failed to fetch object".to_string()),
-        ProxyError::Internal("system error".to_string()),
+        ProxyError::config("failed to load configuration"),
+        ProxyError::s3("failed to fetch object"),
+        ProxyError::internal("system error"),
     ];
 
     for error in &errors {
@@ -930,7 +930,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     //
     // Module paths like "yatagarasu::config::loader" reveal the
     // internal code structure and should not be exposed.
-    let config_error = ProxyError::Config("module initialization failed".to_string());
+    let config_error = ProxyError::config("module initialization failed");
     let json = config_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -944,9 +944,9 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     // Line numbers like ":42" or ":123" reveal source code locations
     // and should only appear in server logs, not client responses.
     let errors = vec![
-        ProxyError::Config("validation failed".to_string()),
-        ProxyError::S3("request failed".to_string()),
-        ProxyError::Internal("operation failed".to_string()),
+        ProxyError::config("validation failed"),
+        ProxyError::s3("request failed"),
+        ProxyError::internal("operation failed"),
     ];
 
     for error in &errors {
@@ -971,7 +971,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     //
     // Memory addresses like "0x7fff5fc3d8a0" are completely meaningless
     // to users and reveal internal runtime information.
-    let internal_error = ProxyError::Internal("memory allocation failed".to_string());
+    let internal_error = ProxyError::internal("memory allocation failed");
     let json = internal_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -991,7 +991,7 @@ fn test_5xx_errors_dont_leak_implementation_details() {
     // the user fix their request.
     let request_id = "550e8400-e29b-41d4-a716-446655440000";
 
-    let config_error = ProxyError::Config("failed to initialize".to_string());
+    let config_error = ProxyError::config("failed to initialize");
     let json = config_error.to_json_response(Some(request_id.to_string()));
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1126,7 +1126,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     //
     // Configuration errors should have a consistent "config" code that clients
     // can use to identify configuration-related failures.
-    let config_error = ProxyError::Config("invalid bucket name".to_string());
+    let config_error = ProxyError::config("invalid bucket name");
     let json = config_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1154,7 +1154,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     //
     // Authentication errors should have a consistent "auth" code so clients
     // can programmatically redirect to login or refresh tokens.
-    let auth_error = ProxyError::Auth("token expired".to_string());
+    let auth_error = ProxyError::auth("token expired");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1164,7 +1164,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     //
     // S3 errors should have a consistent "s3" code so clients can distinguish
     // upstream service failures from proxy failures.
-    let s3_error = ProxyError::S3("connection timeout".to_string());
+    let s3_error = ProxyError::s3("connection timeout");
     let json = s3_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1174,7 +1174,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     //
     // Internal errors should have a consistent "internal" code so clients
     // know to show a generic "try again later" message.
-    let internal_error = ProxyError::Internal("unexpected error".to_string());
+    let internal_error = ProxyError::internal("unexpected error");
     let json = internal_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1188,10 +1188,10 @@ fn test_errors_include_error_code_for_client_parsing() {
     // All error codes must be lowercase for consistency and ease of use.
     // This prevents clients from having to handle "Auth", "AUTH", "auth" differently.
     let errors = vec![
-        (ProxyError::Config("test".to_string()), "config"),
-        (ProxyError::Auth("test".to_string()), "auth"),
-        (ProxyError::S3("test".to_string()), "s3"),
-        (ProxyError::Internal("test".to_string()), "internal"),
+        (ProxyError::config("test"), "config"),
+        (ProxyError::auth("test"), "auth"),
+        (ProxyError::s3("test"), "s3"),
+        (ProxyError::internal("test"), "internal"),
     ];
 
     for (error, expected_code) in &errors {
@@ -1219,11 +1219,11 @@ fn test_errors_include_error_code_for_client_parsing() {
     //
     // Error codes must be consistent across multiple calls with the same error type.
     // Clients depend on this stability for their error handling logic.
-    let auth_error = ProxyError::Auth("first call".to_string());
+    let auth_error = ProxyError::auth("first call");
     let json1 = auth_error.to_json_response(None);
     let parsed1: serde_json::Value = serde_json::from_str(&json1).unwrap();
 
-    let auth_error2 = ProxyError::Auth("second call".to_string());
+    let auth_error2 = ProxyError::auth("second call");
     let json2 = auth_error2.to_json_response(None);
     let parsed2: serde_json::Value = serde_json::from_str(&json2).unwrap();
 
@@ -1237,7 +1237,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     //
     // Every error response must include the "error" field, even if
     // no request_id is provided.
-    let error_without_request_id = ProxyError::Config("test".to_string());
+    let error_without_request_id = ProxyError::config("test");
     let json = error_without_request_id.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1247,7 +1247,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     );
     assert!(parsed["error"].is_string(), "Error code must be a string");
 
-    let error_with_request_id = ProxyError::Config("test".to_string());
+    let error_with_request_id = ProxyError::config("test");
     let json = error_with_request_id.to_json_response(Some("req-123".to_string()));
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1263,7 +1263,7 @@ fn test_errors_include_error_code_for_client_parsing() {
     // - Message: For humans (descriptive, may change, may be localized)
     //
     // They must be separate fields in the JSON response.
-    let auth_error = ProxyError::Auth("invalid token".to_string());
+    let auth_error = ProxyError::auth("invalid token");
     let json = auth_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1429,7 +1429,7 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     // "at /home/user/.cargo/registry/src/.../lib.rs:123"
     //
     // These should NEVER appear in client responses.
-    let config_error = ProxyError::Config("failed to parse configuration".to_string());
+    let config_error = ProxyError::config("failed to parse configuration");
     let json = config_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -1458,7 +1458,7 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     // "thread 'main' panicked at 'index out of bounds', src/main.rs:10:5"
     //
     // These should be caught and converted to generic messages.
-    let s3_error = ProxyError::S3("upstream service error".to_string());
+    let s3_error = ProxyError::s3("upstream service error");
     let json = s3_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -1490,7 +1490,7 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     // "   ..."
     //
     // These are for server logs only, not client responses.
-    let internal_error = ProxyError::Internal("unexpected error".to_string());
+    let internal_error = ProxyError::internal("unexpected error");
     let json = internal_error.to_json_response(None);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let message = parsed["message"].as_str().unwrap();
@@ -1522,10 +1522,10 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     //
     // These should never appear in any error response.
     let errors = vec![
-        ProxyError::Config("parse error".to_string()),
-        ProxyError::Auth("validation failed".to_string()),
-        ProxyError::S3("connection failed".to_string()),
-        ProxyError::Internal("system error".to_string()),
+        ProxyError::config("parse error"),
+        ProxyError::auth("validation failed"),
+        ProxyError::s3("connection failed"),
+        ProxyError::internal("system error"),
     ];
 
     for error in &errors {
@@ -1573,7 +1573,7 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     // "thread 'tokio-runtime-worker' panicked at 'unwrap failed'"
     //
     // These are internal implementation details.
-    let internal_error = ProxyError::Internal("system failure".to_string());
+    let internal_error = ProxyError::internal("system failure");
     let json = internal_error.to_json_response(None);
 
     assert!(
@@ -1604,10 +1604,10 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     //
     // These are for developers, not end users.
     let errors = vec![
-        ProxyError::Config("error".to_string()),
-        ProxyError::Auth("error".to_string()),
-        ProxyError::S3("error".to_string()),
-        ProxyError::Internal("error".to_string()),
+        ProxyError::config("error"),
+        ProxyError::auth("error"),
+        ProxyError::s3("error"),
+        ProxyError::internal("error"),
     ];
 
     for error in &errors {
@@ -1639,7 +1639,7 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     // "tokio::runtime::task::poll"
     //
     // These reveal internal structure and should not be exposed.
-    let internal_error = ProxyError::Internal("processing error".to_string());
+    let internal_error = ProxyError::internal("processing error");
     let json = internal_error.to_json_response(None);
 
     // Should not include common Rust std library function names
@@ -1683,10 +1683,10 @@ fn test_stack_traces_only_in_logs_never_in_responses() {
     // - JSON structure: ~50 bytes
     // Total: ~200-400 bytes typical, max 1KB
     let errors = vec![
-        ProxyError::Config("configuration validation failed".to_string()),
-        ProxyError::Auth("authentication check failed".to_string()),
-        ProxyError::S3("upstream connection failed".to_string()),
-        ProxyError::Internal("internal processing error".to_string()),
+        ProxyError::config("configuration validation failed"),
+        ProxyError::auth("authentication check failed"),
+        ProxyError::s3("upstream connection failed"),
+        ProxyError::internal("internal processing error"),
     ];
 
     for error in &errors {
