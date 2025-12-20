@@ -23,6 +23,7 @@ pub mod cache;
 pub mod compress;
 pub mod config;
 pub mod error;
+pub mod metrics;
 pub mod negotiation;
 pub mod request;
 pub mod response;
@@ -34,6 +35,7 @@ pub use cache::{add_vary_accept_encoding, cache_key_suffix, generate_cache_key};
 pub use compress::{compress, decompress};
 pub use config::CompressionConfig;
 pub use error::CompressionError;
+pub use metrics::{CompressionDecisionReason, CompressionMetrics};
 pub use negotiation::negotiate_compression;
 pub use request::{decompress_request_body, parse_content_encoding};
 
