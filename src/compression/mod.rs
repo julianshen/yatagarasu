@@ -28,6 +28,9 @@ pub mod negotiation;
 pub mod request;
 pub mod response;
 
+#[cfg(test)]
+pub mod integration_tests;
+
 // Re-export public types
 pub use algorithms::{AlgorithmConfig, Compression};
 pub use bucket_config::BucketCompressionConfig;
