@@ -18,6 +18,7 @@
 //! - [`metrics`] - Compression metrics
 
 pub mod algorithms;
+pub mod bucket_config;
 pub mod cache;
 pub mod compress;
 pub mod config;
@@ -28,6 +29,7 @@ pub mod response;
 
 // Re-export public types
 pub use algorithms::{AlgorithmConfig, Compression};
+pub use bucket_config::BucketCompressionConfig;
 pub use cache::{add_vary_accept_encoding, cache_key_suffix, generate_cache_key};
 pub use compress::{compress, decompress};
 pub use config::CompressionConfig;
