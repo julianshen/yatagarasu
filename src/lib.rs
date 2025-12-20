@@ -6,6 +6,7 @@ pub mod audit; // Phase 33: Audit Logging
 pub mod auth;
 pub mod cache;
 pub mod circuit_breaker; // Phase 21: Circuit Breaker Pattern
+pub mod compression; // Phase 40: Request/Response Compression
 pub mod config;
 pub mod constants; // Centralized default values
 pub mod error;

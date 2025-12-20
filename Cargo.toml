@@ -1,12 +1,12 @@
 [package]
-name = "yatagarasu"
-version = "1.4.0"
-edition = "2021"
-rust-version = "1.70"
 authors = ["Yatagarasu Team"]
 description = "High-performance S3 proxy built with Cloudflare's Pingora framework"
+edition = "2021"
 license = "MIT"
+name = "yatagarasu"
 repository = "https://github.com/julianshen/yatagarasu"
+rust-version = "1.70"
+version = "1.4.0"
 
 [features]
 default = []
@@ -15,44 +15,44 @@ uring_backend_disabled = []
 
 [dependencies]
 # Proxy Framework
+async-trait = "0.1"
 pingora = "0.6"
 pingora-core = "0.6"
-pingora-proxy = "0.6"
 pingora-http = "0.6"
-async-trait = "0.1"
+pingora-proxy = "0.6"
 
 # Async Runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = {version = "1.35", features = ["full"]}
 
 # AWS S3 SDK
-aws-sdk-s3 = "1.0"
-aws-config = { version = "1.0", features = ["behavior-version-latest"] }
+aws-config = {version = "1.0", features = ["behavior-version-latest"]}
 aws-credential-types = "1.0"
+aws-sdk-s3 = "1.0"
 
 # JWT Authentication
-jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
+jsonwebtoken = {version = "10.2", features = ["rust_crypto"]}
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
+serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0"
+serde_yaml = "0.9"
 
 # Configuration
+clap = {version = "4.4", features = ["derive"]}
 config = "0.14"
-clap = { version = "4.4", features = ["derive"] }
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-subscriber = {version = "0.3", features = ["json", "env-filter"]}
 
 # Metrics
 prometheus = "0.13"
 
 # HTTP
-hyper = "1.0"
-hyper-util = { version = "0.1", features = ["tokio", "client", "client-legacy", "http1"] }
 http = "1.0"
 http-body-util = "0.1"
+hyper = "1.0"
+hyper-util = {version = "0.1", features = ["tokio", "client", "client-legacy", "http1"]}
 
 # Error Handling
 anyhow = "1.0"
@@ -60,41 +60,45 @@ thiserror = "1.0"
 
 # Utilities
 bytes = "1.5"
+chrono = {version = "0.4", features = ["serde"]}
 futures = "0.3"
-regex = "1.10"
-uuid = { version = "1.6", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
-urlencoding = "2.1"
-signal-hook = "0.3"
 libc = "0.2"
 parking_lot = "0.12"
+regex = "1.10"
+signal-hook = "0.3"
+urlencoding = "2.1"
+uuid = {version = "1.6", features = ["v4"]}
 
 # Rate Limiting
 governor = "0.6"
 nonzero_ext = "0.3"
 
 # Cryptography
-sha2 = "0.10"
-hmac = "0.12"
 hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
 
 # Caching
-moka = { version = "0.12", features = ["future"] }
-redis = { version = "1.0.0-rc.4", features = ["tokio-comp", "connection-manager"] }
+moka = {version = "0.12", features = ["future"]}
+redis = {version = "1.0.0-rc.4", features = ["tokio-comp", "connection-manager"]}
 rmp-serde = "1.1"
 
+# Compression (Phase 40)
+brotli = "7.0"
+flate2 = "1.0"
+
 # HTTP Client (for OPA integration)
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = {version = "0.11", features = ["json"]}
 
 # System utilities
 hostname = "0.4"
 
 # OpenTelemetry (Phase 34: Enhanced Observability)
-opentelemetry = "0.27"
-opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.27", features = ["tonic", "grpc-tonic"] }
-tracing-opentelemetry = "0.28"
 arc-swap = "1.7.1"
+opentelemetry = "0.27"
+opentelemetry-otlp = {version = "0.27", features = ["tonic", "grpc-tonic"]}
+opentelemetry_sdk = {version = "0.27", features = ["rt-tokio"]}
+tracing-opentelemetry = "0.28"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Using low-level io-uring instead of tokio-uring
@@ -104,58 +108,58 @@ io-uring = "0.7"
 
 [dev-dependencies]
 # Testing
-rstest = "0.18"
-mockall = "0.12"
-testcontainers = "0.15"
-testcontainers-modules = { version = "0.3", features = ["localstack", "redis"] }
-tempfile = "3.8"
-reqwest = { version = "0.11", features = ["blocking", "json"] }
-tokio-test = "0.4"
 log = "0.4"
+mockall = "0.12"
+reqwest = {version = "0.11", features = ["blocking", "json"]}
+rstest = "0.18"
+tempfile = "3.8"
+testcontainers = "0.15"
+testcontainers-modules = {version = "0.3", features = ["localstack", "redis"]}
+tokio-test = "0.4"
 # env_logger removed - use tracing-subscriber in tests instead
 
 # Cryptography for JWT algorithm tests (RS256/ES256 key generation)
-rsa = { version = "0.9", features = ["std"] }
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
-rand = "0.8"
 base64 = "0.22"
+p256 = {version = "0.13", features = ["ecdsa", "pkcs8", "pem"]}
+rand = "0.8"
+rsa = {version = "0.9", features = ["std"]}
 
 # Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = {version = "0.5", features = ["html_reports"]}
 
 [profile.release]
-opt-level = 3
-lto = true
 codegen-units = 1
+lto = true
+opt-level = 3
 
 [profile.bench]
 inherits = "release"
 
 # Benchmarks for performance testing
 [[bench]]
+harness = false
 name = "jwt_validation"
-harness = false
 
 [[bench]]
+harness = false
 name = "routing"
-harness = false
 
 [[bench]]
+harness = false
 name = "s3_signature"
-harness = false
 
 [[bench]]
+harness = false
 name = "disk_cache"
-harness = false
 
 [[bench]]
+harness = false
 name = "backend_comparison"
-harness = false
 
 [[bench]]
+harness = false
 name = "cache_comparison"
-harness = false
 
 [[bench]]
-name = "request_processing"
 harness = false
+name = "request_processing"
