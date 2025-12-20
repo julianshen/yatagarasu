@@ -31,6 +31,7 @@ pub use compress::{compress, decompress};
 pub use config::CompressionConfig;
 pub use error::CompressionError;
 pub use negotiation::negotiate_compression;
+pub use request::{decompress_request_body, parse_content_encoding};
 
 #[cfg(test)]
 mod tests {
