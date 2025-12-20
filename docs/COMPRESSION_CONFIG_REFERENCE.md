@@ -3,12 +3,14 @@
 ## Global Configuration Options
 
 ### `compression.enabled`
+
 - **Type**: `boolean`
 - **Default**: `false`
 - **Description**: Enable/disable compression globally
 - **Example**: `enabled: true`
 
 ### `compression.default_algorithm`
+
 - **Type**: `string`
 - **Default**: `"gzip"`
 - **Valid Values**: `"gzip"`, `"brotli"`, `"deflate"`
@@ -16,43 +18,54 @@
 - **Example**: `default_algorithm: "brotli"`
 
 ### `compression.compression_level`
+
 - **Type**: `integer`
 - **Default**: `6`
-- **Valid Range**: `1-11`
+- **Valid Range**: `1-9` (safe for all algorithms)
 - **Description**: Default compression level for all algorithms
   - 1-3: Fast compression, lower ratio
   - 4-6: Balanced (recommended)
   - 7-9: Slower, better ratio
-  - 10-11: Very slow, best ratio
+- **Note**: Global level is limited to 1-9 to be safe for gzip/deflate. Brotli supports 1-11 via per-algorithm config.
 - **Example**: `compression_level: 6`
 
 ### `compression.min_response_size_bytes`
+
 - **Type**: `integer`
 - **Default**: `1024` (1KB)
 - **Description**: Minimum response size to compress
 - **Example**: `min_response_size_bytes: 512`
 
 ### `compression.max_response_size_bytes`
+
 - **Type**: `integer`
 - **Default**: `104857600` (100MB)
 - **Description**: Maximum response size to compress
 - **Example**: `max_response_size_bytes: 50000000`
 
 ### `compression.algorithms`
+
 - **Type**: `object`
 - **Description**: Per-algorithm configuration
 - **Subkeys**:
-  - `gzip.level`: Compression level for gzip (1-11)
+  - `gzip.enabled`: Whether gzip is enabled (default: true)
+  - `gzip.level`: Compression level for gzip (1-9)
+  - `brotli.enabled`: Whether brotli is enabled (default: true)
   - `brotli.level`: Compression level for brotli (1-11)
-  - `deflate.level`: Compression level for deflate (1-11)
+  - `deflate.enabled`: Whether deflate is enabled (default: true)
+  - `deflate.level`: Compression level for deflate (1-9)
+- **Note**: Use `br` or `brotli` as the key for brotli configuration.
 - **Example**:
   ```yaml
   algorithms:
     gzip:
+      enabled: true
       level: 6
-    brotli:
+    br:
+      enabled: true
       level: 8
     deflate:
+      enabled: true
       level: 5
   ```
 
@@ -81,6 +94,7 @@ buckets:
 ## Configuration Examples
 
 ### Example 1: Aggressive Compression (High Ratio)
+
 ```yaml
 compression:
   enabled: true
@@ -89,10 +103,12 @@ compression:
   min_response_size_bytes: 256
   max_response_size_bytes: 100000000
 ```
+
 - **Use Case**: Static content, CDN, low-bandwidth scenarios
 - **Trade-off**: Higher CPU usage, slower compression
 
 ### Example 2: Balanced Configuration (Recommended)
+
 ```yaml
 compression:
   enabled: true
@@ -101,10 +117,12 @@ compression:
   min_response_size_bytes: 1024
   max_response_size_bytes: 104857600
 ```
+
 - **Use Case**: General purpose, most scenarios
 - **Trade-off**: Good balance of speed and compression
 
 ### Example 3: Fast Compression (Low Latency)
+
 ```yaml
 compression:
   enabled: true
@@ -113,10 +131,12 @@ compression:
   min_response_size_bytes: 2048
   max_response_size_bytes: 10485760
 ```
+
 - **Use Case**: Real-time content, high-traffic scenarios
 - **Trade-off**: Lower compression ratio, faster
 
 ### Example 4: Selective Compression (Per-Bucket)
+
 ```yaml
 compression:
   enabled: true
@@ -129,13 +149,13 @@ buckets:
       enabled: true
       default_algorithm: "brotli"
       compression_level: 9
-  
+
   - name: "api-responses"
     compression:
       enabled: true
       default_algorithm: "gzip"
       compression_level: 6
-  
+
   - name: "video-files"
     compression:
       enabled: false
@@ -153,6 +173,7 @@ compression:
 ```
 
 Environment variables:
+
 ```bash
 export COMPRESSION_ENABLED=true
 export COMPRESSION_ALGORITHM=gzip
@@ -173,6 +194,7 @@ Invalid configurations will cause startup failure with clear error messages.
 ## Performance Tuning Guide
 
 ### For Maximum Compression Ratio
+
 ```yaml
 compression:
   default_algorithm: "brotli"
@@ -181,6 +203,7 @@ compression:
 ```
 
 ### For Minimum Latency
+
 ```yaml
 compression:
   default_algorithm: "gzip"
@@ -189,6 +212,7 @@ compression:
 ```
 
 ### For Balanced Performance
+
 ```yaml
 compression:
   default_algorithm: "gzip"
@@ -197,6 +221,7 @@ compression:
 ```
 
 ### For CPU-Constrained Environments
+
 ```yaml
 compression:
   default_algorithm: "gzip"
@@ -204,4 +229,3 @@ compression:
   min_response_size_bytes: 4096
   max_response_size_bytes: 10485760
 ```
-

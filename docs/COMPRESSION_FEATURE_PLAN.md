@@ -8,6 +8,7 @@
 ## Overview
 
 Phase 40 adds comprehensive request/response compression support to Yatagarasu, enabling:
+
 - **Response compression** (gzip, brotli, deflate) with Accept-Encoding negotiation
 - **Request decompression** for compressed request bodies
 - **Smart caching** of compressed variants with Vary header support
@@ -47,11 +48,11 @@ Stream to Client
 
 ## Compression Algorithms
 
-| Algorithm | Speed | Ratio | Use Case |
-|-----------|-------|-------|----------|
-| gzip      | Fast  | Good  | Default, widely supported |
+| Algorithm | Speed | Ratio | Use Case                        |
+| --------- | ----- | ----- | ------------------------------- |
+| gzip      | Fast  | Good  | Default, widely supported       |
 | brotli    | Slow  | Best  | Static content, pre-compression |
-| deflate   | Fast  | Fair  | Legacy support |
+| deflate   | Fast  | Fair  | Legacy support                  |
 
 ## Configuration Example
 
@@ -59,30 +60,31 @@ Stream to Client
 compression:
   enabled: true
   default_algorithm: "gzip"
-  compression_level: 6  # 1-11 for gzip, 1-11 for brotli
-  min_response_size_bytes: 1024  # Don't compress < 1KB
-  max_response_size_bytes: 104857600  # Don't compress > 100MB
+  compression_level: 6 # 1-9 (safe for all algorithms)
+  min_response_size_bytes: 1024 # Don't compress < 1KB
+  max_response_size_bytes: 104857600 # Don't compress > 100MB
   algorithms:
-    - name: "gzip"
+    gzip:
       enabled: true
-      level: 6
-    - name: "brotli"
+      level: 6 # 1-9 for gzip
+    br:
       enabled: true
-      level: 4
-    - name: "deflate"
+      level: 6 # 1-11 for brotli
+    deflate:
       enabled: false
+      level: 5 # 1-9 for deflate
 
 buckets:
   - name: "public"
     compression:
       enabled: true
-      algorithms: ["gzip", "brotli"]
-      min_size: 512  # Override global setting
+      min_response_size_bytes: 512 # Override global setting
 ```
 
 ## Phase Breakdown
 
 ### Phase 40.1: Infrastructure (Core Types & Config)
+
 - Compression enum (Gzip, Brotli, Deflate)
 - CompressionConfig struct
 - CompressionError type
@@ -90,6 +92,7 @@ buckets:
 - Configuration parsing & validation
 
 ### Phase 40.2: Response Compression
+
 - Accept-Encoding header parsing
 - Algorithm selection (client + server preference)
 - Response compression middleware
@@ -97,18 +100,21 @@ buckets:
 - Streaming compression support
 
 ### Phase 40.3: Request Decompression
+
 - Content-Encoding header parsing
 - Request body decompression
 - Error handling for invalid compressed data
 - Transparent decompression in pipeline
 
 ### Phase 40.4: Cache Integration
+
 - Vary header handling (Accept-Encoding)
 - Compressed variant caching
 - Cache key variations
 - Conditional compression based on cache state
 
 ### Phase 40.5: Configuration & Tuning
+
 - Per-bucket compression settings
 - Global compression defaults
 - Compression level tuning
@@ -116,6 +122,7 @@ buckets:
 - Algorithm enable/disable
 
 ### Phase 40.6: Metrics & Observability
+
 - Compression ratio metrics
 - Algorithm usage counters
 - Compression time histograms
@@ -123,6 +130,7 @@ buckets:
 - Performance impact analysis
 
 ### Phase 40.7: Testing & Benchmarking
+
 - Unit tests for all algorithms
 - Integration tests with real compression
 - Benchmark compression performance
@@ -130,6 +138,7 @@ buckets:
 - Test error scenarios
 
 ### Phase 40.8: Documentation
+
 - Configuration reference
 - Performance characteristics
 - Best practices guide
@@ -168,4 +177,3 @@ brotli = "7.0"  # brotli compression
 - ✅ >90% test coverage
 - ✅ Zero clippy warnings
 - ✅ Documentation complete
-

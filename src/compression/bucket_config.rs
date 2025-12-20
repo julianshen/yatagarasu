@@ -53,11 +53,11 @@ impl BucketCompressionConfig {
 
     /// Validate bucket configuration
     pub fn validate(&self) -> Result<(), CompressionError> {
-        // Validate compression level if set
+        // Validate compression level if set (use 1-9 as it's safe for all algorithms)
         if let Some(level) = self.compression_level {
-            if !(1..=11).contains(&level) {
+            if !(1..=9).contains(&level) {
                 return Err(CompressionError::InvalidConfig(format!(
-                    "bucket compression level must be 1-11, got {}",
+                    "bucket compression level must be 1-9 (safe for all algorithms), got {}",
                     level
                 )));
             }
@@ -76,16 +76,26 @@ impl BucketCompressionConfig {
         // Validate per-algorithm settings if present
         if let Some(algos) = &self.algorithms {
             for (name, config) in algos {
-                if !(1..=11).contains(&config.level) {
+                let max_level = Self::max_level_for_algorithm(name);
+                if !(1..=max_level).contains(&config.level) {
                     return Err(CompressionError::InvalidConfig(format!(
-                        "algorithm {} level must be 1-11, got {}",
-                        name, config.level
+                        "algorithm '{}' level must be 1-{}, got {}",
+                        name, max_level, config.level
                     )));
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Get the maximum compression level for a given algorithm name
+    fn max_level_for_algorithm(name: &str) -> u32 {
+        match name.to_lowercase().as_str() {
+            "gzip" | "deflate" => 9, // flate2 supports 0-9, we use 1-9
+            "br" | "brotli" => 11,   // brotli supports 0-11, we use 1-11
+            _ => 9,                  // Safe default for unknown algorithms
+        }
     }
 }
 
@@ -149,7 +159,8 @@ mod tests {
     #[test]
     fn test_bucket_config_validate_invalid_level() {
         let mut config = BucketCompressionConfig::new();
-        config.compression_level = Some(12);
+        // Level 10+ is invalid for bucket config (must be safe for all algorithms)
+        config.compression_level = Some(10);
         assert!(config.validate().is_err());
     }
 
@@ -158,6 +169,57 @@ mod tests {
         let mut config = BucketCompressionConfig::new();
         config.min_response_size_bytes = Some(10_000_000);
         config.max_response_size_bytes = Some(1024);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_bucket_config_validate_per_algorithm_levels() {
+        let mut config = BucketCompressionConfig::new();
+        let mut algos = std::collections::HashMap::new();
+
+        // gzip level 10 should fail (max 9)
+        algos.insert(
+            "gzip".to_string(),
+            AlgorithmConfig::new(true, 10).unwrap_or(AlgorithmConfig {
+                enabled: true,
+                level: 10,
+            }),
+        );
+        config.algorithms = Some(algos.clone());
+        assert!(config.validate().is_err());
+
+        // Reset with valid gzip level
+        algos.clear();
+        algos.insert(
+            "gzip".to_string(),
+            AlgorithmConfig {
+                enabled: true,
+                level: 6,
+            },
+        );
+        config.algorithms = Some(algos.clone());
+        assert!(config.validate().is_ok());
+
+        // brotli level 11 should succeed
+        algos.insert(
+            "br".to_string(),
+            AlgorithmConfig {
+                enabled: true,
+                level: 11,
+            },
+        );
+        config.algorithms = Some(algos.clone());
+        assert!(config.validate().is_ok());
+
+        // brotli level 12 should fail
+        algos.insert(
+            "br".to_string(),
+            AlgorithmConfig {
+                enabled: true,
+                level: 12,
+            },
+        );
+        config.algorithms = Some(algos);
         assert!(config.validate().is_err());
     }
 }

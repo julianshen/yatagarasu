@@ -17,7 +17,7 @@ pub struct CompressionConfig {
     #[serde(default = "default_algorithm")]
     pub default_algorithm: String,
 
-    /// Default compression level (1-11)
+    /// Default compression level (1-9, safe for all algorithms)
     #[serde(default = "default_compression_level")]
     pub compression_level: u32,
 
@@ -54,8 +54,18 @@ fn default_algorithms() -> HashMap<String, AlgorithmConfig> {
     let mut map = HashMap::new();
     map.insert("gzip".to_string(), AlgorithmConfig::gzip_default());
     map.insert("br".to_string(), AlgorithmConfig::brotli_default());
+    map.insert("brotli".to_string(), AlgorithmConfig::brotli_default()); // Accept both "br" and "brotli"
     map.insert("deflate".to_string(), AlgorithmConfig::deflate_default());
     map
+}
+
+/// Get the maximum compression level for a given algorithm name
+fn max_level_for_algorithm(name: &str) -> u32 {
+    match name.to_lowercase().as_str() {
+        "gzip" | "deflate" => 9, // flate2 supports 0-9, we use 1-9
+        "br" | "brotli" => 11,   // brotli supports 0-11, we use 1-11
+        _ => 9,                  // Safe default for unknown algorithms
+    }
 }
 
 impl CompressionConfig {
@@ -73,10 +83,10 @@ impl CompressionConfig {
 
     /// Validate the compression configuration
     pub fn validate(&self) -> Result<(), CompressionError> {
-        // Validate compression level
-        if !(1..=11).contains(&self.compression_level) {
+        // Validate compression level (use 1-9 as it's safe for all algorithms)
+        if !(1..=9).contains(&self.compression_level) {
             return Err(CompressionError::InvalidConfig(format!(
-                "compression_level must be 1-11, got {}",
+                "compression_level must be 1-9 (safe for all algorithms), got {}",
                 self.compression_level
             )));
         }
@@ -98,12 +108,13 @@ impl CompressionConfig {
             ));
         }
 
-        // Validate each algorithm's level
+        // Validate each algorithm's level based on its type
         for (name, cfg) in &self.algorithms {
-            if !(1..=11).contains(&cfg.level) {
+            let max_level = max_level_for_algorithm(name);
+            if !(1..=max_level).contains(&cfg.level) {
                 return Err(CompressionError::InvalidConfig(format!(
-                    "algorithm {} level must be 1-11, got {}",
-                    name, cfg.level
+                    "algorithm '{}' level must be 1-{}, got {}",
+                    name, max_level, cfg.level
                 )));
             }
         }
@@ -112,8 +123,16 @@ impl CompressionConfig {
     }
 
     /// Get configuration for a specific algorithm
+    /// Looks up by header value first ("br"), then by full name ("brotli")
     pub fn get_algorithm(&self, algo: Compression) -> Option<&AlgorithmConfig> {
-        self.algorithms.get(algo.to_header_value())
+        // Try header value first (e.g., "br", "gzip", "deflate")
+        self.algorithms
+            .get(algo.to_header_value())
+            // Also try alternative names for brotli
+            .or_else(|| match algo {
+                Compression::Brotli => self.algorithms.get("brotli"),
+                _ => None,
+            })
     }
 
     /// Check if an algorithm is enabled
@@ -156,7 +175,28 @@ mod tests {
         config.compression_level = 0;
         assert!(config.validate().is_err());
 
-        config.compression_level = 12;
+        // Level 10+ is invalid for global config (must be safe for all algorithms)
+        config.compression_level = 10;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_compression_config_validate_per_algorithm_levels() {
+        let mut config = CompressionConfig::new();
+
+        // gzip level 10 should fail (max 9)
+        config.algorithms.get_mut("gzip").unwrap().level = 10;
+        assert!(config.validate().is_err());
+
+        // Reset gzip to valid level
+        config.algorithms.get_mut("gzip").unwrap().level = 6;
+
+        // brotli level 11 should succeed (brotli supports 1-11)
+        config.algorithms.get_mut("br").unwrap().level = 11;
+        assert!(config.validate().is_ok());
+
+        // brotli level 12 should fail
+        config.algorithms.get_mut("br").unwrap().level = 12;
         assert!(config.validate().is_err());
     }
 

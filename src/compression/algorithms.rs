@@ -61,12 +61,24 @@ impl fmt::Display for Compression {
     }
 }
 
+/// Default enabled state for algorithms
+fn default_enabled() -> bool {
+    true
+}
+
+/// Default compression level
+fn default_level() -> u32 {
+    6
+}
+
 /// Configuration for a specific compression algorithm
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlgorithmConfig {
-    /// Whether this algorithm is enabled
+    /// Whether this algorithm is enabled (default: true)
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Compression level (1-11, meaning varies by algorithm)
+    /// Compression level (1-9 for gzip/deflate, 1-11 for brotli; default: 6)
+    #[serde(default = "default_level")]
     pub level: u32,
 }
 

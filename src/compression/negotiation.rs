@@ -52,7 +52,7 @@ impl EncodingPreference {
 /// 1. Parse Accept-Encoding header into preferences with quality values
 /// 2. Sort by quality (highest first)
 /// 3. Select first enabled algorithm from preferences
-/// 4. Fall back to default algorithm if available
+/// 4. Return None if no acceptable algorithm is found (no fallback)
 pub fn negotiate_compression(
     accept_encoding: Option<&str>,
     config: &CompressionConfig,

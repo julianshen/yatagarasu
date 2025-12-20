@@ -4,10 +4,14 @@
 //! - Request body decompression (gzip, brotli, deflate)
 //! - Content-Encoding header parsing
 //! - Error handling for invalid compressed data
+//! - Protection against decompression bombs with size limits
 
 use super::algorithms::Compression;
 use super::compress::decompress;
 use super::error::CompressionError;
+
+/// Default maximum decompressed size (100MB) to prevent decompression bombs
+pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 100 * 1024 * 1024;
 
 /// Parse Content-Encoding header to determine compression algorithm
 ///
@@ -31,15 +35,48 @@ pub fn parse_content_encoding(content_encoding: &str) -> Result<Compression, Com
 /// # Returns
 /// * `Ok(Vec<u8>)` - Decompressed body (or original if no encoding)
 /// * `Err(CompressionError)` - Decompression failed or unsupported encoding
+///
+/// # Security
+/// Uses DEFAULT_MAX_DECOMPRESSED_SIZE to prevent decompression bombs.
+/// For custom limits, use `decompress_request_body_with_limit`.
 pub fn decompress_request_body(
     body: &[u8],
     content_encoding: Option<&str>,
+) -> Result<Vec<u8>, CompressionError> {
+    decompress_request_body_with_limit(body, content_encoding, DEFAULT_MAX_DECOMPRESSED_SIZE)
+}
+
+/// Decompress request body with a custom size limit
+///
+/// # Arguments
+/// * `body` - Request body data
+/// * `content_encoding` - Value of Content-Encoding header (optional)
+/// * `max_size` - Maximum allowed decompressed size in bytes
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` - Decompressed body (or original if no encoding)
+/// * `Err(CompressionError)` - Decompression failed, unsupported encoding, or size limit exceeded
+pub fn decompress_request_body_with_limit(
+    body: &[u8],
+    content_encoding: Option<&str>,
+    max_size: usize,
 ) -> Result<Vec<u8>, CompressionError> {
     match content_encoding {
         None => Ok(body.to_vec()), // No compression
         Some(encoding) => {
             let algorithm = parse_content_encoding(encoding)?;
-            decompress(body, algorithm)
+            let decompressed = decompress(body, algorithm)?;
+
+            // Check decompressed size limit to prevent decompression bombs
+            if decompressed.len() > max_size {
+                return Err(CompressionError::DecompressionFailed(format!(
+                    "decompressed size {} exceeds maximum allowed size {}",
+                    decompressed.len(),
+                    max_size
+                )));
+            }
+
+            Ok(decompressed)
         }
     }
 }
@@ -139,5 +176,54 @@ mod tests {
             Err(CompressionError::InvalidAlgorithm(_)) => (),
             _ => panic!("Expected InvalidAlgorithm error"),
         }
+    }
+
+    #[test]
+    fn test_decompress_request_body_with_limit_exceeds() {
+        // Create test data that decompresses to more than the limit
+        let original = vec![b'A'; 1000]; // 1000 bytes
+        let mut compressed = Vec::new();
+        {
+            use std::io::Write;
+            let mut encoder =
+                flate2::write::GzEncoder::new(&mut compressed, flate2::Compression::default());
+            encoder.write_all(&original).unwrap();
+            encoder.finish().unwrap();
+        }
+
+        // Set limit to 500 bytes - should fail
+        let result = decompress_request_body_with_limit(&compressed, Some("gzip"), 500);
+        assert!(result.is_err());
+        match result {
+            Err(CompressionError::DecompressionFailed(msg)) => {
+                assert!(msg.contains("exceeds maximum allowed size"));
+            }
+            _ => panic!("Expected DecompressionFailed error for size limit"),
+        }
+    }
+
+    #[test]
+    fn test_decompress_request_body_with_limit_within() {
+        // Create test data that decompresses within the limit
+        let original = vec![b'A'; 500]; // 500 bytes
+        let mut compressed = Vec::new();
+        {
+            use std::io::Write;
+            let mut encoder =
+                flate2::write::GzEncoder::new(&mut compressed, flate2::Compression::default());
+            encoder.write_all(&original).unwrap();
+            encoder.finish().unwrap();
+        }
+
+        // Set limit to 1000 bytes - should succeed
+        let result = decompress_request_body_with_limit(&compressed, Some("gzip"), 1000);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), original);
+    }
+
+    #[test]
+    fn test_default_max_decompressed_size() {
+        // Verify the default constant is 100MB
+        assert_eq!(DEFAULT_MAX_DECOMPRESSED_SIZE, 100 * 1024 * 1024);
     }
 }
