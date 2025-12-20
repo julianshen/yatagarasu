@@ -19,6 +19,7 @@ pub mod proxy;
 pub mod rate_limit; // Phase 21: Rate Limiting
 pub mod reload; // Phase 19: Configuration Hot Reload
 pub mod replica_set; // Phase 23: High Availability Bucket Replication
+pub mod request_coalescing; // Phase 38: Request Coalescing
 pub mod resources; // Phase 21: Resource Monitoring & Exhaustion Prevention
 pub mod retry; // Phase 21: Retry Logic with Exponential Backoff
 pub mod router;

@@ -23,6 +23,7 @@ use crate::metrics::Metrics;
 use crate::opa::{OpaCache, OpaClient, OpaClientConfig, SharedOpaClient};
 use crate::openfga::OpenFgaClient;
 use crate::rate_limit::RateLimitManager;
+use crate::request_coalescing::RequestCoalescer;
 use crate::resources::ResourceMonitor;
 use crate::retry::RetryPolicy;
 use crate::router::Router;
@@ -39,6 +40,7 @@ pub(super) struct ProxyComponents {
     pub metrics: Arc<Metrics>,
     pub resource_monitor: Arc<ResourceMonitor>,
     pub request_semaphore: Arc<Semaphore>,
+    pub request_coalescer: RequestCoalescer,
     pub circuit_breakers: HashMap<String, Arc<CircuitBreaker>>,
     pub rate_limit_manager: Option<Arc<RateLimitManager>>,
     pub retry_policies: HashMap<String, RetryPolicy>,
@@ -144,6 +146,7 @@ pub(super) fn initialize_from_config(config: Config) -> ProxyComponents {
         metrics,
         resource_monitor,
         request_semaphore,
+        request_coalescer: RequestCoalescer::new(),
         circuit_breakers,
         rate_limit_manager,
         retry_policies,
