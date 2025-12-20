@@ -36,6 +36,7 @@ mod integration {
     mod redis_auth_test; // Phase 53.2: Redis Advanced Configuration Tests
     mod replica_failover_test; // Phase 59.3: Replica Failover Integration Tests
     mod replica_set_test;
+    mod request_coalescing_test; // Phase 38: Request Coalescing
     mod retry_test;
     mod security_test;
     mod server_basic_test;

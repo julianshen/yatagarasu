@@ -41,6 +41,7 @@ use crate::openfga::{
 use crate::pipeline::RequestContext;
 use crate::rate_limit::RateLimitManager;
 use crate::reload::ReloadManager;
+use crate::request_coalescing::RequestCoalescer;
 use crate::resources::ResourceMonitor;
 use crate::retry::RetryPolicy;
 use crate::router::Router;
@@ -62,6 +63,10 @@ pub struct YatagarasuProxy {
     reload_manager: Option<Arc<ReloadManager>>,
     resource_monitor: Arc<ResourceMonitor>,
     request_semaphore: Arc<Semaphore>,
+    /// Request coalescer for deduplicating concurrent S3 requests (Phase 38)
+    /// Will be used in Phase 38.2 to integrate coalescing into request handling
+    #[allow(dead_code)]
+    request_coalescer: RequestCoalescer,
     circuit_breakers: Arc<HashMap<String, Arc<CircuitBreaker>>>,
     rate_limit_manager: Option<Arc<RateLimitManager>>,
     /// Retry policies per bucket for automatic retry on transient S3 failures
@@ -103,6 +108,7 @@ impl YatagarasuProxy {
             reload_manager,
             resource_monitor: components.resource_monitor,
             request_semaphore: components.request_semaphore,
+            request_coalescer: components.request_coalescer,
             circuit_breakers: Arc::new(components.circuit_breakers),
             rate_limit_manager: components.rate_limit_manager,
             retry_policies: Arc::new(components.retry_policies),
