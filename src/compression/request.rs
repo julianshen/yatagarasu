@@ -65,17 +65,7 @@ pub fn decompress_request_body_with_limit(
         None => Ok(body.to_vec()), // No compression
         Some(encoding) => {
             let algorithm = parse_content_encoding(encoding)?;
-            let decompressed = decompress(body, algorithm)?;
-
-            // Check decompressed size limit to prevent decompression bombs
-            if decompressed.len() > max_size {
-                return Err(CompressionError::DecompressionFailed(format!(
-                    "decompressed size {} exceeds maximum allowed size {}",
-                    decompressed.len(),
-                    max_size
-                )));
-            }
-
+            let decompressed = decompress(body, algorithm, max_size)?;
             Ok(decompressed)
         }
     }

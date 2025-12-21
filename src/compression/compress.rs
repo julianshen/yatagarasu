@@ -31,15 +31,20 @@ pub fn compress(
 /// # Arguments
 /// * `data` - Compressed data
 /// * `algorithm` - Compression algorithm used
+/// * `max_size` - Maximum allowed decompressed size in bytes
 ///
 /// # Returns
 /// * `Ok(Vec<u8>)` - Decompressed data
-/// * `Err(CompressionError)` - Decompression failed
-pub fn decompress(data: &[u8], algorithm: Compression) -> Result<Vec<u8>, CompressionError> {
+/// * `Err(CompressionError)` - Decompression failed or size limit exceeded
+pub fn decompress(
+    data: &[u8],
+    algorithm: Compression,
+    max_size: usize,
+) -> Result<Vec<u8>, CompressionError> {
     match algorithm {
-        Compression::Gzip => decompress_gzip(data),
-        Compression::Brotli => decompress_brotli(data),
-        Compression::Deflate => decompress_deflate(data),
+        Compression::Gzip => decompress_gzip(data, max_size),
+        Compression::Brotli => decompress_brotli(data, max_size),
+        Compression::Deflate => decompress_deflate(data, max_size),
     }
 }
 
@@ -55,12 +60,20 @@ fn compress_gzip(data: &[u8], level: u32) -> Result<Vec<u8>, CompressionError> {
 }
 
 /// Decompress gzip data
-fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, CompressionError> {
-    let mut decoder = flate2::read::GzDecoder::new(data);
+fn decompress_gzip(data: &[u8], max_size: usize) -> Result<Vec<u8>, CompressionError> {
+    let decoder = flate2::read::GzDecoder::new(data);
+    let mut reader = decoder.take((max_size + 1) as u64);
     let mut result = Vec::new();
-    decoder
+    reader
         .read_to_end(&mut result)
         .map_err(|e| CompressionError::DecompressionFailed(e.to_string()))?;
+
+    if result.len() > max_size {
+        return Err(CompressionError::DecompressionFailed(format!(
+            "decompressed size exceeds maximum allowed size {}",
+            max_size
+        )));
+    }
     Ok(result)
 }
 
@@ -84,12 +97,20 @@ fn compress_brotli(data: &[u8], level: u32) -> Result<Vec<u8>, CompressionError>
 }
 
 /// Decompress brotli data
-fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, CompressionError> {
+fn decompress_brotli(data: &[u8], max_size: usize) -> Result<Vec<u8>, CompressionError> {
     let mut result = Vec::new();
-    let mut decompressor = brotli::Decompressor::new(data, 4096);
-    decompressor
+    let decompressor = brotli::Decompressor::new(data, 4096);
+    let mut reader = decompressor.take((max_size + 1) as u64);
+    reader
         .read_to_end(&mut result)
         .map_err(|e| CompressionError::DecompressionFailed(e.to_string()))?;
+
+    if result.len() > max_size {
+        return Err(CompressionError::DecompressionFailed(format!(
+            "decompressed size exceeds maximum allowed size {}",
+            max_size
+        )));
+    }
     Ok(result)
 }
 
@@ -106,12 +127,20 @@ fn compress_deflate(data: &[u8], level: u32) -> Result<Vec<u8>, CompressionError
 }
 
 /// Decompress deflate data
-fn decompress_deflate(data: &[u8]) -> Result<Vec<u8>, CompressionError> {
-    let mut decoder = flate2::read::DeflateDecoder::new(data);
+fn decompress_deflate(data: &[u8], max_size: usize) -> Result<Vec<u8>, CompressionError> {
+    let decoder = flate2::read::DeflateDecoder::new(data);
+    let mut reader = decoder.take((max_size + 1) as u64);
     let mut result = Vec::new();
-    decoder
+    reader
         .read_to_end(&mut result)
         .map_err(|e| CompressionError::DecompressionFailed(e.to_string()))?;
+
+    if result.len() > max_size {
+        return Err(CompressionError::DecompressionFailed(format!(
+            "decompressed size exceeds maximum allowed size {}",
+            max_size
+        )));
+    }
     Ok(result)
 }
 
@@ -133,7 +162,7 @@ mod tests {
         let data = create_test_data();
         let compressed = compress_gzip(&data, 6).unwrap();
         assert!(compressed.len() < data.len());
-        let decompressed = decompress_gzip(&compressed).unwrap();
+        let decompressed = decompress_gzip(&compressed, 1024 * 1024).unwrap();
         assert_eq!(decompressed, data);
     }
 
@@ -142,7 +171,7 @@ mod tests {
         let data = create_test_data();
         let compressed = compress_deflate(&data, 6).unwrap();
         assert!(compressed.len() < data.len());
-        let decompressed = decompress_deflate(&compressed).unwrap();
+        let decompressed = decompress_deflate(&compressed, 1024 * 1024).unwrap();
         assert_eq!(decompressed, data);
     }
 
@@ -151,7 +180,7 @@ mod tests {
         let data = create_test_data();
         let compressed = compress_brotli(&data, 4).unwrap();
         assert!(compressed.len() < data.len());
-        let decompressed = decompress_brotli(&compressed).unwrap();
+        let decompressed = decompress_brotli(&compressed, 1024 * 1024).unwrap();
         assert_eq!(decompressed, data);
     }
 }

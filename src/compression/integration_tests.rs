@@ -56,7 +56,7 @@ mod tests {
     fn test_compression_reversibility_gzip() {
         let original = generate_test_data("text/plain", 10000);
         let compressed = compress(&original, Compression::Gzip, 6).unwrap();
-        let decompressed = decompress(&compressed, Compression::Gzip).unwrap();
+        let decompressed = decompress(&compressed, Compression::Gzip, 1024 * 1024).unwrap();
         assert_eq!(original, decompressed);
     }
 
@@ -64,7 +64,7 @@ mod tests {
     fn test_compression_reversibility_brotli() {
         let original = generate_test_data("text/plain", 10000);
         let compressed = compress(&original, Compression::Brotli, 6).unwrap();
-        let decompressed = decompress(&compressed, Compression::Brotli).unwrap();
+        let decompressed = decompress(&compressed, Compression::Brotli, 1024 * 1024).unwrap();
         assert_eq!(original, decompressed);
     }
 
@@ -72,7 +72,7 @@ mod tests {
     fn test_compression_reversibility_deflate() {
         let original = generate_test_data("text/plain", 10000);
         let compressed = compress(&original, Compression::Deflate, 6).unwrap();
-        let decompressed = decompress(&compressed, Compression::Deflate).unwrap();
+        let decompressed = decompress(&compressed, Compression::Deflate, 1024 * 1024).unwrap();
         assert_eq!(original, decompressed);
     }
 
@@ -146,7 +146,7 @@ mod tests {
     fn test_compression_empty_data() {
         let empty = vec![];
         let compressed = compress(&empty, Compression::Gzip, 6).unwrap();
-        let decompressed = decompress(&compressed, Compression::Gzip).unwrap();
+        let decompressed = decompress(&compressed, Compression::Gzip, 1024 * 1024).unwrap();
         assert_eq!(decompressed, empty);
     }
 
@@ -154,7 +154,7 @@ mod tests {
     fn test_compression_single_byte() {
         let single = vec![42u8];
         let compressed = compress(&single, Compression::Gzip, 6).unwrap();
-        let decompressed = decompress(&compressed, Compression::Gzip).unwrap();
+        let decompressed = decompress(&compressed, Compression::Gzip, 1024 * 1024).unwrap();
         assert_eq!(decompressed, single);
     }
 
@@ -162,7 +162,7 @@ mod tests {
     fn test_compression_large_data() {
         let large = generate_test_data("text/plain", 1_000_000);
         let compressed = compress(&large, Compression::Gzip, 6).unwrap();
-        let decompressed = decompress(&compressed, Compression::Gzip).unwrap();
+        let decompressed = decompress(&compressed, Compression::Gzip, 10 * 1024 * 1024).unwrap();
         assert_eq!(decompressed, large);
     }
 }
