@@ -18,6 +18,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-object.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Track how many times the "fetch" operation runs
@@ -78,6 +79,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-object.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Track when followers complete
@@ -128,6 +130,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-object.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         assert_eq!(coalescer.in_flight_count().await, 0);
@@ -153,11 +156,13 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "object1.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let key2 = CacheKey {
             bucket: "test-bucket".to_string(),
             object_key: "object2.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let slot1 = coalescer.acquire(&key1).await;
@@ -186,6 +191,7 @@ mod tests {
                     bucket: "test-bucket".to_string(),
                     object_key: format!("object{}.txt", i),
                     etag: None,
+                    variant: None,
                 };
                 let slot = coalescer_clone.acquire(&key).await;
                 // Each key should have its own leader
@@ -216,6 +222,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-object.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         // First request

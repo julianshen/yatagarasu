@@ -40,6 +40,7 @@ async fn test_end_to_end_cache_hit_flow() {
         bucket: "test-bucket".to_string(),
         object_key: "test-file.txt".to_string(),
         etag: Some("etag123".to_string()),
+        variant: None,
     };
 
     let entry = CacheEntry::new(
@@ -123,6 +124,7 @@ async fn test_cache_promotion_disk_to_memory() {
         bucket: "test-bucket".to_string(),
         object_key: "promote-me.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let entry = CacheEntry::new(
@@ -193,6 +195,7 @@ async fn test_cache_stats_api_returns_accurate_data() {
             bucket: "stats-bucket".to_string(),
             object_key: format!("file-{}.txt", i),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -264,6 +267,7 @@ async fn test_cache_clear_api() {
             bucket: "purge-bucket".to_string(),
             object_key: format!("file-{}.txt", i),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -300,6 +304,7 @@ async fn test_cache_clear_api() {
             bucket: "purge-bucket".to_string(),
             object_key: format!("file-{}.txt", i),
             etag: None,
+            variant: None,
         };
 
         let result = cache.get(&key).await.unwrap();
@@ -322,6 +327,7 @@ async fn test_cache_survives_disk_persistence() {
         bucket: "persist-bucket".to_string(),
         object_key: "persistent-file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let entry = CacheEntry::new(
@@ -433,6 +439,7 @@ async fn test_s3_response_populates_cache() {
         bucket: "test-bucket".to_string(),
         object_key: "auto-cached-file.txt".to_string(),
         etag: Some("etag-auto".to_string()),
+        variant: None,
     };
 
     // STEP 1: Verify cache is initially empty
@@ -523,6 +530,7 @@ async fn test_cache_lookup_adds_less_than_1ms_latency() {
         bucket: "perf-bucket".to_string(),
         object_key: "perf-test.txt".to_string(),
         etag: Some("perf-etag".to_string()),
+        variant: None,
     };
 
     let entry = CacheEntry::new(
@@ -598,6 +606,7 @@ async fn test_cache_write_is_non_blocking() {
             bucket: "write-perf-bucket".to_string(),
             object_key: format!("file-{}.txt", i),
             etag: Some(format!("etag-{}", i)),
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -656,6 +665,7 @@ async fn test_promotion_is_async_and_does_not_slow_response() {
         bucket: "promotion-perf-bucket".to_string(),
         object_key: "promote-perf.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let entry = CacheEntry::new(
@@ -739,6 +749,7 @@ async fn test_metrics_track_cache_evictions() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key.clone(), entry).await.unwrap();
@@ -790,6 +801,7 @@ async fn test_metrics_track_cache_size_bytes() {
         bucket: "bucket1".to_string(),
         object_key: "largefile.bin".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key, entry).await.unwrap();
@@ -836,6 +848,7 @@ async fn test_metrics_track_cache_items_count() {
             bucket: "bucket1".to_string(),
             object_key: format!("{}_file{}.txt", unique_prefix, i),
             etag: None,
+            variant: None,
         };
 
         cache.set(key.clone(), entry.clone()).await.unwrap();

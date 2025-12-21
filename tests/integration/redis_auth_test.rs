@@ -66,6 +66,7 @@ fn test_key(name: &str) -> CacheKey {
         bucket: "test-bucket".to_string(),
         object_key: format!("test/{}.txt", name),
         etag: None,
+        variant: None,
     }
 }
 
@@ -395,6 +396,7 @@ async fn test_redis_maxmemory_allkeys_lru_eviction() {
             bucket: "eviction-bucket".to_string(),
             object_key: format!("file-{:04}.bin", i),
             etag: None,
+            variant: None,
         };
         let entry = CacheEntry::new(
             Bytes::from(data_10kb.clone()),
@@ -422,6 +424,7 @@ async fn test_redis_maxmemory_allkeys_lru_eviction() {
             bucket: "eviction-bucket".to_string(),
             object_key: format!("file-{:04}.bin", i),
             etag: None,
+            variant: None,
         };
         if let Ok(None) = cache.get(&key).await {
             evicted_count += 1;
@@ -443,6 +446,7 @@ async fn test_redis_maxmemory_allkeys_lru_eviction() {
             bucket: "eviction-bucket".to_string(),
             object_key: format!("file-{:04}.bin", i),
             etag: None,
+            variant: None,
         };
         if let Ok(Some(_)) = cache.get(&key).await {
             recent_found += 1;
@@ -491,6 +495,7 @@ async fn test_redis_maxmemory_noeviction_fails() {
             bucket: "noeviction-bucket".to_string(),
             object_key: format!("bigfile-{}.bin", i),
             etag: None,
+            variant: None,
         };
         let entry = CacheEntry::new(
             Bytes::from(data_100kb.clone()),

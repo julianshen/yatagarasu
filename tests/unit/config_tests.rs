@@ -2,6 +2,7 @@
 // Extracted from src/config/mod.rs for improved readability
 
 use yatagarasu::config::*;
+use yatagarasu::image_optimizer::ImageConfig;
 use yatagarasu::observability::ObservabilityConfig;
 
 fn test_can_create_empty_config_struct() {
@@ -18,6 +19,12 @@ fn test_can_create_empty_config_struct() {
         buckets: vec![],
         jwt: None,
         cache: None,
+        image_optimization: ImageConfig {
+            enabled: false,
+            max_width: 2048,
+            max_height: 2048,
+            default_quality: 80,
+        },
         audit_log: None,
         observability: ObservabilityConfig::default(),
         generation: 0,
