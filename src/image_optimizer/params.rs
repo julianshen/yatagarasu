@@ -511,6 +511,11 @@ impl ImageParams {
             }
         }
 
+        // auto_rotate is true by default, only include if disabled
+        if !self.auto_rotate {
+            parts.push("noauto".to_string());
+        }
+
         if self.flip_h {
             parts.push("fh".to_string());
         }

@@ -11,8 +11,12 @@ pub fn key_to_hash(key: &CacheKey) -> String {
     hasher.update(b":");
     hasher.update(key.object_key.as_bytes());
     if let Some(etag) = &key.etag {
-        hasher.update(b":");
+        hasher.update(b":e:");
         hasher.update(etag.as_bytes());
+    }
+    if let Some(variant) = &key.variant {
+        hasher.update(b":v:");
+        hasher.update(variant.as_bytes());
     }
     format!("{:x}", hasher.finalize())
 }
@@ -68,5 +72,56 @@ mod tests {
             variant: None,
         };
         assert_ne!(key_to_hash(&key1), key_to_hash(&key2));
+    }
+
+    #[test]
+    fn test_key_to_hash_different_variants() {
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "image.jpg".to_string(),
+            etag: None,
+            variant: Some("w800_h600_q80".to_string()),
+        };
+        let key2 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "image.jpg".to_string(),
+            etag: None,
+            variant: Some("w400_h300_q80".to_string()),
+        };
+        assert_ne!(key_to_hash(&key1), key_to_hash(&key2));
+    }
+
+    #[test]
+    fn test_key_to_hash_variant_vs_no_variant() {
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "image.jpg".to_string(),
+            etag: None,
+            variant: None,
+        };
+        let key2 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "image.jpg".to_string(),
+            etag: None,
+            variant: Some("w800_h600".to_string()),
+        };
+        assert_ne!(key_to_hash(&key1), key_to_hash(&key2));
+    }
+
+    #[test]
+    fn test_key_to_hash_same_variant() {
+        let key1 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "image.jpg".to_string(),
+            etag: None,
+            variant: Some("w800_h600_fwebp".to_string()),
+        };
+        let key2 = CacheKey {
+            bucket: "bucket".to_string(),
+            object_key: "image.jpg".to_string(),
+            etag: None,
+            variant: Some("w800_h600_fwebp".to_string()),
+        };
+        assert_eq!(key_to_hash(&key1), key_to_hash(&key2));
     }
 }
