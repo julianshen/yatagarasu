@@ -244,19 +244,19 @@ Add rotation and flip transformations. Filters and color adjustments are optiona
 
 ### Tasks
 
-#### 50.3.1 Rotation (Required)
+#### 50.3.1 Rotation (Required) ✅
 
-- [ ] Implement 90° rotation
-- [ ] Implement 180° rotation
-- [ ] Implement 270° rotation
-- [ ] Handle arbitrary rotation
-- [ ] Auto-rotate based on EXIF
+- [x] Implement 90° rotation
+- [x] Implement 180° rotation
+- [x] Implement 270° rotation
+- [x] Handle arbitrary rotation (snaps to nearest 90°)
+- [ ] Auto-rotate based on EXIF (deferred)
 
-#### 50.3.2 Flip (Required)
+#### 50.3.2 Flip (Required) ✅
 
-- [ ] Implement horizontal flip
-- [ ] Implement vertical flip
-- [ ] Combine flip with rotation
+- [x] Implement horizontal flip
+- [x] Implement vertical flip
+- [x] Combine flip with rotation
 
 #### 50.3.3 Filters (Optional - Deferred)
 
@@ -273,16 +273,16 @@ Add rotation and flip transformations. Filters and color adjustments are optiona
 ### Test Cases
 
 ```
-[ ] test_rotate_90_clockwise
-[ ] test_rotate_180
-[ ] test_rotate_270_clockwise
-[ ] test_rotate_arbitrary_45
-[ ] test_rotate_auto_exif
-[ ] test_flip_horizontal
-[ ] test_flip_vertical
-[ ] test_flip_both_equals_rotate_180
-[ ] test_rotation_preserves_dimensions_correctly
-[ ] test_combined_rotation_and_flip
+[x] test_rotate_90_clockwise
+[x] test_rotate_180
+[x] test_rotate_270_clockwise
+[x] test_rotate_arbitrary_snaps_to_nearest
+[ ] test_rotate_auto_exif (deferred)
+[x] test_flip_horizontal
+[x] test_flip_vertical
+[x] test_flip_both_equals_rotate_180
+[x] test_rotation_preserves_dimensions_correctly
+[x] test_combined_rotation_and_flip
 ```
 
 ---
