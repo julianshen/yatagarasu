@@ -139,6 +139,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
     }
 
@@ -253,6 +254,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "path/to/file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -282,6 +284,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "path/to/file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -308,6 +311,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "file.txt".to_string(),
             etag: Some("etag".to_string()),
+            variant: None,
         };
         assert_eq!(key.bucket, "test");
     }

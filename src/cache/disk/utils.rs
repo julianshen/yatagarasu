@@ -42,11 +42,13 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
         let key2 = CacheKey {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
         assert_eq!(key_to_hash(&key1), key_to_hash(&key2));
     }
@@ -57,11 +59,13 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key1".to_string(),
             etag: None,
+            variant: None,
         };
         let key2 = CacheKey {
             bucket: "bucket".to_string(),
             object_key: "key2".to_string(),
             etag: None,
+            variant: None,
         };
         assert_ne!(key_to_hash(&key1), key_to_hash(&key2));
     }

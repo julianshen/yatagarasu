@@ -168,6 +168,7 @@ fn test_entry_metadata_creation() {
         bucket: "test".to_string(),
         object_key: "test".to_string(),
         etag: None,
+        variant: None,
     };
 
     let metadata = test_entry_metadata(
@@ -199,6 +200,7 @@ fn test_entry_metadata_serialization() {
         bucket: "test".to_string(),
         object_key: "test".to_string(),
         etag: None,
+        variant: None,
     };
 
     let metadata = test_entry_metadata(
@@ -234,6 +236,7 @@ fn test_entry_metadata_expiration() {
         bucket: "test".to_string(),
         object_key: "test".to_string(),
         etag: None,
+        variant: None,
     };
 
     let metadata = test_entry_metadata(
@@ -267,6 +270,7 @@ fn test_cache_index_thread_safe_operations() {
         bucket: "test-bucket".to_string(),
         object_key: "test-key".to_string(),
         etag: None,
+        variant: None,
     };
 
     let metadata = test_entry_metadata(
@@ -311,6 +315,7 @@ fn test_cache_index_atomic_size_tracking() {
         bucket: "bucket1".to_string(),
         object_key: "key1".to_string(),
         etag: None,
+        variant: None,
     };
     let metadata1 = test_entry_metadata(
         key1.clone(),
@@ -329,6 +334,7 @@ fn test_cache_index_atomic_size_tracking() {
         bucket: "bucket2".to_string(),
         object_key: "key2".to_string(),
         etag: None,
+        variant: None,
     };
     let metadata2 = test_entry_metadata(
         key2.clone(),
@@ -401,6 +407,7 @@ fn test_cache_key_to_sha256_hash() {
         bucket: "test-bucket".to_string(),
         object_key: "path/to/file.jpg".to_string(),
         etag: Some("abc123".to_string()),
+        variant: None,
     };
 
     let hash = key_to_hash(&key);
@@ -448,12 +455,14 @@ fn test_file_paths_different_for_different_keys() {
         bucket: "bucket1".to_string(),
         object_key: "key1".to_string(),
         etag: None,
+        variant: None,
     };
 
     let key2 = CacheKey {
         bucket: "bucket2".to_string(),
         object_key: "key2".to_string(),
         etag: None,
+        variant: None,
     };
 
     let hash1 = key_to_hash(&key1);
@@ -480,18 +489,21 @@ fn test_hash_includes_bucket_and_key() {
         bucket: "bucket".to_string(),
         object_key: "key".to_string(),
         etag: None,
+        variant: None,
     };
 
     let key2 = CacheKey {
         bucket: "different-bucket".to_string(),
         object_key: "key".to_string(),
         etag: None,
+        variant: None,
     };
 
     let key3 = CacheKey {
         bucket: "bucket".to_string(),
         object_key: "different-key".to_string(),
         etag: None,
+        variant: None,
     };
 
     let hash1 = key_to_hash(&key1);
@@ -832,6 +844,7 @@ async fn test_metadata_file_stores_json() {
         bucket: "test".to_string(),
         object_key: "test".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Create metadata
@@ -919,6 +932,7 @@ async fn test_both_data_and_meta_files_created() {
         bucket: "test".to_string(),
         object_key: "test".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Write metadata file
@@ -965,6 +979,7 @@ async fn test_index_can_save_to_json() {
         bucket: "bucket1".to_string(),
         object_key: "key1".to_string(),
         etag: None,
+        variant: None,
     };
     let metadata1 = test_entry_metadata(
         key1.clone(),
@@ -1008,6 +1023,7 @@ async fn test_index_can_load_from_json() {
         bucket: "test-bucket".to_string(),
         object_key: "test-key".to_string(),
         etag: Some("etag123".to_string()),
+        variant: None,
     };
     let metadata = test_entry_metadata(
         key.clone(),
@@ -1102,11 +1118,13 @@ async fn test_index_scans_entries_directory_on_startup() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: Some("etag1".to_string()),
+        variant: None,
     };
     let key2 = CacheKey {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: Some("etag2".to_string()),
+        variant: None,
     };
 
     let data_path1 = cache_key_to_file_path(&entries_dir, &key1, false);
@@ -1175,11 +1193,13 @@ async fn test_index_removes_orphaned_files() {
         bucket: "test".to_string(),
         object_key: "valid.txt".to_string(),
         etag: Some("etag1".to_string()),
+        variant: None,
     };
     let key2 = CacheKey {
         bucket: "test".to_string(),
         object_key: "orphaned.txt".to_string(),
         etag: Some("etag2".to_string()),
+        variant: None,
     };
 
     // Create files for both keys
@@ -1253,11 +1273,13 @@ async fn test_index_removes_entries_without_files() {
         bucket: "test".to_string(),
         object_key: "has_files.txt".to_string(),
         etag: Some("etag1".to_string()),
+        variant: None,
     };
     let key2 = CacheKey {
         bucket: "test".to_string(),
         object_key: "missing_files.txt".to_string(),
         etag: Some("etag2".to_string()),
+        variant: None,
     };
 
     // Create files only for key1
@@ -1319,6 +1341,7 @@ async fn test_index_recalculates_total_size_from_files() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: Some("etag1".to_string()),
+        variant: None,
     };
 
     // Create file with specific size
@@ -1383,11 +1406,13 @@ async fn test_index_removes_expired_entries() {
         bucket: "test".to_string(),
         object_key: "expired.txt".to_string(),
         etag: Some("etag1".to_string()),
+        variant: None,
     };
     let key2 = CacheKey {
         bucket: "test".to_string(),
         object_key: "valid.txt".to_string(),
         etag: Some("etag2".to_string()),
+        variant: None,
     };
 
     // Create files for both keys
@@ -2323,6 +2348,7 @@ async fn test_size_updated_on_set() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]); // 1KB
     let entry1 = CacheEntry {
@@ -2347,6 +2373,7 @@ async fn test_size_updated_on_set() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![0u8; 2048]); // 2KB
     let entry2 = CacheEntry {
@@ -2387,6 +2414,7 @@ async fn test_size_updated_on_delete() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]); // 1KB
     let entry1 = CacheEntry {
@@ -2405,6 +2433,7 @@ async fn test_size_updated_on_delete() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![0u8; 2048]); // 2KB
     let entry2 = CacheEntry {
@@ -2475,6 +2504,7 @@ async fn test_detects_when_size_exceeds_max() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]); // 1KB
     let entry1 = CacheEntry {
@@ -2499,6 +2529,7 @@ async fn test_detects_when_size_exceeds_max() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![0u8; 1024]); // 1KB
     let entry2 = CacheEntry {
@@ -2523,6 +2554,7 @@ async fn test_detects_when_size_exceeds_max() {
         bucket: "test".to_string(),
         object_key: "file3.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![0u8; 1024]); // 1KB
     let entry3 = CacheEntry {
@@ -2569,6 +2601,7 @@ async fn test_eviction_triggered_when_threshold_exceeded() {
         bucket: "test".to_string(),
         object_key: "old_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]);
     let entry1 = CacheEntry {
@@ -2591,6 +2624,7 @@ async fn test_eviction_triggered_when_threshold_exceeded() {
         bucket: "test".to_string(),
         object_key: "middle_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![1u8; 1024]);
     let now2 = SystemTime::now();
@@ -2619,6 +2653,7 @@ async fn test_eviction_triggered_when_threshold_exceeded() {
         bucket: "test".to_string(),
         object_key: "new_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![2u8; 1024]);
     let now3 = SystemTime::now();
@@ -2677,6 +2712,7 @@ async fn test_identifies_least_recently_accessed_entry() {
         bucket: "test".to_string(),
         object_key: "oldest.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![1u8; 1024]);
     let entry1 = CacheEntry {
@@ -2699,6 +2735,7 @@ async fn test_identifies_least_recently_accessed_entry() {
         bucket: "test".to_string(),
         object_key: "middle.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![2u8; 1024]);
     let now2 = SystemTime::now();
@@ -2722,6 +2759,7 @@ async fn test_identifies_least_recently_accessed_entry() {
         bucket: "test".to_string(),
         object_key: "newest.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![3u8; 1024]);
     let now3 = SystemTime::now();
@@ -2750,6 +2788,7 @@ async fn test_identifies_least_recently_accessed_entry() {
         bucket: "test".to_string(),
         object_key: "trigger_eviction.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data4 = Bytes::from(vec![4u8; 1024]);
     let now4 = SystemTime::now();
@@ -2812,6 +2851,7 @@ async fn test_deletes_both_data_and_meta_files() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![1u8; 1024]);
     let entry1 = CacheEntry {
@@ -2847,6 +2887,7 @@ async fn test_deletes_both_data_and_meta_files() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![2u8; 1024]);
     let now2 = SystemTime::now();
@@ -2870,6 +2911,7 @@ async fn test_deletes_both_data_and_meta_files() {
         bucket: "test".to_string(),
         object_key: "file3.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![3u8; 1024]);
     let now3 = SystemTime::now();
@@ -2930,6 +2972,7 @@ async fn test_removes_entry_from_index() {
         bucket: "test".to_string(),
         object_key: "old_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]);
     let entry1 = CacheEntry {
@@ -2955,6 +2998,7 @@ async fn test_removes_entry_from_index() {
         bucket: "test".to_string(),
         object_key: "middle_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![1u8; 1024]);
     let now2 = SystemTime::now();
@@ -2977,6 +3021,7 @@ async fn test_removes_entry_from_index() {
         bucket: "test".to_string(),
         object_key: "new_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![2u8; 1024]);
     let now3 = SystemTime::now();
@@ -3037,6 +3082,7 @@ async fn test_updates_stats_eviction_count() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]);
     let entry1 = CacheEntry {
@@ -3058,6 +3104,7 @@ async fn test_updates_stats_eviction_count() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![1u8; 1024]);
     let now2 = SystemTime::now();
@@ -3084,6 +3131,7 @@ async fn test_updates_stats_eviction_count() {
         bucket: "test".to_string(),
         object_key: "file3.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![2u8; 1024]);
     let now3 = SystemTime::now();
@@ -3113,6 +3161,7 @@ async fn test_updates_stats_eviction_count() {
         bucket: "test".to_string(),
         object_key: "file4.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data4 = Bytes::from(vec![3u8; 1024]);
     let now4 = SystemTime::now();
@@ -3153,6 +3202,7 @@ async fn test_can_evict_multiple_entries_in_one_pass() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]);
     let entry1 = CacheEntry {
@@ -3173,6 +3223,7 @@ async fn test_can_evict_multiple_entries_in_one_pass() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![1u8; 1024]);
     let now2 = SystemTime::now();
@@ -3194,6 +3245,7 @@ async fn test_can_evict_multiple_entries_in_one_pass() {
         bucket: "test".to_string(),
         object_key: "file3.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![2u8; 1024]);
     let now3 = SystemTime::now();
@@ -3219,6 +3271,7 @@ async fn test_can_evict_multiple_entries_in_one_pass() {
         bucket: "test".to_string(),
         object_key: "file4.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data4 = Bytes::from(vec![3u8; 2048]); // 2KB
     let now4 = SystemTime::now();
@@ -3282,6 +3335,7 @@ async fn test_evicts_in_lru_order() {
         bucket: "test".to_string(),
         object_key: "oldest.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]);
     let entry1 = CacheEntry {
@@ -3302,6 +3356,7 @@ async fn test_evicts_in_lru_order() {
         bucket: "test".to_string(),
         object_key: "second_oldest.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![1u8; 1024]);
     let now2 = SystemTime::now();
@@ -3323,6 +3378,7 @@ async fn test_evicts_in_lru_order() {
         bucket: "test".to_string(),
         object_key: "newer.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![2u8; 1024]);
     let now3 = SystemTime::now();
@@ -3344,6 +3400,7 @@ async fn test_evicts_in_lru_order() {
         bucket: "test".to_string(),
         object_key: "newest.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data4 = Bytes::from(vec![3u8; 1024]);
     let now4 = SystemTime::now();
@@ -3369,6 +3426,7 @@ async fn test_evicts_in_lru_order() {
         bucket: "test".to_string(),
         object_key: "large_new.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data5 = Bytes::from(vec![4u8; 2048]); // 2KB
     let now5 = SystemTime::now();
@@ -3441,6 +3499,7 @@ async fn test_stops_when_enough_space_freed() {
             bucket: "test".to_string(),
             object_key: format!("file{}.txt", i + 1),
             etag: None,
+            variant: None,
         };
         let data = Bytes::from(vec![i as u8; 1024]);
         let time = SystemTime::now();
@@ -3473,6 +3532,7 @@ async fn test_stops_when_enough_space_freed() {
         bucket: "test".to_string(),
         object_key: "large_file.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data_new = Bytes::from(vec![99u8; 2048]); // 2KB
     let time_new = SystemTime::now();
@@ -3558,6 +3618,7 @@ async fn test_loads_index_from_json() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let metadata1 = test_entry_metadata(
         key1.clone(),
@@ -3572,6 +3633,7 @@ async fn test_loads_index_from_json() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let metadata2 = test_entry_metadata(
         key2.clone(),
@@ -3628,6 +3690,7 @@ async fn test_validates_index_against_filesystem() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -3646,6 +3709,7 @@ async fn test_validates_index_against_filesystem() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -3720,6 +3784,7 @@ async fn test_removes_orphaned_files() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -3823,6 +3888,7 @@ async fn test_removes_invalid_index_entries() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -3855,6 +3921,7 @@ async fn test_removes_invalid_index_entries() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -3916,6 +3983,7 @@ async fn test_recalculates_total_size() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -3935,6 +4003,7 @@ async fn test_recalculates_total_size() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -4031,6 +4100,7 @@ async fn test_triggers_eviction_if_oversized_after_recovery() {
         bucket: "test".to_string(),
         object_key: "old1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = cache_dir.join("entries").join(format!("{}.data", hash1));
@@ -4049,6 +4119,7 @@ async fn test_triggers_eviction_if_oversized_after_recovery() {
         bucket: "test".to_string(),
         object_key: "old2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = cache_dir.join("entries").join(format!("{}.data", hash2));
@@ -4071,6 +4142,7 @@ async fn test_triggers_eviction_if_oversized_after_recovery() {
         bucket: "test".to_string(),
         object_key: "new.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let new_entry = CacheEntry {
@@ -4137,6 +4209,7 @@ async fn test_handles_corrupted_data_file() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -4163,6 +4236,7 @@ async fn test_handles_corrupted_data_file() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -4225,6 +4299,7 @@ async fn test_handles_corrupted_meta_file() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -4251,6 +4326,7 @@ async fn test_handles_corrupted_meta_file() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -4345,6 +4421,7 @@ async fn test_logs_errors_but_continues_operation() {
         bucket: "test".to_string(),
         object_key: "valid.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -4368,6 +4445,7 @@ async fn test_logs_errors_but_continues_operation() {
         bucket: "test".to_string(),
         object_key: "missing_data.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let meta_path2 = entries_dir.join(format!("{}.meta", hash2));
@@ -4392,6 +4470,7 @@ async fn test_logs_errors_but_continues_operation() {
         bucket: "test".to_string(),
         object_key: "missing_meta.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash3 = key_to_hash(&key3);
     let data_path3 = entries_dir.join(format!("{}.data", hash3));
@@ -4449,6 +4528,7 @@ async fn test_removes_corrupted_entries_from_cache() {
         bucket: "test".to_string(),
         object_key: "valid.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -4478,6 +4558,7 @@ async fn test_removes_corrupted_entries_from_cache() {
         bucket: "test".to_string(),
         object_key: "expired.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -4566,6 +4647,7 @@ async fn test_deletes_tmp_files_from_failed_writes() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -4651,6 +4733,7 @@ async fn test_doesnt_delete_legitimate_files() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash1 = key_to_hash(&key1);
     let data_path1 = entries_dir.join(format!("{}.data", hash1));
@@ -4673,6 +4756,7 @@ async fn test_doesnt_delete_legitimate_files() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let hash2 = key_to_hash(&key2);
     let data_path2 = entries_dir.join(format!("{}.data", hash2));
@@ -4770,6 +4854,7 @@ async fn test_cache_get_returns_none_if_not_found() {
         bucket: "test".to_string(),
         object_key: "nonexistent.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let result = cache.get(&key).await;
@@ -4789,6 +4874,7 @@ async fn test_cache_set_and_get_roundtrip() {
         bucket: "test".to_string(),
         object_key: "test.txt".to_string(),
         etag: Some("etag123".to_string()),
+        variant: None,
     };
 
     let data = Bytes::from("Hello, World!");
@@ -4827,6 +4913,7 @@ async fn test_cache_get_returns_none_if_expired() {
         bucket: "test".to_string(),
         object_key: "expired.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let data = Bytes::from("Expired content");
@@ -4864,6 +4951,7 @@ async fn test_cache_delete_removes_entry() {
         bucket: "test".to_string(),
         object_key: "delete_me.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let data = Bytes::from("To be deleted");
@@ -4922,6 +5010,7 @@ async fn test_cache_stats() {
         bucket: "test".to_string(),
         object_key: "stats_test.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let data = Bytes::from(vec![0u8; 1024]); // 1KB
@@ -4960,6 +5049,7 @@ async fn test_cache_clear_removes_all_entries() {
             bucket: "test".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
 
         let data = Bytes::from(format!("Content {}", i));
@@ -5007,6 +5097,7 @@ async fn test_cache_set_triggers_eviction_when_full() {
         bucket: "test".to_string(),
         object_key: "file1.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data1 = Bytes::from(vec![0u8; 1024]);
     let entry1 = CacheEntry {
@@ -5027,6 +5118,7 @@ async fn test_cache_set_triggers_eviction_when_full() {
         bucket: "test".to_string(),
         object_key: "file2.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data2 = Bytes::from(vec![1u8; 1024]);
     let entry2 = CacheEntry {
@@ -5047,6 +5139,7 @@ async fn test_cache_set_triggers_eviction_when_full() {
         bucket: "test".to_string(),
         object_key: "file3.txt".to_string(),
         etag: None,
+        variant: None,
     };
     let data3 = Bytes::from(vec![2u8; 1024]);
     let entry3 = CacheEntry {
@@ -5090,6 +5183,7 @@ async fn test_cache_stores_multiple_entries() {
             bucket: format!("bucket{}", i % 3), // 3 different buckets
             object_key: format!("file{}.txt", i),
             etag: Some(format!("etag{}", i)),
+            variant: None,
         };
 
         let data = Bytes::from(format!("Content for file {}", i));
@@ -5143,6 +5237,7 @@ async fn test_integration_store_and_retrieve_100_entries() {
             bucket: "test-bucket".to_string(),
             object_key: format!("object-{:03}.txt", i),
             etag: None,
+            variant: None,
         };
 
         let data = Bytes::from(format!("Test data for entry {}", i));
@@ -5207,6 +5302,7 @@ async fn test_integration_index_persistence_and_recovery() {
             bucket: "persistent".to_string(),
             object_key: format!("file-{}.dat", i),
             etag: None,
+            variant: None,
         };
 
         let hash = super::utils::key_to_hash(&key);
@@ -5278,6 +5374,7 @@ async fn test_integration_index_persistence_and_recovery() {
             bucket: "persistent".to_string(),
             object_key: format!("file-{}.dat", i),
             etag: None,
+            variant: None,
         };
 
         let metadata = index2.get(&key);
@@ -5305,6 +5402,7 @@ async fn test_integration_lru_eviction_end_to_end() {
             bucket: "eviction-test".to_string(),
             object_key: format!("large-file-{}.bin", i),
             etag: None,
+            variant: None,
         };
 
         let data = Bytes::from(vec![i as u8; 2 * 1024]);
@@ -5330,6 +5428,7 @@ async fn test_integration_lru_eviction_end_to_end() {
         bucket: "eviction-test".to_string(),
         object_key: "large-file-0.bin".to_string(),
         etag: None,
+        variant: None,
     };
     assert!(
         cache.get(&key0).await.unwrap().is_none(),
@@ -5341,11 +5440,13 @@ async fn test_integration_lru_eviction_end_to_end() {
         bucket: "eviction-test".to_string(),
         object_key: "large-file-1.bin".to_string(),
         etag: None,
+        variant: None,
     };
     let key2 = CacheKey {
         bucket: "eviction-test".to_string(),
         object_key: "large-file-2.bin".to_string(),
         etag: None,
+        variant: None,
     };
 
     assert!(
@@ -5465,6 +5566,7 @@ async fn test_get_sendfile_returns_path_for_large_files() {
         bucket: "sendfile-test".to_string(),
         object_key: "large-file.bin".to_string(),
         etag: None,
+        variant: None,
     };
     let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
     let entry = CacheEntry {
@@ -5518,6 +5620,7 @@ async fn test_get_sendfile_returns_none_for_small_files() {
         bucket: "sendfile-test".to_string(),
         object_key: "small-file.bin".to_string(),
         etag: None,
+        variant: None,
     };
     let data = Bytes::from(vec![0u8; 1024]); // 1KB
     let entry = CacheEntry {
@@ -5569,6 +5672,7 @@ async fn test_get_sendfile_returns_none_when_disabled() {
         bucket: "sendfile-test".to_string(),
         object_key: "large-file-disabled.bin".to_string(),
         etag: None,
+        variant: None,
     };
     let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
     let entry = CacheEntry {
@@ -5615,6 +5719,7 @@ async fn test_get_sendfile_tracks_cache_hits() {
         bucket: "sendfile-test".to_string(),
         object_key: "hit-tracking.bin".to_string(),
         etag: None,
+        variant: None,
     };
     let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
     let entry = CacheEntry {
@@ -5667,6 +5772,7 @@ async fn test_get_sendfile_returns_none_for_nonexistent_key() {
         bucket: "sendfile-test".to_string(),
         object_key: "nonexistent.bin".to_string(),
         etag: None,
+        variant: None,
     };
 
     // get_sendfile should return None for nonexistent keys
@@ -5697,6 +5803,7 @@ async fn test_get_sendfile_returns_none_for_expired_entry() {
         bucket: "sendfile-test".to_string(),
         object_key: "expired.bin".to_string(),
         etag: None,
+        variant: None,
     };
     let data = Bytes::from(vec![0u8; 2 * 1024]); // 2KB
     let entry = CacheEntry {

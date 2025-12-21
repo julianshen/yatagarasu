@@ -28,6 +28,7 @@ use crate::cache::warming::PrewarmManager;
 use crate::cache::{Cache, CacheKey};
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
+use crate::image_optimizer::ImageParams;
 use crate::metrics::Metrics;
 use crate::opa::{
     AuthorizationDecision as OpaAuthorizationDecision, FailMode as OpaFailMode, OpaCache, OpaInput,
@@ -611,6 +612,19 @@ impl ProxyHttp for YatagarasuProxy {
 
             self.metrics.increment_status_count(200);
             return Ok(true); // Short-circuit
+        }
+
+        // Image Optimization Check (Phase: Image Optimization)
+        if config.image_optimization.enabled && (method == "GET" || method == "HEAD") {
+            let query_params = helpers::extract_query_params(req);
+            if let Some(image_params) = ImageParams::from_params(&query_params) {
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    params = ?image_params,
+                    "Image optimization requested"
+                );
+                ctx.set_image_params(image_params);
+            }
         }
 
         // 1. Validate URI length
@@ -1453,6 +1467,7 @@ impl ProxyHttp for YatagarasuProxy {
                         bucket: bucket_name.to_string(),
                         object_key: obj_path.clone(),
                         etag: None,
+                        variant: None,
                     };
 
                     match cache.delete(&cache_key).await {
@@ -2012,6 +2027,7 @@ impl ProxyHttp for YatagarasuProxy {
                     bucket: bucket.to_string(),
                     object_key: object_key.to_string(),
                     etag: None,
+                    variant: None,
                 };
 
                 // Try to get the entry from cache
@@ -2596,6 +2612,7 @@ impl ProxyHttp for YatagarasuProxy {
                         bucket: bucket_config.name.clone(),
                         object_key: object_key.clone(),
                         etag: None, // We don't know the etag yet
+                        variant: None,
                     };
 
                     // Extract conditional headers before mutable borrow of ctx for audit
@@ -3268,6 +3285,7 @@ impl ProxyHttp for YatagarasuProxy {
                             object_key: object_key.to_string(),
                             // Use None to match lookup key - ETag is stored in CacheEntry, not key
                             etag: None,
+                            variant: None,
                         };
 
                         let cache_entry = CacheEntry::new(

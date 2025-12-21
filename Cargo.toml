@@ -32,6 +32,9 @@ aws-sdk-s3 = "1.0"
 # JWT Authentication
 jsonwebtoken = {version = "10.2", features = ["rust_crypto"]}
 
+# Base64 encoding for URL signing
+base64 = "0.22"
+
 # Serialization
 serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0"
@@ -92,6 +95,10 @@ reqwest = {version = "0.11", features = ["json"]}
 
 # System utilities
 hostname = "0.4"
+
+# Image Processing (Phase 50)
+image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+fast_image_resize = "2.7"
 
 # OpenTelemetry (Phase 34: Enhanced Observability)
 arc-swap = "1.7.1"
@@ -163,3 +170,7 @@ name = "cache_comparison"
 [[bench]]
 harness = false
 name = "request_processing"
+
+[[bench]]
+harness = false
+name = "image_optimization"

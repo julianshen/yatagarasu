@@ -341,6 +341,7 @@ async fn worker(
                                     bucket: bucket.clone(),
                                     object_key: obj.key.clone(),
                                     etag: Some(obj.etag.clone()),
+                                    variant: None,
                                 };
 
                                 if cache.set(key, entry).await.is_ok() {

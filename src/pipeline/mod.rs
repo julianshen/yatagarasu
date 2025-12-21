@@ -39,6 +39,8 @@ pub struct RequestContext {
     retry_attempt: u32,
     /// Audit context
     pub audit: AuditRequestContext,
+    /// Image optimization parameters (Phase: Image Optimization)
+    image_params: Option<crate::image_optimizer::ImageParams>,
 }
 
 impl RequestContext {
@@ -66,6 +68,7 @@ impl RequestContext {
             total_response_size: 0,
             retry_attempt: 0,
             audit: AuditRequestContext::new(),
+            image_params: None,
         }
     }
 
@@ -93,6 +96,7 @@ impl RequestContext {
             total_response_size: 0,
             retry_attempt: 0,
             audit: AuditRequestContext::new(),
+            image_params: None,
         }
     }
 
@@ -124,6 +128,7 @@ impl RequestContext {
             total_response_size: 0,
             retry_attempt: 0,
             audit: AuditRequestContext::new(),
+            image_params: None,
         }
     }
 
@@ -292,6 +297,16 @@ impl RequestContext {
     /// Get a mutable reference to the audit context
     pub fn audit(&mut self) -> &mut AuditRequestContext {
         &mut self.audit
+    }
+
+    /// Set image optimization parameters
+    pub fn set_image_params(&mut self, params: crate::image_optimizer::ImageParams) {
+        self.image_params = Some(params);
+    }
+
+    /// Get image optimization parameters
+    pub fn image_params(&self) -> Option<&crate::image_optimizer::ImageParams> {
+        self.image_params.as_ref()
     }
 }
 

@@ -10,6 +10,7 @@ pub mod compression; // Phase 40: Request/Response Compression
 pub mod config;
 pub mod constants; // Centralized default values
 pub mod error;
+pub mod image_optimizer; // Phase: Image Optimization
 pub mod logging;
 pub mod metrics; // Phase 18: Prometheus Metrics
 pub mod observability; // Phase 34: Enhanced Observability
