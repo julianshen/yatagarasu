@@ -35,6 +35,24 @@ impl fmt::Display for CompressionError {
 
 impl std::error::Error for CompressionError {}
 
+impl CompressionError {
+    /// Maps compression errors to HTTP status codes
+    ///
+    /// Status mapping:
+    /// - InvalidAlgorithm → 406 (Not Acceptable - client requested unsupported encoding)
+    /// - CompressionFailed → 500 (Internal Server Error)
+    /// - DecompressionFailed → 400 (Bad Request - invalid compressed payload)
+    /// - InvalidConfig → 500 (Internal Server Error)
+    pub fn to_http_status(&self) -> u16 {
+        match self {
+            CompressionError::InvalidAlgorithm(_) => 406, // Not Acceptable
+            CompressionError::CompressionFailed(_) => 500, // Internal Server Error
+            CompressionError::DecompressionFailed(_) => 400, // Bad Request
+            CompressionError::InvalidConfig(_) => 500,    // Internal Server Error
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,5 +88,25 @@ mod tests {
     fn test_error_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<CompressionError>();
+    }
+
+    #[test]
+    fn test_to_http_status() {
+        assert_eq!(
+            CompressionError::InvalidAlgorithm("test".to_string()).to_http_status(),
+            406
+        );
+        assert_eq!(
+            CompressionError::CompressionFailed("test".to_string()).to_http_status(),
+            500
+        );
+        assert_eq!(
+            CompressionError::DecompressionFailed("test".to_string()).to_http_status(),
+            400
+        );
+        assert_eq!(
+            CompressionError::InvalidConfig("test".to_string()).to_http_status(),
+            500
+        );
     }
 }

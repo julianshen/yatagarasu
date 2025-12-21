@@ -42,8 +42,11 @@ pub fn should_compress_by_size(content_length: Option<usize>, config: &Compressi
 }
 
 /// Determines if response is already compressed
+///
+/// Returns true if Content-Encoding header indicates compression.
+/// Note: "identity" means no encoding, so it returns false for that case.
 pub fn is_already_compressed(content_encoding: Option<&str>) -> bool {
-    content_encoding.is_some()
+    content_encoding.is_some_and(|e| !e.eq_ignore_ascii_case("identity"))
 }
 
 /// Compress response body if appropriate
@@ -133,10 +136,20 @@ mod tests {
     #[test]
     fn test_is_already_compressed_yes() {
         assert!(is_already_compressed(Some("gzip")));
+        assert!(is_already_compressed(Some("br")));
+        assert!(is_already_compressed(Some("deflate")));
     }
 
     #[test]
     fn test_is_already_compressed_no() {
         assert!(!is_already_compressed(None));
+    }
+
+    #[test]
+    fn test_is_already_compressed_identity() {
+        // "identity" means no encoding, should return false
+        assert!(!is_already_compressed(Some("identity")));
+        assert!(!is_already_compressed(Some("Identity")));
+        assert!(!is_already_compressed(Some("IDENTITY")));
     }
 }
