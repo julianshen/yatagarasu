@@ -5,6 +5,7 @@
 All planning documents are in `/docs/`:
 
 1. **COMPRESSION_FEATURE_PLAN.md** - Start here for overview
+
    - Architecture diagram
    - Design decisions
    - Configuration example
@@ -12,11 +13,13 @@ All planning documents are in `/docs/`:
    - Dependencies
 
 2. **COMPRESSION_IMPLEMENTATION_PLAN.md** - Detailed test cases
+
    - 125+ test cases across 8 phases
    - Organized by phase and feature
    - Use this to implement each phase
 
 3. **COMPRESSION_ARCHITECTURE.md** - Technical deep dive
+
    - Module structure
    - Core types and interfaces
    - Integration points
@@ -57,11 +60,11 @@ All planning documents are in `/docs/`:
 
 ## Supported Algorithms
 
-| Algorithm | Speed | Ratio | Use Case |
-|-----------|-------|-------|----------|
-| gzip      | Fast  | Good  | Default |
+| Algorithm | Speed | Ratio | Use Case       |
+| --------- | ----- | ----- | -------------- |
+| gzip      | Fast  | Good  | Default        |
 | brotli    | Slow  | Best  | Static content |
-| deflate   | Fast  | Fair  | Legacy |
+| deflate   | Fast  | Fair  | Legacy         |
 
 ## Configuration Example
 
@@ -69,22 +72,22 @@ All planning documents are in `/docs/`:
 compression:
   enabled: true
   default_algorithm: "gzip"
-  compression_level: 6
+  compression_level: 6 # 1-9 (safe for all algorithms)
   min_response_size_bytes: 1024
   max_response_size_bytes: 104857600
   algorithms:
-    - name: "gzip"
+    gzip:
       enabled: true
-      level: 6
-    - name: "brotli"
+      level: 6 # 1-9 for gzip
+    br:
       enabled: true
-      level: 4
+      level: 4 # 1-11 for brotli
 
 buckets:
   - name: "public"
     compression:
       enabled: true
-      algorithms: ["gzip", "brotli"]
+      min_response_size_bytes: 512
 ```
 
 ## Module Structure
@@ -142,7 +145,7 @@ brotli = "7.0"  # brotli compression
 ✅ Performance targets met  
 ✅ >90% test coverage  
 ✅ Zero clippy warnings  
-✅ Documentation complete  
+✅ Documentation complete
 
 ## How to Use This Plan
 
@@ -177,4 +180,3 @@ brotli = "7.0"  # brotli compression
 ---
 
 **Ready to start? Say "go" to begin Phase 40.1!**
-
