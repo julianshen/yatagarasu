@@ -659,14 +659,14 @@ src/image_optimizer/
 2. ✅ Auto-format selection (Phase 50.4)
 3. ✅ URL signing & security (Phase 50.5)
 4. ✅ CacheKey.variant field added (Phase 50.6 partial)
+5. ✅ Enhanced encoders (Phase 50.1) - mozjpeg, oxipng, webp, ravif
+6. ✅ Advanced resize & crop (Phase 50.2) - gravity, smart crop, fit:pad
 
 ### Next Up
 
-1. **Phase 50.1**: Add enhanced encoders (mozjpeg, oxipng, ravif)
-2. **Phase 50.2**: Smart crop and advanced resize operations
-3. **Phase 50.3**: Rotation, flip, blur, sharpen
-4. **Phase 50.6**: Complete cache integration
-5. **Phase 50.7**: Prometheus metrics and structured logging
+1. **Phase 50.3**: Rotation, flip, blur, sharpen
+2. **Phase 50.6**: Complete cache integration
+3. **Phase 50.7**: Prometheus metrics and structured logging
 
 ### TDD Workflow
 
@@ -676,4 +676,4 @@ src/image_optimizer/
 
 ---
 
-**Ready to continue? Say "go" to begin Phase 50.1 (Enhanced Encoders)!**
+**Ready to continue? Say "go" to begin Phase 50.3 (Transformations)!**
