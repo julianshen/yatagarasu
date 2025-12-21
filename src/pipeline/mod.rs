@@ -41,6 +41,8 @@ pub struct RequestContext {
     pub audit: AuditRequestContext,
     /// Image optimization parameters (Phase: Image Optimization)
     image_params: Option<crate::image_optimizer::ImageParams>,
+    /// Whether the current response is being optimized (Phase: Image Optimization)
+    optimizing_image: bool,
 }
 
 impl RequestContext {
@@ -69,6 +71,7 @@ impl RequestContext {
             retry_attempt: 0,
             audit: AuditRequestContext::new(),
             image_params: None,
+            optimizing_image: false,
         }
     }
 
@@ -97,6 +100,7 @@ impl RequestContext {
             retry_attempt: 0,
             audit: AuditRequestContext::new(),
             image_params: None,
+            optimizing_image: false,
         }
     }
 
@@ -129,6 +133,7 @@ impl RequestContext {
             retry_attempt: 0,
             audit: AuditRequestContext::new(),
             image_params: None,
+            optimizing_image: false,
         }
     }
 
@@ -307,6 +312,16 @@ impl RequestContext {
     /// Get image optimization parameters
     pub fn image_params(&self) -> Option<&crate::image_optimizer::ImageParams> {
         self.image_params.as_ref()
+    }
+
+    /// Set whether the response is being optimized
+    pub fn set_optimizing_image(&mut self, optimizing: bool) {
+        self.optimizing_image = optimizing;
+    }
+
+    /// Check if the response is being optimized
+    pub fn is_optimizing_image(&self) -> bool {
+        self.optimizing_image
     }
 }
 
