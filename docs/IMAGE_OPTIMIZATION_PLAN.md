@@ -240,35 +240,35 @@ Implement smart cropping, gravity-based positioning, and DPR support.
 
 ### Objective
 
-Add rotation, flip, blur, sharpen, and basic color adjustments.
+Add rotation and flip transformations. Filters and color adjustments are optional.
 
 ### Tasks
 
-#### 50.3.1 Rotation
+#### 50.3.1 Rotation (Required)
 
 - [ ] Implement 90° rotation
 - [ ] Implement 180° rotation
 - [ ] Implement 270° rotation
-- [ ] Handle arbitrary rotation (optional)
-- [ ] Auto-rotate based on EXIF (optional)
+- [ ] Handle arbitrary rotation
+- [ ] Auto-rotate based on EXIF
 
-#### 50.3.2 Flip
+#### 50.3.2 Flip (Required)
 
 - [ ] Implement horizontal flip
 - [ ] Implement vertical flip
 - [ ] Combine flip with rotation
 
-#### 50.3.3 Filters
+#### 50.3.3 Filters (Optional - Deferred)
 
 - [ ] Implement Gaussian blur (sigma parameter)
 - [ ] Implement unsharp mask / sharpen
 - [ ] Clamp parameter ranges for safety
 
-#### 50.3.4 Color Adjustments (Basic)
+#### 50.3.4 Color Adjustments (Optional - Deferred)
 
 - [ ] Implement brightness adjustment
 - [ ] Implement contrast adjustment
-- [ ] Implement saturation adjustment (optional)
+- [ ] Implement saturation adjustment
 
 ### Test Cases
 
@@ -276,18 +276,13 @@ Add rotation, flip, blur, sharpen, and basic color adjustments.
 [ ] test_rotate_90_clockwise
 [ ] test_rotate_180
 [ ] test_rotate_270_clockwise
+[ ] test_rotate_arbitrary_45
+[ ] test_rotate_auto_exif
 [ ] test_flip_horizontal
 [ ] test_flip_vertical
 [ ] test_flip_both_equals_rotate_180
-[ ] test_blur_sigma_0_no_change
-[ ] test_blur_sigma_5_visible_blur
-[ ] test_sharpen_increases_edges
-[ ] test_brightness_increase
-[ ] test_brightness_decrease
-[ ] test_contrast_increase
-[ ] test_combined_transformations_order
 [ ] test_rotation_preserves_dimensions_correctly
-[ ] test_filter_parameters_clamped
+[ ] test_combined_rotation_and_flip
 ```
 
 ---
