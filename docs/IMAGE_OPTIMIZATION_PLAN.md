@@ -1,26 +1,85 @@
 # Image Optimization Implementation Plan
 
-**Status**: Ready for Implementation
+**Status**: In Progress (Foundation Complete)
 **Phases**: 50.1 - 50.8
 **Estimated Effort**: 10-12 weeks
 **Dependencies**: Compression feature (merged)
+**Last Updated**: December 2025
 
 ---
 
 ## Phase Overview
 
-| Phase | Name | Focus | Tests | Duration |
-|-------|------|-------|-------|----------|
-| 50.1 | Enhanced Encoders | mozjpeg, oxipng, ravif integration | 25+ | 1.5 weeks |
-| 50.2 | Advanced Resize & Crop | Smart crop, gravity, DPR | 20+ | 1 week |
-| 50.3 | Transformations | Rotate, flip, blur, sharpen | 15+ | 1 week |
-| 50.4 | Auto-Format | Accept header negotiation | 15+ | 1 week |
-| 50.5 | URL Signing & Security | HMAC, image bomb protection | 20+ | 1.5 weeks |
-| 50.6 | Cache Integration | Variant caching, purge | 15+ | 1 week |
-| 50.7 | Metrics & Observability | Prometheus, logging | 10+ | 0.5 weeks |
-| 50.8 | Testing & Documentation | Integration tests, docs | 20+ | 1.5 weeks |
+| Phase | Name | Focus | Tests | Status |
+|-------|------|-------|-------|--------|
+| 50.0 | Foundation | Error types, params, encoder abstraction | 47 | ✅ Complete |
+| 50.1 | Enhanced Encoders | mozjpeg, oxipng, ravif integration | 25+ | ⏳ Pending |
+| 50.2 | Advanced Resize & Crop | Smart crop, gravity, DPR | 20+ | ⏳ Pending |
+| 50.3 | Transformations | Rotate, flip, blur, sharpen | 15+ | ⏳ Pending |
+| 50.4 | Auto-Format | Accept header negotiation | 11 | ✅ Complete |
+| 50.5 | URL Signing & Security | HMAC, image bomb protection | 13 | ✅ Complete |
+| 50.6 | Cache Integration | Variant caching, purge | 15+ | 🔄 Partial |
+| 50.7 | Metrics & Observability | Prometheus, logging | 10+ | ⏳ Pending |
+| 50.8 | Testing & Documentation | Integration tests, docs | 20+ | ⏳ Pending |
 
-**Total**: 140+ test cases
+**Current Total**: 71 test cases passing
+**Target**: 140+ test cases
+
+---
+
+## Phase 50.0: Foundation ✅ COMPLETE
+
+### Objective
+Establish core module structure with error handling, parameter parsing, encoder abstraction, and basic processor.
+
+### Completed Tasks
+
+#### 50.0.1 Error Types ✅
+- [x] Create `ImageError` enum with all variants
+- [x] Implement HTTP status code mapping
+- [x] Add error constructors with meaningful messages
+- [x] **Tests**: 10 passing
+
+#### 50.0.2 Parameter Parsing ✅
+- [x] Define `ImageParams` struct
+- [x] Parse from query parameters (`w`, `h`, `q`, `fmt`, `fit`, etc.)
+- [x] Parse from path-based options (`w:800,h:600,q:80`)
+- [x] Support `Dimension` type (pixels and percentage)
+- [x] Support all `FitMode` variants
+- [x] Support `Gravity` options
+- [x] Backward-compatible `from_params()` method
+- [x] **Tests**: 14 passing
+
+#### 50.0.3 Encoder Abstraction ✅
+- [x] Create `ImageEncoder` trait
+- [x] Create `EncoderFactory` with factory pattern
+- [x] Implement `JpegEncoder` (image crate)
+- [x] Implement `PngEncoder` (image crate)
+- [x] Implement `WebPEncoder` (lossless only)
+- [x] Add `AvifEncoder` placeholder
+- [x] Define `EncoderQuality` and `EncodedImage` types
+- [x] **Tests**: 13 passing
+
+#### 50.0.4 Basic Processor ✅
+- [x] Decode image from bytes
+- [x] Calculate target dimensions with DPR
+- [x] Resize using `fast_image_resize` with Lanczos3
+- [x] Encode to target format
+- [x] Return `ProcessedImage` with metadata
+- [x] **Tests**: 10 passing
+
+### Module Structure (Actual)
+```
+src/image_optimizer/
+├── mod.rs          # Module root, public API exports
+├── config.rs       # ImageConfig configuration
+├── error.rs        # ImageError enum with HTTP status mapping
+├── params.rs       # ImageParams parsing (query and path-based)
+├── processor.rs    # Main processing pipeline
+├── encoder.rs      # Encoder trait, factory, implementations
+├── format.rs       # Auto-format selection from Accept header
+└── security.rs     # URL signing, image bomb protection, source validation
+```
 
 ---
 
@@ -206,120 +265,138 @@ Add rotation, flip, blur, sharpen, and basic color adjustments.
 
 ---
 
-## Phase 50.4: Auto-Format Selection
+## Phase 50.4: Auto-Format Selection ✅ COMPLETE
 
 ### Objective
 Automatically select optimal output format based on Accept header and content.
 
-### Tasks
+### Completed Tasks
 
-#### 50.4.1 Accept Header Parsing
-- [ ] Parse Accept header for image types
-- [ ] Extract quality values (q=0.9)
-- [ ] Handle wildcards (image/*)
-- [ ] Build preference list
+#### 50.4.1 Accept Header Parsing ✅
+- [x] Parse Accept header for image types
+- [x] Extract quality values (q=0.9)
+- [x] Handle wildcards (image/*)
+- [x] Build preference list sorted by quality
 
-#### 50.4.2 Format Selection Logic
-- [ ] Implement format selection algorithm
-- [ ] Consider source format (preserve transparency)
-- [ ] Consider browser support
-- [ ] Consider file size benefit threshold
+#### 50.4.2 Format Selection Logic ✅
+- [x] Implement format selection algorithm
+- [x] Consider source format (preserve transparency)
+- [x] Consider browser support (AVIF > WebP > JPEG)
+- [x] Apply format preferences from config
 
-#### 50.4.3 Configuration
-- [ ] Add `auto_format.enabled` config
-- [ ] Add `auto_format.prefer_avif` config
-- [ ] Add `auto_format.prefer_webp` config
-- [ ] Add `auto_format.min_savings_percent` config
+#### 50.4.3 Configuration ✅
+- [x] Add `auto_format.enabled` config
+- [x] Add `auto_format.prefer_avif` config
+- [x] Add `auto_format.prefer_webp` config
+- [x] Add `auto_format.min_savings_percent` config
 
-#### 50.4.4 Response Headers
-- [ ] Add `Vary: Accept` header
-- [ ] Add `Content-Type` based on output
-- [ ] Add debug header with format decision (optional)
+#### 50.4.4 Response Headers ✅
+- [x] Add `Vary: Accept` header via `vary_header()` function
+- [x] Content-Type based on output format
+- [ ] Debug header with format decision (optional - deferred)
 
-### Test Cases
+### Completed Test Cases (11 tests)
 
 ```
-[ ] test_accept_header_parse_single
-[ ] test_accept_header_parse_multiple
-[ ] test_accept_header_parse_with_quality
-[ ] test_accept_header_parse_wildcard
-[ ] test_format_selection_prefers_avif
-[ ] test_format_selection_falls_back_to_webp
-[ ] test_format_selection_preserves_png_transparency
-[ ] test_format_selection_respects_min_savings
-[ ] test_format_selection_disabled
-[ ] test_vary_header_present
-[ ] test_content_type_matches_output
-[ ] test_format_explicit_overrides_auto
+[x] test_parse_accept_header_simple
+[x] test_parse_accept_header_with_quality
+[x] test_parse_accept_header_sorted_by_quality
+[x] test_select_format_avif_preferred
+[x] test_select_format_webp_fallback
+[x] test_select_format_preserve_transparency
+[x] test_select_format_no_accept_header
+[x] test_select_format_disabled
+[x] test_is_format_acceptable
+[x] test_is_format_acceptable_wildcard
+[x] test_format_supports_transparency
 ```
+
+### Implementation
+**File**: `src/image_optimizer/format.rs`
 
 ---
 
-## Phase 50.5: URL Signing & Security
+## Phase 50.5: URL Signing & Security ✅ COMPLETE
 
 ### Objective
 Implement HMAC-SHA256 URL signing and image bomb protection.
 
-### Tasks
+### Completed Tasks
 
-#### 50.5.1 URL Signing
-- [ ] Implement HMAC-SHA256 signature generation
-- [ ] Implement signature validation
-- [ ] Support optional salt
-- [ ] Add `signing_required` config option
-- [ ] Generate signed URLs helper
+#### 50.5.1 URL Signing ✅
+- [x] Implement HMAC-SHA256 signature generation
+- [x] Implement signature validation with constant-time comparison
+- [x] Support optional salt
+- [x] Add `signing_required` config option
+- [x] Base64url encoding (URL-safe, no padding)
 
-#### 50.5.2 Path-based URL Support
-- [ ] Implement `/_img/{sig}/{options}/{url}` pattern
-- [ ] Parse options from path
-- [ ] Decode source URL (base64 or plain)
-- [ ] Route to image processor
+#### 50.5.2 Path-based URL Support ✅
+- [x] Parse options from path (`w:800,h:600,q:80`)
+- [x] Query parameter parsing also supported
+- [ ] `/_img/{sig}/{options}/{url}` route pattern (proxy integration pending)
 
-#### 50.5.3 Image Bomb Protection
-- [ ] Validate dimensions before full decode
-- [ ] Check pixel count limit
-- [ ] Check file size limit
-- [ ] Implement processing timeout
-- [ ] Return appropriate error responses
+#### 50.5.3 Image Bomb Protection ✅
+- [x] Validate max_source_width (default: 10,000)
+- [x] Validate max_source_height (default: 10,000)
+- [x] Check pixel count limit (default: 100MP)
+- [x] Check file size limit (default: 50MB)
+- [x] Return appropriate `ImageError` variants
+- [ ] Processing timeout (deferred to metrics phase)
 
-#### 50.5.4 Source Validation
-- [ ] Implement allowed sources list
-- [ ] Implement blocked sources list
-- [ ] Glob pattern matching
-- [ ] Validate before processing
+#### 50.5.4 Source Validation ✅
+- [x] Implement allowed sources list
+- [x] Implement blocked sources list
+- [x] Glob pattern matching (prefix/suffix wildcards)
+- [x] Validate before processing
 
-### Test Cases
+### Completed Test Cases (13 tests)
 
 ```
-[ ] test_signature_generation
-[ ] test_signature_validation_success
-[ ] test_signature_validation_failure
-[ ] test_signature_with_salt
-[ ] test_signature_required_rejects_unsigned
-[ ] test_signature_optional_allows_unsigned
-[ ] test_path_url_parsing
-[ ] test_path_options_parsing
-[ ] test_image_bomb_width_exceeded
-[ ] test_image_bomb_height_exceeded
-[ ] test_image_bomb_pixels_exceeded
-[ ] test_file_size_limit
-[ ] test_processing_timeout
-[ ] test_allowed_source_passes
-[ ] test_blocked_source_rejected
-[ ] test_source_glob_matching
-[ ] test_error_returns_correct_status
+[x] test_generate_signature
+[x] test_validate_signature_success
+[x] test_validate_signature_failure
+[x] test_validate_signature_not_required
+[x] test_validate_dimensions_ok
+[x] test_validate_dimensions_width_exceeded
+[x] test_validate_dimensions_pixels_exceeded
+[x] test_validate_file_size_ok
+[x] test_validate_file_size_exceeded
+[x] test_validate_source_allowed
+[x] test_validate_source_not_allowed
+[x] test_validate_source_blocked
+[x] test_glob_match
+[x] test_constant_time_compare
+```
+
+### Implementation
+**File**: `src/image_optimizer/security.rs`
+
+### Security Configuration
+```rust
+pub struct SecurityConfig {
+    pub signing_required: bool,
+    pub signing_key: Option<Vec<u8>>,
+    pub signing_salt: Option<Vec<u8>>,
+    pub max_source_width: u32,        // Default: 10,000
+    pub max_source_height: u32,       // Default: 10,000
+    pub max_source_pixels: u64,       // Default: 100,000,000
+    pub max_source_file_size: usize,  // Default: 50MB
+    pub allowed_sources: Vec<String>,
+    pub blocked_sources: Vec<String>,
+}
 ```
 
 ---
 
-## Phase 50.6: Cache Integration
+## Phase 50.6: Cache Integration 🔄 PARTIAL
 
 ### Objective
 Integrate image optimization with existing cache layer.
 
 ### Tasks
 
-#### 50.6.1 Cache Key Generation
+#### 50.6.1 Cache Key Generation 🔄
+- [x] Add `variant` field to `CacheKey` struct
 - [ ] Generate deterministic cache keys from params
 - [ ] Include format in cache key
 - [ ] Include quality in cache key
@@ -340,6 +417,10 @@ Integrate image optimization with existing cache layer.
 - [ ] Set appropriate Cache-Control
 - [ ] Set ETag based on content hash
 - [ ] Handle conditional requests (If-None-Match)
+
+### Completed Work
+**File**: `src/cache/entry.rs`
+- Added `variant: Option<String>` field to `CacheKey` struct
 
 ### Test Cases
 
@@ -452,35 +533,35 @@ Comprehensive integration tests and user documentation.
 
 ## Module Structure
 
+### Current Implementation (Flat Structure)
 ```
 src/image_optimizer/
-├── mod.rs                  # Module root, public API
-├── config.rs               # Configuration (enhance existing)
-├── processor.rs            # Main processing pipeline (enhance existing)
-├── params.rs               # Parameter parsing (extract from processor)
+├── mod.rs          # Module root, public API exports
+├── config.rs       # ImageConfig configuration
+├── error.rs        # ImageError enum with HTTP status mapping
+├── params.rs       # ImageParams parsing (query and path-based)
+├── processor.rs    # Main processing pipeline (decode → resize → encode)
+├── encoder.rs      # ImageEncoder trait, factory, JPEG/PNG/WebP/AVIF encoders
+├── format.rs       # Auto-format selection from Accept header
+└── security.rs     # URL signing, image bomb protection, source validation
+```
+
+### Planned Expansion (Phase 50.1+)
+```
+src/image_optimizer/
+├── ... (existing modules)
 ├── encoders/
-│   ├── mod.rs              # Encoder trait and factory
+│   ├── mod.rs              # Enhanced encoder module
 │   ├── mozjpeg.rs          # MozJPEG encoder
 │   ├── oxipng.rs           # Oxipng encoder
-│   ├── webp.rs             # WebP encoder
-│   ├── ravif.rs            # AVIF encoder
-│   └── fallback.rs         # image crate fallback
+│   └── ravif.rs            # AVIF encoder
 ├── operations/
 │   ├── mod.rs              # Operation trait
-│   ├── resize.rs           # Resize operations
 │   ├── crop.rs             # Crop operations
 │   ├── transform.rs        # Rotate, flip
 │   └── filters.rs          # Blur, sharpen
-├── security/
-│   ├── mod.rs              # Security module root
-│   ├── signing.rs          # URL signing
-│   └── validation.rs       # Image bomb, source validation
-├── format/
-│   ├── mod.rs              # Format detection and selection
-│   └── auto.rs             # Auto-format from Accept header
 ├── cache.rs                # Cache integration
-├── metrics.rs              # Prometheus metrics
-└── error.rs                # Error types
+└── metrics.rs              # Prometheus metrics
 ```
 
 ---
@@ -514,13 +595,24 @@ src/image_optimizer/
 
 ## Next Steps
 
-1. Review and approve spec
-2. Add dependencies to Cargo.toml
-3. Begin Phase 50.1 (Enhanced Encoders)
-4. Follow TDD workflow: Red → Green → Refactor
-5. Mark tests complete as implemented
-6. Commit with [BEHAVIORAL]/[STRUCTURAL] prefixes
+### Completed ✅
+1. ✅ Foundation complete (Phase 50.0)
+2. ✅ Auto-format selection (Phase 50.4)
+3. ✅ URL signing & security (Phase 50.5)
+4. ✅ CacheKey.variant field added (Phase 50.6 partial)
+
+### Next Up
+1. **Phase 50.1**: Add enhanced encoders (mozjpeg, oxipng, ravif)
+2. **Phase 50.2**: Smart crop and advanced resize operations
+3. **Phase 50.3**: Rotation, flip, blur, sharpen
+4. **Phase 50.6**: Complete cache integration
+5. **Phase 50.7**: Prometheus metrics and structured logging
+
+### TDD Workflow
+- Follow Red → Green → Refactor cycle
+- Mark tests complete as implemented
+- Commit with [BEHAVIORAL]/[STRUCTURAL] prefixes
 
 ---
 
-**Ready to start? Say "go" to begin Phase 50.1!**
+**Ready to continue? Say "go" to begin Phase 50.1 (Enhanced Encoders)!**

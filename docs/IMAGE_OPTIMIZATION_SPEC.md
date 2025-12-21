@@ -1,10 +1,11 @@
 # Image Optimization Feature Specification
 
-**Version**: 1.0
-**Status**: Draft
+**Version**: 1.1
+**Status**: In Progress
 **Target Release**: v1.6.0
 **Author**: Yatagarasu Team
 **Date**: December 2025
+**Last Updated**: December 2025
 
 ---
 
@@ -16,33 +17,38 @@ Enhance Yatagarasu's image optimization capabilities to provide a production-rea
 
 ## Current State Analysis
 
-### Existing Implementation (`src/image_optimizer/`)
+### Implementation Status (`src/image_optimizer/`)
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Basic resize | ✅ Exists | Uses `fast_image_resize` with Lanczos3 |
-| Format conversion | ✅ Exists | JPEG, PNG, WebP, AVIF |
-| Quality control | ✅ Exists | Via `q` parameter |
-| Fit modes | ✅ Exists | Cover, Contain, Fill, Inside, Outside |
-| Query params | ✅ Exists | `w`, `h`, `q`, `fmt`, `fit` |
-| Config | ✅ Exists | max_width, max_height, default_quality |
+| Feature | Status | Module | Notes |
+|---------|--------|--------|-------|
+| Basic resize | ✅ Complete | `processor.rs` | Uses `fast_image_resize` with Lanczos3 |
+| Format conversion | ✅ Complete | `encoder.rs` | JPEG, PNG, WebP, AVIF (placeholder) |
+| Quality control | ✅ Complete | `params.rs` | Via `q` parameter (1-100) |
+| Fit modes | ✅ Complete | `params.rs` | Cover, Contain, Fill, Inside, Outside, Pad |
+| Query params | ✅ Complete | `params.rs` | `w`, `h`, `q`, `fmt`, `fit`, `dpr`, `g`, `r`, `blur`, `sharpen` |
+| Path-based params | ✅ Complete | `params.rs` | `/w:800,h:600,q:80,f:webp/` format |
+| DPR support | ✅ Complete | `processor.rs` | Device pixel ratio 1-4 |
+| Percentage dimensions | ✅ Complete | `params.rs` | `50p` or `50%` syntax |
+| Config | ✅ Complete | `config.rs` | max_width, max_height, default_quality |
+| Error types | ✅ Complete | `error.rs` | Structured errors with HTTP status mapping |
+| URL signing | ✅ Complete | `security.rs` | HMAC-SHA256 signature generation/validation |
+| Image bomb protection | ✅ Complete | `security.rs` | Dimension/pixel limits |
+| Source validation | ✅ Complete | `security.rs` | Allowlist/blocklist with glob patterns |
+| Auto-format | ✅ Complete | `format.rs` | Accept header parsing, format selection |
+| Encoder abstraction | ✅ Complete | `encoder.rs` | Trait-based with factory pattern |
+| Cache variant support | ✅ Complete | `cache/entry.rs` | `CacheKey.variant` field added |
 
-### Gaps to Address
+### Remaining Work
 
 | Feature | Priority | Status |
 |---------|----------|--------|
-| URL signing (HMAC) | High | ❌ Missing |
-| Smart/content-aware crop | High | ❌ Missing |
-| Advanced encoders (mozjpeg, oxipng, ravif) | High | ❌ Missing |
-| Auto-format (Accept header) | High | ❌ Missing |
-| Crop positioning | Medium | ❌ Missing |
-| Rotation/flip | Medium | ❌ Missing |
-| Watermarking | Medium | ❌ Missing |
-| Blur/sharpen filters | Low | ❌ Missing |
-| Cache integration | High | ❌ Missing |
-| Metrics & observability | High | ❌ Missing |
-| Image bomb protection | High | ❌ Missing |
-| Streaming processing | Medium | ❌ Missing |
+| Smart/content-aware crop | Medium | ❌ Pending |
+| Advanced encoders (mozjpeg, oxipng, ravif) | Medium | ❌ Pending |
+| Rotation/flip implementation | Medium | ❌ Pending |
+| Blur/sharpen implementation | Low | ❌ Pending |
+| Watermarking | Low | ❌ Pending |
+| Metrics & observability | Medium | ❌ Pending |
+| Full cache integration | Medium | ❌ Pending |
 
 ---
 
@@ -52,386 +58,287 @@ Enhance Yatagarasu's image optimization capabilities to provide a production-rea
 
 Support two URL patterns:
 
-#### Pattern A: Query Parameters (Current)
+#### Pattern A: Query Parameters (Implemented)
 ```
 GET /bucket/path/image.jpg?w=800&h=600&q=80&fmt=webp
 ```
 
-#### Pattern B: Path-based (imgproxy-style)
+#### Pattern B: Path-based (Implemented)
 ```
-GET /_img/{signature}/{options}/{encoded_url}
-GET /_img/insecure/{options}/{bucket}/{path}
+GET /bucket/w:800,h:600,q:80,f:webp/image.jpg
 ```
 
 **Options Format**: Comma-separated key-value pairs
 ```
-w:800,h:600,q:80,f:webp,fit:cover,crop:smart
+w:800,h:600,q:80,f:webp,fit:cover
 ```
 
 ### 2. Transformation Operations
 
-#### 2.1 Resize Operations
+#### 2.1 Resize Operations (Implemented)
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `w` | Target width (pixels or percentage) | `w:800`, `w:50p` |
-| `h` | Target height | `h:600` |
-| `fit` | Fit mode | `fit:cover`, `fit:contain`, `fit:fill` |
-| `dpr` | Device pixel ratio (1-4) | `dpr:2` |
-| `enlarge` | Allow upscaling | `enlarge:1` |
+| Parameter | Description | Example | Status |
+|-----------|-------------|---------|--------|
+| `w` | Target width (pixels or percentage) | `w:800`, `w:50p` | ✅ |
+| `h` | Target height | `h:600` | ✅ |
+| `fit` | Fit mode | `fit:cover`, `fit:contain`, `fit:fill` | ✅ |
+| `dpr` | Device pixel ratio (1-4) | `dpr:2` | ✅ |
+| `enlarge` | Allow upscaling | `enlarge:1` | ✅ |
 
-#### 2.2 Crop Operations
+#### 2.2 Crop Operations (Partial)
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `crop` | Crop mode | `crop:smart`, `crop:attention`, `crop:entropy` |
-| `gravity` | Crop position | `g:center`, `g:north`, `g:face` |
-| `cx`, `cy` | Crop offset | `cx:100,cy:50` |
-| `cw`, `ch` | Crop dimensions | `cw:400,ch:300` |
+| Parameter | Description | Example | Status |
+|-----------|-------------|---------|--------|
+| `gravity` | Crop position | `g:center`, `g:north`, `g:smart` | ✅ Parsed |
+| `cx`, `cy` | Crop offset | `cx:100,cy:50` | ✅ Parsed |
+| `cw`, `ch` | Crop dimensions | `cw:400,ch:300` | ✅ Parsed |
+| `crop` | Smart crop | `crop:smart` | ❌ Not implemented |
 
-#### 2.3 Format & Quality
+#### 2.3 Format & Quality (Implemented)
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `f` / `fmt` | Output format | `f:webp`, `f:avif`, `f:jpeg`, `f:png` |
-| `q` | Quality (1-100) | `q:80` |
-| `auto` | Auto-format from Accept | `auto:webp,avif` |
-| `strip` | Strip metadata | `strip:1` |
-| `progressive` | Progressive encoding | `progressive:1` |
+| Parameter | Description | Example | Status |
+|-----------|-------------|---------|--------|
+| `f` / `fmt` | Output format | `f:webp`, `f:avif`, `f:jpeg`, `f:png` | ✅ |
+| `q` | Quality (1-100) | `q:80` | ✅ |
+| `auto` | Auto-format from Accept | Automatic | ✅ |
+| `strip` | Strip metadata | `strip:1` | ✅ Parsed |
+| `progressive` | Progressive encoding | `progressive:1` | ✅ Parsed |
 
-#### 2.4 Effects
+#### 2.4 Effects (Parsed, Not Implemented)
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `r` / `rotate` | Rotation (degrees) | `r:90`, `r:180`, `r:270` |
-| `flip` | Flip direction | `flip:h`, `flip:v` |
-| `blur` | Gaussian blur (sigma) | `blur:5` |
-| `sharpen` | Sharpen (sigma) | `sharpen:1.5` |
-| `brightness` | Brightness adjustment | `brightness:10` |
-| `contrast` | Contrast adjustment | `contrast:1.2` |
+| Parameter | Description | Example | Status |
+|-----------|-------------|---------|--------|
+| `r` / `rotate` | Rotation (degrees) | `r:90`, `r:180`, `r:270` | ✅ Parsed |
+| `flip` | Flip direction | `flip:h`, `flip:v` | ✅ Parsed |
+| `blur` | Gaussian blur (sigma) | `blur:5` | ✅ Parsed |
+| `sharpen` | Sharpen (sigma) | `sharpen:1.5` | ✅ Parsed |
 
-#### 2.5 Watermark (Phase 2)
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `wm` | Watermark image URL | `wm:logo.png` |
-| `wm_pos` | Watermark position | `wm_pos:se` (southeast) |
-| `wm_opacity` | Watermark opacity | `wm_opacity:0.5` |
-| `wm_scale` | Watermark scale | `wm_scale:0.1` |
-
-### 3. Security Features
+### 3. Security Features (Implemented)
 
 #### 3.1 URL Signing (HMAC-SHA256)
 
 ```
-signature = HMAC-SHA256(secret_key, options + "/" + source_url)
-URL = /_img/{signature}/{options}/{encoded_url}
+signature = HMAC-SHA256(secret_key, salt + options + "/" + source_url)
 ```
 
-**Configuration**:
-```yaml
-image_optimization:
-  security:
-    signing_required: true
-    signing_key: "${IMAGE_SIGNING_KEY}"
-    signing_salt: "${IMAGE_SIGNING_SALT}"  # Optional
-```
+**Implementation**: `src/image_optimizer/security.rs`
+- `generate_signature()` - creates URL signature
+- `validate_signature()` - verifies signature with constant-time comparison
+- Optional salt support
+- Configurable `signing_required` flag
 
 #### 3.2 Image Bomb Protection
 
-- Validate image dimensions before full decode
-- Maximum pixel limit (e.g., 100 megapixels)
-- Maximum file size before processing
-- Timeout for processing operations
+**Implementation**: `src/image_optimizer/security.rs`
+- `validate_dimensions()` - checks width, height, and total pixels
+- `validate_file_size()` - checks input file size
 
-```yaml
-image_optimization:
-  limits:
-    max_source_width: 10000
-    max_source_height: 10000
-    max_source_pixels: 100000000  # 100MP
-    max_source_file_size: 52428800  # 50MB
-    processing_timeout_ms: 30000
+```rust
+pub struct SecurityConfig {
+    pub signing_required: bool,
+    pub signing_key: Option<Vec<u8>>,
+    pub signing_salt: Option<Vec<u8>>,
+    pub max_source_width: u32,        // Default: 10,000
+    pub max_source_height: u32,       // Default: 10,000
+    pub max_source_pixels: u64,       // Default: 100,000,000 (100MP)
+    pub max_source_file_size: usize,  // Default: 50MB
+    pub allowed_sources: Vec<String>,
+    pub blocked_sources: Vec<String>,
+}
 ```
 
-#### 3.3 Allowed Sources
+#### 3.3 Source Validation
 
-```yaml
-image_optimization:
-  security:
-    allowed_sources:
-      - "s3://my-bucket/*"
-      - "https://cdn.example.com/*"
-    blocked_sources:
-      - "*.internal.example.com"
-```
+**Implementation**: `src/image_optimizer/security.rs`
+- `validate_source()` - checks against allowed/blocked lists
+- Glob pattern support (`bucket/*`, `*.example.com`)
 
-### 4. Format Support
+### 4. Auto-Format Selection (Implemented)
 
-#### 4.1 Input Formats
-
-| Format | Library | Notes |
-|--------|---------|-------|
-| JPEG | zune-jpeg | Fastest Rust decoder |
-| PNG | zune-png | Fast decoder |
-| WebP | webp | Google's library |
-| AVIF | libavif | AV1-based |
-| GIF | image | Static only (Phase 1) |
-| TIFF | image | Full support |
-| BMP | image | Full support |
-
-#### 4.2 Output Formats
-
-| Format | Encoder | Quality Range | Notes |
-|--------|---------|---------------|-------|
-| JPEG | mozjpeg | 1-100 | Best compression |
-| PNG | oxipng | 0-6 (levels) | Lossless, multithreaded |
-| WebP | webp | 1-100 | Good compression + transparency |
-| AVIF | ravif | 1-100 | Best compression, slow encode |
-
-### 5. Auto-Format Selection
+**Implementation**: `src/image_optimizer/format.rs`
 
 Based on `Accept` header with fallback chain:
-
 ```
 Accept: image/avif,image/webp,image/jpeg
 ```
 
 Selection priority:
-1. AVIF (if supported and beneficial)
-2. WebP (if supported)
+1. AVIF (if supported and `prefer_avif` enabled)
+2. WebP (if supported and `prefer_webp` enabled)
 3. Original format (JPEG/PNG)
 
-**Decision Factors**:
-- Browser support (Accept header)
-- Source format (preserve PNG transparency)
-- File size benefit threshold (>10% savings)
-- Processing time budget
-
-### 6. Caching Strategy
-
-#### 6.1 Cache Key Generation
-
-```
-cache_key = hash(source_url + options + format)
-```
-
-Example:
-```
-/bucket/image.jpg:w800_h600_q80_fwebp_fitcover
-```
-
-#### 6.2 Cache Headers
-
-```http
-Cache-Control: public, max-age=31536000
-Vary: Accept
-ETag: "abc123"
-```
-
-#### 6.3 Integration with Existing Cache
-
-- Use existing cache layer (memory, Redis, disk)
-- Store transformed variants separately
-- Support cache purge by source URL (invalidate all variants)
-
-### 7. Metrics & Observability
-
-#### 7.1 Prometheus Metrics
-
-```
-# Processing time histogram
-yatagarasu_image_processing_duration_seconds{operation="resize",format="webp"}
-
-# Transformation counters
-yatagarasu_image_transformations_total{operation="resize",status="success"}
-yatagarasu_image_transformations_total{operation="resize",status="error"}
-
-# Size reduction
-yatagarasu_image_bytes_saved_total{format="webp"}
-yatagarasu_image_compression_ratio{format="webp"}
-
-# Cache performance
-yatagarasu_image_cache_hits_total
-yatagarasu_image_cache_misses_total
-```
-
-#### 7.2 Logging
-
-```json
-{
-  "event": "image_processed",
-  "source": "bucket/image.jpg",
-  "operations": ["resize", "format_convert"],
-  "input_size": 1048576,
-  "output_size": 262144,
-  "compression_ratio": 0.25,
-  "duration_ms": 45,
-  "output_format": "webp",
-  "dimensions": {"width": 800, "height": 600}
-}
-```
-
----
-
-## Configuration Schema
-
-```yaml
-image_optimization:
-  # Global enable/disable
-  enabled: true
-
-  # Processing limits
-  limits:
-    max_width: 4096
-    max_height: 4096
-    max_source_width: 10000
-    max_source_height: 10000
-    max_source_pixels: 100000000
-    max_source_file_size: 52428800
-    processing_timeout_ms: 30000
-
-  # Default settings
-  defaults:
-    quality: 80
-    format: "auto"  # auto, jpeg, png, webp, avif
-    fit: "cover"
-    strip_metadata: true
-    progressive: true
-
-  # Encoder settings
-  encoders:
-    jpeg:
-      encoder: "mozjpeg"  # mozjpeg, image
-      quality: 80
-      progressive: true
-      chroma_subsample: "4:2:0"
-    png:
-      encoder: "oxipng"  # oxipng, image
-      compression_level: 3  # 0-6
-      strip_metadata: true
-    webp:
-      quality: 80
-      lossless: false
-      near_lossless: false
-    avif:
-      quality: 70
-      speed: 6  # 1-10 (higher = faster, lower quality)
-
-  # Security
-  security:
-    signing_required: false
-    signing_key: "${IMAGE_SIGNING_KEY}"
-    allowed_sources: []
-    blocked_sources: []
-
-  # Auto-format settings
-  auto_format:
-    enabled: true
-    prefer_avif: true
-    prefer_webp: true
-    min_savings_percent: 10
-
-  # Per-bucket overrides
-  buckets:
-    static-assets:
-      enabled: true
-      defaults:
-        quality: 85
-        format: "webp"
-    user-uploads:
-      enabled: true
-      limits:
-        max_width: 2048
-        max_height: 2048
-```
-
----
-
-## API Design
-
-### Public API
-
+**Configuration**:
 ```rust
-/// Image optimization result
-pub struct OptimizedImage {
-    pub data: Vec<u8>,
-    pub content_type: String,
-    pub width: u32,
-    pub height: u32,
-    pub original_size: usize,
-    pub optimized_size: usize,
+pub struct AutoFormatConfig {
+    pub enabled: bool,
+    pub prefer_avif: bool,
+    pub prefer_webp: bool,
+    pub min_savings_percent: u8,
 }
-
-/// Parse image parameters from URL/query
-pub fn parse_params(
-    query: &HashMap<String, String>,
-    path_options: Option<&str>,
-) -> Result<ImageParams, ImageError>;
-
-/// Process image with given parameters
-pub async fn process_image(
-    source: &[u8],
-    params: &ImageParams,
-    config: &ImageConfig,
-) -> Result<OptimizedImage, ImageError>;
-
-/// Validate URL signature
-pub fn validate_signature(
-    signature: &str,
-    options: &str,
-    source_url: &str,
-    config: &SecurityConfig,
-) -> Result<(), ImageError>;
-
-/// Generate URL signature
-pub fn generate_signature(
-    options: &str,
-    source_url: &str,
-    config: &SecurityConfig,
-) -> String;
 ```
 
-### Error Types
+**Functions**:
+- `select_format()` - chooses optimal format based on Accept header
+- `vary_header()` - returns "Accept" for Vary header
+
+### 5. Encoder Architecture (Implemented)
+
+**Implementation**: `src/image_optimizer/encoder.rs`
+
+#### Trait-Based Design
+```rust
+pub trait ImageEncoder: Send + Sync {
+    fn format(&self) -> OutputFormat;
+    fn encode(&self, data: &[u8], width: u32, height: u32, quality: EncoderQuality)
+        -> Result<EncodedImage, ImageError>;
+    fn supports_transparency(&self) -> bool;
+}
+```
+
+#### Factory Pattern
+```rust
+pub struct EncoderFactory;
+
+impl EncoderFactory {
+    pub fn create(format: OutputFormat) -> Box<dyn ImageEncoder>;
+}
+```
+
+#### Current Encoders
+| Format | Encoder | Notes |
+|--------|---------|-------|
+| JPEG | `JpegEncoder` | Uses `image` crate |
+| PNG | `PngEncoder` | Uses `image` crate |
+| WebP | `WebPEncoder` | Lossless only (image crate limitation) |
+| AVIF | `AvifEncoder` | Placeholder, returns error |
+
+### 6. Error Handling (Implemented)
+
+**Implementation**: `src/image_optimizer/error.rs`
 
 ```rust
 pub enum ImageError {
     // Decoding errors
-    UnsupportedFormat(String),
-    DecodeFailed(String),
-    CorruptedImage(String),
+    UnsupportedFormat { format: String },
+    DecodeFailed { message: String },
+    CorruptedImage { message: String },
 
     // Processing errors
-    ResizeFailed(String),
-    EncodeFailed(String),
-    ProcessingTimeout,
+    ResizeFailed { message: String },
+    EncodeFailed { format: String, message: String },
+    ProcessingTimeout { timeout_ms: u64 },
 
     // Security errors
     InvalidSignature,
-    SourceNotAllowed(String),
-    ImageBombDetected { width: u32, height: u32, pixels: u64 },
-    FileTooLarge { size: usize, max: usize },
+    SourceNotAllowed { source: String },
+    ImageBombDetected { width, height, pixels, max_pixels },
+    FileTooLarge { size, max_size },
 
-    // Configuration errors
-    InvalidParameter(String),
-    InvalidDimensions { width: u32, height: u32 },
+    // Parameter errors
+    InvalidParameter { param: String, message: String },
+    InvalidDimensions { width, height, reason: String },
+    InvalidQuality { quality: u8 },
 }
 
 impl ImageError {
     pub fn to_http_status(&self) -> u16 {
         match self {
-            Self::UnsupportedFormat(_) => 415,
-            Self::InvalidSignature => 403,
-            Self::SourceNotAllowed(_) => 403,
-            Self::ImageBombDetected { .. } => 400,
+            Self::UnsupportedFormat { .. } => 415,
+            Self::InvalidSignature | Self::SourceNotAllowed { .. } => 403,
             Self::FileTooLarge { .. } => 413,
-            Self::InvalidParameter(_) => 400,
-            Self::ProcessingTimeout => 504,
+            Self::ProcessingTimeout { .. } => 504,
+            Self::DecodeFailed { .. } | Self::ImageBombDetected { .. } |
+            Self::InvalidParameter { .. } | Self::InvalidDimensions { .. } |
+            Self::InvalidQuality { .. } => 400,
             _ => 500,
         }
     }
 }
 ```
+
+---
+
+## Module Structure (Current)
+
+```
+src/image_optimizer/
+├── mod.rs          # Module root, public API exports
+├── config.rs       # ImageConfig configuration
+├── error.rs        # ImageError enum with HTTP status mapping
+├── params.rs       # ImageParams parsing (query and path-based)
+├── processor.rs    # Main processing pipeline
+├── encoder.rs      # Encoder trait, factory, implementations
+├── format.rs       # Auto-format selection from Accept header
+└── security.rs     # URL signing, image bomb protection, source validation
+```
+
+---
+
+## API Summary
+
+### Public Types
+```rust
+// Core types
+pub use error::ImageError;
+pub use params::{Dimension, FitMode, Gravity, ImageParams, OutputFormat};
+pub use config::ImageConfig;
+
+// Encoder types
+pub use encoder::{EncodedImage, EncoderFactory, EncoderQuality, ImageEncoder};
+
+// Security types
+pub use security::SecurityConfig;
+
+// Format selection
+pub use format::{AutoFormatConfig, select_format, vary_header};
+
+// Processing
+pub use processor::{process_image, process_image_internal, ProcessedImage};
+```
+
+### Key Functions
+```rust
+// Parse parameters from query map
+pub fn ImageParams::from_params(params: &HashMap<String, String>) -> Option<Self>;
+pub fn ImageParams::from_query(params: &HashMap<String, String>) -> Option<Result<Self, ImageError>>;
+pub fn ImageParams::from_path_options(options: &str) -> Result<Self, ImageError>;
+
+// Process image
+pub fn process_image(data: &[u8], params: ImageParams) -> Result<(Vec<u8>, String), String>;
+
+// Security
+pub fn generate_signature(options: &str, source_url: &str, config: &SecurityConfig) -> Option<String>;
+pub fn validate_signature(sig: &str, options: &str, source_url: &str, config: &SecurityConfig) -> Result<(), ImageError>;
+pub fn validate_dimensions(width: u32, height: u32, config: &SecurityConfig) -> Result<(), ImageError>;
+pub fn validate_source(source: &str, config: &SecurityConfig) -> Result<(), ImageError>;
+
+// Format selection
+pub fn select_format(accept: Option<&str>, source: OutputFormat, has_transparency: bool, config: &AutoFormatConfig) -> OutputFormat;
+```
+
+---
+
+## Test Coverage
+
+| Module | Tests | Status |
+|--------|-------|--------|
+| `error.rs` | 10 | ✅ Pass |
+| `params.rs` | 14 | ✅ Pass |
+| `processor.rs` | 10 | ✅ Pass |
+| `encoder.rs` | 13 | ✅ Pass |
+| `format.rs` | 11 | ✅ Pass |
+| `security.rs` | 13 | ✅ Pass |
+| **Total** | **71** | ✅ Pass |
+
+---
+
+## Next Steps
+
+1. **Phase 50.1**: Integrate optimized encoders (mozjpeg, oxipng, ravif)
+2. **Phase 50.2**: Implement smart crop and advanced resize operations
+3. **Phase 50.3**: Implement rotation, flip, blur, sharpen
+4. **Phase 50.6**: Full cache integration with variant storage
+5. **Phase 50.7**: Add Prometheus metrics and structured logging
 
 ---
 
@@ -448,81 +355,10 @@ impl ImageError {
 
 ---
 
-## Dependencies
-
-### Required Crates
-
-```toml
-# Core image processing
-image = "0.24"
-fast_image_resize = "2.7"
-zune-image = "0.4"
-zune-jpeg = "0.4"
-
-# Optimized encoders
-mozjpeg = "0.10"
-oxipng = "9.0"
-webp = "0.2"
-ravif = "0.11"
-libavif = { version = "0.14", optional = true }
-
-# Smart crop (optional, Phase 2)
-# smartcrop = "0.2"  # or implement basic edge detection
-```
-
-### Feature Flags
-
-```toml
-[features]
-default = ["jpeg", "png", "webp"]
-jpeg = ["mozjpeg", "zune-jpeg"]
-png = ["oxipng"]
-webp = ["webp"]
-avif = ["ravif", "libavif"]
-full = ["jpeg", "png", "webp", "avif"]
-```
-
----
-
-## Security Considerations
-
-1. **Image Bomb Protection**: Validate dimensions before full decode
-2. **URL Signing**: HMAC-SHA256 prevents unauthorized transformations
-3. **Rate Limiting**: Use existing rate limiter for image endpoints
-4. **Memory Limits**: Cap concurrent image processing
-5. **Timeout Protection**: Kill long-running operations
-6. **Source Validation**: Whitelist allowed image sources
-
----
-
 ## Compatibility
 
 - Maintains backward compatibility with existing query parameter API
-- New path-based API is opt-in
-- Existing cache entries remain valid
-- No breaking changes to configuration (additive only)
+- New path-based API works alongside query parameters
+- `from_params()` method preserved for legacy code
+- No breaking changes to existing configuration
 
----
-
-## Success Criteria
-
-1. All 6 core operations working (resize, crop, rotate, flip, format, quality)
-2. Auto-format selection based on Accept header
-3. URL signing for security
-4. Image bomb protection
-5. Cache integration with variant storage
-6. Metrics for monitoring
-7. >90% test coverage
-8. Performance targets met
-9. Documentation complete
-
----
-
-## Out of Scope (Future Phases)
-
-- Animated GIF/WebP processing
-- Video thumbnail generation
-- Face detection for smart crop
-- AI-based upscaling
-- PDF/PSD preview generation
-- SVG rasterization
