@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use image::{ImageFormat, RgbaImage};
 use std::io::Cursor;
-use yatagarasu::image_optimizer::{process_image, FitMode, OutputFormat, ImageParams};
+use yatagarasu::image_optimizer::{process_image, FitMode, ImageParams, OutputFormat};
 
 fn create_bench_image(width: u32, height: u32) -> Vec<u8> {
     let mut img = RgbaImage::new(width, height);

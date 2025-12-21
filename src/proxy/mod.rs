@@ -3239,13 +3239,14 @@ impl ProxyHttp for YatagarasuProxy {
             }
 
             // Image Optimization: Check if optimization is requested and content is image
-            let is_image = ctx.response_content_type()
+            let is_image = ctx
+                .response_content_type()
                 .map(|ct| ct.starts_with("image/"))
                 .unwrap_or(false);
 
             if ctx.image_params().is_some() && is_image {
                 ctx.set_optimizing_image(true);
-                
+
                 // Ensure buffering is enabled even if cache is disabled
                 if !ctx.is_response_buffering_enabled() {
                     ctx.enable_response_buffering();
@@ -3257,7 +3258,7 @@ impl ProxyHttp for YatagarasuProxy {
                 upstream_response.remove_header("content-length");
                 upstream_response.remove_header("ETag");
                 upstream_response.remove_header("etag");
-                
+
                 tracing::debug!(
                     request_id = %ctx.request_id(),
                     params = ?ctx.image_params(),
@@ -3289,7 +3290,7 @@ impl ProxyHttp for YatagarasuProxy {
                 const MAX_CACHE_SIZE: usize = 10 * 1024 * 1024; // 10MB
                 if ctx.total_response_size() + chunk.len() <= MAX_CACHE_SIZE {
                     ctx.append_response_chunk(chunk);
-                    
+
                     // IF optimizing, suppress output to client until we have full image
                     if ctx.is_optimizing_image() {
                         *body = None;
@@ -3313,13 +3314,15 @@ impl ProxyHttp for YatagarasuProxy {
             if end_of_stream {
                 if let Some(buffered_data) = ctx.take_response_buffer() {
                     let should_cache_original = ctx.should_cache_response() && self.cache.is_some();
-                    
+
                     // 1. Populate cache with ORIGINAL data if enabled
                     // We need to use the data, so clone if we also need it for optimization
                     if should_cache_original {
                         let cache_data = buffered_data.clone();
-                        
-                        if let (Some(bucket_config), Some(cache)) = (ctx.bucket_config(), &self.cache) {
+
+                        if let (Some(bucket_config), Some(cache)) =
+                            (ctx.bucket_config(), &self.cache)
+                        {
                             use crate::cache::{CacheEntry, CacheKey};
 
                             let router = self.router.load_full();
@@ -3364,8 +3367,11 @@ impl ProxyHttp for YatagarasuProxy {
                                 input_size = buffered_data.len(),
                                 "Starting image optimization"
                             );
-                            
-                            match crate::image_optimizer::processor::process_image(&buffered_data, params.clone()) {
+
+                            match crate::image_optimizer::processor::process_image(
+                                &buffered_data,
+                                params.clone(),
+                            ) {
                                 Ok((optimized_data, content_type)) => {
                                     tracing::debug!(
                                         request_id = %ctx.request_id(),
@@ -3376,29 +3382,33 @@ impl ProxyHttp for YatagarasuProxy {
 
                                     // Store optimized version in cache (if cache enabled)
                                     if self.cache.is_some() {
-                                        if let (Some(bucket_config), Some(cache)) = (ctx.bucket_config(), &self.cache) {
+                                        if let (Some(bucket_config), Some(cache)) =
+                                            (ctx.bucket_config(), &self.cache)
+                                        {
                                             use crate::cache::{CacheEntry, CacheKey};
                                             let router = self.router.load_full();
-                                            let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
+                                            let object_key = router
+                                                .extract_s3_key(ctx.path())
+                                                .unwrap_or_default();
                                             let variant = params.to_cache_key();
-                                            
+
                                             let cache_key = CacheKey {
                                                 bucket: bucket_config.name.clone(),
                                                 object_key: object_key.to_string(),
                                                 etag: None,
                                                 variant: Some(variant),
                                             };
-                                            
+
                                             let cache_entry = CacheEntry::new(
                                                 bytes::Bytes::from(optimized_data.clone()),
                                                 content_type.clone(),
                                                 // We don't have a real ETag for optimized image, usage empty or derived?
                                                 // Using empty for now as it differs from original
-                                                "".to_string(), 
+                                                "".to_string(),
                                                 ctx.response_last_modified().map(|s| s.to_string()),
                                                 Some(std::time::Duration::from_secs(3600)),
                                             );
-                                            
+
                                             let cache_clone = Arc::clone(cache);
                                             tokio::spawn(async move {
                                                 cache_clone.set(cache_key, cache_entry).await.ok();
@@ -3408,7 +3418,7 @@ impl ProxyHttp for YatagarasuProxy {
 
                                     // Replace body with optimized data
                                     *body = Some(bytes::Bytes::from(optimized_data));
-                                    
+
                                     // Can't easily update headers (Content-Length) here as they are already sent
                                     // Relying on chunked transfer encoding (which removal of CL header should trigger)
                                 }

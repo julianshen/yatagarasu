@@ -187,6 +187,8 @@ pub struct ImageParams {
     // === Effects ===
     /// Rotation in degrees (0, 90, 180, 270)
     pub rotate: Option<u16>,
+    /// Auto-rotate based on EXIF orientation
+    pub auto_rotate: bool,
     /// Flip horizontally
     pub flip_h: bool,
     /// Flip vertically
@@ -261,6 +263,7 @@ impl Default for ImageParams {
             strip_metadata: true,
             progressive: true,
             rotate: None,
+            auto_rotate: true, // Auto-rotate based on EXIF by default
             flip_h: false,
             flip_v: false,
             blur: None,
@@ -355,6 +358,11 @@ impl ImageParams {
                 return Err(ImageError::invalid_param("r", "must be 0, 90, 180, or 270"));
             }
             result.rotate = Some(rotation);
+        }
+
+        // Auto-rotate (EXIF-based), enabled by default
+        if let Some(auto) = params.get("auto_rotate") {
+            result.auto_rotate = auto != "0" && auto != "false";
         }
 
         // Flip

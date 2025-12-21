@@ -250,7 +250,7 @@ Add rotation and flip transformations. Filters and color adjustments are optiona
 - [x] Implement 180° rotation
 - [x] Implement 270° rotation
 - [x] Handle arbitrary rotation (snaps to nearest 90°)
-- [ ] Auto-rotate based on EXIF (deferred)
+- [x] Auto-rotate based on EXIF orientation
 
 #### 50.3.2 Flip (Required) ✅
 
@@ -277,7 +277,10 @@ Add rotation and flip transformations. Filters and color adjustments are optiona
 [x] test_rotate_180
 [x] test_rotate_270_clockwise
 [x] test_rotate_arbitrary_snaps_to_nearest
-[ ] test_rotate_auto_exif (deferred)
+[x] test_read_exif_orientation_no_exif
+[x] test_apply_exif_rotation_no_exif
+[x] test_auto_rotate_enabled_by_default
+[x] test_auto_rotate_can_be_disabled
 [x] test_flip_horizontal
 [x] test_flip_vertical
 [x] test_flip_both_equals_rotate_180

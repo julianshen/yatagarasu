@@ -2,6 +2,7 @@
 //!
 //! Handles the actual image transformation: decode → resize → encode
 
+use exif::{In, Reader as ExifReader, Tag};
 use fast_image_resize::{FilterType, Image, PixelType, ResizeAlg, Resizer};
 use image::io::Reader as ImageReader;
 use image::DynamicImage;
@@ -47,10 +48,18 @@ pub fn process_image_internal(
 ) -> Result<ProcessedImage, ImageError> {
     // 1. Decode the image
     let img = decode_image(data)?;
+
+    // 2. Apply EXIF auto-rotation if enabled
+    let img = if params.auto_rotate {
+        apply_exif_rotation(&img, data)
+    } else {
+        img
+    };
+
     let src_width = img.width();
     let src_height = img.height();
 
-    // 2. Apply manual crop first if specified
+    // 3. Apply manual crop first if specified
     let img = if params.crop_width.is_some() || params.crop_height.is_some() {
         apply_manual_crop(&img, &params)?
     } else {
@@ -283,6 +292,50 @@ fn apply_flip(img: &DynamicImage, flip_h: bool, flip_v: bool) -> DynamicImage {
         (true, false) => img.fliph(),
         (false, true) => img.flipv(),
         (false, false) => img.clone(),
+    }
+}
+
+/// Read EXIF orientation from image data
+///
+/// Returns the EXIF orientation value (1-8), or 1 if not found
+fn read_exif_orientation(data: &[u8]) -> u32 {
+    let mut cursor = Cursor::new(data);
+    match ExifReader::new().read_from_container(&mut cursor) {
+        Ok(exif) => {
+            if let Some(field) = exif.get_field(Tag::Orientation, In::PRIMARY) {
+                field.value.get_uint(0).unwrap_or(1)
+            } else {
+                1 // Default: no rotation needed
+            }
+        }
+        Err(_) => 1, // No EXIF or parse error - assume no rotation needed
+    }
+}
+
+/// Apply rotation/flip based on EXIF orientation
+///
+/// EXIF Orientation values:
+/// 1 = Normal (no rotation)
+/// 2 = Flip horizontal
+/// 3 = Rotate 180°
+/// 4 = Flip vertical
+/// 5 = Rotate 90° CW + flip horizontal
+/// 6 = Rotate 90° CW
+/// 7 = Rotate 90° CCW + flip horizontal
+/// 8 = Rotate 90° CCW (270° CW)
+fn apply_exif_rotation(img: &DynamicImage, data: &[u8]) -> DynamicImage {
+    let orientation = read_exif_orientation(data);
+
+    match orientation {
+        1 => img.clone(),             // Normal
+        2 => img.fliph(),             // Flip horizontal
+        3 => img.rotate180(),         // Rotate 180°
+        4 => img.flipv(),             // Flip vertical
+        5 => img.rotate90().fliph(),  // Rotate 90° CW + flip horizontal
+        6 => img.rotate90(),          // Rotate 90° CW
+        7 => img.rotate270().fliph(), // Rotate 90° CCW + flip horizontal
+        8 => img.rotate270(),         // Rotate 90° CCW (270° CW)
+        _ => img.clone(),             // Unknown - no rotation
     }
 }
 
@@ -1145,6 +1198,44 @@ mod tests {
         let result = process_image_internal(&img_data, params);
         assert!(result.is_ok());
 
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (100, 50));
+    }
+
+    #[test]
+    fn test_read_exif_orientation_no_exif() {
+        // PNG images don't have EXIF - should return 1 (normal)
+        let img_data = create_test_image(100, 100);
+        let orientation = read_exif_orientation(&img_data);
+        assert_eq!(orientation, 1);
+    }
+
+    #[test]
+    fn test_apply_exif_rotation_no_exif() {
+        // Image without EXIF should remain unchanged
+        let img_data = create_test_image(100, 50);
+        let img = decode_image(&img_data).unwrap();
+        let rotated = apply_exif_rotation(&img, &img_data);
+        assert_eq!(rotated.width(), 100);
+        assert_eq!(rotated.height(), 50);
+    }
+
+    #[test]
+    fn test_auto_rotate_enabled_by_default() {
+        let params = ImageParams::default();
+        assert!(params.auto_rotate);
+    }
+
+    #[test]
+    fn test_auto_rotate_can_be_disabled() {
+        let img_data = create_test_image(100, 50);
+        let mut params = ImageParams::default();
+        params.auto_rotate = false;
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        // Should process without error, dimensions unchanged (no EXIF in test image)
         let processed = result.unwrap();
         assert_eq!(processed.output_size, (100, 50));
     }
