@@ -106,6 +106,12 @@ opentelemetry = "0.27"
 opentelemetry-otlp = {version = "0.27", features = ["tonic", "grpc-tonic"]}
 opentelemetry_sdk = {version = "0.27", features = ["rt-tokio"]}
 tracing-opentelemetry = "0.28"
+mozjpeg-sys = "1.1.1"
+oxipng = "9.0.0"
+webp = "0.3.1"
+ravif = "0.11.20"
+rgb = "0.8.52"
+imgref = "1.12.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Using low-level io-uring instead of tokio-uring
