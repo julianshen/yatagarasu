@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use image::{ImageFormat, RgbaImage};
 use std::io::Cursor;
-use yatagarasu::image_optimizer::{process_image, FitMode, ImageFormatType, ImageParams};
+use yatagarasu::image_optimizer::{process_image, FitMode, OutputFormat, ImageParams};
 
 fn create_bench_image(width: u32, height: u32) -> Vec<u8> {
     let mut img = RgbaImage::new(width, height);
@@ -23,11 +23,12 @@ fn bench_image_resize(c: &mut Criterion) {
     group.bench_function("resize_1080p_to_thumbnail_cover", |b| {
         b.iter(|| {
             let params = ImageParams {
-                width: Some(200),
-                height: Some(200),
+                width: Some(yatagarasu::image_optimizer::Dimension::Pixels(200)),
+                height: Some(yatagarasu::image_optimizer::Dimension::Pixels(200)),
                 fit: FitMode::Cover,
                 quality: Some(80),
-                format: Some(ImageFormatType::Jpeg),
+                format: Some(OutputFormat::Jpeg),
+                ..Default::default()
             };
             process_image(black_box(&input_data), black_box(params)).unwrap();
         })
@@ -36,11 +37,12 @@ fn bench_image_resize(c: &mut Criterion) {
     group.bench_function("resize_1080p_to_medium_contain", |b| {
         b.iter(|| {
             let params = ImageParams {
-                width: Some(800),
-                height: Some(600),
+                width: Some(yatagarasu::image_optimizer::Dimension::Pixels(800)),
+                height: Some(yatagarasu::image_optimizer::Dimension::Pixels(600)),
                 fit: FitMode::Contain,
                 quality: Some(85),
-                format: Some(ImageFormatType::WebP),
+                format: Some(OutputFormat::WebP),
+                ..Default::default()
             };
             process_image(black_box(&input_data), black_box(params)).unwrap();
         })
