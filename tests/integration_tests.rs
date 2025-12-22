@@ -21,6 +21,7 @@ mod integration {
     // mod health_test; // TODO: Fix API mismatch with test_harness
     mod hot_reload_load_test; // Phase 60: Hot Reload Under Load
     mod hot_reload_test;
+    mod image_optimization_test; // Phase 50.8: Image Optimization E2E Tests
     mod jwt_auth_test;
     mod k8s_scaling_test; // Phase 64: Kubernetes Deployment Testing
     mod layer_failure_test; // Phase 54.2: Layer Failure Recovery Tests

@@ -589,14 +589,16 @@ Comprehensive integration tests and user documentation.
 ### Test Cases
 
 ```
-[ ] test_e2e_resize_jpeg_to_webp
+[x] test_e2e_resize_jpeg - resize JPEG to specific dimensions
+[x] test_e2e_convert_to_webp - JPEG to WebP format conversion
+[x] test_e2e_convert_to_png - JPEG to PNG format conversion
+[x] test_e2e_quality_adjustment - quality parameter (q=30 vs q=95)
+[x] test_e2e_non_image_passthrough - non-image files pass through unchanged
+[x] test_e2e_rotation - rotation transformation (rot=90)
 [ ] test_e2e_signed_url_flow
 [ ] test_e2e_auto_format_selection
 [ ] test_e2e_cache_integration
-[ ] test_e2e_error_handling
 [ ] test_concurrent_processing
-[ ] test_memory_usage_large_image
-[ ] test_memory_usage_many_small_images
 [ ] bench_resize_1mp_image
 [ ] bench_mozjpeg_vs_image_crate
 [ ] bench_cache_hit_latency
