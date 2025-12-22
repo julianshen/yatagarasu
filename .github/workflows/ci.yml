@@ -66,7 +66,13 @@ jobs:
             ${{ runner.os }}-cargo-build-${{ matrix.rust }}-
 
       - name: Run cargo test
-        run: cargo test --all --verbose
+        run: |
+          if [ "${{ matrix.rust }}" = "beta" ]; then
+            # Skip doc tests on beta - they cause linker bus errors due to memory constraints
+            cargo test --all --verbose --lib --bins --tests
+          else
+            cargo test --all --verbose
+          fi
 
       - name: Upload test results
         if: always()
