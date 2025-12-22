@@ -32,6 +32,7 @@ pub mod config;
 pub mod encoder;
 pub mod error;
 pub mod format;
+pub mod metrics;
 pub mod params;
 pub mod processor;
 pub mod security;
@@ -41,6 +42,7 @@ pub use config::ImageConfig;
 pub use encoder::{EncodedImage, EncoderFactory, EncoderQuality, ImageEncoder};
 pub use error::ImageError;
 pub use format::{select_format, vary_header, AutoFormatConfig};
+pub use metrics::{ImageProcessingMetrics, ImageProcessingMetricsBuilder, TransformationType};
 pub use params::{Dimension, FitMode, Gravity, ImageParams, OutputFormat};
 pub use processor::{process_image, process_image_internal, ProcessedImage};
 pub use security::{
