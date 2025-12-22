@@ -599,9 +599,12 @@ Comprehensive integration tests and user documentation.
 [ ] test_e2e_auto_format_selection
 [ ] test_e2e_cache_integration
 [ ] test_concurrent_processing
-[ ] bench_resize_1mp_image
-[ ] bench_mozjpeg_vs_image_crate
-[ ] bench_cache_hit_latency
+[x] bench_image_resize - 1080p to thumbnail/medium/720p
+[x] bench_image_resize_by_source_size - 1MP/4MP/12MP sources
+[x] bench_format_conversion - JPEG to WebP/PNG/AVIF
+[x] bench_quality_levels - quality 30/60/80/95
+[x] bench_transformations - rotate/flip
+[x] bench_combined_operations - real-world pipelines
 ```
 
 ---
