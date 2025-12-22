@@ -40,6 +40,7 @@ fn bench_routing_single_bucket(c: &mut Criterion) {
         cache: None,
         audit_log: None,
         observability: Default::default(),
+        image_optimization: Default::default(),
         generation: 0,
     };
 
@@ -92,6 +93,7 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
         cache: None,
         audit_log: None,
         observability: Default::default(),
+        image_optimization: Default::default(),
         generation: 0,
     };
 
@@ -159,6 +161,7 @@ fn bench_routing_path_lengths(c: &mut Criterion) {
         cache: None,
         audit_log: None,
         observability: Default::default(),
+        image_optimization: Default::default(),
         generation: 0,
     };
 
@@ -225,6 +228,7 @@ fn bench_s3_key_extraction(c: &mut Criterion) {
         cache: None,
         audit_log: None,
         observability: Default::default(),
+        image_optimization: Default::default(),
         generation: 0,
     };
 
@@ -336,6 +340,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
         cache: None,
         audit_log: None,
         observability: Default::default(),
+        image_optimization: Default::default(),
         generation: 0,
     };
 
@@ -407,6 +412,7 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
             cache: None,
             audit_log: None,
             observability: Default::default(),
+            image_optimization: Default::default(),
             generation: 0,
         };
 
@@ -471,6 +477,7 @@ fn bench_path_normalization(c: &mut Criterion) {
         cache: None,
         audit_log: None,
         observability: Default::default(),
+        image_optimization: Default::default(),
         generation: 0,
     };
 
