@@ -2471,6 +2471,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(tarpaulin, ignore)] // Skip under code coverage - instrumentation slows execution
     fn test_export_prometheus_performance() {
         // Test: Response time < 50ms even under load (simulated with many metrics)
         let metrics = Metrics::new();
