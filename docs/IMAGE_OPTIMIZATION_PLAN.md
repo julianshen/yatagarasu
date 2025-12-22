@@ -570,7 +570,16 @@ Comprehensive integration tests and user documentation.
 - [ ] Create configuration reference
 - [ ] Add examples for common use cases
 
-#### 50.8.4 Migration Guide
+#### 50.8.4 Website Documentation (`website/`)
+
+- [ ] Create `website/configuration/image-optimization.md` - configuration reference
+- [ ] Create `website/tutorials/image-optimization.md` - tutorial guide
+- [ ] Create `website/reference/image-parameters.md` - URL parameter reference
+- [ ] Update `website/reference/api.md` - add image optimization endpoints
+- [ ] Update `website/configuration/index.md` - link to image optimization config
+- [ ] Add image optimization examples to relevant tutorials
+
+#### 50.8.5 Migration Guide
 
 - [ ] Document upgrade path from current implementation
 - [ ] List breaking changes (if any)
