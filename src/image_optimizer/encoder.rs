@@ -764,6 +764,7 @@ fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[allow(clippy::default_constructed_unit_structs)]
 mod tests {
     use super::*;
 
@@ -889,7 +890,7 @@ mod tests {
             255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
         ];
 
-        let encoder = WebPEncoder::default();
+        let encoder = WebPEncoder;
         let result = encoder.encode(&data, 2, 2, EncoderQuality::default());
         assert!(result.is_ok());
 
