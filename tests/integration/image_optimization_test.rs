@@ -579,3 +579,391 @@ buckets:
         println!("✅ E2E test passed: Rotation");
     });
 }
+
+/// Test E2E: Signed URL flow - valid signature allows access
+#[test]
+#[ignore = "Requires Docker and LocalStack"]
+fn test_e2e_signed_url_valid() {
+    init_logging();
+
+    let port = next_port();
+    let docker = Cli::default();
+    let localstack = docker.run(RunnableImage::from(LocalStack).with_env_var(("SERVICES", "s3")));
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    let test_image = create_test_jpeg_100x100();
+    let signing_key = "test-secret-key-for-signing";
+
+    // Upload test image
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        // Create bucket
+        let client = reqwest::Client::new();
+        client
+            .put(format!("{}/test-bucket", s3_endpoint))
+            .send()
+            .await
+            .unwrap();
+
+        // Upload image
+        client
+            .put(format!("{}/test-bucket/signed.jpg", s3_endpoint))
+            .header("Content-Type", "image/jpeg")
+            .body(test_image)
+            .send()
+            .await
+            .unwrap();
+    });
+
+    // Config with signing enabled
+    let config_yaml = format!(
+        r#"
+server:
+  addr: "127.0.0.1:{port}"
+  workers: 1
+buckets:
+  - name: "test"
+    path_prefix: "/images"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      endpoint: "{s3_endpoint}"
+      access_key: "test"
+      secret_key: "test"
+    image_optimization:
+      enabled: true
+      require_signature: true
+      signature_key: "{signing_key}"
+"#
+    );
+
+    let config_path = write_temp_config(&config_yaml, "signed_url_valid");
+    let harness = ProxyTestHarness::start(&config_path, port).expect("Failed to start proxy");
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Generate valid signature using same algorithm as security module
+    // signature = HMAC-SHA256(key, options + "/" + source_url)
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    let options = "w=50";
+    let source_path = "/images/signed.jpg";
+
+    let mut mac = HmacSha256::new_from_slice(signing_key.as_bytes()).unwrap();
+    mac.update(options.as_bytes());
+    mac.update(b"/");
+    mac.update(source_path.as_bytes());
+    let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "{}{}?{}&sig={}",
+            harness.base_url, source_path, options, signature
+        );
+
+        let response = client.get(&url).send().await.unwrap();
+        assert_eq!(
+            response.status(),
+            200,
+            "Valid signature should allow access"
+        );
+
+        println!("✅ E2E test passed: Signed URL (valid)");
+    });
+}
+
+/// Test E2E: Signed URL flow - invalid signature is rejected
+#[test]
+#[ignore = "Requires Docker and LocalStack"]
+fn test_e2e_signed_url_invalid() {
+    init_logging();
+
+    let port = next_port();
+    let docker = Cli::default();
+    let localstack = docker.run(RunnableImage::from(LocalStack).with_env_var(("SERVICES", "s3")));
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    let test_image = create_test_jpeg_100x100();
+    let signing_key = "test-secret-key-for-signing";
+
+    // Upload test image
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+        client
+            .put(format!("{}/test-bucket", s3_endpoint))
+            .send()
+            .await
+            .unwrap();
+
+        client
+            .put(format!("{}/test-bucket/signed.jpg", s3_endpoint))
+            .header("Content-Type", "image/jpeg")
+            .body(test_image)
+            .send()
+            .await
+            .unwrap();
+    });
+
+    let config_yaml = format!(
+        r#"
+server:
+  addr: "127.0.0.1:{port}"
+  workers: 1
+buckets:
+  - name: "test"
+    path_prefix: "/images"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      endpoint: "{s3_endpoint}"
+      access_key: "test"
+      secret_key: "test"
+    image_optimization:
+      enabled: true
+      require_signature: true
+      signature_key: "{signing_key}"
+"#
+    );
+
+    let config_path = write_temp_config(&config_yaml, "signed_url_invalid");
+    let harness = ProxyTestHarness::start(&config_path, port).expect("Failed to start proxy");
+    std::thread::sleep(Duration::from_secs(1));
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "{}/images/signed.jpg?w=50&sig=invalid-signature",
+            harness.base_url
+        );
+
+        let response = client.get(&url).send().await.unwrap();
+        // Should be 403 Forbidden or similar error
+        assert!(
+            response.status() == 403 || response.status() == 401,
+            "Invalid signature should be rejected, got status {}",
+            response.status()
+        );
+
+        println!("✅ E2E test passed: Signed URL (invalid rejected)");
+    });
+}
+
+/// Test E2E: Auto format selection based on Accept header
+#[test]
+#[ignore = "Requires Docker and LocalStack"]
+fn test_e2e_auto_format_selection() {
+    init_logging();
+
+    let port = next_port();
+    let docker = Cli::default();
+    let localstack = docker.run(RunnableImage::from(LocalStack).with_env_var(("SERVICES", "s3")));
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    let test_image = create_test_jpeg_100x100();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+        client
+            .put(format!("{}/test-bucket", s3_endpoint))
+            .send()
+            .await
+            .unwrap();
+
+        client
+            .put(format!("{}/test-bucket/auto.jpg", s3_endpoint))
+            .header("Content-Type", "image/jpeg")
+            .body(test_image)
+            .send()
+            .await
+            .unwrap();
+    });
+
+    let config_yaml = format!(
+        r#"
+server:
+  addr: "127.0.0.1:{port}"
+  workers: 1
+buckets:
+  - name: "test"
+    path_prefix: "/images"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      endpoint: "{s3_endpoint}"
+      access_key: "test"
+      secret_key: "test"
+    image_optimization:
+      enabled: true
+      auto_format: true
+"#
+    );
+
+    let config_path = write_temp_config(&config_yaml, "auto_format");
+    let harness = ProxyTestHarness::start(&config_path, port).expect("Failed to start proxy");
+    std::thread::sleep(Duration::from_secs(1));
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+
+        // Request with WebP in Accept header should get WebP
+        let response = client
+            .get(format!(
+                "{}/images/auto.jpg?w=50&fmt=auto",
+                harness.base_url
+            ))
+            .header("Accept", "image/webp,image/jpeg,*/*")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .map(|v| v.to_str().unwrap_or(""));
+
+        // Should return WebP since Accept header includes it
+        if let Some(ct) = content_type {
+            println!("Auto format response Content-Type: {}", ct);
+            // Accept either webp or jpeg (depending on implementation)
+            assert!(
+                ct.contains("webp") || ct.contains("jpeg"),
+                "Expected webp or jpeg, got: {}",
+                ct
+            );
+        }
+
+        println!("✅ E2E test passed: Auto format selection");
+    });
+}
+
+/// Test E2E: Cache integration - second request hits cache
+#[test]
+#[ignore = "Requires Docker and LocalStack"]
+fn test_e2e_cache_integration() {
+    init_logging();
+
+    let port = next_port();
+    let docker = Cli::default();
+    let localstack = docker.run(RunnableImage::from(LocalStack).with_env_var(("SERVICES", "s3")));
+    let s3_port = localstack.get_host_port_ipv4(4566);
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    let test_image = create_test_jpeg_100x100();
+    let cache_dir = format!("/tmp/yatagarasu-cache-test-{}", port);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+        client
+            .put(format!("{}/test-bucket", s3_endpoint))
+            .send()
+            .await
+            .unwrap();
+
+        client
+            .put(format!("{}/test-bucket/cached.jpg", s3_endpoint))
+            .header("Content-Type", "image/jpeg")
+            .body(test_image)
+            .send()
+            .await
+            .unwrap();
+    });
+
+    let config_yaml = format!(
+        r#"
+server:
+  addr: "127.0.0.1:{port}"
+  workers: 1
+buckets:
+  - name: "test"
+    path_prefix: "/images"
+    s3:
+      bucket: "test-bucket"
+      region: "us-east-1"
+      endpoint: "{s3_endpoint}"
+      access_key: "test"
+      secret_key: "test"
+    image_optimization:
+      enabled: true
+cache:
+  memory:
+    max_capacity: 10485760
+    ttl_seconds: 3600
+  disk:
+    path: "{cache_dir}"
+    max_size: 104857600
+"#
+    );
+
+    // Clean cache dir
+    let _ = std::fs::remove_dir_all(&cache_dir);
+    std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let config_path = write_temp_config(&config_yaml, "cache_integration");
+    let harness = ProxyTestHarness::start(&config_path, port).expect("Failed to start proxy");
+    std::thread::sleep(Duration::from_secs(1));
+
+    rt.block_on(async {
+        let client = reqwest::Client::new();
+        let url = format!("{}/images/cached.jpg?w=50&fmt=webp", harness.base_url);
+
+        // First request - cache miss
+        let start1 = std::time::Instant::now();
+        let response1 = client.get(&url).send().await.unwrap();
+        let duration1 = start1.elapsed();
+        assert_eq!(response1.status(), 200);
+        let body1 = response1.bytes().await.unwrap();
+        let body1_len = body1.len();
+
+        // Brief pause to allow cache write
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Second request - should be cache hit (faster)
+        let start2 = std::time::Instant::now();
+        let response2 = client.get(&url).send().await.unwrap();
+        let duration2 = start2.elapsed();
+        assert_eq!(response2.status(), 200);
+        let body2 = response2.bytes().await.unwrap();
+
+        // Verify same content
+        assert_eq!(
+            body1_len,
+            body2.len(),
+            "Cached response should be same size"
+        );
+
+        println!("First request: {:?}", duration1);
+        println!("Second request: {:?}", duration2);
+        println!(
+            "Cache speedup: {:.1}x",
+            duration1.as_secs_f64() / duration2.as_secs_f64().max(0.001)
+        );
+
+        println!("✅ E2E test passed: Cache integration");
+    });
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}

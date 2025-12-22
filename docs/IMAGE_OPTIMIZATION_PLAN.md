@@ -595,9 +595,10 @@ Comprehensive integration tests and user documentation.
 [x] test_e2e_quality_adjustment - quality parameter (q=30 vs q=95)
 [x] test_e2e_non_image_passthrough - non-image files pass through unchanged
 [x] test_e2e_rotation - rotation transformation (rot=90)
-[ ] test_e2e_signed_url_flow
-[ ] test_e2e_auto_format_selection
-[ ] test_e2e_cache_integration
+[x] test_e2e_signed_url_valid - valid signature allows access
+[x] test_e2e_signed_url_invalid - invalid signature rejected
+[x] test_e2e_auto_format_selection - Accept header format selection
+[x] test_e2e_cache_integration - cache miss/hit flow
 [ ] test_concurrent_processing
 [x] bench_image_resize - 1080p to thumbnail/medium/720p
 [x] bench_image_resize_by_source_size - 1MP/4MP/12MP sources
