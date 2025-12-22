@@ -130,6 +130,19 @@ pub struct Metrics {
     prewarm_bytes_total: AtomicU64,
     prewarm_errors_total: AtomicU64,
     prewarm_duration_seconds: Mutex<Vec<u64>>, // microseconds
+
+    // Phase 50.7: Image optimization metrics
+    image_processing_total: AtomicU64,
+    image_processing_errors: AtomicU64,
+    image_processing_durations: Mutex<Vec<u64>>, // microseconds
+    image_bytes_saved: AtomicU64,                // total bytes saved
+    image_bytes_original: AtomicU64,             // total original bytes
+    image_bytes_processed: AtomicU64,            // total processed bytes
+    image_cache_hits: AtomicU64,                 // image variant cache hits
+    image_cache_misses: AtomicU64,               // image variant cache misses
+    image_transformations: Mutex<HashMap<String, u64>>, // by transformation type
+    image_formats: Mutex<HashMap<String, u64>>,  // by output format
+    image_errors_by_type: Mutex<HashMap<String, u64>>, // by error type
 }
 
 /// Global singleton instance of metrics
@@ -205,6 +218,19 @@ impl Metrics {
             prewarm_bytes_total: AtomicU64::new(0),
             prewarm_errors_total: AtomicU64::new(0),
             prewarm_duration_seconds: Mutex::new(Vec::new()),
+
+            // Phase 50.7: Image optimization metrics
+            image_processing_total: AtomicU64::new(0),
+            image_processing_errors: AtomicU64::new(0),
+            image_processing_durations: Mutex::new(Vec::new()),
+            image_bytes_saved: AtomicU64::new(0),
+            image_bytes_original: AtomicU64::new(0),
+            image_bytes_processed: AtomicU64::new(0),
+            image_cache_hits: AtomicU64::new(0),
+            image_cache_misses: AtomicU64::new(0),
+            image_transformations: Mutex::new(HashMap::new()),
+            image_formats: Mutex::new(HashMap::new()),
+            image_errors_by_type: Mutex::new(HashMap::new()),
         }
     }
 
@@ -709,6 +735,129 @@ impl Metrics {
     #[cfg(test)]
     pub fn get_prewarm_files_count(&self) -> u64 {
         self.prewarm_files_total.load(Ordering::Relaxed)
+    }
+
+    // ========== Phase 50.7: Image Optimization Metrics ==========
+
+    /// Record an image processing operation
+    pub fn record_image_processing(
+        &self,
+        duration_us: u64,
+        original_size: u64,
+        processed_size: u64,
+        format: &str,
+        transformations: &[&str],
+        cache_hit: bool,
+    ) {
+        self.image_processing_total.fetch_add(1, Ordering::Relaxed);
+
+        // Record duration
+        if let Ok(mut durations) = self.image_processing_durations.lock() {
+            durations.push(duration_us);
+        }
+
+        // Record bytes
+        self.image_bytes_original
+            .fetch_add(original_size, Ordering::Relaxed);
+        self.image_bytes_processed
+            .fetch_add(processed_size, Ordering::Relaxed);
+        if original_size > processed_size {
+            self.image_bytes_saved
+                .fetch_add(original_size - processed_size, Ordering::Relaxed);
+        }
+
+        // Record format
+        if let Ok(mut formats) = self.image_formats.lock() {
+            *formats.entry(format.to_string()).or_insert(0) += 1;
+        }
+
+        // Record transformations
+        if let Ok(mut transforms) = self.image_transformations.lock() {
+            for t in transformations {
+                *transforms.entry((*t).to_string()).or_insert(0) += 1;
+            }
+        }
+
+        // Record cache hit/miss
+        if cache_hit {
+            self.image_cache_hits.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.image_cache_misses.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record an image processing error
+    pub fn record_image_error(&self, error_type: &str) {
+        self.image_processing_errors.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut errors) = self.image_errors_by_type.lock() {
+            *errors.entry(error_type.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    /// Get image processing total count
+    pub fn get_image_processing_total(&self) -> u64 {
+        self.image_processing_total.load(Ordering::Relaxed)
+    }
+
+    /// Get image processing error count
+    pub fn get_image_processing_errors(&self) -> u64 {
+        self.image_processing_errors.load(Ordering::Relaxed)
+    }
+
+    /// Get image bytes saved
+    pub fn get_image_bytes_saved(&self) -> u64 {
+        self.image_bytes_saved.load(Ordering::Relaxed)
+    }
+
+    /// Get image cache hits
+    pub fn get_image_cache_hits(&self) -> u64 {
+        self.image_cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Get image cache misses
+    pub fn get_image_cache_misses(&self) -> u64 {
+        self.image_cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Get image processing duration histogram
+    pub fn get_image_processing_histogram(&self) -> Histogram {
+        self.image_processing_durations
+            .lock()
+            .ok()
+            .map(|durations| calculate_histogram(&durations))
+            .unwrap_or(Histogram {
+                p50: 0.0,
+                p90: 0.0,
+                p95: 0.0,
+                p99: 0.0,
+            })
+    }
+
+    /// Get transformation count by type
+    pub fn get_image_transformation_count(&self, transformation: &str) -> u64 {
+        self.image_transformations
+            .lock()
+            .ok()
+            .and_then(|t| t.get(transformation).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get format count
+    pub fn get_image_format_count(&self, format: &str) -> u64 {
+        self.image_formats
+            .lock()
+            .ok()
+            .and_then(|f| f.get(format).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get error count by type
+    pub fn get_image_error_count(&self, error_type: &str) -> u64 {
+        self.image_errors_by_type
+            .lock()
+            .ok()
+            .and_then(|e| e.get(error_type).copied())
+            .unwrap_or(0)
     }
 
     /// Increment counter for a specific S3 operation
@@ -1597,6 +1746,124 @@ impl Metrics {
                 output.push_str(&format!(
                     "yatagarasu_prewarm_duration_seconds{{quantile=\"0.99\"}} {:.3}\n",
                     histogram.p99
+                ));
+            }
+        }
+
+        // Phase 50.7: Image optimization metrics
+        output.push_str(
+            "\n# HELP yatagarasu_image_processing_total Total image processing operations\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_processing_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_processing_total {}\n",
+            self.image_processing_total.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP yatagarasu_image_processing_errors_total Total image processing errors\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_processing_errors_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_processing_errors_total {}\n",
+            self.image_processing_errors.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP yatagarasu_image_bytes_saved_total Total bytes saved by image optimization\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_bytes_saved_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_bytes_saved_total {}\n",
+            self.image_bytes_saved.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP yatagarasu_image_bytes_original_total Total original image bytes processed\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_bytes_original_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_bytes_original_total {}\n",
+            self.image_bytes_original.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP yatagarasu_image_bytes_processed_total Total processed image bytes\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_bytes_processed_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_bytes_processed_total {}\n",
+            self.image_bytes_processed.load(Ordering::Relaxed)
+        ));
+
+        output.push_str("\n# HELP yatagarasu_image_cache_hits_total Image variant cache hits\n");
+        output.push_str("# TYPE yatagarasu_image_cache_hits_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_cache_hits_total {}\n",
+            self.image_cache_hits.load(Ordering::Relaxed)
+        ));
+
+        output
+            .push_str("\n# HELP yatagarasu_image_cache_misses_total Image variant cache misses\n");
+        output.push_str("# TYPE yatagarasu_image_cache_misses_total counter\n");
+        output.push_str(&format!(
+            "yatagarasu_image_cache_misses_total {}\n",
+            self.image_cache_misses.load(Ordering::Relaxed)
+        ));
+
+        output.push_str(
+            "\n# HELP yatagarasu_image_processing_duration_us Image processing duration\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_processing_duration_us summary\n");
+        if let Ok(durations) = self.image_processing_durations.lock() {
+            if !durations.is_empty() {
+                let histogram = calculate_histogram(&durations);
+                output.push_str(&format!(
+                    "yatagarasu_image_processing_duration_us{{quantile=\"0.5\"}} {:.3}\n",
+                    histogram.p50
+                ));
+                output.push_str(&format!(
+                    "yatagarasu_image_processing_duration_us{{quantile=\"0.95\"}} {:.3}\n",
+                    histogram.p95
+                ));
+                output.push_str(&format!(
+                    "yatagarasu_image_processing_duration_us{{quantile=\"0.99\"}} {:.3}\n",
+                    histogram.p99
+                ));
+            }
+        }
+
+        output.push_str(
+            "\n# HELP yatagarasu_image_transformations_total Image transformations by type\n",
+        );
+        output.push_str("# TYPE yatagarasu_image_transformations_total counter\n");
+        if let Ok(transforms) = self.image_transformations.lock() {
+            for (transform_type, count) in transforms.iter() {
+                output.push_str(&format!(
+                    "yatagarasu_image_transformations_total{{type=\"{}\"}} {}\n",
+                    transform_type, count
+                ));
+            }
+        }
+
+        output.push_str("\n# HELP yatagarasu_image_formats_total Image output formats\n");
+        output.push_str("# TYPE yatagarasu_image_formats_total counter\n");
+        if let Ok(formats) = self.image_formats.lock() {
+            for (format, count) in formats.iter() {
+                output.push_str(&format!(
+                    "yatagarasu_image_formats_total{{format=\"{}\"}} {}\n",
+                    format, count
+                ));
+            }
+        }
+
+        output.push_str("\n# HELP yatagarasu_image_errors_by_type_total Image errors by type\n");
+        output.push_str("# TYPE yatagarasu_image_errors_by_type_total counter\n");
+        if let Ok(errors) = self.image_errors_by_type.lock() {
+            for (error_type, count) in errors.iter() {
+                output.push_str(&format!(
+                    "yatagarasu_image_errors_by_type_total{{type=\"{}\"}} {}\n",
+                    error_type, count
                 ));
             }
         }
@@ -2776,5 +3043,120 @@ mod tests {
             output.contains("# TYPE yatagarasu_cache_sendfile_total counter"),
             "Should have TYPE for sendfile count"
         );
+    }
+
+    // Phase 50.7: Image optimization metrics tests
+
+    #[test]
+    fn test_image_processing_metrics_recording() {
+        let metrics = Metrics::new();
+
+        // Record an image processing operation
+        metrics.record_image_processing(
+            50_000, // 50ms in microseconds
+            100_000,
+            50_000,
+            "webp",
+            &["resize", "format_conversion"],
+            false,
+        );
+
+        assert_eq!(metrics.get_image_processing_total(), 1);
+        assert_eq!(metrics.get_image_bytes_saved(), 50_000);
+        assert_eq!(metrics.get_image_cache_hits(), 0);
+        assert_eq!(metrics.get_image_cache_misses(), 1);
+        assert_eq!(metrics.get_image_transformation_count("resize"), 1);
+        assert_eq!(
+            metrics.get_image_transformation_count("format_conversion"),
+            1
+        );
+        assert_eq!(metrics.get_image_format_count("webp"), 1);
+    }
+
+    #[test]
+    fn test_image_processing_cache_hit() {
+        let metrics = Metrics::new();
+
+        // Record a cache hit
+        metrics.record_image_processing(1_000, 100_000, 50_000, "jpeg", &[], true);
+
+        assert_eq!(metrics.get_image_cache_hits(), 1);
+        assert_eq!(metrics.get_image_cache_misses(), 0);
+    }
+
+    #[test]
+    fn test_image_processing_error_recording() {
+        let metrics = Metrics::new();
+
+        metrics.record_image_error("decode_error");
+        metrics.record_image_error("decode_error");
+        metrics.record_image_error("encode_error");
+
+        assert_eq!(metrics.get_image_processing_errors(), 3);
+        assert_eq!(metrics.get_image_error_count("decode_error"), 2);
+        assert_eq!(metrics.get_image_error_count("encode_error"), 1);
+    }
+
+    #[test]
+    fn test_image_processing_histogram() {
+        let metrics = Metrics::new();
+
+        // Record multiple operations with different durations
+        metrics.record_image_processing(10_000, 100, 50, "jpeg", &[], false);
+        metrics.record_image_processing(20_000, 100, 50, "jpeg", &[], false);
+        metrics.record_image_processing(30_000, 100, 50, "jpeg", &[], false);
+
+        let histogram = metrics.get_image_processing_histogram();
+        assert!(histogram.p50 > 0.0);
+    }
+
+    #[test]
+    fn test_image_metrics_prometheus_export() {
+        let metrics = Metrics::new();
+
+        metrics.record_image_processing(50_000, 100_000, 50_000, "webp", &["resize"], false);
+        metrics.record_image_error("decode_error");
+
+        let output = metrics.export_prometheus();
+
+        assert!(
+            output.contains("yatagarasu_image_processing_total 1"),
+            "Should export image processing total"
+        );
+        assert!(
+            output.contains("yatagarasu_image_processing_errors_total 1"),
+            "Should export image processing errors"
+        );
+        assert!(
+            output.contains("yatagarasu_image_bytes_saved_total 50000"),
+            "Should export bytes saved"
+        );
+        assert!(
+            output.contains("yatagarasu_image_cache_misses_total 1"),
+            "Should export cache misses"
+        );
+        assert!(
+            output.contains("yatagarasu_image_transformations_total{type=\"resize\"} 1"),
+            "Should export transformations by type"
+        );
+        assert!(
+            output.contains("yatagarasu_image_formats_total{format=\"webp\"} 1"),
+            "Should export formats"
+        );
+        assert!(
+            output.contains("yatagarasu_image_errors_by_type_total{type=\"decode_error\"} 1"),
+            "Should export errors by type"
+        );
+    }
+
+    #[test]
+    fn test_image_bytes_no_savings() {
+        let metrics = Metrics::new();
+
+        // Image grew (e.g., converting to lossless format)
+        metrics.record_image_processing(10_000, 50_000, 80_000, "png", &[], false);
+
+        // bytes_saved should remain 0 when image grows
+        assert_eq!(metrics.get_image_bytes_saved(), 0);
     }
 }
