@@ -16,7 +16,9 @@
 ## Core Documentation
 
 ### Product Specifications
+
 - **[../spec.md](../spec.md)** - Complete product specification (35KB)
+
   - Functional requirements (multi-bucket, JWT, S3 proxying)
   - Non-functional requirements (performance, security)
   - Technical architecture
@@ -29,6 +31,7 @@
   - Production readiness verification
 
 ### Implementation Plan
+
 - **[../plan.md](../plan.md)** - TDD implementation roadmap (28KB)
   - 200+ tests across 25 phases
   - Detailed test cases for each feature
@@ -36,6 +39,7 @@
   - All phases complete for v1.0.0
 
 ### Development Methodology
+
 - **[../CLAUDE.md](../CLAUDE.md)** - Kent Beck's TDD methodology for this project
   - Red → Green → Refactor cycle
   - Structural vs behavioral commits
@@ -43,6 +47,7 @@
   - "go" command workflow
 
 ### Roadmap
+
 - **[../ROADMAP.md](../ROADMAP.md)** - Product roadmap (v1.0 → v1.1 → v1.2+)
   - v1.0.0 release summary
   - v1.1.0 planned features (RS256/ES256 JWT, advanced caching)
@@ -51,6 +56,7 @@
   - Future ideas (v2.0+)
 
 ### Changelog
+
 - **[../CHANGELOG.md](../CHANGELOG.md)** - Version history and release notes
   - v1.0.0 release notes (November 15, 2025)
   - Complete feature list
@@ -62,7 +68,9 @@
 ## Architecture & Features
 
 ### Streaming Architecture
+
 - **[STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md)** - Detailed technical documentation (17KB)
+
   - Complete sequence diagrams with timing
   - Memory usage patterns (constant ~64KB per connection)
   - Cache decision logic (files <10MB cached, >10MB streamed)
@@ -76,7 +84,9 @@
   - Performance characteristics
 
 ### HTTP Range Requests
+
 - **[RANGE_REQUESTS.md](RANGE_REQUESTS.md)** ⭐ **Range Request Support**
+
   - HTTP Range header support (bytes ranges)
   - Use cases: video seeking, resume downloads, PDF previews
   - Always streamed, never cached
@@ -90,8 +100,20 @@
   - No special configuration needed
   - Constant memory: connections × 64KB
 
+### Image Optimization
+
+- **[IMAGE_OPTIMIZATION.md](IMAGE_OPTIMIZATION.md)** 🖼️ **Image Optimization**
+  - On-the-fly resize, crop, format conversion
+  - WebP, AVIF, PNG, JPEG output formats
+  - Quality adjustment (1-100)
+  - Smart crop with face/content detection
+  - URL signing for secure access
+  - Prometheus metrics for monitoring
+
 ### Caching
+
 - **[CACHE_MANAGEMENT.md](CACHE_MANAGEMENT.md)** 🔧 **Cache Management**
+
   - Current capabilities (v1.0): TTL-based expiry
   - Planned features (v1.1): API-based purging, renewal, conditional requests
   - Workarounds for v1.0 limitations
@@ -105,7 +127,9 @@
   - ROI: Instant load times, cost savings
 
 ### Configuration & Operations
+
 - **[CONFIG_RELOAD.md](CONFIG_RELOAD.md)** 🔄 **Configuration Hot Reload**
+
   - Reload config without downtime (SIGHUP or API endpoint)
   - Zero dropped requests during reload
   - Validates config before applying
@@ -113,6 +137,7 @@
   - Kubernetes ConfigMap integration
 
 - **[GRACEFUL_SHUTDOWN.md](GRACEFUL_SHUTDOWN.md)** 🛑 **Graceful Shutdown**
+
   - Pingora's built-in graceful shutdown (SIGTERM/SIGINT/SIGQUIT)
   - In-flight request completion
   - Connection pool cleanup
@@ -127,6 +152,7 @@
   - Production best practices
 
 ### High Availability
+
 - **[HA_BUCKET_REPLICATION.md](HA_BUCKET_REPLICATION.md)** 🌍 **HA Bucket Replication**
   - Manual failover configuration (v1.0)
   - Automatic failover planned (v1.2)
@@ -135,6 +161,7 @@
   - Disaster recovery patterns
 
 ### Security
+
 - **[SECURITY_LOGGING.md](SECURITY_LOGGING.md)** 🔒 **Security & Logging**
   - SQL injection prevention (path validation)
   - Path traversal attack protection
@@ -148,6 +175,7 @@
 ## Performance & Testing
 
 ### Performance Reports
+
 - **[PERFORMANCE.md](PERFORMANCE.md)** 📊 **Performance Testing Report**
   - Throughput: 726 req/s baseline (test-limited, capable of 1,000+ req/s)
   - P95 Latency: 6.7ms (small files), 15.95ms (100 concurrent users)
@@ -157,6 +185,7 @@
   - Memory: Stable usage, ~60-70MB under sustained load
 
 ### Load Testing
+
 - **[scripts/load-testing/README.md](../scripts/load-testing/README.md)** - K6 load testing guide
   - Test scenarios (throughput, concurrent, streaming, stability)
   - How to reproduce performance results
@@ -168,6 +197,7 @@
 ## v1.3.0 Documentation (NEW)
 
 ### Performance & Benchmarks
+
 - **[BENCHMARK_RESULTS_V1.2.md](BENCHMARK_RESULTS_V1.2.md)** - Criterion Benchmark Results
   - JWT validation: 1.78µs (561x faster than target)
   - Routing: 95.9ns (104x faster than target)
@@ -176,6 +206,7 @@
   - Scaling recommendations and tuning guide
 
 ### Operations
+
 - **[OPERATIONS.md](OPERATIONS.md)** - Production Operations Guide
   - Endurance test results (24-hour stability)
   - Prometheus metrics and Grafana queries
@@ -184,6 +215,7 @@
   - Runbook for common issues
 
 ### Authentication
+
 - **[JWT_AUTHENTICATION.md](JWT_AUTHENTICATION.md)** - JWT Authentication Guide
   - RS256/RS384/RS512 (RSA) support
   - ES256/ES384 (ECDSA) support
@@ -193,6 +225,7 @@
   - Admin claims for cache management API
 
 ### Deployment
+
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Multi-Instance Deployment Guide
   - Horizontal scaling patterns
   - Load balancer configuration (Nginx, HAProxy)
@@ -202,7 +235,9 @@
   - HPA (Horizontal Pod Autoscaler) configuration
 
 ### Authorization
+
 - **[OPENFGA.md](OPENFGA.md)** - OpenFGA Relationship-Based Authorization
+
   - ReBAC (Relationship-Based Access Control)
   - Object hierarchies for S3 paths
   - Team/user permission models
@@ -305,30 +340,38 @@
 ## Key Architectural Decisions
 
 ### 1. Zero-Copy Streaming (Large Files)
+
 **Decision**: Stream S3 responses directly to clients without local buffering
 **Why**:
+
 - Constant memory usage regardless of file size (~64KB per connection)
 - Low latency (TTFB P95: 24.45ms)
 - Can handle 1000s of concurrent large file streams
 - No disk I/O, no cleanup needed
 
 ### 2. Smart Caching (Small Files)
+
 **Decision**: Cache only files <10MB in memory
 **Why**:
+
 - Balance performance (cache hits <10ms) and memory usage
 - Async cache writes don't block client response
 - Reduces S3 costs by 80-90% for hot files
 
 ### 3. Per-Bucket Credential Isolation
+
 **Decision**: Each bucket gets its own S3 client with isolated credentials
 **Why**:
+
 - Security: No risk of using wrong credentials
 - Multi-tenancy: Different teams/apps use different buckets
 - Simplicity: Clear ownership and blast radius
 
 ### 4. Flexible JWT Authentication
+
 **Decision**: Optional, per-bucket auth with multiple token sources
 **Why**:
+
 - Mixed public/private content in one proxy
 - Support different client types (web, mobile, API)
 - Custom claims for fine-grained authorization
@@ -337,14 +380,14 @@
 
 ## Performance Targets vs Achieved (v1.0.0)
 
-| Metric | Target | Achieved | Status |
-|--------|--------|----------|--------|
-| Cache Hit Response | <10ms | **6.7ms P95** | ✅ **Exceeded** |
-| S3 Streaming TTFB | <500ms P95 | **24.45ms P95** | ✅ **20x better** |
-| Throughput | >1,000 req/s | **726 req/s** [1] | ✅ **Capable of more** |
-| Memory per Connection | ~64KB | **~64KB** | ✅ **Met** |
-| Stability | 1 hour crash-free | **1 hour, 0 crashes** | ✅ **Perfect** |
-| Error Rate | <0.1% | **0.00%** | ✅ **Perfect** |
+| Metric                | Target            | Achieved              | Status                 |
+| --------------------- | ----------------- | --------------------- | ---------------------- |
+| Cache Hit Response    | <10ms             | **6.7ms P95**         | ✅ **Exceeded**        |
+| S3 Streaming TTFB     | <500ms P95        | **24.45ms P95**       | ✅ **20x better**      |
+| Throughput            | >1,000 req/s      | **726 req/s** [1]     | ✅ **Capable of more** |
+| Memory per Connection | ~64KB             | **~64KB**             | ✅ **Met**             |
+| Stability             | 1 hour crash-free | **1 hour, 0 crashes** | ✅ **Perfect**         |
+| Error Rate            | <0.1%             | **0.00%**             | ✅ **Perfect**         |
 
 **[1]** Test configuration limited throughput (10ms sleep), actual capacity >1,000 req/s based on latency metrics
 
@@ -402,20 +445,26 @@ k6 run k6/stability.js    # 1-hour stability test
 ## Common Questions
 
 ### Q: Does the proxy buffer large files to disk?
+
 **A**: NO - Uses zero-copy streaming with constant ~64KB memory per connection (see [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md))
 
 ### Q: How does caching work?
+
 **A**: Small files (<10MB) cached in memory, large files always streamed (see [QUICK_REFERENCE_STREAMING.md](QUICK_REFERENCE_STREAMING.md))
 
 ### Q: Does it support HTTP Range requests?
+
 **A**: YES - Full support for byte ranges (see [RANGE_REQUESTS.md](RANGE_REQUESTS.md))
+
 - Single, multiple, suffix, and open-ended ranges
 - Always streamed from S3, never cached
 - Works with JWT authentication
 - 95% bandwidth savings for video seeking scenarios
 
 ### Q: Does it support parallel downloads using Range requests?
+
 **A**: YES - Full support for concurrent range requests (see [PARALLEL_DOWNLOADS.md](PARALLEL_DOWNLOADS.md))
+
 - Download large files 5-10x faster
 - Split file into chunks, download in parallel
 - Works with aria2, curl, custom clients
@@ -423,37 +472,48 @@ k6 run k6/stability.js    # 1-hour stability test
 - Memory: connections × 64KB (constant)
 
 ### Q: Does it support cache pre-warming (recursive path prefetching)?
+
 **A**: NOT YET - Planned for v1.1 (see [CACHE_PREWARMING.md](CACHE_PREWARMING.md))
+
 - Recursive path prefetching to populate cache
 - API-driven and scheduled pre-warming
 - Workarounds available for v1.0 (external scripts)
 - Benefits: Instant load times, reduced S3 costs, peak traffic preparation
 
 ### Q: Does it support cache purging (invalidation)?
+
 **A**: NOT YET - Planned for v1.1 (see [CACHE_MANAGEMENT.md](CACHE_MANAGEMENT.md))
+
 - v1.0: TTL-based expiry only, restart proxy for full purge
 - v1.1: Full API for selective purging (by key, prefix, pattern)
 - Workarounds: Restart proxy or short TTL
 
 ### Q: Does it support cache renewal (refresh)?
+
 **A**: PARTIAL - TTL-based in v1.0, manual refresh in v1.1
+
 - v1.0: Automatic expiry after TTL
 - v1.1: Manual refresh API + smart background refresh
 - Workarounds: Wait for TTL or restart proxy
 
 ### Q: Does it check Last-Modified / support conditional requests?
+
 **A**: PARTIAL - Forwards headers in v1.0, validates in v1.1
+
 - v1.0: Forwards Last-Modified/ETag but doesn't validate
 - v1.1: Full 304 Not Modified support + cache revalidation
 - Benefits in v1.1: 90% bandwidth savings
 
 ### Q: What's the memory usage?
+
 **A**: ~60-70MB base + ~64KB per connection, regardless of file size
 
 ### Q: Can it handle video streaming?
+
 **A**: YES - Efficient streaming of GB+ files with constant memory, plus Range support for seeking
 
 ### Q: How's the performance?
+
 **A**: P95 latency 6.7ms - 24.45ms, 726+ req/s, 0.00% error rate, 1-hour crash-free stability
 
 ---
@@ -473,17 +533,17 @@ Or just say **"go"** to Claude and let the AI guide you through the TDD cycle!
 
 ## Document Sizes
 
-| Document | Size | Purpose |
-|----------|------|---------|
-| spec.md | 35KB | Complete specification |
-| plan.md | 28KB | 200+ tests across 25 phases |
-| STREAMING_ARCHITECTURE.md | 17KB | Detailed technical docs |
-| README.md | 18KB | Project overview |
-| QUICK_REFERENCE_STREAMING.md | 15KB | Quick diagrams |
-| PERFORMANCE.md | 12KB | Load testing report |
-| GETTING_STARTED.md | 8KB | Onboarding guide |
-| CLAUDE.md | 7KB | TDD methodology |
-| config.yaml | 5KB | Example configuration |
+| Document                     | Size | Purpose                     |
+| ---------------------------- | ---- | --------------------------- |
+| spec.md                      | 35KB | Complete specification      |
+| plan.md                      | 28KB | 200+ tests across 25 phases |
+| STREAMING_ARCHITECTURE.md    | 17KB | Detailed technical docs     |
+| README.md                    | 18KB | Project overview            |
+| QUICK_REFERENCE_STREAMING.md | 15KB | Quick diagrams              |
+| PERFORMANCE.md               | 12KB | Load testing report         |
+| GETTING_STARTED.md           | 8KB  | Onboarding guide            |
+| CLAUDE.md                    | 7KB  | TDD methodology             |
+| config.yaml                  | 5KB  | Example configuration       |
 
 **Total Documentation**: ~145KB of comprehensive specs and guides!
 
@@ -499,6 +559,7 @@ Or just say **"go"** to Claude and let the AI guide you through the TDD cycle!
 ---
 
 **Next Steps**:
+
 1. Read [../README.md](../README.md) for project overview
 2. Check [GETTING_STARTED.md](GETTING_STARTED.md) to begin development
 3. Review [PERFORMANCE.md](PERFORMANCE.md) for verified production-ready metrics

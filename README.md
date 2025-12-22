@@ -18,6 +18,7 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - **Multi-Bucket Routing** - Map different S3 buckets to URL paths with isolated credentials
 - **Flexible Authentication** - JWT (HS256/RS256/ES256), JWKS endpoints, OPA/OpenFGA authorization
 - **Multi-Tier Caching** - Memory (Moka TinyLFU), Disk, and Redis/Valkey with 80%+ hit rates
+- **Image Optimization** - On-the-fly resize, crop, format conversion (WebP/AVIF), quality adjustment
 - **Production Ready** - Circuit breaker, graceful shutdown, hot reload, distributed tracing
 - **Observable** - Prometheus metrics, OpenTelemetry tracing, structured audit logging
 
@@ -60,7 +61,7 @@ buckets:
       access_key: "${AWS_ACCESS_KEY}"
       secret_key: "${AWS_SECRET_KEY}"
     auth:
-      enabled: false  # Public access
+      enabled: false # Public access
 
   - name: "private-data"
     path_prefix: "/private"
@@ -81,7 +82,7 @@ buckets:
 
 cache:
   memory:
-    max_capacity: 1073741824  # 1GB
+    max_capacity: 1073741824 # 1GB
     ttl_seconds: 3600
 
 metrics:
@@ -95,20 +96,20 @@ See [config.example.yaml](config.example.yaml) for full configuration reference.
 
 ### Supported Methods
 
-| Method | Description |
-|--------|-------------|
-| `GET` | Retrieve objects from S3 |
-| `HEAD` | Get object metadata |
-| `OPTIONS` | CORS pre-flight |
+| Method    | Description              |
+| --------- | ------------------------ |
+| `GET`     | Retrieve objects from S3 |
+| `HEAD`    | Get object metadata      |
+| `OPTIONS` | CORS pre-flight          |
 
 ### Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `/{path_prefix}/*` | Proxy to configured S3 bucket |
-| `/health` | Liveness check |
-| `/ready` | Readiness check with backend health |
-| `/metrics` (port 9090) | Prometheus metrics |
+| Endpoint               | Description                         |
+| ---------------------- | ----------------------------------- |
+| `/{path_prefix}/*`     | Proxy to configured S3 bucket       |
+| `/health`              | Liveness check                      |
+| `/ready`               | Readiness check with backend health |
+| `/metrics` (port 9090) | Prometheus metrics                  |
 
 ### Example Requests
 
@@ -121,6 +122,9 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8080/private/data.json
 
 # Or via query param
 curl "http://localhost:8080/private/data.json?token=<jwt>"
+
+# Image optimization (resize, format conversion)
+curl "http://localhost:8080/assets/photo.jpg?w=400&h=300&fmt=webp&q=80"
 
 # Health check
 curl http://localhost:8080/health
@@ -153,19 +157,20 @@ yatagarasu/
 
 ## Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Getting Started](docs/GETTING_STARTED.md) | Step-by-step setup guide |
-| [JWT Authentication](docs/JWT_AUTHENTICATION.md) | JWT configuration and JWKS |
-| [OPA Policies](docs/OPA_POLICIES.md) | Policy-based authorization |
-| [OpenFGA](docs/OPENFGA.md) | Fine-grained authorization |
-| [Caching](docs/CACHE_MANAGEMENT.md) | Cache configuration and management |
-| [HA & Replication](docs/HA_BUCKET_REPLICATION.md) | Multi-replica failover |
-| [Deployment](docs/DEPLOYMENT.md) | Production deployment guide |
-| [Operations](docs/OPERATIONS.md) | Monitoring and troubleshooting |
-| [Performance](docs/PERFORMANCE.md) | Benchmarks and tuning |
-| [Docker](docs/DOCKER.md) | Container deployment |
-| [Index](docs/INDEX.md) | Full documentation index |
+| Guide                                             | Description                        |
+| ------------------------------------------------- | ---------------------------------- |
+| [Getting Started](docs/GETTING_STARTED.md)        | Step-by-step setup guide           |
+| [Image Optimization](docs/IMAGE_OPTIMIZATION.md)  | Resize, crop, format conversion    |
+| [JWT Authentication](docs/JWT_AUTHENTICATION.md)  | JWT configuration and JWKS         |
+| [OPA Policies](docs/OPA_POLICIES.md)              | Policy-based authorization         |
+| [OpenFGA](docs/OPENFGA.md)                        | Fine-grained authorization         |
+| [Caching](docs/CACHE_MANAGEMENT.md)               | Cache configuration and management |
+| [HA & Replication](docs/HA_BUCKET_REPLICATION.md) | Multi-replica failover             |
+| [Deployment](docs/DEPLOYMENT.md)                  | Production deployment guide        |
+| [Operations](docs/OPERATIONS.md)                  | Monitoring and troubleshooting     |
+| [Performance](docs/PERFORMANCE.md)                | Benchmarks and tuning              |
+| [Docker](docs/DOCKER.md)                          | Container deployment               |
+| [Index](docs/INDEX.md)                            | Full documentation index           |
 
 ## Development
 
@@ -215,12 +220,12 @@ kill -TERM $(pgrep yatagarasu)
 
 Validated with K6 load testing:
 
-| Metric | Result |
-|--------|--------|
-| Throughput | 893+ RPS |
-| P95 Latency | 807µs |
-| Cache Hit Rate | 80%+ |
-| Memory per Connection | ~64KB |
+| Metric                | Result   |
+| --------------------- | -------- |
+| Throughput            | 893+ RPS |
+| P95 Latency           | 807µs    |
+| Cache Hit Rate        | 80%+     |
+| Memory per Connection | ~64KB    |
 
 See [docs/BENCHMARK_RESULTS_V1.2.md](docs/BENCHMARK_RESULTS_V1.2.md) for details.
 
