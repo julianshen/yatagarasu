@@ -259,17 +259,20 @@ Add rotation and flip transformations. Filters and color adjustments are optiona
 - [x] Implement vertical flip
 - [x] Combine flip with rotation
 
-#### 50.3.3 Filters (Optional - Deferred)
+#### 50.3.3 Filters (Moved to Phase 50.9) ✅
 
-- [ ] Implement Gaussian blur (sigma parameter)
-- [ ] Implement unsharp mask / sharpen
-- [ ] Clamp parameter ranges for safety
+See Phase 50.9 for implementation:
+- [x] Gaussian blur (blur parameter)
+- [x] Unsharp mask (sharpen parameter)
+- [x] Parameter ranges clamped for safety
 
-#### 50.3.4 Color Adjustments (Optional - Deferred)
+#### 50.3.4 Color Adjustments (Moved to Phase 50.9) ✅
 
-- [ ] Implement brightness adjustment
-- [ ] Implement contrast adjustment
-- [ ] Implement saturation adjustment
+See Phase 50.9 for implementation:
+- [x] Brightness adjustment
+- [x] Contrast adjustment
+- [x] Saturation adjustment
+- [x] Grayscale conversion
 
 ### Test Cases
 
@@ -600,7 +603,7 @@ Comprehensive integration tests and user documentation.
 [x] test_e2e_signed_url_invalid - invalid signature rejected
 [x] test_e2e_auto_format_selection - Accept header format selection
 [x] test_e2e_cache_integration - cache miss/hit flow
-[ ] test_concurrent_processing
+[x] test_concurrent_processing
 [x] bench_image_resize - 1080p to thumbnail/medium/720p
 [x] bench_image_resize_by_source_size - 1MP/4MP/12MP sources
 [x] bench_format_conversion - JPEG to WebP/PNG/AVIF
