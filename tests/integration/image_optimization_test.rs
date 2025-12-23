@@ -967,3 +967,121 @@ cache:
     // Cleanup
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
+
+/// Test: Concurrent image processing - multiple requests handled simultaneously
+#[test]
+#[ignore] // Requires Docker
+fn test_concurrent_processing() {
+    init_logging();
+
+    let docker = Cli::default();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    runtime.block_on(async {
+        let bucket_name = "test-images-concurrent";
+        let (_container, s3_endpoint) = setup_localstack_with_images(&docker, bucket_name).await;
+
+        let port = next_port();
+        let config_yaml = format!(
+            r#"
+server:
+  address: "127.0.0.1:{port}"
+
+buckets:
+  - name: "images"
+    path_prefix: "/img"
+    s3:
+      bucket: "{bucket_name}"
+      region: "us-east-1"
+      endpoint: "{s3_endpoint}"
+      access_key: "test"
+      secret_key: "test"
+    auth:
+      enabled: false
+    image_optimization:
+      enabled: true
+      max_width: 2000
+      max_height: 2000
+"#,
+            port = port,
+            bucket_name = bucket_name,
+            s3_endpoint = s3_endpoint
+        );
+
+        let config_path = write_temp_config(&config_yaml, "concurrent");
+        let harness = ProxyTestHarness::start(&config_path, port).expect("Failed to start proxy");
+        let proxy_url = harness.base_url.clone();
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+
+        // Launch multiple concurrent requests with different transformations
+        let num_requests = 10;
+        let mut handles = Vec::with_capacity(num_requests);
+
+        for i in 0..num_requests {
+            let client = client.clone();
+            let proxy_url = proxy_url.clone();
+
+            let handle = tokio::spawn(async move {
+                // Vary the transformation parameters for each request
+                let url = match i % 5 {
+                    0 => format!("{}/img/photo.jpg?w=50&h=50", proxy_url),
+                    1 => format!("{}/img/photo.jpg?w=75&q=80", proxy_url),
+                    2 => format!("{}/img/photo.jpg?fmt=webp", proxy_url),
+                    3 => format!("{}/img/image.png?w=100&fmt=jpeg", proxy_url),
+                    _ => format!("{}/img/photo.jpg?blur=2&brightness=10", proxy_url),
+                };
+
+                let response = client.get(&url).send().await?;
+                let status = response.status();
+                let body = response.bytes().await?;
+
+                Ok::<(u16, usize), reqwest::Error>((status.as_u16(), body.len()))
+            });
+
+            handles.push(handle);
+        }
+
+        // Collect results
+        let mut success_count = 0;
+        let mut failure_count = 0;
+
+        for handle in handles {
+            match handle.await {
+                Ok(Ok((status, size))) => {
+                    if status == 200 && size > 0 {
+                        success_count += 1;
+                    } else {
+                        println!("Request returned status={}, size={}", status, size);
+                        failure_count += 1;
+                    }
+                }
+                Ok(Err(e)) => {
+                    println!("Request error: {}", e);
+                    failure_count += 1;
+                }
+                Err(e) => {
+                    println!("Task error: {}", e);
+                    failure_count += 1;
+                }
+            }
+        }
+
+        println!(
+            "Concurrent processing: {} succeeded, {} failed out of {} requests",
+            success_count, failure_count, num_requests
+        );
+
+        // All requests should succeed
+        assert_eq!(
+            success_count, num_requests,
+            "All concurrent requests should succeed"
+        );
+        assert_eq!(failure_count, 0, "No requests should fail");
+
+        println!("✅ E2E test passed: Concurrent processing");
+    });
+}

@@ -197,6 +197,14 @@ pub struct ImageParams {
     pub blur: Option<f32>,
     /// Sharpen sigma
     pub sharpen: Option<f32>,
+    /// Brightness adjustment (-100 to 100)
+    pub brightness: Option<i32>,
+    /// Contrast adjustment (-100 to 100)
+    pub contrast: Option<i32>,
+    /// Convert to grayscale
+    pub grayscale: bool,
+    /// Saturation adjustment (-100 to 100, -100 = grayscale)
+    pub saturation: Option<i32>,
 
     // === Background ===
     /// Background color for padding (hex RGB)
@@ -268,6 +276,10 @@ impl Default for ImageParams {
             flip_v: false,
             blur: None,
             sharpen: None,
+            brightness: None,
+            contrast: None,
+            grayscale: false,
+            saturation: None,
             background: None,
         }
     }
@@ -306,7 +318,21 @@ impl ImageParams {
     pub fn from_query(params: &HashMap<String, String>) -> Option<Result<Self, ImageError>> {
         // Check if any image params are present
         let image_params = [
-            "w", "h", "q", "fmt", "f", "fit", "dpr", "g", "r", "blur", "sharpen",
+            "w",
+            "h",
+            "q",
+            "fmt",
+            "f",
+            "fit",
+            "dpr",
+            "g",
+            "r",
+            "blur",
+            "sharpen",
+            "brightness",
+            "contrast",
+            "grayscale",
+            "saturation",
         ];
         let has_params = image_params.iter().any(|p| params.contains_key(*p));
 
@@ -416,6 +442,53 @@ impl ImageParams {
                 return Err(ImageError::invalid_param("sharpen", "sigma must be 0-10"));
             }
             result.sharpen = Some(sigma);
+        }
+
+        // Brightness
+        if let Some(brightness) = params.get("brightness") {
+            let val: i32 = brightness
+                .parse()
+                .map_err(|_| ImageError::invalid_param("brightness", "must be a number"))?;
+            if !(-100..=100).contains(&val) {
+                return Err(ImageError::invalid_param(
+                    "brightness",
+                    "must be between -100 and 100",
+                ));
+            }
+            result.brightness = Some(val);
+        }
+
+        // Contrast
+        if let Some(contrast) = params.get("contrast") {
+            let val: i32 = contrast
+                .parse()
+                .map_err(|_| ImageError::invalid_param("contrast", "must be a number"))?;
+            if !(-100..=100).contains(&val) {
+                return Err(ImageError::invalid_param(
+                    "contrast",
+                    "must be between -100 and 100",
+                ));
+            }
+            result.contrast = Some(val);
+        }
+
+        // Grayscale
+        if let Some(grayscale) = params.get("grayscale") {
+            result.grayscale = grayscale == "1" || grayscale == "true";
+        }
+
+        // Saturation
+        if let Some(saturation) = params.get("saturation") {
+            let val: i32 = saturation
+                .parse()
+                .map_err(|_| ImageError::invalid_param("saturation", "must be a number"))?;
+            if !(-100..=100).contains(&val) {
+                return Err(ImageError::invalid_param(
+                    "saturation",
+                    "must be between -100 and 100",
+                ));
+            }
+            result.saturation = Some(val);
         }
 
         // Enlarge
@@ -541,11 +614,35 @@ impl ImageParams {
             parts.push("fv".to_string());
         }
 
+        // Only include effect parameters if they have non-zero values
+        // (zero values are no-ops and would create duplicate cache entries)
         if let Some(blur) = self.blur {
-            parts.push(format!("blur{:.2}", blur));
+            if blur > 0.0 {
+                parts.push(format!("blur{:.2}", blur));
+            }
         }
         if let Some(sharpen) = self.sharpen {
-            parts.push(format!("sharp{:.2}", sharpen));
+            if sharpen > 0.0 {
+                parts.push(format!("sharp{:.2}", sharpen));
+            }
+        }
+        if let Some(brightness) = self.brightness {
+            if brightness != 0 {
+                parts.push(format!("bri{}", brightness));
+            }
+        }
+        if let Some(contrast) = self.contrast {
+            if contrast != 0 {
+                parts.push(format!("con{}", contrast));
+            }
+        }
+        if self.grayscale {
+            parts.push("gray".to_string());
+        }
+        if let Some(saturation) = self.saturation {
+            if saturation != 0 {
+                parts.push(format!("sat{}", saturation));
+            }
         }
 
         if parts.is_empty() {
@@ -566,6 +663,10 @@ impl ImageParams {
             || self.flip_v
             || self.blur.is_some()
             || self.sharpen.is_some()
+            || self.brightness.is_some()
+            || self.contrast.is_some()
+            || self.grayscale
+            || self.saturation.is_some()
     }
 }
 
