@@ -617,13 +617,46 @@ impl ProxyHttp for YatagarasuProxy {
         // Image Optimization Check (Phase: Image Optimization)
         if config.image_optimization.enabled && (method == "GET" || method == "HEAD") {
             let query_params = helpers::extract_query_params(req);
-            if let Some(image_params) = ImageParams::from_params(&query_params) {
-                tracing::debug!(
-                    request_id = %ctx.request_id(),
-                    params = ?image_params,
-                    "Image optimization requested"
-                );
-                ctx.set_image_params(image_params);
+            if let Some(parse_result) = ImageParams::from_query(&query_params) {
+                match parse_result {
+                    Ok(image_params) => {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            params = ?image_params,
+                            "Image optimization requested"
+                        );
+                        ctx.set_image_params(image_params);
+                    }
+                    Err(image_error) => {
+                        let status = image_error.to_http_status();
+                        tracing::warn!(
+                            request_id = %ctx.request_id(),
+                            error = %image_error,
+                            "Invalid image optimization parameters"
+                        );
+
+                        let mut header = ResponseHeader::build(status, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+
+                        let error_body = serde_json::json!({
+                            "error": "Bad Request",
+                            "message": image_error.to_string(),
+                            "status": status
+                        })
+                        .to_string();
+
+                        header.insert_header("Content-Length", error_body.len().to_string())?;
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(error_body.into()), true)
+                            .await?;
+
+                        self.metrics.increment_status_count(status);
+                        return Ok(true); // Short-circuit
+                    }
+                }
             }
         }
 

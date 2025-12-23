@@ -524,10 +524,10 @@ impl ImageParams {
         }
 
         if let Some(blur) = self.blur {
-            parts.push(format!("blur{}", blur));
+            parts.push(format!("blur{:.2}", blur));
         }
         if let Some(sharpen) = self.sharpen {
-            parts.push(format!("sharp{}", sharpen));
+            parts.push(format!("sharp{:.2}", sharpen));
         }
 
         if parts.is_empty() {

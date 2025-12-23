@@ -84,8 +84,6 @@ pub fn generate_signature(
 ) -> Option<String> {
     let key = config.signing_key.as_ref()?;
 
-    // TODO: Implement the HMAC-SHA256 signature generation
-    // This is where you'll compute the signature
     let signature =
         compute_hmac_signature(key, config.signing_salt.as_deref(), options, source_url);
 
@@ -254,7 +252,15 @@ pub fn validate_source(source: &str, config: &SecurityConfig) -> Result<(), Imag
     Ok(())
 }
 
-/// Simple glob pattern matching (supports * and **)
+/// Simple glob pattern matching
+///
+/// Supports:
+/// - `*` or `**` alone matches everything
+/// - `*suffix` matches text ending with suffix (e.g., `*.example.com`)
+/// - `prefix*` matches text starting with prefix (e.g., `https://cdn.*`)
+/// - Exact match for patterns without wildcards
+///
+/// Note: Does not support wildcards in the middle of patterns (e.g., `cdn.*.com`)
 fn glob_match(pattern: &str, text: &str) -> bool {
     // Handle ** (match any path)
     if pattern == "**" || pattern == "*" {

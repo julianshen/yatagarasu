@@ -407,6 +407,15 @@ impl ImageEncoder for MozJpegEncoder {
         // Convert RGBA to RGB (JPEG doesn't support alpha)
         let rgb_data = rgba_to_rgb(data);
 
+        // SAFETY: This unsafe block uses mozjpeg-sys FFI bindings. The safety invariants are:
+        // 1. jpeg_error_mgr and jpeg_compress_struct are zero-initialized as required by libjpeg API
+        // 2. jpeg_std_error initializes the error handler before any other operations
+        // 3. jpeg_create_compress must be called before setting any fields on cinfo
+        // 4. cinfo is stack-allocated and lives for the entire duration of compression
+        // 5. out_buffer is heap-allocated by libjpeg via jpeg_mem_dest; we copy data before freeing
+        // 6. rgb_data slice is valid for the entire compression (not moved or dropped)
+        // 7. jpeg_destroy_compress is always called to clean up resources
+        // 8. libc::free is called on out_buffer which was allocated by libjpeg's malloc
         unsafe {
             let mut err = std::mem::zeroed::<jpeg_error_mgr>();
             let mut cinfo = std::mem::zeroed::<jpeg_compress_struct>();
