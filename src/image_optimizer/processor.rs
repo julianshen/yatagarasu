@@ -362,24 +362,30 @@ fn apply_effects(img: &DynamicImage, params: &ImageParams) -> DynamicImage {
 /// Apply saturation adjustment using HSL color space
 ///
 /// saturation: -100 (grayscale) to 100 (max saturation)
+///
+/// Uses Rayon for parallel processing on multi-core systems.
 fn apply_saturation(img: &DynamicImage, saturation: i32) -> DynamicImage {
+    use rayon::prelude::*;
+
     let mut rgba = img.to_rgba8();
     let factor = 1.0 + (saturation as f32 / 100.0);
 
-    for pixel in rgba.pixels_mut() {
-        let [r, g, b, a] = pixel.0;
+    // Process pixels in parallel using Rayon
+    rgba.par_chunks_mut(4).for_each(|pixel| {
+        let r = pixel[0];
+        let g = pixel[1];
+        let b = pixel[2];
+        // pixel[3] is alpha, unchanged
 
-        // Convert to HSL
+        // Convert to HSL, adjust saturation, convert back
         let (h, s, l) = rgb_to_hsl(r, g, b);
-
-        // Adjust saturation
         let new_s = (s * factor).clamp(0.0, 1.0);
-
-        // Convert back to RGB
         let (nr, ng, nb) = hsl_to_rgb(h, new_s, l);
 
-        pixel.0 = [nr, ng, nb, a];
-    }
+        pixel[0] = nr;
+        pixel[1] = ng;
+        pixel[2] = nb;
+    });
 
     DynamicImage::ImageRgba8(rgba)
 }
