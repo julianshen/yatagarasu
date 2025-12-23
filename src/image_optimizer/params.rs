@@ -614,23 +614,35 @@ impl ImageParams {
             parts.push("fv".to_string());
         }
 
+        // Only include effect parameters if they have non-zero values
+        // (zero values are no-ops and would create duplicate cache entries)
         if let Some(blur) = self.blur {
-            parts.push(format!("blur{:.2}", blur));
+            if blur > 0.0 {
+                parts.push(format!("blur{:.2}", blur));
+            }
         }
         if let Some(sharpen) = self.sharpen {
-            parts.push(format!("sharp{:.2}", sharpen));
+            if sharpen > 0.0 {
+                parts.push(format!("sharp{:.2}", sharpen));
+            }
         }
         if let Some(brightness) = self.brightness {
-            parts.push(format!("bri{}", brightness));
+            if brightness != 0 {
+                parts.push(format!("bri{}", brightness));
+            }
         }
         if let Some(contrast) = self.contrast {
-            parts.push(format!("con{}", contrast));
+            if contrast != 0 {
+                parts.push(format!("con{}", contrast));
+            }
         }
         if self.grayscale {
             parts.push("gray".to_string());
         }
         if let Some(saturation) = self.saturation {
-            parts.push(format!("sat{}", saturation));
+            if saturation != 0 {
+                parts.push(format!("sat{}", saturation));
+            }
         }
 
         if parts.is_empty() {

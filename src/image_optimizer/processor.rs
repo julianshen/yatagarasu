@@ -336,12 +336,11 @@ fn apply_effects(img: &DynamicImage, params: &ImageParams) -> DynamicImage {
     // Apply contrast adjustment if specified
     if let Some(contrast) = params.contrast {
         if contrast != 0 {
-            // Convert -100..100 to contrast factor
-            // 0 = no change (factor 1.0)
-            // 100 = max increase (factor 2.0)
-            // -100 = max decrease (factor 0.0)
-            let factor = 1.0 + (contrast as f32 / 100.0);
-            result = result.adjust_contrast(factor);
+            // adjust_contrast expects signed amount:
+            // - Negative values decrease contrast
+            // - Positive values increase contrast
+            // Pass contrast value directly (-100 to 100 range)
+            result = result.adjust_contrast(contrast as f32);
         }
     }
 
