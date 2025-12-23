@@ -17,7 +17,16 @@
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Get current time as milliseconds since UNIX epoch (lock-free timestamp)
+#[inline]
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Circuit breaker states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +76,12 @@ impl Default for CircuitBreakerConfig {
 }
 
 /// Circuit breaker for preventing cascading failures
+///
+/// Uses lock-free atomics for all operations, including timestamp tracking.
+/// State transitions use Acquire/Release ordering for proper synchronization.
 #[derive(Debug, Clone)]
 pub struct CircuitBreaker {
-    /// Current circuit state
+    /// Current circuit state (uses Acquire on load, Release on store)
     state: Arc<AtomicU8>,
     /// Consecutive failure count
     failure_count: Arc<AtomicU64>,
@@ -77,8 +89,8 @@ pub struct CircuitBreaker {
     success_count: Arc<AtomicU64>,
     /// Number of requests currently being tested in half-open state
     half_open_requests: Arc<AtomicU64>,
-    /// Last state transition time (for timeout)
-    last_transition: Arc<parking_lot::Mutex<Instant>>,
+    /// Last state transition time as milliseconds since UNIX epoch (lock-free)
+    last_transition_ms: Arc<AtomicU64>,
     /// Configuration
     config: Arc<CircuitBreakerConfig>,
 }
@@ -91,14 +103,14 @@ impl CircuitBreaker {
             failure_count: Arc::new(AtomicU64::new(0)),
             success_count: Arc::new(AtomicU64::new(0)),
             half_open_requests: Arc::new(AtomicU64::new(0)),
-            last_transition: Arc::new(parking_lot::Mutex::new(Instant::now())),
+            last_transition_ms: Arc::new(AtomicU64::new(now_ms())),
             config: Arc::new(config),
         }
     }
 
     /// Get current circuit state
     pub fn state(&self) -> CircuitState {
-        self.state.load(Ordering::Relaxed).into()
+        self.state.load(Ordering::Acquire).into()
     }
 
     /// Check if a request should be allowed through the circuit
@@ -108,9 +120,12 @@ impl CircuitBreaker {
         match current_state {
             CircuitState::Closed => true,
             CircuitState::Open => {
-                // Check if timeout has elapsed to transition to half-open
-                let elapsed = self.last_transition.lock().elapsed();
-                if elapsed >= self.config.timeout_duration {
+                // Check if timeout has elapsed to transition to half-open (lock-free)
+                let last_ms = self.last_transition_ms.load(Ordering::Acquire);
+                let elapsed_ms = now_ms().saturating_sub(last_ms);
+                let timeout_ms = self.config.timeout_duration.as_millis() as u64;
+
+                if elapsed_ms >= timeout_ms {
                     tracing::info!("Circuit breaker timeout elapsed, transitioning to half-open");
                     self.transition_to_half_open();
                     true // Allow the first test request
@@ -214,31 +229,40 @@ impl CircuitBreaker {
     }
 
     /// Transition to closed state
+    ///
+    /// Uses Release ordering to ensure counter resets are visible before state change.
     fn transition_to_closed(&self) {
-        self.state
-            .store(CircuitState::Closed as u8, Ordering::Relaxed);
         self.failure_count.store(0, Ordering::Relaxed);
         self.success_count.store(0, Ordering::Relaxed);
         self.half_open_requests.store(0, Ordering::Relaxed);
-        *self.last_transition.lock() = Instant::now();
+        self.last_transition_ms.store(now_ms(), Ordering::Relaxed);
+        // Release ensures all above writes are visible before state change
+        self.state
+            .store(CircuitState::Closed as u8, Ordering::Release);
     }
 
     /// Transition to open state
+    ///
+    /// Uses Release ordering to ensure counter resets are visible before state change.
     fn transition_to_open(&self) {
-        self.state
-            .store(CircuitState::Open as u8, Ordering::Relaxed);
         self.success_count.store(0, Ordering::Relaxed);
         self.half_open_requests.store(0, Ordering::Relaxed);
-        *self.last_transition.lock() = Instant::now();
+        self.last_transition_ms.store(now_ms(), Ordering::Relaxed);
+        // Release ensures all above writes are visible before state change
+        self.state
+            .store(CircuitState::Open as u8, Ordering::Release);
     }
 
     /// Transition to half-open state
+    ///
+    /// Uses Release ordering to ensure counter resets are visible before state change.
     fn transition_to_half_open(&self) {
-        self.state
-            .store(CircuitState::HalfOpen as u8, Ordering::Relaxed);
         self.success_count.store(0, Ordering::Relaxed);
         self.half_open_requests.store(0, Ordering::Relaxed);
-        *self.last_transition.lock() = Instant::now();
+        self.last_transition_ms.store(now_ms(), Ordering::Relaxed);
+        // Release ensures all above writes are visible before state change
+        self.state
+            .store(CircuitState::HalfOpen as u8, Ordering::Release);
     }
 }
 
@@ -246,6 +270,7 @@ impl CircuitBreaker {
 mod tests {
     use super::*;
     use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn test_circuit_starts_in_closed_state() {

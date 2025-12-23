@@ -6554,6 +6554,7 @@ dependencies = [
  "prometheus",
  "rand 0.8.5",
  "ravif",
+ "rayon",
  "redis",
  "regex",
  "reqwest",
