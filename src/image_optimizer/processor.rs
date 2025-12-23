@@ -149,10 +149,13 @@ pub fn process_image_internal(
     // 6. Apply flip if specified
     let processed_img = apply_flip(&processed_img, params.flip_h, params.flip_v);
 
-    // 7. Determine output format
+    // 7. Apply effects (blur, sharpen)
+    let processed_img = apply_effects(&processed_img, &params);
+
+    // 8. Determine output format
     let output_format = params.format.unwrap_or_else(|| detect_format(data));
 
-    // 8. Encode to target format
+    // 9. Encode to target format
     let quality = EncoderQuality::with_quality(params.quality.unwrap_or(80));
     let encoder = EncoderFactory::create(output_format);
 
@@ -293,6 +296,156 @@ fn apply_flip(img: &DynamicImage, flip_h: bool, flip_v: bool) -> DynamicImage {
         (false, true) => img.flipv(),
         (false, false) => img.clone(),
     }
+}
+
+/// Apply image effects: blur, sharpen, brightness, contrast, saturation, grayscale
+///
+/// Effects are applied in order:
+/// 1. Blur (Gaussian blur)
+/// 2. Sharpen (unsharp mask)
+/// 3. Brightness adjustment
+/// 4. Contrast adjustment
+/// 5. Saturation adjustment
+/// 6. Grayscale conversion (last, so saturation can be applied before)
+fn apply_effects(img: &DynamicImage, params: &ImageParams) -> DynamicImage {
+    let mut result = img.clone();
+
+    // Apply Gaussian blur if specified
+    if let Some(sigma) = params.blur {
+        if sigma > 0.0 {
+            result = result.blur(sigma);
+        }
+    }
+
+    // Apply unsharp mask (sharpen) if specified
+    if let Some(sigma) = params.sharpen {
+        if sigma > 0.0 {
+            // unsharpen(sigma, threshold) - threshold controls how much to sharpen edges
+            // A threshold of 1 means only sharpen edges with 1+ unit difference
+            result = result.unsharpen(sigma, 1);
+        }
+    }
+
+    // Apply brightness adjustment if specified
+    if let Some(brightness) = params.brightness {
+        if brightness != 0 {
+            result = result.brighten(brightness);
+        }
+    }
+
+    // Apply contrast adjustment if specified
+    if let Some(contrast) = params.contrast {
+        if contrast != 0 {
+            // Convert -100..100 to contrast factor
+            // 0 = no change (factor 1.0)
+            // 100 = max increase (factor 2.0)
+            // -100 = max decrease (factor 0.0)
+            let factor = 1.0 + (contrast as f32 / 100.0);
+            result = result.adjust_contrast(factor);
+        }
+    }
+
+    // Apply saturation adjustment if specified
+    if let Some(saturation) = params.saturation {
+        if saturation != 0 {
+            result = apply_saturation(&result, saturation);
+        }
+    }
+
+    // Apply grayscale conversion last
+    if params.grayscale {
+        result = result.grayscale();
+    }
+
+    result
+}
+
+/// Apply saturation adjustment using HSL color space
+///
+/// saturation: -100 (grayscale) to 100 (max saturation)
+fn apply_saturation(img: &DynamicImage, saturation: i32) -> DynamicImage {
+    let mut rgba = img.to_rgba8();
+    let factor = 1.0 + (saturation as f32 / 100.0);
+
+    for pixel in rgba.pixels_mut() {
+        let [r, g, b, a] = pixel.0;
+
+        // Convert to HSL
+        let (h, s, l) = rgb_to_hsl(r, g, b);
+
+        // Adjust saturation
+        let new_s = (s * factor).clamp(0.0, 1.0);
+
+        // Convert back to RGB
+        let (nr, ng, nb) = hsl_to_rgb(h, new_s, l);
+
+        pixel.0 = [nr, ng, nb, a];
+    }
+
+    DynamicImage::ImageRgba8(rgba)
+}
+
+/// Convert RGB to HSL
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    // Lightness
+    let l = (max + min) / 2.0;
+
+    // Saturation
+    let s = if delta == 0.0 {
+        0.0
+    } else {
+        delta / (1.0 - (2.0 * l - 1.0).abs())
+    };
+
+    // Hue
+    let h = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * (((b - r) / delta) + 2.0)
+    } else {
+        60.0 * (((r - g) / delta) + 4.0)
+    };
+
+    let h = if h < 0.0 { h + 360.0 } else { h };
+
+    (h, s, l)
+}
+
+/// Convert HSL to RGB
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r1, g1, b1) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    let r = ((r1 + m) * 255.0).round() as u8;
+    let g = ((g1 + m) * 255.0).round() as u8;
+    let b = ((b1 + m) * 255.0).round() as u8;
+
+    (r, g, b)
 }
 
 /// Read EXIF orientation from image data
@@ -1239,5 +1392,320 @@ mod tests {
         // Should process without error, dimensions unchanged (no EXIF in test image)
         let processed = result.unwrap();
         assert_eq!(processed.output_size, (100, 50));
+    }
+
+    // ============================================================
+    // Phase 50.9: Image Effects Tests
+    // ============================================================
+
+    #[test]
+    fn test_blur_gaussian_applied() {
+        let img_data = create_test_image(100, 100);
+        let mut params = ImageParams::default();
+        params.blur = Some(2.0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        // Blur should not change dimensions
+        assert_eq!(processed.output_size, (100, 100));
+    }
+
+    #[test]
+    fn test_blur_sigma_affects_result() {
+        let img_data = create_test_image(50, 50);
+
+        // Low blur
+        let mut params_low = ImageParams::default();
+        params_low.blur = Some(1.0);
+        let result_low = process_image_internal(&img_data, params_low).unwrap();
+
+        // High blur
+        let mut params_high = ImageParams::default();
+        params_high.blur = Some(10.0);
+        let result_high = process_image_internal(&img_data, params_high).unwrap();
+
+        // Both should produce valid output
+        assert!(!result_low.data.is_empty());
+        assert!(!result_high.data.is_empty());
+        // Higher blur should produce different output
+        assert_ne!(result_low.data, result_high.data);
+    }
+
+    #[test]
+    fn test_blur_zero_sigma_no_change() {
+        let img_data = create_test_image(50, 50);
+
+        // Zero blur (effectively no blur)
+        let mut params = ImageParams::default();
+        params.blur = Some(0.0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        // Should still work, just with no blur applied
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_sharpen_unsharp_mask_applied() {
+        let img_data = create_test_image(100, 100);
+        let mut params = ImageParams::default();
+        params.sharpen = Some(1.5);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        // Sharpen should not change dimensions
+        assert_eq!(processed.output_size, (100, 100));
+    }
+
+    #[test]
+    fn test_sharpen_sigma_affects_result() {
+        let img_data = create_test_image(50, 50);
+
+        // Low sharpen
+        let mut params_low = ImageParams::default();
+        params_low.sharpen = Some(0.5);
+        let result_low = process_image_internal(&img_data, params_low).unwrap();
+
+        // High sharpen
+        let mut params_high = ImageParams::default();
+        params_high.sharpen = Some(5.0);
+        let result_high = process_image_internal(&img_data, params_high).unwrap();
+
+        // Both should produce valid output
+        assert!(!result_low.data.is_empty());
+        assert!(!result_high.data.is_empty());
+        // Different sharpen levels should produce different output
+        assert_ne!(result_low.data, result_high.data);
+    }
+
+    #[test]
+    fn test_sharpen_zero_sigma_no_change() {
+        let img_data = create_test_image(50, 50);
+
+        // Zero sharpen (effectively no sharpen)
+        let mut params = ImageParams::default();
+        params.sharpen = Some(0.0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        // Should still work, just with no sharpen applied
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_effects_combine_with_resize() {
+        let img_data = create_test_image(200, 200);
+        let mut params = ImageParams::default();
+        params.width = Some(Dimension::Pixels(100));
+        params.height = Some(Dimension::Pixels(100));
+        params.blur = Some(2.0);
+        params.sharpen = Some(1.0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        // Resize should still work with effects
+        assert_eq!(processed.output_size, (100, 100));
+    }
+
+    #[test]
+    fn test_blur_and_sharpen_combined() {
+        // Applying blur then sharpen (odd but valid combination)
+        let img_data = create_test_image(100, 100);
+        let mut params = ImageParams::default();
+        params.blur = Some(3.0);
+        params.sharpen = Some(2.0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (100, 100));
+    }
+
+    #[test]
+    fn test_brightness_increase() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.brightness = Some(50);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_brightness_decrease() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.brightness = Some(-50);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_brightness_zero_no_change() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.brightness = Some(0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_contrast_increase() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.contrast = Some(50);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_contrast_decrease() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.contrast = Some(-50);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_contrast_zero_no_change() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.contrast = Some(0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_grayscale_conversion() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.grayscale = true;
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_grayscale_preserves_dimensions() {
+        let img_data = create_test_image(100, 80);
+        let mut params = ImageParams::default();
+        params.grayscale = true;
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (100, 80));
+    }
+
+    #[test]
+    fn test_saturation_increase() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.saturation = Some(50);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_saturation_decrease() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.saturation = Some(-50);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_saturation_zero_no_change() {
+        let img_data = create_test_image(50, 50);
+        let mut params = ImageParams::default();
+        params.saturation = Some(0);
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (50, 50));
+    }
+
+    #[test]
+    fn test_all_effects_combined() {
+        // Apply all effects together
+        let img_data = create_test_image(100, 100);
+        let mut params = ImageParams::default();
+        params.blur = Some(1.0);
+        params.sharpen = Some(0.5);
+        params.brightness = Some(10);
+        params.contrast = Some(20);
+        params.saturation = Some(-30);
+        // grayscale = false so we can test saturation
+
+        let result = process_image_internal(&img_data, params);
+        assert!(result.is_ok());
+
+        let processed = result.unwrap();
+        assert_eq!(processed.output_size, (100, 100));
+    }
+
+    #[test]
+    fn test_effects_cache_key_includes_all() {
+        let mut params = ImageParams::default();
+        params.brightness = Some(50);
+        params.contrast = Some(-25);
+        params.grayscale = true;
+        params.saturation = Some(30);
+
+        let key = params.to_cache_key();
+        assert!(key.contains("bri50"));
+        assert!(key.contains("con-25"));
+        assert!(key.contains("gray"));
+        assert!(key.contains("sat30"));
     }
 }
