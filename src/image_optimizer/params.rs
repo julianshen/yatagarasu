@@ -274,10 +274,28 @@ impl Default for ImageParams {
 }
 
 impl ImageParams {
+    /// Parse from query parameters map with error handling
+    ///
+    /// Returns `Ok(Some(params))` if image parameters are present and valid,
+    /// `Ok(None)` if no image parameters are present,
+    /// `Err(ImageError)` if parameters are present but invalid.
+    pub fn try_from_params(params: &HashMap<String, String>) -> Result<Option<Self>, ImageError> {
+        match Self::from_query(params) {
+            Some(result) => result.map(Some),
+            None => Ok(None),
+        }
+    }
+
     /// Parse from query parameters map (legacy compatibility method)
     ///
     /// Returns None if no optimization parameters are present or if parsing fails.
     /// Parsing errors are silently ignored for backward compatibility.
+    ///
+    /// **Deprecated**: Use `try_from_params` instead to handle parsing errors properly.
+    #[deprecated(
+        since = "1.5.0",
+        note = "Use try_from_params for proper error handling"
+    )]
     pub fn from_params(params: &HashMap<String, String>) -> Option<Self> {
         Self::from_query(params).and_then(|r| r.ok())
     }
@@ -478,14 +496,14 @@ impl ImageParams {
         if let Some(ref w) = self.width {
             match w {
                 Dimension::Pixels(px) => parts.push(format!("w{}", px)),
-                Dimension::Percentage(pct) => parts.push(format!("w{}p", pct)),
+                Dimension::Percentage(pct) => parts.push(format!("w{:.1}p", pct)),
             }
         }
 
         if let Some(ref h) = self.height {
             match h {
                 Dimension::Pixels(px) => parts.push(format!("h{}", px)),
-                Dimension::Percentage(pct) => parts.push(format!("h{}p", pct)),
+                Dimension::Percentage(pct) => parts.push(format!("h{:.1}p", pct)),
             }
         }
 
@@ -502,7 +520,7 @@ impl ImageParams {
         }
 
         if self.dpr != 1.0 {
-            parts.push(format!("dpr{}", self.dpr));
+            parts.push(format!("dpr{:.1}", self.dpr));
         }
 
         if let Some(r) = self.rotate {
