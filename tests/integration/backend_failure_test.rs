@@ -514,6 +514,7 @@ fn test_memory_cache_eviction() {
                 bucket: "test".to_string(),
                 object_key: format!("key-{}", i),
                 etag: None,
+                variant: None,
             };
             let entry = CacheEntry::new(
                 Bytes::from(vec![0u8; 100 * 1024]), // 100KB each
@@ -562,6 +563,7 @@ fn test_disk_cache_eviction() {
                 bucket: "test".to_string(),
                 object_key: format!("key-{}", i),
                 etag: None,
+                variant: None,
             };
             let entry = CacheEntry::new(
                 Bytes::from(vec![0u8; 100 * 1024]), // 100KB each

@@ -229,6 +229,7 @@ async fn test_get_retrieves_entry_from_redis() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the entry
@@ -267,6 +268,7 @@ async fn test_get_returns_none_if_key_doesnt_exist() {
         bucket: "bucket1".to_string(),
         object_key: "nonexistent.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     let result = cache.get(&key).await.unwrap();
@@ -306,6 +308,7 @@ async fn test_set_stores_entry_in_redis() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set should succeed
@@ -351,6 +354,7 @@ async fn test_get_and_set_roundtrip() {
         bucket: "images".to_string(),
         object_key: "photo.jpg".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set
@@ -398,6 +402,7 @@ async fn test_delete_removes_key_from_redis() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key.clone(), entry).await.unwrap();
@@ -448,6 +453,7 @@ async fn test_delete_returns_ok_if_key_existed() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set and delete
@@ -480,6 +486,7 @@ async fn test_delete_returns_ok_if_key_didnt_exist() {
         bucket: "bucket1".to_string(),
         object_key: "nonexistent.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Delete a key that doesn't exist - should still succeed (idempotent)
@@ -521,6 +528,7 @@ async fn test_delete_uses_del_command() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key.clone(), entry).await.unwrap();
@@ -566,6 +574,7 @@ async fn test_clear_removes_all_keys_with_prefix() {
             bucket: "bucket1".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
         cache.set(key, entry.clone()).await.unwrap();
     }
@@ -580,6 +589,7 @@ async fn test_clear_removes_all_keys_with_prefix() {
             bucket: "bucket1".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
         assert!(cache.get(&key).await.unwrap().is_none());
     }
@@ -623,6 +633,7 @@ async fn test_clear_uses_scan_for_safe_iteration() {
             bucket: "bucket1".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
         cache.set(key, entry.clone()).await.unwrap();
     }
@@ -676,6 +687,7 @@ async fn test_clear_does_not_affect_other_prefixes() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache1.set(key.clone(), entry.clone()).await.unwrap();
@@ -728,6 +740,7 @@ async fn test_clear_handles_large_key_count() {
             bucket: "bucket1".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
         cache.set(key, entry.clone()).await.unwrap();
     }
@@ -801,6 +814,7 @@ async fn test_stats_returns_current_statistics() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set an entry
@@ -814,6 +828,7 @@ async fn test_stats_returns_current_statistics() {
         bucket: "bucket1".to_string(),
         object_key: "nonexistent.txt".to_string(),
         etag: None,
+        variant: None,
     };
     cache.get(&key2).await.unwrap();
 
@@ -860,6 +875,7 @@ async fn test_stats_returns_hit_count() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set and get multiple times
@@ -897,6 +913,7 @@ async fn test_stats_returns_miss_count() {
             bucket: "bucket1".to_string(),
             object_key: format!("nonexistent{}.txt", i),
             etag: None,
+            variant: None,
         };
         cache.get(&key).await.unwrap();
     }
@@ -940,6 +957,7 @@ async fn test_stats_returns_set_count() {
             bucket: "bucket1".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
         cache.set(key, entry.clone()).await.unwrap();
     }
@@ -986,6 +1004,7 @@ async fn test_stats_returns_eviction_count() {
             bucket: "bucket1".to_string(),
             object_key: format!("file{}.txt", i),
             etag: None,
+            variant: None,
         };
         cache.set(key.clone(), entry.clone()).await.unwrap();
         cache.delete(&key).await.unwrap();
@@ -1028,6 +1047,7 @@ async fn test_stats_tracks_operations_atomically() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Perform mixed operations
@@ -1039,6 +1059,7 @@ async fn test_stats_tracks_operations_atomically() {
         bucket: "bucket1".to_string(),
         object_key: "nonexistent.txt".to_string(),
         etag: None,
+        variant: None,
     };
     cache.get(&key2).await.unwrap(); // miss
 
@@ -1089,6 +1110,7 @@ async fn test_sets_redis_ttl_on_entry_insertion() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the entry
@@ -1159,6 +1181,7 @@ async fn test_calculates_ttl_from_entry_expires_at() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the entry
@@ -1223,6 +1246,7 @@ async fn test_redis_auto_expires_entries() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the entry
@@ -1286,6 +1310,7 @@ async fn test_get_double_checks_entry_not_expired_locally() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the entry - Redis will accept it (with minimum 1 second TTL)
@@ -1336,6 +1361,7 @@ async fn test_can_store_and_retrieve_medium_entries_100kb() {
         bucket: "bucket1".to_string(),
         object_key: "medium-file.bin".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the medium entry
@@ -1388,6 +1414,7 @@ async fn test_can_store_and_retrieve_large_entries_1mb() {
         bucket: "bucket1".to_string(),
         object_key: "large-file.bin".to_string(),
         etag: None,
+        variant: None,
     };
 
     // Set the large entry

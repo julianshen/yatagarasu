@@ -31,6 +31,7 @@ fn test_set_writes_to_memory_synchronously() {
             bucket: "test".to_string(),
             object_key: "/test.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let entry = CacheEntry {
             data: Bytes::from(vec![1u8, 2, 3, 4, 5]),
@@ -95,6 +96,7 @@ fn test_secondary_layer_failures_dont_fail_operation() {
             bucket: "test".to_string(),
             object_key: "/test.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let entry = CacheEntry {
             data: Bytes::from(vec![1u8, 2, 3]),
@@ -169,6 +171,7 @@ fn test_memory_write_returns_quickly() {
             bucket: "test".to_string(),
             object_key: "/speed-test.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Create 1KB entry
@@ -233,6 +236,7 @@ fn test_multi_layer_write_primary_then_secondary() {
             bucket: "test".to_string(),
             object_key: "/multi-layer.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let entry = CacheEntry {
             data: Bytes::from(vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]),

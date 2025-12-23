@@ -15,21 +15,22 @@ API endpoints, error codes, and technical specifications.
 
 ## Quick Links
 
-| Reference | Description |
-|:----------|:------------|
-| [API Reference](/yatagarasu/reference/api/) | HTTP endpoints and methods |
-| [Error Codes](/yatagarasu/reference/errors/) | Error responses and handling |
-| [Performance](/yatagarasu/reference/performance/) | Benchmarks and specifications |
+| Reference                                                   | Description                       |
+| :---------------------------------------------------------- | :-------------------------------- |
+| [API Reference](/yatagarasu/reference/api/)                 | HTTP endpoints and methods        |
+| [Image Parameters](/yatagarasu/reference/image-parameters/) | Image optimization URL parameters |
+| [Error Codes](/yatagarasu/reference/errors/)                | Error responses and handling      |
+| [Performance](/yatagarasu/reference/performance/)           | Benchmarks and specifications     |
 
 ---
 
 ## Supported HTTP Methods
 
-| Method | Description |
-|:-------|:------------|
-| `GET` | Retrieve objects from S3 |
-| `HEAD` | Get object metadata |
-| `OPTIONS` | CORS preflight requests |
+| Method    | Description              |
+| :-------- | :----------------------- |
+| `GET`     | Retrieve objects from S3 |
+| `HEAD`    | Get object metadata      |
+| `OPTIONS` | CORS preflight requests  |
 
 {: .note }
 Yatagarasu is a **read-only** proxy. PUT, POST, and DELETE are not supported.
@@ -40,43 +41,43 @@ Yatagarasu is a **read-only** proxy. PUT, POST, and DELETE are not supported.
 
 ### Request Headers
 
-| Header | Description |
-|:-------|:------------|
-| `Authorization` | JWT token (`Bearer <token>`) |
-| `Range` | Byte range for partial content |
-| `If-None-Match` | Conditional request (ETag) |
-| `If-Modified-Since` | Conditional request (date) |
+| Header              | Description                    |
+| :------------------ | :----------------------------- |
+| `Authorization`     | JWT token (`Bearer <token>`)   |
+| `Range`             | Byte range for partial content |
+| `If-None-Match`     | Conditional request (ETag)     |
+| `If-Modified-Since` | Conditional request (date)     |
 
 ### Response Headers
 
-| Header | Description |
-|:-------|:------------|
-| `Content-Type` | Object MIME type |
-| `Content-Length` | Response body size |
-| `ETag` | Object version identifier |
-| `Last-Modified` | Object modification date |
-| `Cache-Control` | Caching directives |
-| `X-Cache` | Cache hit/miss indicator |
-| `X-Request-Id` | Unique request identifier |
+| Header           | Description               |
+| :--------------- | :------------------------ |
+| `Content-Type`   | Object MIME type          |
+| `Content-Length` | Response body size        |
+| `ETag`           | Object version identifier |
+| `Last-Modified`  | Object modification date  |
+| `Cache-Control`  | Caching directives        |
+| `X-Cache`        | Cache hit/miss indicator  |
+| `X-Request-Id`   | Unique request identifier |
 
 ---
 
 ## Status Codes
 
-| Code | Description |
-|:-----|:------------|
-| 200 | Success |
-| 206 | Partial Content (Range request) |
-| 304 | Not Modified (conditional request) |
-| 400 | Bad Request |
-| 401 | Unauthorized (missing/invalid token) |
-| 403 | Forbidden (authorization denied) |
-| 404 | Not Found |
-| 429 | Too Many Requests (rate limited) |
-| 500 | Internal Server Error |
-| 502 | Bad Gateway (S3 error) |
-| 503 | Service Unavailable (all backends down) |
-| 504 | Gateway Timeout |
+| Code | Description                             |
+| :--- | :-------------------------------------- |
+| 200  | Success                                 |
+| 206  | Partial Content (Range request)         |
+| 304  | Not Modified (conditional request)      |
+| 400  | Bad Request                             |
+| 401  | Unauthorized (missing/invalid token)    |
+| 403  | Forbidden (authorization denied)        |
+| 404  | Not Found                               |
+| 429  | Too Many Requests (rate limited)        |
+| 500  | Internal Server Error                   |
+| 502  | Bad Gateway (S3 error)                  |
+| 503  | Service Unavailable (all backends down) |
+| 504  | Gateway Timeout                         |
 
 ---
 
@@ -103,14 +104,14 @@ curl -H "If-None-Match: \"abc123\"" http://proxy:8080/bucket/file.txt
 
 ## Performance Specifications
 
-| Metric | Specification |
-|:-------|:--------------|
-| Throughput | 893+ RPS |
-| P95 Latency (cached) | 807us |
-| P95 TTFB (S3 stream) | 24.45ms |
-| Memory per connection | ~64KB |
-| JWT validation | 1.78us |
-| Path routing | 95.9ns |
+| Metric                | Specification |
+| :-------------------- | :------------ |
+| Throughput            | 893+ RPS      |
+| P95 Latency (cached)  | 807us         |
+| P95 TTFB (S3 stream)  | 24.45ms       |
+| Memory per connection | ~64KB         |
+| JWT validation        | 1.78us        |
+| Path routing          | 95.9ns        |
 
 ---
 

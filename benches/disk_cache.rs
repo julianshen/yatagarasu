@@ -35,6 +35,7 @@ fn bench_small_file_write(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("small-file-{}.bin", counter),
                 etag: None,
+                variant: None,
             };
             counter += 1;
 
@@ -61,6 +62,7 @@ fn bench_small_file_read(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("small-file-{}.bin", i),
                 etag: None,
+                variant: None,
             };
             let entry = create_cache_entry(4 * 1024);
             cache.set(key, entry).await.unwrap();
@@ -76,6 +78,7 @@ fn bench_small_file_read(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("small-file-{}.bin", counter % 100),
                 etag: None,
+                variant: None,
             };
             counter += 1;
 
@@ -105,6 +108,7 @@ fn bench_large_file_write(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("large-file-{}.bin", counter),
                 etag: None,
+                variant: None,
             };
             counter += 1;
 
@@ -131,6 +135,7 @@ fn bench_large_file_read(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("large-file-{}.bin", i),
                 etag: None,
+                variant: None,
             };
             let entry = create_cache_entry(10 * 1024 * 1024);
             cache.set(key, entry).await.unwrap();
@@ -147,6 +152,7 @@ fn bench_large_file_read(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("large-file-{}.bin", counter % 10),
                 etag: None,
+                variant: None,
             };
             counter += 1;
 
@@ -183,6 +189,7 @@ fn bench_mixed_file_sizes(c: &mut Criterion) {
                     bucket: "bench-bucket".to_string(),
                     object_key: format!("{}-file-{}.bin", name, i),
                     etag: None,
+                    variant: None,
                 };
                 let entry = create_cache_entry(*size);
                 cache.set(key, entry).await.unwrap();
@@ -200,6 +207,7 @@ fn bench_mixed_file_sizes(c: &mut Criterion) {
                     bucket: "bench-bucket".to_string(),
                     object_key: format!("{}-file-{}.bin", name, counter % 10),
                     etag: None,
+                    variant: None,
                 };
                 counter += 1;
 
@@ -232,6 +240,7 @@ fn bench_eviction(c: &mut Criterion) {
                 bucket: "bench-bucket".to_string(),
                 object_key: format!("evict-file-{}.bin", counter),
                 etag: None,
+                variant: None,
             };
             counter += 1;
 

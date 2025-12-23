@@ -177,6 +177,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let slot = coalescer.acquire(&key).await;
@@ -191,6 +192,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-key".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Track execution order
@@ -243,6 +245,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let fetch_count = Arc::new(AtomicUsize::new(0));
@@ -297,11 +300,13 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "object1.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let key2 = CacheKey {
             bucket: "test-bucket".to_string(),
             object_key: "object2.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let slot1 = coalescer.acquire(&key1).await;
@@ -323,6 +328,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test-key".to_string(),
             etag: None,
+            variant: None,
         };
 
         {

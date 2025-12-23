@@ -32,6 +32,9 @@ aws-sdk-s3 = "1.0"
 # JWT Authentication
 jsonwebtoken = {version = "10.2", features = ["rust_crypto"]}
 
+# Base64 encoding for URL signing
+base64 = "0.22"
+
 # Serialization
 serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0"
@@ -93,12 +96,23 @@ reqwest = {version = "0.11", features = ["json"]}
 # System utilities
 hostname = "0.4"
 
+# Image Processing (Phase 50)
+fast_image_resize = "2.7"
+image = {version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "gif"]}
+
 # OpenTelemetry (Phase 34: Enhanced Observability)
 arc-swap = "1.7.1"
+imgref = "1.12.0"
+kamadak-exif = "0.6.1"
+mozjpeg-sys = "1.1.1"
 opentelemetry = "0.27"
 opentelemetry-otlp = {version = "0.27", features = ["tonic", "grpc-tonic"]}
 opentelemetry_sdk = {version = "0.27", features = ["rt-tokio"]}
+oxipng = "9.0.0"
+ravif = "0.11.20"
+rgb = "0.8.52"
 tracing-opentelemetry = "0.28"
+webp = "0.3.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Using low-level io-uring instead of tokio-uring
@@ -163,3 +177,10 @@ name = "cache_comparison"
 [[bench]]
 harness = false
 name = "request_processing"
+
+[[bench]]
+harness = false
+name = "image_optimization"
+
+[lints.rust]
+unexpected_cfgs = {level = "warn", check-cfg = ["cfg(tarpaulin)"]}

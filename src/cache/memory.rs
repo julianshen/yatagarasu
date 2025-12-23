@@ -384,6 +384,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "nonexistent".to_string(),
             etag: None,
+            variant: None,
         };
 
         let result = cache.get(&key).await;
@@ -400,6 +401,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "myfile.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -428,6 +430,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "deleteme.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -455,11 +458,13 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "file1.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let key2 = CacheKey {
             bucket: "test".to_string(),
             object_key: "file2.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -491,6 +496,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Miss
@@ -526,6 +532,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "large.bin".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Create a 2MB entry
@@ -550,6 +557,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let result = cache.get(&key).await;
@@ -564,6 +572,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "file.txt".to_string(),
             etag: None,
+            variant: None,
         };
         let entry = CacheEntry::new(
             Bytes::from("data"),

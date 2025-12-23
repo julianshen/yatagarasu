@@ -28,6 +28,7 @@ use crate::cache::warming::PrewarmManager;
 use crate::cache::{Cache, CacheKey};
 use crate::circuit_breaker::CircuitBreaker;
 use crate::config::Config;
+use crate::image_optimizer::ImageParams;
 use crate::metrics::Metrics;
 use crate::opa::{
     AuthorizationDecision as OpaAuthorizationDecision, FailMode as OpaFailMode, OpaCache, OpaInput,
@@ -611,6 +612,52 @@ impl ProxyHttp for YatagarasuProxy {
 
             self.metrics.increment_status_count(200);
             return Ok(true); // Short-circuit
+        }
+
+        // Image Optimization Check (Phase: Image Optimization)
+        if config.image_optimization.enabled && (method == "GET" || method == "HEAD") {
+            let query_params = helpers::extract_query_params(req);
+            if let Some(parse_result) = ImageParams::from_query(&query_params) {
+                match parse_result {
+                    Ok(image_params) => {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            params = ?image_params,
+                            "Image optimization requested"
+                        );
+                        ctx.set_image_params(image_params);
+                    }
+                    Err(image_error) => {
+                        let status = image_error.to_http_status();
+                        tracing::warn!(
+                            request_id = %ctx.request_id(),
+                            error = %image_error,
+                            "Invalid image optimization parameters"
+                        );
+
+                        let mut header = ResponseHeader::build(status, None)?;
+                        header.insert_header("Content-Type", "application/json")?;
+
+                        let error_body = serde_json::json!({
+                            "error": "Bad Request",
+                            "message": image_error.to_string(),
+                            "status": status
+                        })
+                        .to_string();
+
+                        header.insert_header("Content-Length", error_body.len().to_string())?;
+                        session
+                            .write_response_header(Box::new(header), false)
+                            .await?;
+                        session
+                            .write_response_body(Some(error_body.into()), true)
+                            .await?;
+
+                        self.metrics.increment_status_count(status);
+                        return Ok(true); // Short-circuit
+                    }
+                }
+            }
         }
 
         // 1. Validate URI length
@@ -1453,6 +1500,7 @@ impl ProxyHttp for YatagarasuProxy {
                         bucket: bucket_name.to_string(),
                         object_key: obj_path.clone(),
                         etag: None,
+                        variant: None,
                     };
 
                     match cache.delete(&cache_key).await {
@@ -2012,6 +2060,7 @@ impl ProxyHttp for YatagarasuProxy {
                     bucket: bucket.to_string(),
                     object_key: object_key.to_string(),
                     etag: None,
+                    variant: None,
                 };
 
                 // Try to get the entry from cache
@@ -2592,10 +2641,14 @@ impl ProxyHttp for YatagarasuProxy {
                     // Use router.extract_s3_key for consistent key generation (same as cache set)
                     let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
 
+                    // Generate variant string if image optimization is requested
+                    let variant = ctx.image_params().map(|p| p.to_cache_key());
+
                     let cache_key = CacheKey {
                         bucket: bucket_config.name.clone(),
                         object_key: object_key.clone(),
                         etag: None, // We don't know the etag yet
+                        variant,
                     };
 
                     // Extract conditional headers before mutable borrow of ctx for audit
@@ -3173,10 +3226,9 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
-        // Phase 30: Enable response buffering for cache population
-        // Only buffer successful (200) responses that are not range requests
-        if status == 200 && self.cache.is_some() {
-            // Capture response headers for cache entry
+        // Phase 30 & Image Optimization: Enable response buffering and header capture
+        if status == 200 {
+            // Capture response headers (common for both caching and optimization)
             if let Some(content_type) = upstream_response
                 .headers
                 .get("content-type")
@@ -3199,7 +3251,7 @@ impl ProxyHttp for YatagarasuProxy {
                 }
             }
 
-            // Capture Last-Modified header for If-Modified-Since support
+            // Capture Last-Modified header
             if let Some(last_modified) = upstream_response
                 .headers
                 .get("last-modified")
@@ -3210,13 +3262,42 @@ impl ProxyHttp for YatagarasuProxy {
                 }
             }
 
-            // Enable response buffering (will be used in response_body_filter)
-            ctx.enable_response_buffering();
+            // check if cache is enabled to enable buffering for cache population
+            if self.cache.is_some() {
+                ctx.enable_response_buffering();
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    "Enabled response buffering for cache population"
+                );
+            }
 
-            tracing::debug!(
-                request_id = %ctx.request_id(),
-                "Enabled response buffering for cache population"
-            );
+            // Image Optimization: Check if optimization is requested and content is image
+            let is_image = ctx
+                .response_content_type()
+                .map(|ct| ct.starts_with("image/"))
+                .unwrap_or(false);
+
+            if ctx.image_params().is_some() && is_image {
+                ctx.set_optimizing_image(true);
+
+                // Ensure buffering is enabled even if cache is disabled
+                if !ctx.is_response_buffering_enabled() {
+                    ctx.enable_response_buffering();
+                }
+
+                // Strip headers that will be invalid after optimization
+                // We use transfer-encoding: chunked implies we don't need Content-Length
+                upstream_response.remove_header("Content-Length");
+                upstream_response.remove_header("content-length");
+                upstream_response.remove_header("ETag");
+                upstream_response.remove_header("etag");
+
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    params = ?ctx.image_params(),
+                    "Enabled image optimization (stripped headers)"
+                );
+            }
         }
 
         Ok(())
@@ -3242,76 +3323,158 @@ impl ProxyHttp for YatagarasuProxy {
                 const MAX_CACHE_SIZE: usize = 10 * 1024 * 1024; // 10MB
                 if ctx.total_response_size() + chunk.len() <= MAX_CACHE_SIZE {
                     ctx.append_response_chunk(chunk);
+
+                    // IF optimizing, suppress output to client until we have full image
+                    if ctx.is_optimizing_image() {
+                        *body = None;
+                    }
                 } else {
                     // Response too large, disable buffering
                     tracing::debug!(
                         request_id = %ctx.request_id(),
                         total_size = ctx.total_response_size() + chunk.len(),
-                        "Response too large for cache, disabling buffering"
+                        "Response too large for cache/optimization, disabling buffering"
                     );
                     ctx.disable_response_buffering();
+                    // If optimizing, we stop optimizing (this may result in truncated info if we swallowed chunks)
+                    if ctx.is_optimizing_image() {
+                        ctx.set_optimizing_image(false);
+                    }
                 }
             }
 
-            // On end of stream, write buffered data to cache
-            if end_of_stream && ctx.should_cache_response() {
+            // On end of stream, write buffered data to cache and/or optimize
+            if end_of_stream {
                 if let Some(buffered_data) = ctx.take_response_buffer() {
-                    // We need to populate the cache asynchronously
-                    // Get necessary data from context before spawning task
-                    if let (Some(bucket_config), Some(cache)) = (ctx.bucket_config(), &self.cache) {
-                        use crate::cache::{CacheEntry, CacheKey};
+                    let should_cache_original = ctx.should_cache_response() && self.cache.is_some();
 
-                        let router = self.router.load_full();
-                        let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
-                        let cache_key = CacheKey {
-                            bucket: bucket_config.name.clone(),
-                            object_key: object_key.to_string(),
-                            // Use None to match lookup key - ETag is stored in CacheEntry, not key
-                            etag: None,
-                        };
+                    // 1. Populate cache with ORIGINAL data if enabled
+                    // We need to use the data, so clone if we also need it for optimization
+                    if should_cache_original {
+                        let cache_data = buffered_data.clone();
 
-                        let cache_entry = CacheEntry::new(
-                            bytes::Bytes::from(buffered_data),
-                            ctx.response_content_type()
-                                .unwrap_or("application/octet-stream")
-                                .to_string(),
-                            ctx.response_etag().unwrap_or("").to_string(),
-                            ctx.response_last_modified().map(|s| s.to_string()),
-                            Some(std::time::Duration::from_secs(3600)), // 1 hour TTL
-                        );
+                        if let (Some(bucket_config), Some(cache)) =
+                            (ctx.bucket_config(), &self.cache)
+                        {
+                            use crate::cache::{CacheEntry, CacheKey};
 
-                        // Clone cache for async task
-                        let cache_clone = Arc::clone(cache);
-                        let request_id = ctx.request_id().to_string();
+                            let router = self.router.load_full();
+                            let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
+                            let cache_key = CacheKey {
+                                bucket: bucket_config.name.clone(),
+                                object_key: object_key.to_string(),
+                                etag: None,
+                                variant: None, // Original always has None
+                            };
 
-                        // Spawn async task to populate cache (don't block response)
-                        tokio::spawn(async move {
-                            match cache_clone.set(cache_key.clone(), cache_entry).await {
-                                Ok(_) => {
-                                    tracing::info!(
-                                        request_id = %request_id,
-                                        bucket = %cache_key.bucket,
-                                        object_key = %cache_key.object_key,
-                                        "Successfully populated cache from S3 response"
-                                    );
-                                }
-                                Err(e) => {
+                            let cache_entry = CacheEntry::new(
+                                bytes::Bytes::from(cache_data),
+                                ctx.response_content_type()
+                                    .unwrap_or("application/octet-stream")
+                                    .to_string(),
+                                ctx.response_etag().unwrap_or("").to_string(),
+                                ctx.response_last_modified().map(|s| s.to_string()),
+                                Some(std::time::Duration::from_secs(3600)), // 1 hour TTL
+                            );
+
+                            let cache_clone = Arc::clone(cache);
+                            let request_id = ctx.request_id().to_string();
+
+                            tokio::spawn(async move {
+                                if let Err(e) = cache_clone.set(cache_key, cache_entry).await {
                                     tracing::warn!(
                                         request_id = %request_id,
-                                        bucket = %cache_key.bucket,
-                                        object_key = %cache_key.object_key,
                                         error = %e,
                                         "Failed to populate cache from S3 response"
                                     );
                                 }
+                            });
+                        }
+                    }
+
+                    // 2. Perform Image Optimization
+                    if ctx.is_optimizing_image() {
+                        if let Some(params) = ctx.image_params() {
+                            tracing::debug!(
+                                request_id = %ctx.request_id(),
+                                input_size = buffered_data.len(),
+                                "Starting image optimization"
+                            );
+
+                            match crate::image_optimizer::processor::process_image(
+                                &buffered_data,
+                                params.clone(),
+                            ) {
+                                Ok((optimized_data, content_type)) => {
+                                    tracing::debug!(
+                                        request_id = %ctx.request_id(),
+                                        output_size = optimized_data.len(),
+                                        content_type = %content_type,
+                                        "Image optimization successful"
+                                    );
+
+                                    // Store optimized version in cache (if cache enabled)
+                                    if self.cache.is_some() {
+                                        if let (Some(bucket_config), Some(cache)) =
+                                            (ctx.bucket_config(), &self.cache)
+                                        {
+                                            use crate::cache::{CacheEntry, CacheKey};
+                                            let router = self.router.load_full();
+                                            let object_key = router
+                                                .extract_s3_key(ctx.path())
+                                                .unwrap_or_default();
+                                            let variant = params.to_cache_key();
+
+                                            let cache_key = CacheKey {
+                                                bucket: bucket_config.name.clone(),
+                                                object_key: object_key.to_string(),
+                                                etag: None,
+                                                variant: Some(variant),
+                                            };
+
+                                            let cache_entry = CacheEntry::new(
+                                                bytes::Bytes::from(optimized_data.clone()),
+                                                content_type.clone(),
+                                                // We don't have a real ETag for optimized image, usage empty or derived?
+                                                // Using empty for now as it differs from original
+                                                "".to_string(),
+                                                ctx.response_last_modified().map(|s| s.to_string()),
+                                                Some(std::time::Duration::from_secs(3600)),
+                                            );
+
+                                            let cache_clone = Arc::clone(cache);
+                                            tokio::spawn(async move {
+                                                cache_clone.set(cache_key, cache_entry).await.ok();
+                                            });
+                                        }
+                                    }
+
+                                    // Replace body with optimized data
+                                    *body = Some(bytes::Bytes::from(optimized_data));
+
+                                    // Can't easily update headers (Content-Length) here as they are already sent
+                                    // Relying on chunked transfer encoding (which removal of CL header should trigger)
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        request_id = %ctx.request_id(),
+                                        error = %e,
+                                        "Image optimization failed, falling back to original"
+                                    );
+                                    // Fallback: send original data
+                                    *body = Some(bytes::Bytes::from(buffered_data));
+                                }
                             }
-                        });
+                        } else {
+                            // Should not happen as is_optimizing_image implies params exist
+                            *body = Some(bytes::Bytes::from(buffered_data));
+                        }
                     }
                 }
             }
         }
 
-        // Don't modify the body - let it pass through to client unchanged
+        // Don't modify the body - let it pass through to client unchanged (unless optimizing)
         Ok(None)
     }
 

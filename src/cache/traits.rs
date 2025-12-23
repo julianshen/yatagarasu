@@ -149,6 +149,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let get_result = cache.get(&key).await;

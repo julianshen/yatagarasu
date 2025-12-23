@@ -19,6 +19,7 @@ Complete HTTP API documentation.
 Retrieve an object from S3.
 
 **Request:**
+
 ```http
 GET /assets/images/logo.png HTTP/1.1
 Host: proxy.example.com
@@ -26,6 +27,7 @@ Authorization: Bearer <jwt>  (if auth enabled)
 ```
 
 **Response:**
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: image/png
@@ -40,6 +42,7 @@ X-Request-Id: req-abc123
 ```
 
 **Example:**
+
 ```bash
 curl http://proxy:8080/assets/images/logo.png -o logo.png
 ```
@@ -51,12 +54,14 @@ curl http://proxy:8080/assets/images/logo.png -o logo.png
 Get object metadata without body.
 
 **Request:**
+
 ```http
 HEAD /assets/images/logo.png HTTP/1.1
 Host: proxy.example.com
 ```
 
 **Response:**
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: image/png
@@ -66,6 +71,7 @@ Last-Modified: Mon, 15 Jan 2024 10:30:00 GMT
 ```
 
 **Example:**
+
 ```bash
 curl -I http://proxy:8080/assets/images/logo.png
 ```
@@ -77,6 +83,7 @@ curl -I http://proxy:8080/assets/images/logo.png
 CORS preflight request.
 
 **Request:**
+
 ```http
 OPTIONS /assets/images/logo.png HTTP/1.1
 Host: proxy.example.com
@@ -85,6 +92,7 @@ Access-Control-Request-Method: GET
 ```
 
 **Response:**
+
 ```http
 HTTP/1.1 200 OK
 Access-Control-Allow-Origin: *
@@ -95,6 +103,67 @@ Access-Control-Max-Age: 86400
 
 ---
 
+## Image Optimization
+
+### GET /{path_prefix}/{image}?{params}
+
+Process and optimize images on-the-fly.
+
+**Request:**
+
+```http
+GET /img/photo.jpg?w=800&h=600&fmt=webp HTTP/1.1
+Host: proxy.example.com
+Accept: image/webp
+```
+
+**Response:**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/webp
+Content-Length: 45678
+X-Cache: MISS
+X-Image-Original-Size: 125000
+X-Image-Format: webp
+
+<binary data>
+```
+
+**Parameters:**
+
+| Parameter | Description           | Example     |
+| :-------- | :-------------------- | :---------- |
+| `w`       | Width in pixels       | `w=800`     |
+| `h`       | Height in pixels      | `h=600`     |
+| `q`       | Quality (1-100)       | `q=80`      |
+| `fmt`     | Output format         | `fmt=webp`  |
+| `fit`     | Fit mode              | `fit=cover` |
+| `g`       | Gravity/crop position | `g=center`  |
+| `rot`     | Rotation (90,180,270) | `rot=90`    |
+| `flip`    | Flip (h,v,hv)         | `flip=h`    |
+| `dpr`     | Device pixel ratio    | `dpr=2`     |
+
+**Examples:**
+
+```bash
+# Resize to 800px width
+curl "http://proxy:8080/img/photo.jpg?w=800" -o resized.jpg
+
+# Convert to WebP at 80% quality
+curl "http://proxy:8080/img/photo.jpg?w=800&fmt=webp&q=80" -o photo.webp
+
+# Square thumbnail with cover crop
+curl "http://proxy:8080/img/photo.jpg?w=200&h=200&fit=cover" -o thumb.jpg
+
+# Auto-format based on Accept header
+curl -H "Accept: image/avif" "http://proxy:8080/img/photo.jpg?w=800&fmt=auto"
+```
+
+See [Image Parameters Reference](/yatagarasu/reference/image-parameters/) for all options.
+
+---
+
 ## Range Requests
 
 ### Partial Content
@@ -102,6 +171,7 @@ Access-Control-Max-Age: 86400
 Request a byte range:
 
 **Request:**
+
 ```http
 GET /assets/video.mp4 HTTP/1.1
 Host: proxy.example.com
@@ -109,6 +179,7 @@ Range: bytes=0-1023
 ```
 
 **Response:**
+
 ```http
 HTTP/1.1 206 Partial Content
 Content-Type: video/mp4
@@ -120,6 +191,7 @@ Accept-Ranges: bytes
 ```
 
 **Examples:**
+
 ```bash
 # First 1KB
 curl -H "Range: bytes=0-1023" http://proxy:8080/assets/video.mp4
@@ -138,6 +210,7 @@ curl -H "Range: bytes=1000-" http://proxy:8080/assets/video.mp4
 ### If-None-Match (ETag)
 
 **Request:**
+
 ```http
 GET /assets/data.json HTTP/1.1
 Host: proxy.example.com
@@ -145,12 +218,14 @@ If-None-Match: "abc123def456"
 ```
 
 **Response (Not Modified):**
+
 ```http
 HTTP/1.1 304 Not Modified
 ETag: "abc123def456"
 ```
 
 **Response (Modified):**
+
 ```http
 HTTP/1.1 200 OK
 ETag: "xyz789new123"
@@ -162,6 +237,7 @@ Content-Type: application/json
 ### If-Modified-Since
 
 **Request:**
+
 ```http
 GET /assets/data.json HTTP/1.1
 Host: proxy.example.com
@@ -177,6 +253,7 @@ If-Modified-Since: Mon, 15 Jan 2024 10:30:00 GMT
 Liveness check - is the process running?
 
 **Response:**
+
 ```json
 {
   "status": "ok"
@@ -184,6 +261,7 @@ Liveness check - is the process running?
 ```
 
 **Usage:**
+
 ```bash
 curl http://proxy:8080/health
 ```
@@ -193,6 +271,7 @@ curl http://proxy:8080/health
 Readiness check - is the proxy ready to serve traffic?
 
 **Response:**
+
 ```json
 {
   "status": "ok",
@@ -212,6 +291,7 @@ Readiness check - is the proxy ready to serve traffic?
 ```
 
 **Usage:**
+
 ```bash
 curl http://proxy:8080/ready
 ```
@@ -225,6 +305,7 @@ curl http://proxy:8080/ready
 Prometheus metrics.
 
 **Response:**
+
 ```prometheus
 # HELP yatagarasu_requests_total Total requests
 # TYPE yatagarasu_requests_total counter
@@ -238,6 +319,7 @@ yatagarasu_request_duration_seconds_bucket{bucket="assets",le="0.1"} 12000
 ```
 
 **Usage:**
+
 ```bash
 curl http://proxy:9090/metrics
 ```
@@ -270,31 +352,31 @@ X-Auth-Token: eyJhbGciOiJIUzI1NiIs...
 
 ## Request Headers
 
-| Header | Required | Description |
-|:-------|:---------|:------------|
-| `Host` | Yes | Target host |
-| `Authorization` | Conditional | Bearer token for auth |
-| `Range` | No | Byte range request |
-| `If-None-Match` | No | Conditional ETag |
-| `If-Modified-Since` | No | Conditional date |
-| `Accept-Encoding` | No | Accepted encodings |
+| Header              | Required    | Description           |
+| :------------------ | :---------- | :-------------------- |
+| `Host`              | Yes         | Target host           |
+| `Authorization`     | Conditional | Bearer token for auth |
+| `Range`             | No          | Byte range request    |
+| `If-None-Match`     | No          | Conditional ETag      |
+| `If-Modified-Since` | No          | Conditional date      |
+| `Accept-Encoding`   | No          | Accepted encodings    |
 
 ---
 
 ## Response Headers
 
-| Header | Always | Description |
-|:-------|:-------|:------------|
-| `Content-Type` | Yes | MIME type |
-| `Content-Length` | Yes | Body size |
-| `Date` | Yes | Response timestamp |
-| `X-Request-Id` | Yes | Unique request ID |
-| `ETag` | If available | Object version |
-| `Last-Modified` | If available | Modification date |
-| `Cache-Control` | If configured | Caching directive |
-| `X-Cache` | If cached | HIT or MISS |
-| `Content-Range` | If partial | Range info |
-| `Accept-Ranges` | If supported | bytes |
+| Header           | Always        | Description        |
+| :--------------- | :------------ | :----------------- |
+| `Content-Type`   | Yes           | MIME type          |
+| `Content-Length` | Yes           | Body size          |
+| `Date`           | Yes           | Response timestamp |
+| `X-Request-Id`   | Yes           | Unique request ID  |
+| `ETag`           | If available  | Object version     |
+| `Last-Modified`  | If available  | Modification date  |
+| `Cache-Control`  | If configured | Caching directive  |
+| `X-Cache`        | If cached     | HIT or MISS        |
+| `Content-Range`  | If partial    | Range info         |
+| `Accept-Ranges`  | If supported  | bytes              |
 
 ---
 
@@ -302,13 +384,13 @@ X-Auth-Token: eyJhbGciOiJIUzI1NiIs...
 
 When CORS is enabled:
 
-| Header | Value |
-|:-------|:------|
-| `Access-Control-Allow-Origin` | `*` or configured origin |
-| `Access-Control-Allow-Methods` | `GET, HEAD, OPTIONS` |
-| `Access-Control-Allow-Headers` | `Authorization, Content-Type` |
-| `Access-Control-Max-Age` | `86400` |
-| `Access-Control-Expose-Headers` | `ETag, Content-Length` |
+| Header                          | Value                         |
+| :------------------------------ | :---------------------------- |
+| `Access-Control-Allow-Origin`   | `*` or configured origin      |
+| `Access-Control-Allow-Methods`  | `GET, HEAD, OPTIONS`          |
+| `Access-Control-Allow-Headers`  | `Authorization, Content-Type` |
+| `Access-Control-Max-Age`        | `86400`                       |
+| `Access-Control-Expose-Headers` | `ETag, Content-Length`        |
 
 ---
 
@@ -316,15 +398,16 @@ When CORS is enabled:
 
 Object keys must be URL-encoded:
 
-| Character | Encoded |
-|:----------|:--------|
-| Space | `%20` or `+` |
-| `/` | `%2F` (in key name) |
-| `?` | `%3F` |
-| `#` | `%23` |
-| `&` | `%26` |
+| Character | Encoded             |
+| :-------- | :------------------ |
+| Space     | `%20` or `+`        |
+| `/`       | `%2F` (in key name) |
+| `?`       | `%3F`               |
+| `#`       | `%23`               |
+| `&`       | `%26`               |
 
 **Example:**
+
 ```bash
 # File: "reports/2024 Q1/summary.pdf"
 curl "http://proxy:8080/docs/reports%2F2024%20Q1%2Fsummary.pdf"
@@ -337,6 +420,7 @@ curl "http://proxy:8080/docs/reports%2F2024%20Q1%2Fsummary.pdf"
 When rate limited:
 
 **Response:**
+
 ```http
 HTTP/1.1 429 Too Many Requests
 Retry-After: 5

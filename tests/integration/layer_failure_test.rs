@@ -40,6 +40,7 @@ fn test_key(bucket: &str, object: &str) -> CacheKey {
         bucket: bucket.to_string(),
         object_key: object.to_string(),
         etag: None,
+        variant: None,
     }
 }
 
