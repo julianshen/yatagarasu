@@ -8,6 +8,9 @@
 *.swo
 *~
 
+# Local Claude Code agent configuration
+.agent/
+
 # OS files
 .DS_Store
 Thumbs.db
