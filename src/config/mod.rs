@@ -54,6 +54,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::cache::CacheConfig;
+use crate::image_optimizer::ImageConfig;
 use crate::observability::ObservabilityConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +65,8 @@ pub struct Config {
     pub jwt: Option<JwtConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<CacheConfig>,
+    #[serde(default)]
+    pub image_optimization: ImageConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audit_log: Option<AuditLogConfig>,
     /// Observability configuration (tracing, request logging, slow queries)

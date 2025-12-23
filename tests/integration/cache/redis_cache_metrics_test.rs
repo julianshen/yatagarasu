@@ -44,6 +44,7 @@ async fn test_metrics_track_cache_hits() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key.clone(), entry).await.unwrap();
@@ -84,6 +85,7 @@ async fn test_metrics_track_cache_misses() {
         bucket: "bucket1".to_string(),
         object_key: "nonexistent.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.get(&key).await.unwrap();
@@ -131,6 +133,7 @@ async fn test_metrics_track_cache_sets() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key, entry).await.unwrap();
@@ -178,6 +181,7 @@ async fn test_metrics_track_evictions() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key.clone(), entry).await.unwrap();
@@ -267,6 +271,7 @@ async fn test_metrics_endpoint_format() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     cache.set(key.clone(), entry).await.unwrap();

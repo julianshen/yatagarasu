@@ -173,6 +173,7 @@ fn create_cache_key(bucket: &str, prefix: &str, index: usize) -> CacheKey {
         bucket: bucket.to_string(),
         object_key: format!("{}/file-{:06}.bin", prefix, index),
         etag: None,
+        variant: None,
     }
 }
 
@@ -649,6 +650,7 @@ fn bench_cache_key_generation(c: &mut Criterion) {
                     counter
                 ),
                 etag: None,
+                variant: None,
             };
             counter += 1;
             black_box(key);
@@ -661,6 +663,7 @@ fn bench_cache_key_generation(c: &mut Criterion) {
             bucket: "my-production-bucket".to_string(),
             object_key: "users/12345/documents/2024/01/15/reports/quarterly-report.pdf".to_string(),
             etag: None,
+            variant: None,
         };
         b.iter(|| {
             let s = black_box(key.to_string());
@@ -677,6 +680,7 @@ fn bench_cache_key_generation(c: &mut Criterion) {
             bucket: "my-production-bucket".to_string(),
             object_key: "users/12345/documents/2024/01/15/reports/quarterly-report.pdf".to_string(),
             etag: None,
+            variant: None,
         };
         b.iter(|| {
             let mut hasher = DefaultHasher::new();

@@ -79,16 +79,17 @@ observability:
 
 ## Quick Reference
 
-| Section | Purpose |
-|:--------|:--------|
-| [Server](/yatagarasu/configuration/server/) | Listen address, threads |
-| [Buckets](/yatagarasu/configuration/buckets/) | S3 bucket mappings |
-| [Authentication](/yatagarasu/configuration/authentication/) | JWT configuration |
-| [Authorization](/yatagarasu/configuration/authorization/) | OPA/OpenFGA |
-| [Cache](/yatagarasu/configuration/cache/) | Memory, disk, Redis cache |
-| [Metrics](/yatagarasu/configuration/metrics/) | Prometheus metrics |
-| [Logging](/yatagarasu/configuration/logging/) | Log level and format |
-| [Rate Limiting](/yatagarasu/configuration/rate-limiting/) | Request throttling |
+| Section                                                             | Purpose                     |
+| :------------------------------------------------------------------ | :-------------------------- |
+| [Server](/yatagarasu/configuration/server/)                         | Listen address, threads     |
+| [Buckets](/yatagarasu/configuration/buckets/)                       | S3 bucket mappings          |
+| [Authentication](/yatagarasu/configuration/authentication/)         | JWT configuration           |
+| [Authorization](/yatagarasu/configuration/authorization/)           | OPA/OpenFGA                 |
+| [Cache](/yatagarasu/configuration/cache/)                           | Memory, disk, Redis cache   |
+| [Image Optimization](/yatagarasu/configuration/image-optimization/) | On-the-fly image processing |
+| [Metrics](/yatagarasu/configuration/metrics/)                       | Prometheus metrics          |
+| [Logging](/yatagarasu/configuration/logging/)                       | Log level and format        |
+| [Rate Limiting](/yatagarasu/configuration/rate-limiting/)           | Request throttling          |
 
 ---
 
@@ -158,20 +159,20 @@ buckets:
 
 cache:
   memory:
-    max_capacity: 536870912      # 512MB
-    max_file_size: 10485760      # 10MB
+    max_capacity: 536870912 # 512MB
+    max_file_size: 10485760 # 10MB
     ttl_seconds: 3600
 
   disk:
     enabled: true
     path: "/var/cache/yatagarasu"
-    max_capacity: 10737418240    # 10GB
+    max_capacity: 10737418240 # 10GB
     ttl_seconds: 86400
 
   redis:
     enabled: true
     url: "redis://redis:6379"
-    max_capacity: 1073741824     # 1GB
+    max_capacity: 1073741824 # 1GB
     ttl_seconds: 7200
 
 metrics:
@@ -226,12 +227,14 @@ docker kill --signal=HUP yatagarasu
 ```
 
 Reloadable settings:
+
 - Bucket configurations
 - Cache settings
 - Rate limiting
 - Logging level
 
 Non-reloadable settings (require restart):
+
 - Server address/port
 - Number of threads
 
@@ -239,13 +242,13 @@ Non-reloadable settings (require restart):
 
 ## Default Values
 
-| Setting | Default |
-|:--------|:--------|
-| `server.address` | `0.0.0.0:8080` |
-| `server.threads` | Number of CPU cores |
+| Setting                     | Default             |
+| :-------------------------- | :------------------ |
+| `server.address`            | `0.0.0.0:8080`      |
+| `server.threads`            | Number of CPU cores |
 | `cache.memory.max_capacity` | `536870912` (512MB) |
-| `cache.memory.ttl_seconds` | `3600` (1 hour) |
-| `metrics.enabled` | `false` |
-| `metrics.port` | `9090` |
-| `logging.level` | `info` |
-| `logging.format` | `json` |
+| `cache.memory.ttl_seconds`  | `3600` (1 hour)     |
+| `metrics.enabled`           | `false`             |
+| `metrics.port`              | `9090`              |
+| `logging.level`             | `info`              |
+| `logging.format`            | `json`              |

@@ -3,15 +3,17 @@
 
 # Stage 1: Build stage
 # Use Rust with Debian 12 (bookworm) to match distroless runtime glibc version
-FROM rust:1-slim-bookworm as builder
+FROM rust:1-slim-bookworm AS builder
 
 # Install build dependencies
 # cmake and g++ needed for libz-ng-sys compilation
+# nasm needed for rav1e (AVIF encoder) x86_64 assembly optimizations
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     cmake \
     g++ \
+    nasm \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory

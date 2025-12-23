@@ -47,6 +47,7 @@ async fn test_retries_failed_operations_configurable_default_3() {
         bucket: "bucket1".to_string(),
         object_key: "file.txt".to_string(),
         etag: None,
+        variant: None,
     };
 
     // This should work with the working Redis connection

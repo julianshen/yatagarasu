@@ -792,6 +792,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -833,6 +834,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "test.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -877,6 +879,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "nonexistent.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let result = tiered.get(&key).await.unwrap();
@@ -902,6 +905,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "promote.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -968,6 +972,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "write-through.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -1035,6 +1040,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "to-delete.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -1106,6 +1112,7 @@ mod tests {
                 bucket: "test-bucket".to_string(),
                 object_key: format!("file{}.txt", i),
                 etag: None,
+                variant: None,
             };
 
             let entry = CacheEntry::new(
@@ -1297,6 +1304,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "fallback.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(
@@ -1341,6 +1349,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "nonexistent.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         // Get from tiered cache - redis fails, disk misses
@@ -1370,6 +1379,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "multi-fallback.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let entry = CacheEntry::new(

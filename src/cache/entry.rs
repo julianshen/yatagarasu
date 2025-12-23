@@ -18,14 +18,25 @@ pub struct CacheKey {
     pub object_key: String,
     /// Optional ETag for validation
     pub etag: Option<String>,
+    /// Optional Variant (e.g. query parameters for image processing)
+    pub variant: Option<String>,
 }
 
 impl std::fmt::Display for CacheKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Format: "bucket:encoded_object_key"
+        // Format: "bucket:encoded_object_key[:variant]"
         // URL-encode special characters in object_key, but preserve slashes (valid S3 path separators)
         let encoded_object_key = url_encode_cache_key(&self.object_key);
-        write!(f, "{}:{}", self.bucket, encoded_object_key)
+        if let Some(variant) = &self.variant {
+            let encoded_variant = url_encode_cache_key(variant);
+            write!(
+                f,
+                "{}:{}:{}",
+                self.bucket, encoded_object_key, encoded_variant
+            )
+        } else {
+            write!(f, "{}:{}", self.bucket, encoded_object_key)
+        }
     }
 }
 
@@ -77,15 +88,21 @@ impl std::str::FromStr for CacheKey {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Expected format: "bucket:encoded_object_key"
-        let parts: Vec<&str> = s.splitn(2, ':').collect();
+        // Expected format: "bucket:encoded_object_key[:encoded_variant]"
+        let parts: Vec<&str> = s.split(':').collect();
 
-        if parts.len() != 2 {
-            return Err("Invalid cache key format: missing ':' separator".to_string());
+        if parts.len() < 2 || parts.len() > 3 {
+            return Err("Invalid cache key format: incorrect number of parts".to_string());
         }
 
         let bucket = parts[0];
         let encoded_object_key = parts[1];
+
+        let variant = if parts.len() == 3 {
+            Some(url_decode_cache_key(parts[2])?)
+        } else {
+            None
+        };
 
         if bucket.is_empty() {
             return Err("Invalid cache key format: bucket cannot be empty".to_string());
@@ -102,6 +119,7 @@ impl std::str::FromStr for CacheKey {
             bucket: bucket.to_string(),
             object_key,
             etag: None,
+            variant,
         })
     }
 }
@@ -227,10 +245,12 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "path/to/object.jpg".to_string(),
             etag: None,
+            variant: None,
         };
         assert_eq!(key.bucket, "test-bucket");
         assert_eq!(key.object_key, "path/to/object.jpg");
         assert_eq!(key.etag, None);
+        assert_eq!(key.variant, None);
     }
 
     #[test]
@@ -239,6 +259,7 @@ mod tests {
             bucket: "my-bucket".to_string(),
             object_key: "file.txt".to_string(),
             etag: None,
+            variant: None,
         };
         assert_eq!(key.bucket, "my-bucket");
     }
@@ -249,6 +270,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "path/to/my/object.pdf".to_string(),
             etag: None,
+            variant: None,
         };
         assert_eq!(key.object_key, "path/to/my/object.pdf");
     }
@@ -259,6 +281,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "file.txt".to_string(),
             etag: None,
+            variant: None,
         };
         assert_eq!(key_without_etag.etag, None);
 
@@ -266,6 +289,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "file.txt".to_string(),
             etag: Some("abc123".to_string()),
+            variant: None,
         };
         assert_eq!(key_with_etag.etag, Some("abc123".to_string()));
     }
@@ -278,6 +302,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let mut map: HashMap<CacheKey, String> = HashMap::new();
@@ -292,18 +317,21 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let key2 = CacheKey {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let key3 = CacheKey {
             bucket: "different".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         assert_eq!(key1, key2);
@@ -316,6 +344,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: Some("etag123".to_string()),
+            variant: None,
         };
 
         let key2 = key1.clone();
@@ -331,6 +360,7 @@ mod tests {
             bucket: "test".to_string(),
             object_key: "file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let debug_str = format!("{:?}", key);
@@ -344,6 +374,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "path/to/file.jpg".to_string(),
             etag: None,
+            variant: None,
         };
 
         let string_repr = key.to_string();
@@ -356,6 +387,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "file:with:colons.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let string_repr = key.to_string();
@@ -369,6 +401,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "path/to/nested/file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let string_repr = key.to_string();
@@ -382,6 +415,7 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "file with spaces.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let string_repr = key.to_string();
@@ -398,6 +432,7 @@ mod tests {
         assert_eq!(key.bucket, "my-bucket");
         assert_eq!(key.object_key, "path/to/file.txt");
         assert_eq!(key.etag, None);
+        assert_eq!(key.variant, None);
     }
 
     #[test]
@@ -425,6 +460,7 @@ mod tests {
             bucket: "test-bucket".to_string(),
             object_key: "path/to/file.txt".to_string(),
             etag: None,
+            variant: None,
         };
 
         let string_repr = original.to_string();
@@ -433,6 +469,7 @@ mod tests {
         assert_eq!(parsed.bucket, original.bucket);
         assert_eq!(parsed.object_key, original.object_key);
         assert_eq!(parsed.etag, original.etag);
+        assert_eq!(parsed.variant, original.variant);
     }
 
     #[test]
@@ -444,12 +481,14 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let key2 = CacheKey {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let mut hasher1 = DefaultHasher::new();
@@ -472,12 +511,14 @@ mod tests {
             bucket: "bucket1".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let key2 = CacheKey {
             bucket: "bucket2".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         let mut hasher1 = DefaultHasher::new();
@@ -497,18 +538,21 @@ mod tests {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: Some("etag1".to_string()),
+            variant: None,
         };
 
         let key2 = CacheKey {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: Some("etag2".to_string()),
+            variant: None,
         };
 
         let key3 = CacheKey {
             bucket: "bucket".to_string(),
             object_key: "key".to_string(),
             etag: None,
+            variant: None,
         };
 
         assert_ne!(key1, key2);
