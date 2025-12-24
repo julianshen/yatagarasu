@@ -1,0 +1,134 @@
+# Yatagarasu Watermarking Example
+# Demonstrates text and image watermarks with template variables
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+jwt:
+  enabled: true
+  algorithm: HS256
+  secret: "${JWT_SECRET}"
+  token_sources:
+    - source_type: bearer
+
+buckets:
+  # Public images - no watermark
+  - name: "public"
+    path_prefix: "/public"
+    s3:
+      bucket: "public-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+
+  # Premium images - requires auth, no watermark
+  - name: "premium"
+    path_prefix: "/premium"
+    s3:
+      bucket: "premium-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+
+  # Preview images - watermarked for non-subscribers
+  - name: "previews"
+    path_prefix: "/preview"
+    s3:
+      bucket: "premium-assets"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: false
+    watermark:
+      enabled: true
+      cache_ttl_seconds: 3600
+      rules:
+        # Text watermark with user info
+        - pattern: "*.jpg"
+          watermarks:
+            - type: text
+              text: "PREVIEW - {{date}}"
+              font_size: 32
+              color: "#FF0000"
+              opacity: 0.4
+              position: bottom-right
+              margin: 20
+            - type: text
+              text: "yatagarasu.example.com"
+              font_size: 18
+              color: "#FFFFFF"
+              opacity: 0.3
+              position: bottom-left
+              margin: 15
+
+        # Tiled watermark for PNG files
+        - pattern: "*.png"
+          watermarks:
+            - type: text
+              text: "SAMPLE"
+              font_size: 36
+              color: "#888888"
+              opacity: 0.15
+              position: tiled
+              tile_spacing: 150
+              rotation: -30
+
+        # Diagonal band for all other images
+        - pattern: "*"
+          watermarks:
+            - type: text
+              text: "PREVIEW ONLY"
+              font_size: 24
+              color: "#FF6600"
+              opacity: 0.25
+              position: diagonal-band
+
+  # Protected documents - watermark with user identity
+  - name: "documents"
+    path_prefix: "/docs"
+    s3:
+      bucket: "documents"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY}"
+      secret_key: "${AWS_SECRET_KEY}"
+    auth:
+      enabled: true
+    watermark:
+      enabled: true
+      rules:
+        - pattern: "*"
+          watermarks:
+            # User identification watermark
+            - type: text
+              text: "Licensed to: {{jwt.sub}}"
+              font_size: 14
+              color: "#333333"
+              opacity: 0.5
+              position: bottom-center
+              margin: 10
+            # IP tracking watermark
+            - type: text
+              text: "Downloaded: {{datetime}} from {{ip}}"
+              font_size: 10
+              color: "#666666"
+              opacity: 0.3
+              position: top-right
+              margin: 5
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
