@@ -42,11 +42,10 @@ const EMBEDDED_FONT_DATA: &[u8] = include_bytes!("fonts/DejaVuSansMono.ttf");
 
 /// Get the default font, initializing it lazily.
 fn get_default_font() -> Result<&'static FontRef<'static>, WatermarkError> {
-    DEFAULT_FONT
-        .get_or_init(|| {
-            FontRef::try_from_slice(EMBEDDED_FONT_DATA)
-                .expect("Failed to load embedded font - this is a bug")
-        });
+    DEFAULT_FONT.get_or_init(|| {
+        FontRef::try_from_slice(EMBEDDED_FONT_DATA)
+            .expect("Failed to load embedded font - this is a bug")
+    });
 
     DEFAULT_FONT
         .get()
@@ -186,7 +185,10 @@ pub fn measure_text(text: &str, font_size: f32) -> Result<(u32, u32), WatermarkE
 
     // Add small padding
     let padding = 2;
-    Ok((width.ceil() as u32 + padding, height.ceil() as u32 + padding))
+    Ok((
+        width.ceil() as u32 + padding,
+        height.ceil() as u32 + padding,
+    ))
 }
 
 /// Render text to an RGBA image.
@@ -215,23 +217,24 @@ pub fn render_text(options: &TextRenderOptions) -> Result<RgbaImage, WatermarkEr
     let (width, height) = measure_text(&options.text, options.font_size)?;
 
     // Handle rotation - need larger canvas
-    let (canvas_width, canvas_height, offset_x, offset_y) = if let Some(degrees) = options.rotation_degrees {
-        let radians = degrees.to_radians();
-        let cos = radians.cos().abs();
-        let sin = radians.sin().abs();
+    let (canvas_width, canvas_height, offset_x, offset_y) =
+        if let Some(degrees) = options.rotation_degrees {
+            let radians = degrees.to_radians();
+            let cos = radians.cos().abs();
+            let sin = radians.sin().abs();
 
-        // Rotated bounding box
-        let rotated_width = (width as f32 * cos + height as f32 * sin).ceil() as u32;
-        let rotated_height = (width as f32 * sin + height as f32 * cos).ceil() as u32;
+            // Rotated bounding box
+            let rotated_width = (width as f32 * cos + height as f32 * sin).ceil() as u32;
+            let rotated_height = (width as f32 * sin + height as f32 * cos).ceil() as u32;
 
-        // Offset to center the text in the rotated canvas
-        let ox = (rotated_width.saturating_sub(width)) / 2;
-        let oy = (rotated_height.saturating_sub(height)) / 2;
+            // Offset to center the text in the rotated canvas
+            let ox = (rotated_width.saturating_sub(width)) / 2;
+            let oy = (rotated_height.saturating_sub(height)) / 2;
 
-        (rotated_width.max(1), rotated_height.max(1), ox, oy)
-    } else {
-        (width.max(1), height.max(1), 0, 0)
-    };
+            (rotated_width.max(1), rotated_height.max(1), ox, oy)
+        } else {
+            (width.max(1), height.max(1), 0, 0)
+        };
 
     // Create transparent image
     let mut image = RgbaImage::new(canvas_width, canvas_height);
@@ -345,10 +348,22 @@ fn rotate_image(image: &RgbaImage, degrees: f32) -> RgbaImage {
         .map(|(x, y)| (x * cos - y * sin, x * sin + y * cos))
         .collect();
 
-    let min_x = rotated_corners.iter().map(|(x, _)| *x).fold(f32::INFINITY, f32::min);
-    let max_x = rotated_corners.iter().map(|(x, _)| *x).fold(f32::NEG_INFINITY, f32::max);
-    let min_y = rotated_corners.iter().map(|(_, y)| *y).fold(f32::INFINITY, f32::min);
-    let max_y = rotated_corners.iter().map(|(_, y)| *y).fold(f32::NEG_INFINITY, f32::max);
+    let min_x = rotated_corners
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f32::INFINITY, f32::min);
+    let max_x = rotated_corners
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let min_y = rotated_corners
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f32::INFINITY, f32::min);
+    let max_y = rotated_corners
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f32::NEG_INFINITY, f32::max);
 
     let dst_w = (max_x - min_x).ceil() as u32;
     let dst_h = (max_y - min_y).ceil() as u32;
@@ -403,7 +418,12 @@ fn rotate_image(image: &RgbaImage, degrees: f32) -> RgbaImage {
                 rotated.put_pixel(
                     dx,
                     dy,
-                    Rgba([interpolate(0), interpolate(1), interpolate(2), interpolate(3)]),
+                    Rgba([
+                        interpolate(0),
+                        interpolate(1),
+                        interpolate(2),
+                        interpolate(3),
+                    ]),
                 );
             }
         }

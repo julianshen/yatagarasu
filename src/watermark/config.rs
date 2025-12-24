@@ -255,7 +255,8 @@ impl ImageWatermarkConfig {
         {
             return Err(format!(
                 "Image watermark source must start with one of {:?}, got '{}'",
-                Self::ALLOWED_PREFIXES, self.source
+                Self::ALLOWED_PREFIXES,
+                self.source
             ));
         }
 

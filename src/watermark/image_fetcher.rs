@@ -182,9 +182,7 @@ impl ImageFetcher {
         let image = match &parsed {
             ImageSource::S3 { bucket, key } => {
                 let client = s3_client.ok_or_else(|| {
-                    WatermarkError::FetchError(
-                        "S3 client required for s3:// sources".to_string(),
-                    )
+                    WatermarkError::FetchError("S3 client required for s3:// sources".to_string())
                 })?;
                 self.fetch_from_s3(client, bucket, key).await?
             }
@@ -212,22 +210,21 @@ impl ImageFetcher {
             .key(key)
             .send()
             .await
-            .map_err(|e| {
-                WatermarkError::FetchError(format!("S3 fetch failed: {e}"))
-            })?;
+            .map_err(|e| WatermarkError::FetchError(format!("S3 fetch failed: {e}")))?;
 
-        let bytes = response.body.collect().await.map_err(|e| {
-            WatermarkError::FetchError(format!("Failed to read S3 body: {e}"))
-        })?;
+        let bytes = response
+            .body
+            .collect()
+            .await
+            .map_err(|e| WatermarkError::FetchError(format!("Failed to read S3 body: {e}")))?;
 
         let data = bytes.into_bytes();
 
         // Detect format from bytes or key extension
         let format = detect_image_format(&data, key)?;
 
-        image::load(Cursor::new(data), format).map_err(|e| {
-            WatermarkError::FetchError(format!("Failed to decode image: {e}"))
-        })
+        image::load(Cursor::new(data), format)
+            .map_err(|e| WatermarkError::FetchError(format!("Failed to decode image: {e}")))
     }
 
     /// Fetch image from HTTPS URL.
@@ -246,16 +243,16 @@ impl ImageFetcher {
             )));
         }
 
-        let bytes = response.bytes().await.map_err(|e| {
-            WatermarkError::FetchError(format!("Failed to read HTTP body: {e}"))
-        })?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| WatermarkError::FetchError(format!("Failed to read HTTP body: {e}")))?;
 
         // Detect format from bytes or URL extension
         let format = detect_image_format(&bytes, url)?;
 
-        image::load(Cursor::new(bytes), format).map_err(|e| {
-            WatermarkError::FetchError(format!("Failed to decode image: {e}"))
-        })
+        image::load(Cursor::new(bytes), format)
+            .map_err(|e| WatermarkError::FetchError(format!("Failed to decode image: {e}")))
     }
 
     /// Get the number of cached images.

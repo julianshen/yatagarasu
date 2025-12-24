@@ -100,7 +100,9 @@ pub fn calculate_position(
         WatermarkPosition::BottomCenter => {
             PlacementPosition::new((img_w - wm_w) / 2, img_h - wm_h - m)
         }
-        WatermarkPosition::BottomRight => PlacementPosition::new(img_w - wm_w - m, img_h - wm_h - m),
+        WatermarkPosition::BottomRight => {
+            PlacementPosition::new(img_w - wm_w - m, img_h - wm_h - m)
+        }
 
         // For tiled/diagonal, return center as default (use specific functions)
         WatermarkPosition::Tiled | WatermarkPosition::DiagonalBand => {
