@@ -40,6 +40,7 @@
 
 pub mod config;
 pub mod error;
+pub mod position;
 pub mod template;
 
 // Re-export main types for convenience
@@ -48,4 +49,8 @@ pub use config::{
     WatermarkPosition, WatermarkRule,
 };
 pub use error::WatermarkError;
+pub use position::{
+    calculate_diagonal_positions, calculate_position, calculate_tiled_positions, clamp_to_bounds,
+    is_visible, ImageDimensions, PlacementPosition, WatermarkDimensions,
+};
 pub use template::{resolve_template, template_hash, TemplateContext};
