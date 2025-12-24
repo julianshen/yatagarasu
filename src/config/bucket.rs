@@ -34,6 +34,7 @@ use super::authorization::AuthorizationConfig;
 use super::circuit_breaker::CircuitBreakerConfigYaml;
 use super::rate_limit::BucketRateLimitConfigYaml;
 use super::retry::RetryConfigYaml;
+use crate::watermark::BucketWatermarkConfig;
 
 fn default_s3_timeout() -> u64 {
     DEFAULT_S3_TIMEOUT_SECS
@@ -57,6 +58,9 @@ pub struct BucketConfig {
     /// IP filtering configuration (allowlist/blocklist with CIDR support)
     #[serde(default)]
     pub ip_filter: IpFilterConfig,
+    /// Watermark configuration for images served from this bucket
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<BucketWatermarkConfig>,
 }
 
 /// S3 Replica configuration (for HA bucket replication)
@@ -593,5 +597,68 @@ ip_filter:
         let err = result.unwrap_err();
         assert!(err.contains("S3 configuration is empty"));
         assert!(err.contains("empty-bucket"));
+    }
+
+    #[test]
+    fn test_bucket_config_with_watermark() {
+        let yaml = r##"
+name: watermarked-bucket
+path_prefix: /images
+s3:
+  bucket: my-bucket
+  region: us-east-1
+  access_key: test
+  secret_key: test
+watermark:
+  enabled: true
+  cache_ttl_seconds: 7200
+  rules:
+    - pattern: /images/previews/
+      watermarks:
+        - type: text
+          text: Copyright
+          font_size: 24
+          color: "#FFFFFF"
+          opacity: 0.5
+          position: bottom-right
+          margin: 20
+        - type: image
+          source: s3://assets/logo.png
+          width: 100
+          opacity: 0.7
+          position: top-left
+    - pattern: /default
+      watermarks:
+        - type: text
+          text: test
+          position: bottom-center
+"##;
+        let config: BucketConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.name, "watermarked-bucket");
+        let wm = config.watermark.unwrap();
+        assert!(wm.enabled);
+        assert_eq!(wm.cache_ttl_seconds, 7200);
+        assert_eq!(wm.rules.len(), 2);
+        assert_eq!(wm.rules[0].pattern, "/images/previews/");
+        assert_eq!(wm.rules[0].watermarks.len(), 2);
+        assert_eq!(wm.rules[1].pattern, "/default");
+        assert_eq!(wm.rules[1].watermarks.len(), 1);
+    }
+
+    #[test]
+    fn test_bucket_config_without_watermark() {
+        let yaml = r#"
+name: no-watermark-bucket
+path_prefix: /public
+s3:
+  bucket: my-bucket
+  region: us-east-1
+  access_key: test
+  secret_key: test
+"#;
+        let config: BucketConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert!(config.watermark.is_none());
     }
 }

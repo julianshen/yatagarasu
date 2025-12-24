@@ -243,6 +243,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
             cache: None,
             authorization: None,
             ip_filter: IpFilterConfig::default(),
+            watermark: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -264,6 +265,7 @@ fn test_router_middleware_extracts_bucket_from_request_path() {
             cache: None,
             authorization: None,
             ip_filter: IpFilterConfig::default(),
+            watermark: None,
         },
     ];
 
@@ -308,6 +310,7 @@ fn test_requests_to_products_route_to_products_bucket() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     let router = Router::new(buckets);
@@ -359,6 +362,7 @@ fn test_requests_to_private_route_to_private_bucket() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     let router = Router::new(buckets);
@@ -411,6 +415,7 @@ fn test_longest_prefix_matching_works() {
             cache: None,
             authorization: None,
             ip_filter: IpFilterConfig::default(),
+            watermark: None,
         },
         BucketConfig {
             name: "products".to_string(),
@@ -432,6 +437,7 @@ fn test_longest_prefix_matching_works() {
             cache: None,
             authorization: None,
             ip_filter: IpFilterConfig::default(),
+            watermark: None,
         },
     ];
 
@@ -488,6 +494,7 @@ fn test_unmapped_paths_return_none() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     let router = Router::new(buckets);
@@ -539,6 +546,7 @@ fn test_s3_key_is_extracted_from_path() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     let router = Router::new(buckets);
@@ -598,6 +606,7 @@ fn test_router_middleware_adds_bucket_config_to_request_context() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     };
 
     // Add the bucket config to the context
@@ -645,6 +654,7 @@ fn test_auth_middleware_skips_validation_for_public_buckets() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     };
 
     // Create a request context without any JWT token
@@ -702,6 +712,7 @@ fn test_auth_middleware_validates_jwt_for_private_buckets() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     };
 
     // Create a request context with a JWT token in Authorization header
@@ -1169,6 +1180,7 @@ fn test_missing_jwt_on_private_bucket_returns_401() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     };
 
     // Create a request context WITHOUT any JWT token
@@ -1575,6 +1587,7 @@ fn test_request_passes_through_middleware_in_correct_order() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     let secret = "test_secret_key_123";
@@ -1715,6 +1728,7 @@ fn test_middleware_can_short_circuit_request() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     // Create request WITHOUT JWT token (will fail auth)
@@ -1815,6 +1829,7 @@ fn test_short_circuit_prevents_handler_execution() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     let router = Router::new(buckets);
@@ -1888,6 +1903,7 @@ fn test_middleware_can_modify_request_context() {
         cache: None,
         authorization: None,
         ip_filter: IpFilterConfig::default(),
+        watermark: None,
     }];
 
     // Create JWT token
@@ -2052,6 +2068,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
             cache: None,
             authorization: None,
             ip_filter: IpFilterConfig::default(),
+            watermark: None,
         },
         BucketConfig {
             name: "private".to_string(),
@@ -2073,6 +2090,7 @@ fn test_errors_in_middleware_return_appropriate_http_status() {
             cache: None,
             authorization: None,
             ip_filter: IpFilterConfig::default(),
+            watermark: None,
         },
     ];
 

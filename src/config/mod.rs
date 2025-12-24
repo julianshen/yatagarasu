@@ -258,6 +258,11 @@ impl Config {
                     }
                 }
             }
+
+            // Validate watermark configuration if present
+            if let Some(watermark_config) = &bucket.watermark {
+                watermark_config.validate(&bucket.name)?;
+            }
         }
 
         // Validate JWT configuration if present

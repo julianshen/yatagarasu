@@ -50,6 +50,18 @@ impl OutputFormat {
             Self::Auto => "jpg",
         }
     }
+
+    /// Parse output format from content type string.
+    /// Returns Jpeg as default if content type is not recognized.
+    pub fn from_content_type(content_type: &str) -> Self {
+        match content_type.to_lowercase().as_str() {
+            "image/jpeg" | "image/jpg" => Self::Jpeg,
+            "image/png" => Self::Png,
+            "image/webp" => Self::WebP,
+            "image/avif" => Self::Avif,
+            _ => Self::Jpeg, // Default fallback
+        }
+    }
 }
 
 impl FromStr for OutputFormat {
