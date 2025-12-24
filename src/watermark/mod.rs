@@ -42,6 +42,7 @@ pub mod config;
 pub mod error;
 pub mod position;
 pub mod template;
+pub mod text_renderer;
 
 // Re-export main types for convenience
 pub use config::{
@@ -54,3 +55,4 @@ pub use position::{
     is_visible, ImageDimensions, PlacementPosition, WatermarkDimensions,
 };
 pub use template::{resolve_template, template_hash, TemplateContext};
+pub use text_renderer::{measure_text, parse_hex_color, render_text, Color, TextRenderOptions};
