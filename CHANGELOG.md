@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+**On-the-Fly Image Optimization**:
+- **Resize & Crop**: Width, height, with 6 fit modes (cover, contain, fill, inside, outside, pad)
+- **Format Conversion**: JPEG, PNG, WebP, AVIF with quality control (1-100)
+- **Smart Cropping**: 9 gravity positions (center, north, south, east, west, corners) + smart detection
+- **DPR Support**: Device pixel ratio for retina displays (`dpr=2`)
+- **EXIF Auto-Rotation**: Automatic orientation correction from EXIF metadata
+- **Manual Transforms**: Rotate (90°/180°/270°), flip (horizontal/vertical)
+
+**Image Effects**:
+- **Blur**: Gaussian blur with configurable sigma (0-100)
+- **Sharpen**: Unsharp mask with configurable intensity (0-10)
+- **Brightness**: Adjust brightness (-100 to 100)
+- **Contrast**: Adjust contrast (-100 to 100)
+- **Saturation**: Color saturation (-100 grayscale to 100 vivid)
+- **Grayscale**: Convert to black and white
+
+**URL Formats**:
+- Query parameters: `?w=800&h=600&q=80&fmt=webp&blur=2`
+- Path-based options: `/w:800,h:600,q:80,f:webp/image.jpg`
+- Auto-format selection based on Accept header
+
 **Server-Side Watermarking**:
 - **Text watermarks**: Configurable font size, color (hex), opacity, and rotation
 - **Image watermarks**: Support for HTTPS URLs (S3 sources with AWS SDK setup)
@@ -18,24 +39,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LRU caching**: Watermark images cached in memory for performance
 
 **New Modules**:
-- `src/watermark/config.rs`: Configuration structs and validation
-- `src/watermark/template.rs`: Variable substitution engine
-- `src/watermark/position.rs`: Position calculations for all 11 modes
-- `src/watermark/text_renderer.rs`: Text rendering with ab_glyph font rasterization
-- `src/watermark/image_fetcher.rs`: Async image fetch with moka LRU cache
-- `src/watermark/compositor.rs`: Porter-Duff "over" alpha blending
-- `src/watermark/processor.rs`: High-level watermark processor
+- `src/image_optimizer/`: Complete image processing pipeline
+  - `processor.rs`: Decode → resize → effects → encode pipeline
+  - `params.rs`: URL parameter parsing (query & path-based)
+  - `encoder.rs`: Multi-format encoding (JPEG, PNG, WebP, AVIF)
+  - `format.rs`: Auto-format selection based on Accept header
+  - `security.rs`: URL signing with HMAC-SHA256
+  - `config.rs`: Per-bucket image optimization settings
+  - `metrics.rs`: Processing time and transformation metrics
+- `src/watermark/`: Watermark processing
+  - `config.rs`: Configuration structs and validation
+  - `template.rs`: Variable substitution engine
+  - `position.rs`: Position calculations for all 11 modes
+  - `text_renderer.rs`: Text rendering with ab_glyph font rasterization
+  - `image_fetcher.rs`: Async image fetch with moka LRU cache
+  - `compositor.rs`: Porter-Duff "over" alpha blending
+  - `processor.rs`: High-level watermark processor
 
 **Examples**:
 - `examples/docker-compose/watermark/`: Complete watermarking demo with MinIO
 
 ### Changed
-- `BucketConfig`: Added optional `watermark` field for per-bucket watermark rules
+- `BucketConfig`: Added optional `watermark` and `image` fields
 - `ImageParams`: Added `OutputFormat::from_content_type()` for watermark re-encoding
-- Image processing pipeline: Watermarks applied after effects, before encoding
+- Image processing pipeline: Decode → EXIF → Crop → Resize → Rotate/Flip → Effects → Watermarks → Encode
 
-### Configuration Example
+### Usage Examples
 
+**Image Optimization**:
+```bash
+# Resize to 800px width, convert to WebP, quality 85
+curl "http://localhost:8080/photos/image.jpg?w=800&fmt=webp&q=85"
+
+# Crop to 400x300 centered, add blur effect
+curl "http://localhost:8080/photos/image.jpg?w=400&h=300&fit=cover&blur=2"
+
+# Adjust brightness and contrast
+curl "http://localhost:8080/photos/image.jpg?brightness=20&contrast=10"
+```
+
+**Watermark Configuration**:
 ```yaml
 buckets:
   - name: previews

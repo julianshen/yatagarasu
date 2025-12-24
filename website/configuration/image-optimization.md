@@ -139,9 +139,7 @@ buckets:
 
 ## URL Parameters
 
-See [Image Parameters Reference](/yatagarasu/reference/image-parameters/) for all URL parameters.
-
-Quick reference:
+### Basic Transformations
 
 ```
 /img/photo.jpg?w=800&h=600&q=80&fmt=webp
@@ -151,10 +149,46 @@ Quick reference:
 |:----------|:------------|:--------|
 | `w` | Width | `w=800` |
 | `h` | Height | `h=600` |
-| `q` | Quality | `q=80` |
-| `fmt` | Format | `fmt=webp` |
-| `fit` | Fit mode | `fit=cover` |
-| `g` | Gravity | `g=center` |
+| `q` | Quality (1-100) | `q=80` |
+| `fmt` | Format (jpeg/png/webp/avif) | `fmt=webp` |
+| `fit` | Fit mode (cover/contain/fill/inside/outside/pad) | `fit=cover` |
+| `g` | Gravity (center/n/s/e/w/ne/nw/se/sw/smart) | `g=center` |
+| `dpr` | Device pixel ratio | `dpr=2` |
+
+### Rotation & Flip
+
+| Parameter | Description | Example |
+|:----------|:------------|:--------|
+| `rotate` | Rotate (90/180/270) | `rotate=90` |
+| `flip` | Flip (h/v/hv) | `flip=h` |
+| `auto_rotate` | Auto-rotate from EXIF (default: true) | `auto_rotate=false` |
+
+### Image Effects
+
+| Parameter | Description | Range | Example |
+|:----------|:------------|:------|:--------|
+| `blur` | Gaussian blur sigma | 0-100 | `blur=5` |
+| `sharpen` | Unsharp mask intensity | 0-10 | `sharpen=1.5` |
+| `brightness` | Brightness adjustment | -100 to 100 | `brightness=20` |
+| `contrast` | Contrast adjustment | -100 to 100 | `contrast=10` |
+| `saturation` | Color saturation | -100 to 100 | `saturation=30` |
+| `grayscale` | Convert to grayscale | true/1 | `grayscale=1` |
+
+### Examples
+
+```bash
+# Resize and blur
+curl "http://localhost:8080/img/photo.jpg?w=800&blur=3"
+
+# Adjust brightness and contrast
+curl "http://localhost:8080/img/photo.jpg?brightness=20&contrast=15"
+
+# Grayscale with high contrast
+curl "http://localhost:8080/img/photo.jpg?grayscale=1&contrast=30"
+
+# Vintage look: desaturated with slight blur
+curl "http://localhost:8080/img/photo.jpg?saturation=-40&blur=0.5"
+```
 
 ---
 

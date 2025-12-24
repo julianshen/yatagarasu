@@ -18,7 +18,7 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - **Multi-Bucket Routing** - Map different S3 buckets to URL paths with isolated credentials
 - **Flexible Authentication** - JWT (HS256/RS256/ES256), JWKS endpoints, OPA/OpenFGA authorization
 - **Multi-Tier Caching** - Memory (Moka TinyLFU), Disk, and Redis/Valkey with 80%+ hit rates
-- **Image Optimization** - On-the-fly resize, crop, format conversion (WebP/AVIF), quality adjustment
+- **Image Optimization** - On-the-fly resize, crop, format conversion (WebP/AVIF), effects (blur, sharpen, brightness, contrast, saturation)
 - **Server-Side Watermarking** - Text/image watermarks with template variables and 11 positioning modes
 - **Production Ready** - Circuit breaker, graceful shutdown, hot reload, distributed tracing
 - **Observable** - Prometheus metrics, OpenTelemetry tracing, structured audit logging
@@ -126,6 +126,9 @@ curl "http://localhost:8080/private/data.json?token=<jwt>"
 
 # Image optimization (resize, format conversion)
 curl "http://localhost:8080/assets/photo.jpg?w=400&h=300&fmt=webp&q=80"
+
+# Image effects (blur, brightness, contrast)
+curl "http://localhost:8080/assets/photo.jpg?w=800&blur=3&brightness=10"
 
 # Health check
 curl http://localhost:8080/health
