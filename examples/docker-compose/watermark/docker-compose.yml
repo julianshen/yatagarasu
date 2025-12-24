@@ -1,0 +1,112 @@
+# Yatagarasu Watermark Example
+# Demonstrates text watermarking on images
+#
+# Usage:
+#   docker compose up -d
+#   # Public (no watermark):
+#   curl "http://localhost:8080/public/nature.jpg?w=800" -o public.jpg
+#   # Preview (watermarked):
+#   curl "http://localhost:8080/preview/nature.jpg?w=800" -o preview.jpg
+#
+# Cleanup:
+#   docker compose down -v
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: yatagarasu-watermark-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - yatagarasu-watermark
+
+  # MinIO setup - creates buckets and uploads sample images
+  minio-setup:
+    image: minio/mc:latest
+    container_name: yatagarasu-watermark-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting up MinIO...';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+
+      # Create buckets
+      mc mb --ignore-existing myminio/public-assets;
+      mc mb --ignore-existing myminio/premium-assets;
+      mc mb --ignore-existing myminio/documents;
+      mc anonymous set public myminio/public-assets;
+
+      # Download sample images
+      echo 'Downloading sample images...';
+      wget -q -O /tmp/nature.jpg 'https://picsum.photos/1920/1080' || echo 'Failed to download nature.jpg';
+      wget -q -O /tmp/city.jpg 'https://picsum.photos/1600/900' || echo 'Failed to download city.jpg';
+      wget -q -O /tmp/abstract.png 'https://picsum.photos/1200/800.webp' || echo 'Failed to download abstract.png';
+
+      # If downloads failed, create placeholder images with ImageMagick
+      if [ ! -s /tmp/nature.jpg ]; then
+        echo 'Creating placeholder images...';
+        # Create simple colored rectangles as placeholders
+        dd if=/dev/urandom of=/tmp/nature.jpg bs=1K count=50 2>/dev/null;
+        dd if=/dev/urandom of=/tmp/city.jpg bs=1K count=40 2>/dev/null;
+        dd if=/dev/urandom of=/tmp/abstract.png bs=1K count=30 2>/dev/null;
+      fi;
+
+      # Upload to both public and premium buckets
+      mc cp /tmp/nature.jpg myminio/public-assets/nature.jpg;
+      mc cp /tmp/city.jpg myminio/public-assets/city.jpg;
+      mc cp /tmp/nature.jpg myminio/premium-assets/nature.jpg;
+      mc cp /tmp/city.jpg myminio/premium-assets/city.jpg;
+      mc cp /tmp/abstract.png myminio/premium-assets/abstract.png;
+
+      # Create a sample document image
+      mc cp /tmp/nature.jpg myminio/documents/report-cover.jpg;
+
+      echo 'MinIO setup complete!';
+      mc ls myminio/public-assets/;
+      mc ls myminio/premium-assets/;
+      "
+    networks:
+      - yatagarasu-watermark
+
+  # Yatagarasu S3 Proxy with watermarking
+  yatagarasu:
+    image: ghcr.io/julianshen/yatagarasu:latest
+    container_name: yatagarasu-watermark-proxy
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      AWS_ACCESS_KEY: minioadmin
+      AWS_SECRET_KEY: minioadmin
+      JWT_SECRET: "super-secret-key-for-demo-only"
+      RUST_LOG: info
+    volumes:
+      - ./config.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - yatagarasu-watermark
+
+networks:
+  yatagarasu-watermark:
+    driver: bridge
