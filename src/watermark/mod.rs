@@ -40,6 +40,7 @@
 
 pub mod config;
 pub mod error;
+pub mod image_fetcher;
 pub mod position;
 pub mod template;
 pub mod text_renderer;
@@ -56,3 +57,4 @@ pub use position::{
 };
 pub use template::{resolve_template, template_hash, TemplateContext};
 pub use text_renderer::{measure_text, parse_hex_color, render_text, Color, TextRenderOptions};
+pub use image_fetcher::{CachedImage, ImageFetcher, ImageFetcherConfig, ImageSource};
