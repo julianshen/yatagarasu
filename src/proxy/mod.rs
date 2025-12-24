@@ -48,6 +48,7 @@ use crate::retry::RetryPolicy;
 use crate::router::Router;
 use crate::s3::{build_get_object_request, build_head_object_request};
 use crate::security::{self, SecurityLimits};
+use crate::watermark::{ImageFetcher, ImageFetcherConfig, WatermarkContext, WatermarkProcessor};
 use arc_swap::ArcSwap;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -94,6 +95,9 @@ pub struct YatagarasuProxy {
     audit_writer: Option<Arc<AsyncAuditFileWriter>>,
     /// Cache warming task manager (Phase 1.3)
     prewarm_manager: Arc<PrewarmManager>,
+    /// Watermark image fetcher with LRU cache (Phase 50: Watermarks)
+    /// Shared across requests to cache watermark images
+    watermark_image_fetcher: Arc<ImageFetcher>,
 }
 
 impl YatagarasuProxy {
@@ -122,6 +126,7 @@ impl YatagarasuProxy {
             openfga_clients: Arc::new(components.openfga_clients),
             audit_writer: components.audit_writer,
             prewarm_manager: components.prewarm_manager,
+            watermark_image_fetcher: Arc::new(ImageFetcher::new(ImageFetcherConfig::default())),
         }
     }
 
@@ -273,6 +278,50 @@ impl YatagarasuProxy {
     /// Export circuit breaker metrics for Prometheus.
     fn export_circuit_breaker_metrics(&self) -> String {
         helpers::export_circuit_breaker_metrics(&self.circuit_breakers)
+    }
+
+    /// Build WatermarkContext from request context for watermark template resolution.
+    /// Phase 50: Watermark integration
+    fn build_watermark_context(
+        ctx: &RequestContext,
+        bucket_name: &str,
+        client_ip: Option<&str>,
+    ) -> WatermarkContext {
+        let mut wm_ctx = WatermarkContext::default();
+
+        // Set client IP
+        if let Some(ip) = client_ip {
+            wm_ctx.client_ip = Some(ip.to_string());
+        }
+
+        // Set JWT claims if authenticated
+        if let Some(claims) = ctx.claims() {
+            // Add standard claims
+            if let Some(ref sub) = claims.sub {
+                wm_ctx.jwt_claims.insert("sub".to_string(), sub.clone());
+            }
+            if let Some(ref iss) = claims.iss {
+                wm_ctx.jwt_claims.insert("iss".to_string(), iss.clone());
+            }
+            // Add custom claims
+            for (key, value) in &claims.custom {
+                // Convert Value to String
+                if let Some(s) = value.as_str() {
+                    wm_ctx.jwt_claims.insert(key.clone(), s.to_string());
+                } else {
+                    wm_ctx.jwt_claims.insert(key.clone(), value.to_string());
+                }
+            }
+        }
+
+        // Set headers
+        wm_ctx.headers = ctx.headers().clone();
+
+        // Set path and bucket
+        wm_ctx.path = ctx.path().to_string();
+        wm_ctx.bucket = bucket_name.to_string();
+
+        wm_ctx
     }
 }
 
@@ -3412,6 +3461,118 @@ impl ProxyHttp for YatagarasuProxy {
                                         content_type = %content_type,
                                         "Image optimization successful"
                                     );
+
+                                    // 3. Apply watermarks if configured (Phase 50)
+                                    let optimized_data = if let Some(bucket_config) =
+                                        ctx.bucket_config()
+                                    {
+                                        if let Some(ref watermark_config) = bucket_config.watermark
+                                        {
+                                            if watermark_config.enabled
+                                                && !watermark_config.rules.is_empty()
+                                            {
+                                                // Extract client IP from X-Forwarded-For header
+                                                let client_ip = ctx
+                                                    .headers()
+                                                    .get("x-forwarded-for")
+                                                    .map(|s| s.as_str());
+
+                                                // Build watermark context from request
+                                                let wm_context = Self::build_watermark_context(
+                                                    ctx,
+                                                    &bucket_config.name,
+                                                    client_ip,
+                                                );
+
+                                                // Create watermark processor with cloned fetcher
+                                                let fetcher =
+                                                    (*self.watermark_image_fetcher).clone();
+                                                let processor = WatermarkProcessor::new(fetcher);
+
+                                                // Decode optimized image for watermarking
+                                                match image::load_from_memory(&optimized_data) {
+                                                    Ok(img) => {
+                                                        // Apply watermarks (run async in blocking context)
+                                                        // Note: Currently no S3 client for watermark images
+                                                        // HTTPS sources work, S3 sources require additional setup
+                                                        let watermark_result =
+                                                            tokio::task::block_in_place(|| {
+                                                                tokio::runtime::Handle::current()
+                                                                    .block_on(processor.apply(
+                                                                        &img,
+                                                                        watermark_config,
+                                                                        &wm_context,
+                                                                        None,
+                                                                    ))
+                                                            });
+
+                                                        match watermark_result {
+                                                            Ok(watermarked_img) => {
+                                                                // Re-encode to same format
+                                                                let output_format = crate::image_optimizer::params::OutputFormat::from_content_type(&content_type);
+                                                                let quality =
+                                                                    params.quality.unwrap_or(80);
+                                                                let encoder = crate::image_optimizer::encoder::EncoderFactory::create(output_format);
+                                                                let rgba_data = watermarked_img
+                                                                    .to_rgba8()
+                                                                    .into_raw();
+                                                                let (w, h) = (
+                                                                    watermarked_img.width(),
+                                                                    watermarked_img.height(),
+                                                                );
+
+                                                                match encoder.encode(
+                                                                    &rgba_data,
+                                                                    w,
+                                                                    h,
+                                                                    crate::image_optimizer::encoder::EncoderQuality::with_quality(quality),
+                                                                ) {
+                                                                    Ok(encoded) => {
+                                                                        tracing::debug!(
+                                                                            request_id = %ctx.request_id(),
+                                                                            watermark_size = encoded.data.len(),
+                                                                            "Watermarks applied successfully"
+                                                                        );
+                                                                        encoded.data
+                                                                    }
+                                                                    Err(e) => {
+                                                                        tracing::warn!(
+                                                                            request_id = %ctx.request_id(),
+                                                                            error = %e,
+                                                                            "Failed to encode watermarked image, using original"
+                                                                        );
+                                                                        optimized_data
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                tracing::warn!(
+                                                                    request_id = %ctx.request_id(),
+                                                                    error = %e,
+                                                                    "Failed to apply watermarks, using optimized image"
+                                                                );
+                                                                optimized_data
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::warn!(
+                                                            request_id = %ctx.request_id(),
+                                                            error = %e,
+                                                            "Failed to decode optimized image for watermarking"
+                                                        );
+                                                        optimized_data
+                                                    }
+                                                }
+                                            } else {
+                                                optimized_data
+                                            }
+                                        } else {
+                                            optimized_data
+                                        }
+                                    } else {
+                                        optimized_data
+                                    };
 
                                     // Store optimized version in cache (if cache enabled)
                                     if self.cache.is_some() {
