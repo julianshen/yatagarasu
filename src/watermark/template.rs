@@ -37,9 +37,7 @@ static TEMPLATE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// Gets the compiled template pattern regex.
 fn get_template_pattern() -> &'static Regex {
-    TEMPLATE_PATTERN.get_or_init(|| {
-        Regex::new(r"\{\{([^}]+)\}\}").expect("Invalid template regex")
-    })
+    TEMPLATE_PATTERN.get_or_init(|| Regex::new(r"\{\{([^}]+)\}\}").expect("Invalid template regex"))
 }
 
 /// Context containing all available values for template substitution.
@@ -281,8 +279,10 @@ mod tests {
         context.set_header("X-Request-Id", "req-abc");
         context.set_header("X-Trace-Id", "trace-xyz");
 
-        let result =
-            resolve_template("Request: {{header.X-Request-Id}}, Trace: {{header.X-Trace-Id}}", &context);
+        let result = resolve_template(
+            "Request: {{header.X-Request-Id}}, Trace: {{header.X-Trace-Id}}",
+            &context,
+        );
         assert_eq!(result, "Request: req-abc, Trace: trace-xyz");
     }
 

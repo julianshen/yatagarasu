@@ -164,7 +164,7 @@ pub struct ImageWatermarkConfig {
 ///
 /// Added to `BucketConfig` as an optional field. If absent or disabled,
 /// no watermarks are applied to images from this bucket.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BucketWatermarkConfig {
     /// Enable/disable watermarking for this bucket (default: false)
     #[serde(default)]
@@ -177,6 +177,16 @@ pub struct BucketWatermarkConfig {
     /// Path-pattern rules for applying watermarks (first match wins)
     #[serde(default)]
     pub rules: Vec<WatermarkRule>,
+}
+
+impl Default for BucketWatermarkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cache_ttl_seconds: default_cache_ttl(),
+            rules: Vec::new(),
+        }
+    }
 }
 
 /// A rule that matches paths and applies watermarks.
@@ -199,32 +209,26 @@ impl TextWatermarkConfig {
             return Err("Text watermark 'text' field cannot be empty".to_string());
         }
 
-        if self.opacity < 0.0 || self.opacity > 1.0 {
+        // Check for NaN/Infinity and valid range
+        if !self.opacity.is_finite() || !(0.0..=1.0).contains(&self.opacity) {
             return Err(format!(
-                "Text watermark opacity must be between 0.0 and 1.0, got {}",
+                "Text watermark opacity must be a finite value between 0.0 and 1.0, got {}",
                 self.opacity
             ));
         }
 
-        if !self.color.starts_with('#') {
+        // Validate hex color format (#RGB or #RRGGBB)
+        if let Some(hex_part) = self.color.strip_prefix('#') {
+            let len = hex_part.len();
+            if (len != 3 && len != 6) || !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(format!(
+                    "Text watermark color must be in #RGB or #RRGGBB format with valid hex characters, got '{}'",
+                    self.color
+                ));
+            }
+        } else {
             return Err(format!(
                 "Text watermark color must be a hex string starting with '#', got '{}'",
-                self.color
-            ));
-        }
-
-        // Validate hex color format (#RGB or #RRGGBB)
-        let hex_part = &self.color[1..];
-        if hex_part.len() != 3 && hex_part.len() != 6 {
-            return Err(format!(
-                "Text watermark color must be #RGB or #RRGGBB format, got '{}'",
-                self.color
-            ));
-        }
-
-        if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(format!(
-                "Text watermark color contains invalid hex characters: '{}'",
                 self.color
             ));
         }
@@ -234,26 +238,31 @@ impl TextWatermarkConfig {
 }
 
 impl ImageWatermarkConfig {
+    /// Allowed URL schemes for image watermark sources.
+    /// Note: http:// is intentionally excluded to prevent MITM attacks.
+    const ALLOWED_PREFIXES: &'static [&'static str] = &["s3://", "https://"];
+
     /// Validate the image watermark configuration.
     pub fn validate(&self) -> Result<(), String> {
         if self.source.is_empty() {
             return Err("Image watermark 'source' field cannot be empty".to_string());
         }
 
-        // Validate source format
-        if !self.source.starts_with("s3://")
-            && !self.source.starts_with("https://")
-            && !self.source.starts_with("http://")
+        // Validate source format (http:// excluded for security)
+        if !Self::ALLOWED_PREFIXES
+            .iter()
+            .any(|p| self.source.starts_with(p))
         {
             return Err(format!(
-                "Image watermark source must be 's3://...' or 'https://...', got '{}'",
-                self.source
+                "Image watermark source must start with one of {:?}, got '{}'",
+                Self::ALLOWED_PREFIXES, self.source
             ));
         }
 
-        if self.opacity < 0.0 || self.opacity > 1.0 {
+        // Check for NaN/Infinity and valid range
+        if !self.opacity.is_finite() || !(0.0..=1.0).contains(&self.opacity) {
             return Err(format!(
-                "Image watermark opacity must be between 0.0 and 1.0, got {}",
+                "Image watermark opacity must be a finite value between 0.0 and 1.0, got {}",
                 self.opacity
             ));
         }
@@ -729,5 +738,81 @@ rules:
         let err = result.unwrap_err();
         assert!(err.contains("test-bucket"));
         assert!(err.contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_text_watermark_validate_nan_opacity() {
+        let config = TextWatermarkConfig {
+            text: "Test".to_string(),
+            font_size: 24,
+            color: "#FFFFFF".to_string(),
+            opacity: f32::NAN,
+            position: WatermarkPosition::BottomRight,
+            margin: 10,
+            rotation: None,
+            tile_spacing: None,
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("finite value"));
+    }
+
+    #[test]
+    fn test_text_watermark_validate_infinity_opacity() {
+        let config = TextWatermarkConfig {
+            text: "Test".to_string(),
+            font_size: 24,
+            color: "#FFFFFF".to_string(),
+            opacity: f32::INFINITY,
+            position: WatermarkPosition::BottomRight,
+            margin: 10,
+            rotation: None,
+            tile_spacing: None,
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("finite value"));
+    }
+
+    #[test]
+    fn test_image_watermark_validate_nan_opacity() {
+        let config = ImageWatermarkConfig {
+            source: "s3://assets/logo.png".to_string(),
+            width: None,
+            height: None,
+            opacity: f32::NAN,
+            position: WatermarkPosition::Center,
+            margin: 10,
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("finite value"));
+    }
+
+    #[test]
+    fn test_image_watermark_validate_http_rejected() {
+        // http:// is rejected for security reasons (MITM attacks)
+        let config = ImageWatermarkConfig {
+            source: "http://example.com/logo.png".to_string(),
+            width: None,
+            height: None,
+            opacity: 0.5,
+            position: WatermarkPosition::Center,
+            margin: 10,
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        // Should suggest s3:// or https://
+        let err = result.unwrap_err();
+        assert!(err.contains("s3://") || err.contains("https://"));
+    }
+
+    #[test]
+    fn test_bucket_watermark_config_default_uses_correct_cache_ttl() {
+        // Ensure Default implementation uses 3600 (not u64 default of 0)
+        let config = BucketWatermarkConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.cache_ttl_seconds, 3600);
+        assert!(config.rules.is_empty());
     }
 }
