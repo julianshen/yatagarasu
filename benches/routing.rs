@@ -35,6 +35,7 @@ fn bench_routing_single_bucket(c: &mut Criterion) {
             cache: None,
             authorization: None,
             ip_filter: Default::default(),
+            watermark: None,
         }],
         jwt: None,
         cache: None,
@@ -75,6 +76,7 @@ fn bench_routing_multiple_buckets(c: &mut Criterion) {
             cache: None,
             authorization: None,
             ip_filter: Default::default(),
+            watermark: None,
         })
         .collect();
 
@@ -156,6 +158,7 @@ fn bench_routing_path_lengths(c: &mut Criterion) {
             cache: None,
             authorization: None,
             ip_filter: Default::default(),
+            watermark: None,
         }],
         jwt: None,
         cache: None,
@@ -223,6 +226,7 @@ fn bench_s3_key_extraction(c: &mut Criterion) {
             cache: None,
             authorization: None,
             ip_filter: Default::default(),
+            watermark: None,
         }],
         jwt: None,
         cache: None,
@@ -292,6 +296,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                 cache: None,
                 authorization: None,
                 ip_filter: Default::default(),
+                watermark: None,
             },
             BucketConfig {
                 name: "bucket-medium".to_string(),
@@ -313,6 +318,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                 cache: None,
                 authorization: None,
                 ip_filter: Default::default(),
+                watermark: None,
             },
             BucketConfig {
                 name: "bucket-long".to_string(),
@@ -334,6 +340,7 @@ fn bench_routing_longest_prefix(c: &mut Criterion) {
                 cache: None,
                 authorization: None,
                 ip_filter: Default::default(),
+                watermark: None,
             },
         ],
         jwt: None,
@@ -394,6 +401,7 @@ fn bench_routing_many_buckets(c: &mut Criterion) {
                 cache: None,
                 authorization: None,
                 ip_filter: Default::default(),
+                watermark: None,
             })
             .collect();
 
@@ -472,6 +480,7 @@ fn bench_path_normalization(c: &mut Criterion) {
             cache: None,
             authorization: None,
             ip_filter: Default::default(),
+            watermark: None,
         }],
         jwt: None,
         cache: None,
@@ -537,6 +546,7 @@ fn bench_bucket_lookup_by_name(c: &mut Criterion) {
                 cache: None,
                 authorization: None,
                 ip_filter: Default::default(),
+                watermark: None,
             })
             .collect();
 
