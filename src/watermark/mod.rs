@@ -40,6 +40,7 @@
 
 pub mod config;
 pub mod error;
+pub mod template;
 
 // Re-export main types for convenience
 pub use config::{
@@ -47,3 +48,4 @@ pub use config::{
     WatermarkPosition, WatermarkRule,
 };
 pub use error::WatermarkError;
+pub use template::{resolve_template, template_hash, TemplateContext};
