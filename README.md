@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/julianshen/yatagarasu/actions/workflows/ci.yml/badge.svg)](https://github.com/julianshen/yatagarasu/actions)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/julianshen/yatagarasu)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/julianshen/yatagarasu/releases)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/julianshen/yatagarasu/releases)
 
 [![logo](https://raw.githubusercontent.com/julianshen/yatagarasu/master/logo.png)](https://github.com/julianshen/yatagarasu)
 
@@ -18,7 +18,8 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - **Multi-Bucket Routing** - Map different S3 buckets to URL paths with isolated credentials
 - **Flexible Authentication** - JWT (HS256/RS256/ES256), JWKS endpoints, OPA/OpenFGA authorization
 - **Multi-Tier Caching** - Memory (Moka TinyLFU), Disk, and Redis/Valkey with 80%+ hit rates
-- **Image Optimization** - On-the-fly resize, crop, format conversion (WebP/AVIF), quality adjustment
+- **Image Optimization** - On-the-fly resize, crop, format conversion (WebP/AVIF), effects (blur, sharpen, brightness, contrast, saturation)
+- **Server-Side Watermarking** - Text/image watermarks with template variables and 11 positioning modes
 - **Production Ready** - Circuit breaker, graceful shutdown, hot reload, distributed tracing
 - **Observable** - Prometheus metrics, OpenTelemetry tracing, structured audit logging
 
@@ -126,6 +127,9 @@ curl "http://localhost:8080/private/data.json?token=<jwt>"
 # Image optimization (resize, format conversion)
 curl "http://localhost:8080/assets/photo.jpg?w=400&h=300&fmt=webp&q=80"
 
+# Image effects (blur, brightness, contrast)
+curl "http://localhost:8080/assets/photo.jpg?w=800&blur=3&brightness=10"
+
 # Health check
 curl http://localhost:8080/health
 
@@ -161,6 +165,7 @@ yatagarasu/
 | ------------------------------------------------- | ---------------------------------- |
 | [Getting Started](docs/GETTING_STARTED.md)        | Step-by-step setup guide           |
 | [Image Optimization](docs/IMAGE_OPTIMIZATION.md)  | Resize, crop, format conversion    |
+| [Watermarking](docs/WATERMARKING.md)              | Text/image watermarks with templates |
 | [JWT Authentication](docs/JWT_AUTHENTICATION.md)  | JWT configuration and JWKS         |
 | [OPA Policies](docs/OPA_POLICIES.md)              | Policy-based authorization         |
 | [OpenFGA](docs/OPENFGA.md)                        | Fine-grained authorization         |

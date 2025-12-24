@@ -6,7 +6,7 @@ license = "MIT"
 name = "yatagarasu"
 repository = "https://github.com/julianshen/yatagarasu"
 rust-version = "1.70"
-version = "1.4.0"
+version = "1.5.0"
 
 [features]
 default = []

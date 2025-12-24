@@ -1,6 +1,6 @@
 # Image Optimization
 
-Yatagarasu provides on-the-fly image optimization with resize, crop, format conversion, and quality adjustment. All transformations are applied at request time via URL query parameters.
+Yatagarasu provides on-the-fly image optimization with resize, crop, format conversion, quality adjustment, and image effects (blur, sharpen, brightness, contrast, saturation). All transformations are applied at request time via URL query parameters.
 
 ## Quick Start
 
@@ -117,6 +117,37 @@ curl "http://localhost:8080/images/photo.jpg?rot=90"
 curl "http://localhost:8080/images/photo.jpg?flip=h"
 ```
 
+### Image Effects
+
+| Parameter    | Range       | Description                |
+| ------------ | ----------- | -------------------------- |
+| `blur`       | 0-100       | Gaussian blur sigma        |
+| `sharpen`    | 0-10        | Unsharp mask intensity     |
+| `brightness` | -100 to 100 | Brightness adjustment      |
+| `contrast`   | -100 to 100 | Contrast adjustment        |
+| `saturation` | -100 to 100 | Color saturation           |
+| `grayscale`  | 0, 1        | Convert to black and white |
+
+```bash
+# Apply gaussian blur
+curl "http://localhost:8080/images/photo.jpg?blur=5"
+
+# Sharpen image
+curl "http://localhost:8080/images/photo.jpg?sharpen=1.5"
+
+# Adjust brightness and contrast
+curl "http://localhost:8080/images/photo.jpg?brightness=20&contrast=10"
+
+# Desaturate for vintage look
+curl "http://localhost:8080/images/photo.jpg?saturation=-50"
+
+# Convert to grayscale
+curl "http://localhost:8080/images/photo.jpg?grayscale=1"
+
+# Combine multiple effects
+curl "http://localhost:8080/images/photo.jpg?w=800&brightness=10&contrast=15&saturation=20"
+```
+
 ## Caching
 
 Optimized images are cached based on the full URL including query parameters. Each unique combination of parameters creates a separate cache entry.
@@ -163,7 +194,7 @@ Use lower quality for thumbnails and WebP/AVIF for better compression.
 
 ## Migration Guide
 
-Image optimization is a new feature in v1.4.0. There are no breaking changes to existing functionality.
+Image optimization (including effects) is a new feature in v1.5.0. There are no breaking changes to existing functionality.
 
 ### Enabling Image Optimization
 
