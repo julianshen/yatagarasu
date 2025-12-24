@@ -28,3 +28,4 @@ pub mod router;
 pub mod s3;
 pub mod security; // Phase 21: Security Validations (request size, headers, path traversal)
 pub mod server; // Phase 12: Pingora Server Setup // Phase 15: Error Handling & Logging
+pub mod watermark; // Watermarking: Text and image watermarks for images
