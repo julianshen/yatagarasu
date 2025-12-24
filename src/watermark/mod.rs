@@ -43,6 +43,7 @@ pub mod config;
 pub mod error;
 pub mod image_fetcher;
 pub mod position;
+pub mod processor;
 pub mod template;
 pub mod text_renderer;
 
@@ -61,5 +62,6 @@ pub use position::{
     calculate_diagonal_positions, calculate_position, calculate_tiled_positions, clamp_to_bounds,
     is_visible, ImageDimensions, PlacementPosition, WatermarkDimensions,
 };
+pub use processor::{WatermarkContext, WatermarkProcessor};
 pub use template::{resolve_template, template_hash, TemplateContext};
 pub use text_renderer::{measure_text, parse_hex_color, render_text, Color, TextRenderOptions};
