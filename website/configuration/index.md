@@ -87,9 +87,9 @@ observability:
 | [Authorization](/yatagarasu/configuration/authorization/)           | OPA/OpenFGA                 |
 | [Cache](/yatagarasu/configuration/cache/)                           | Memory, disk, Redis cache   |
 | [Image Optimization](/yatagarasu/configuration/image-optimization/) | On-the-fly image processing |
+| [Watermarks](/yatagarasu/configuration/watermarks/)                 | Text/image watermarking     |
 | [Metrics](/yatagarasu/configuration/metrics/)                       | Prometheus metrics          |
 | [Logging](/yatagarasu/configuration/logging/)                       | Log level and format        |
-| [Rate Limiting](/yatagarasu/configuration/rate-limiting/)           | Request throttling          |
 
 ---
 

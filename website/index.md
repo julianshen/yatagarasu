@@ -24,6 +24,7 @@ Traditional S3 access patterns expose your backend infrastructure and credential
 
 - **Credential Isolation** - S3 credentials never reach your clients
 - **Flexible Authentication** - JWT, JWKS, OPA, or OpenFGA authorization per bucket
+- **Image Processing** - On-the-fly optimization, format conversion, and server-side watermarking
 - **Performance at Scale** - Zero-copy streaming, multi-tier caching, 893+ RPS throughput
 - **Production Ready** - Circuit breakers, graceful shutdown, hot reload, observability
 
@@ -125,6 +126,41 @@ s3:
     failure_threshold: 5
     timeout_seconds: 30
 ```
+
+### Image Processing
+
+Transform and protect images on-the-fly with zero client-side processing:
+
+**Image Optimization:**
+```bash
+# Resize, convert format, adjust quality
+curl "http://localhost:8080/photos/image.jpg?w=800&h=600&fmt=webp&q=85"
+```
+
+**Server-Side Watermarking:**
+```yaml
+watermark:
+  enabled: true
+  rules:
+    - pattern: "*.jpg"
+      watermarks:
+        - type: text
+          text: "© {{jwt.org}} - {{date}}"
+          position: bottom-right
+          opacity: 0.5
+        - type: image
+          source: "https://cdn.example.com/logo.png"
+          position: top-left
+          opacity: 0.7
+```
+
+| Feature | Description |
+|:--------|:------------|
+| **Resize/Crop** | Width, height, fit modes (cover, contain, fill) |
+| **Format Conversion** | JPEG, PNG, WebP, AVIF |
+| **Watermarks** | Text and image with 11 positioning modes |
+| **Template Variables** | `{{jwt.*}}`, `{{ip}}`, `{{date}}`, `{{header.*}}` |
+| **Tiled/Diagonal** | Repeating patterns for preview protection |
 
 ## Performance
 

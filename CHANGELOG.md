@@ -5,6 +5,63 @@ All notable changes to Yatagarasu S3 Proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2025-12-25
+
+### Added
+
+**Server-Side Watermarking**:
+- **Text watermarks**: Configurable font size, color (hex), opacity, and rotation
+- **Image watermarks**: Support for HTTPS URLs (S3 sources with AWS SDK setup)
+- **Template variables**: Dynamic text with `{{jwt.*}}`, `{{ip}}`, `{{header.*}}`, `{{date}}`, `{{datetime}}`, `{{timestamp}}`, `{{path}}`, `{{bucket}}`
+- **11 positioning modes**: 9-grid (corners + centers), tiled pattern, diagonal band
+- **Per-bucket configuration**: Path pattern matching with glob syntax (`*.jpg`, `/preview/*`)
+- **LRU caching**: Watermark images cached in memory for performance
+
+**New Modules**:
+- `src/watermark/config.rs`: Configuration structs and validation
+- `src/watermark/template.rs`: Variable substitution engine
+- `src/watermark/position.rs`: Position calculations for all 11 modes
+- `src/watermark/text_renderer.rs`: Text rendering with ab_glyph font rasterization
+- `src/watermark/image_fetcher.rs`: Async image fetch with moka LRU cache
+- `src/watermark/compositor.rs`: Porter-Duff "over" alpha blending
+- `src/watermark/processor.rs`: High-level watermark processor
+
+**Examples**:
+- `examples/docker-compose/watermark/`: Complete watermarking demo with MinIO
+
+### Changed
+- `BucketConfig`: Added optional `watermark` field for per-bucket watermark rules
+- `ImageParams`: Added `OutputFormat::from_content_type()` for watermark re-encoding
+- Image processing pipeline: Watermarks applied after effects, before encoding
+
+### Configuration Example
+
+```yaml
+buckets:
+  - name: previews
+    watermark:
+      enabled: true
+      rules:
+        - pattern: "*.jpg"
+          watermarks:
+            - type: text
+              text: "Preview - {{date}}"
+              font_size: 24
+              color: "#FF0000"
+              opacity: 0.4
+              position: bottom-right
+              margin: 20
+        - pattern: "*"
+          watermarks:
+            - type: text
+              text: "SAMPLE"
+              position: tiled
+              tile_spacing: 150
+              rotation: -30
+```
+
+---
+
 ## [1.4.0] - 2025-12-16
 
 ### Added

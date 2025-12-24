@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/julianshen/yatagarasu/actions/workflows/ci.yml/badge.svg)](https://github.com/julianshen/yatagarasu/actions)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/julianshen/yatagarasu)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/julianshen/yatagarasu/releases)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/julianshen/yatagarasu/releases)
 
 [![logo](https://raw.githubusercontent.com/julianshen/yatagarasu/master/logo.png)](https://github.com/julianshen/yatagarasu)
 
@@ -19,6 +19,7 @@ A high-performance **read-only** S3 proxy built with Cloudflare's Pingora framew
 - **Flexible Authentication** - JWT (HS256/RS256/ES256), JWKS endpoints, OPA/OpenFGA authorization
 - **Multi-Tier Caching** - Memory (Moka TinyLFU), Disk, and Redis/Valkey with 80%+ hit rates
 - **Image Optimization** - On-the-fly resize, crop, format conversion (WebP/AVIF), quality adjustment
+- **Server-Side Watermarking** - Text/image watermarks with template variables and 11 positioning modes
 - **Production Ready** - Circuit breaker, graceful shutdown, hot reload, distributed tracing
 - **Observable** - Prometheus metrics, OpenTelemetry tracing, structured audit logging
 
@@ -161,6 +162,7 @@ yatagarasu/
 | ------------------------------------------------- | ---------------------------------- |
 | [Getting Started](docs/GETTING_STARTED.md)        | Step-by-step setup guide           |
 | [Image Optimization](docs/IMAGE_OPTIMIZATION.md)  | Resize, crop, format conversion    |
+| [Watermarking](docs/WATERMARKING.md)              | Text/image watermarks with templates |
 | [JWT Authentication](docs/JWT_AUTHENTICATION.md)  | JWT configuration and JWKS         |
 | [OPA Policies](docs/OPA_POLICIES.md)              | Policy-based authorization         |
 | [OpenFGA](docs/OPENFGA.md)                        | Fine-grained authorization         |
