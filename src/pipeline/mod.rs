@@ -4,13 +4,14 @@
 use crate::audit::RequestContext as AuditRequestContext;
 use crate::auth::Claims;
 use crate::config::BucketConfig;
+use crate::request_coalescing::StreamLeader;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Request context that holds all information about an HTTP request
 /// as it flows through the middleware pipeline
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RequestContext {
     request_id: String,
     method: String,
@@ -43,6 +44,9 @@ pub struct RequestContext {
     image_params: Option<crate::image_optimizer::ImageParams>,
     /// Whether the current response is being optimized (Phase: Image Optimization)
     optimizing_image: bool,
+    /// Streaming coalescer leader handle
+    /// If Some, this request is the leader and must broadcast data to followers
+    streaming_leader: Option<StreamLeader>,
 }
 
 impl RequestContext {
@@ -72,6 +76,7 @@ impl RequestContext {
             audit: AuditRequestContext::new(),
             image_params: None,
             optimizing_image: false,
+            streaming_leader: None,
         }
     }
 
@@ -101,6 +106,7 @@ impl RequestContext {
             audit: AuditRequestContext::new(),
             image_params: None,
             optimizing_image: false,
+            streaming_leader: None,
         }
     }
 
@@ -134,6 +140,7 @@ impl RequestContext {
             audit: AuditRequestContext::new(),
             image_params: None,
             optimizing_image: false,
+            streaming_leader: None,
         }
     }
 
@@ -322,6 +329,50 @@ impl RequestContext {
     /// Check if the response is being optimized
     pub fn is_optimizing_image(&self) -> bool {
         self.optimizing_image
+    }
+
+    /// Set the streaming leader handle (Streaming Coalescing)
+    pub fn set_streaming_leader(&mut self, leader: StreamLeader) {
+        self.streaming_leader = Some(leader);
+    }
+
+    /// Take the streaming leader handle, leaving None in its place
+    pub fn take_streaming_leader(&mut self) -> Option<StreamLeader> {
+        self.streaming_leader.take()
+    }
+
+    /// Get a reference to the streaming leader handle
+    pub fn streaming_leader(&self) -> Option<&StreamLeader> {
+        self.streaming_leader.as_ref()
+    }
+}
+
+// Manual Clone implementation because StreamLeader cannot implement Clone
+// (it has RAII semantics for cleanup). When cloning, streaming_leader is set to None.
+impl Clone for RequestContext {
+    fn clone(&self) -> Self {
+        Self {
+            request_id: self.request_id.clone(),
+            method: self.method.clone(),
+            path: self.path.clone(),
+            headers: self.headers.clone(),
+            query_params: self.query_params.clone(),
+            timestamp: self.timestamp,
+            bucket_config: self.bucket_config.clone(),
+            claims: self.claims.clone(),
+            replica_name: self.replica_name.clone(),
+            response_buffer: self.response_buffer.clone(),
+            response_content_type: self.response_content_type.clone(),
+            response_etag: self.response_etag.clone(),
+            response_last_modified: self.response_last_modified.clone(),
+            should_cache_response: self.should_cache_response,
+            total_response_size: self.total_response_size,
+            retry_attempt: self.retry_attempt,
+            audit: self.audit.clone(),
+            image_params: self.image_params.clone(),
+            optimizing_image: self.optimizing_image,
+            streaming_leader: None, // Cannot clone - RAII handle
+        }
     }
 }
 

@@ -19,7 +19,7 @@ use pingora_proxy::{ProxyHttp, Session};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
+use tokio::sync::{broadcast, Semaphore};
 
 use crate::audit::AsyncAuditFileWriter;
 use crate::auth::{authenticate_request, AuthError};
@@ -42,7 +42,7 @@ use crate::openfga::{
 use crate::pipeline::RequestContext;
 use crate::rate_limit::RateLimitManager;
 use crate::reload::ReloadManager;
-use crate::request_coalescing::RequestCoalescer;
+use crate::request_coalescing::{Coalescer, StreamMessage, StreamingSlot};
 use crate::resources::ResourceMonitor;
 use crate::retry::RetryPolicy;
 use crate::router::Router;
@@ -65,10 +65,10 @@ pub struct YatagarasuProxy {
     reload_manager: Option<Arc<ReloadManager>>,
     resource_monitor: Arc<ResourceMonitor>,
     request_semaphore: Arc<Semaphore>,
-    /// Request coalescer for deduplicating concurrent S3 requests (Phase 38)
-    /// Will be used in Phase 38.2 to integrate coalescing into request handling
+    /// Unified coalescer for deduplicating concurrent S3 requests (Phase 38/40)
+    /// None if coalescing is disabled in config
     #[allow(dead_code)]
-    request_coalescer: RequestCoalescer,
+    coalescer: Option<Coalescer>,
     circuit_breakers: Arc<HashMap<String, Arc<CircuitBreaker>>>,
     rate_limit_manager: Option<Arc<RateLimitManager>>,
     /// Retry policies per bucket for automatic retry on transient S3 failures
@@ -113,7 +113,7 @@ impl YatagarasuProxy {
             reload_manager,
             resource_monitor: components.resource_monitor,
             request_semaphore: components.request_semaphore,
-            request_coalescer: components.request_coalescer,
+            coalescer: components.coalescer,
             circuit_breakers: Arc::new(components.circuit_breakers),
             rate_limit_manager: components.rate_limit_manager,
             retry_policies: Arc::new(components.retry_policies),
@@ -322,6 +322,104 @@ impl YatagarasuProxy {
         wm_ctx.bucket = bucket_name.to_string();
 
         wm_ctx
+    }
+
+    /// Handle a streaming coalescer follower response.
+    /// This hijacks the response by streaming data from the leader's broadcast channel.
+    /// Streaming Coalescing
+    async fn handle_streaming_follower(
+        &self,
+        session: &mut Session,
+        receiver: &mut broadcast::Receiver<StreamMessage>,
+    ) -> Result<bool> {
+        loop {
+            match receiver.recv().await {
+                Ok(StreamMessage::Headers(h)) => {
+                    // Clone the headers and send to client
+                    session
+                        .write_response_header(Box::new((*h).clone()), false)
+                        .await?;
+                }
+                Ok(StreamMessage::Chunk(bytes)) => {
+                    // Stream chunk to client
+                    session.write_response_body(Some(bytes), false).await?;
+                }
+                Ok(StreamMessage::Done) => {
+                    // Signal end of body
+                    session.write_response_body(None, true).await?;
+                    tracing::debug!("Streaming follower: received Done, response complete");
+                    self.metrics.increment_status_count(200);
+                    return Ok(true); // Request handled
+                }
+                Ok(StreamMessage::Error(e)) => {
+                    // Leader encountered an error - return 502
+                    tracing::warn!(error = %e, "Streaming follower: leader reported error");
+                    let mut header = ResponseHeader::build(502, None)?;
+                    header.insert_header("Content-Type", "application/json")?;
+                    let error_body = serde_json::json!({
+                        "error": "Bad Gateway",
+                        "message": format!("Upstream error: {}", e),
+                        "status": 502
+                    })
+                    .to_string();
+                    header.insert_header("Content-Length", error_body.len().to_string())?;
+                    session
+                        .write_response_header(Box::new(header), false)
+                        .await?;
+                    session
+                        .write_response_body(Some(error_body.into()), true)
+                        .await?;
+                    self.metrics.increment_status_count(502);
+                    return Ok(true);
+                }
+                Err(broadcast::error::RecvError::Lagged(count)) => {
+                    // Follower is too slow - return 503 with Retry-After
+                    tracing::warn!(
+                        lagged_count = count,
+                        "Streaming follower: lagged behind, rejecting with 503"
+                    );
+                    let mut header = ResponseHeader::build(503, None)?;
+                    header.insert_header("Content-Type", "application/json")?;
+                    header.insert_header("Retry-After", "1")?;
+                    let error_body = serde_json::json!({
+                        "error": "Service Unavailable",
+                        "message": "Request processing lagged behind. Please retry.",
+                        "status": 503
+                    })
+                    .to_string();
+                    header.insert_header("Content-Length", error_body.len().to_string())?;
+                    session
+                        .write_response_header(Box::new(header), false)
+                        .await?;
+                    session
+                        .write_response_body(Some(error_body.into()), true)
+                        .await?;
+                    self.metrics.increment_status_count(503);
+                    return Ok(true);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    // Leader died unexpectedly
+                    tracing::error!("Streaming follower: leader channel closed unexpectedly");
+                    let mut header = ResponseHeader::build(502, None)?;
+                    header.insert_header("Content-Type", "application/json")?;
+                    let error_body = serde_json::json!({
+                        "error": "Bad Gateway",
+                        "message": "Stream leader closed unexpectedly",
+                        "status": 502
+                    })
+                    .to_string();
+                    header.insert_header("Content-Length", error_body.len().to_string())?;
+                    session
+                        .write_response_header(Box::new(header), false)
+                        .await?;
+                    session
+                        .write_response_body(Some(error_body.into()), true)
+                        .await?;
+                    self.metrics.increment_status_count(502);
+                    return Ok(true);
+                }
+            }
+        }
     }
 }
 
@@ -2887,6 +2985,44 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
+        // Streaming Coalescing
+        // After cache miss, check if we should deduplicate this request
+        if let Some(Coalescer::Streaming(ref coalescer)) = self.coalescer {
+            // Build cache key for coalescing
+            // Clone bucket name to avoid borrow conflict with ctx.set_streaming_leader()
+            if let Some(bucket_config) = ctx.bucket_config() {
+                let bucket_name = bucket_config.name.clone();
+                let object_key = ctx.path().trim_start_matches('/').to_string();
+                let cache_key = CacheKey {
+                    bucket: bucket_name.clone(),
+                    object_key,
+                    etag: None,
+                    variant: None,
+                };
+
+                match coalescer.acquire(&cache_key) {
+                    StreamingSlot::Leader(leader) => {
+                        // We are the leader - store the handle and proceed to upstream
+                        ctx.set_streaming_leader(leader);
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket_name,
+                            "Streaming coalescer: became leader, proceeding to S3"
+                        );
+                    }
+                    StreamingSlot::Follower(mut receiver) => {
+                        // Another request is fetching - stream from them
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            bucket = %bucket_name,
+                            "Streaming coalescer: became follower, streaming from leader"
+                        );
+                        return self.handle_streaming_follower(session, &mut receiver).await;
+                    }
+                }
+            }
+        }
+
         Ok(false) // Continue to upstream
     }
 
@@ -3349,6 +3485,22 @@ impl ProxyHttp for YatagarasuProxy {
             }
         }
 
+        // Streaming Coalescing - broadcast headers to followers
+        if let Some(leader) = ctx.streaming_leader() {
+            if let Err(e) = leader.send_headers(upstream_response.clone()) {
+                tracing::warn!(
+                    request_id = %ctx.request_id(),
+                    error = ?e,
+                    "Failed to broadcast headers to streaming followers"
+                );
+            } else {
+                tracing::debug!(
+                    request_id = %ctx.request_id(),
+                    "Streaming leader: broadcast headers to followers"
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -3630,6 +3782,34 @@ impl ProxyHttp for YatagarasuProxy {
                             // Should not happen as is_optimizing_image implies params exist
                             *body = Some(bytes::Bytes::from(buffered_data));
                         }
+                    }
+                }
+            }
+        }
+
+        // Streaming Coalescing - broadcast chunks to followers
+        if ctx.streaming_leader().is_some() {
+            // Broadcast chunk if we have body data
+            if let Some(ref chunk) = body {
+                if let Some(leader) = ctx.streaming_leader() {
+                    let _ = leader.send_chunk(chunk.clone());
+                }
+            }
+
+            // On end of stream, take ownership and call finish
+            if end_of_stream {
+                if let Some(leader) = ctx.take_streaming_leader() {
+                    if let Err(e) = leader.finish() {
+                        tracing::warn!(
+                            request_id = %ctx.request_id(),
+                            error = ?e,
+                            "Failed to broadcast finish to streaming followers"
+                        );
+                    } else {
+                        tracing::debug!(
+                            request_id = %ctx.request_id(),
+                            "Streaming leader: broadcast finish to followers"
+                        );
                     }
                 }
             }
