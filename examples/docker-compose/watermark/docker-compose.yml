@@ -33,51 +33,52 @@ services:
 
   # MinIO setup - creates buckets and uploads sample images
   minio-setup:
-    image: minio/mc:latest
+    image: curlimages/curl:latest
     container_name: yatagarasu-watermark-minio-setup
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      echo 'Setting up MinIO...';
-      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo 'Setting up MinIO...'
 
-      # Create buckets
-      mc mb --ignore-existing myminio/public-assets;
-      mc mb --ignore-existing myminio/premium-assets;
-      mc mb --ignore-existing myminio/documents;
-      mc anonymous set public myminio/public-assets;
+        # Install mc
+        wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O /tmp/mc
+        chmod +x /tmp/mc
+        /tmp/mc alias set myminio http://minio:9000 minioadmin minioadmin
 
-      # Download sample images
-      echo 'Downloading sample images...';
-      wget -q -O /tmp/nature.jpg 'https://picsum.photos/1920/1080' || echo 'Failed to download nature.jpg';
-      wget -q -O /tmp/city.jpg 'https://picsum.photos/1600/900' || echo 'Failed to download city.jpg';
-      wget -q -O /tmp/abstract.png 'https://picsum.photos/1200/800.webp' || echo 'Failed to download abstract.png';
+        # Create buckets
+        /tmp/mc mb --ignore-existing myminio/public-assets
+        /tmp/mc mb --ignore-existing myminio/premium-assets
+        /tmp/mc mb --ignore-existing myminio/documents
+        /tmp/mc anonymous set public myminio/public-assets
 
-      # If downloads failed, create placeholder images with ImageMagick
-      if [ ! -s /tmp/nature.jpg ]; then
-        echo 'Creating placeholder images...';
-        # Create simple colored rectangles as placeholders
-        dd if=/dev/urandom of=/tmp/nature.jpg bs=1K count=50 2>/dev/null;
-        dd if=/dev/urandom of=/tmp/city.jpg bs=1K count=40 2>/dev/null;
-        dd if=/dev/urandom of=/tmp/abstract.png bs=1K count=30 2>/dev/null;
-      fi;
+        # Download sample images
+        echo 'Downloading sample images...'
+        curl -sL -o /tmp/nature.jpg 'https://picsum.photos/1920/1080' || true
+        curl -sL -o /tmp/city.jpg 'https://picsum.photos/1600/900' || true
+        curl -sL -o /tmp/abstract.png 'https://picsum.photos/1200/800' || true
 
-      # Upload to both public and premium buckets
-      mc cp /tmp/nature.jpg myminio/public-assets/nature.jpg;
-      mc cp /tmp/city.jpg myminio/public-assets/city.jpg;
-      mc cp /tmp/nature.jpg myminio/premium-assets/nature.jpg;
-      mc cp /tmp/city.jpg myminio/premium-assets/city.jpg;
-      mc cp /tmp/abstract.png myminio/premium-assets/abstract.png;
+        # Create placeholder if downloads failed
+        if [ ! -s /tmp/nature.jpg ]; then
+          echo 'Creating placeholder images...'
+          dd if=/dev/urandom bs=1K count=50 2>/dev/null | base64 > /tmp/nature.jpg
+          dd if=/dev/urandom bs=1K count=40 2>/dev/null | base64 > /tmp/city.jpg
+          dd if=/dev/urandom bs=1K count=30 2>/dev/null | base64 > /tmp/abstract.png
+        fi
 
-      # Create a sample document image
-      mc cp /tmp/nature.jpg myminio/documents/report-cover.jpg;
+        # Upload to buckets
+        /tmp/mc cp /tmp/nature.jpg myminio/public-assets/nature.jpg
+        /tmp/mc cp /tmp/city.jpg myminio/public-assets/city.jpg
+        /tmp/mc cp /tmp/nature.jpg myminio/premium-assets/nature.jpg
+        /tmp/mc cp /tmp/city.jpg myminio/premium-assets/city.jpg
+        /tmp/mc cp /tmp/abstract.png myminio/premium-assets/abstract.png
+        /tmp/mc cp /tmp/nature.jpg myminio/documents/report-cover.jpg
 
-      echo 'MinIO setup complete!';
-      mc ls myminio/public-assets/;
-      mc ls myminio/premium-assets/;
-      "
+        echo 'MinIO setup complete!'
+        /tmp/mc ls myminio/public-assets/
+        /tmp/mc ls myminio/premium-assets/
     networks:
       - yatagarasu-watermark
 
