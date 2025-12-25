@@ -54,27 +54,34 @@ services:
         /tmp/mc mb --ignore-existing myminio/documents
         /tmp/mc anonymous set public myminio/public-assets
 
-        # Download sample images
+        # Download sample images (JPEG)
         echo 'Downloading sample images...'
         curl -sL -o /tmp/nature.jpg 'https://picsum.photos/1920/1080' || true
         curl -sL -o /tmp/city.jpg 'https://picsum.photos/1600/900' || true
-        curl -sL -o /tmp/abstract.png 'https://picsum.photos/1200/800' || true
+
+        # Download PNG images (from placehold.co which supports PNG)
+        curl -sL -o /tmp/abstract.png 'https://placehold.co/1200x800/3498db/ffffff.png?text=Abstract' || true
+        curl -sL -o /tmp/logo.png 'https://placehold.co/800x600/e74c3c/ffffff.png?text=Logo' || true
 
         # Create placeholder if downloads failed
         if [ ! -s /tmp/nature.jpg ]; then
           echo 'Creating placeholder images...'
           dd if=/dev/urandom bs=1K count=50 2>/dev/null | base64 > /tmp/nature.jpg
           dd if=/dev/urandom bs=1K count=40 2>/dev/null | base64 > /tmp/city.jpg
-          dd if=/dev/urandom bs=1K count=30 2>/dev/null | base64 > /tmp/abstract.png
         fi
 
-        # Upload to buckets
+        # Upload JPEGs to buckets
         /tmp/mc cp /tmp/nature.jpg myminio/public-assets/nature.jpg
         /tmp/mc cp /tmp/city.jpg myminio/public-assets/city.jpg
         /tmp/mc cp /tmp/nature.jpg myminio/premium-assets/nature.jpg
         /tmp/mc cp /tmp/city.jpg myminio/premium-assets/city.jpg
-        /tmp/mc cp /tmp/abstract.png myminio/premium-assets/abstract.png
         /tmp/mc cp /tmp/nature.jpg myminio/documents/report-cover.jpg
+
+        # Upload PNGs to buckets
+        /tmp/mc cp /tmp/abstract.png myminio/public-assets/abstract.png
+        /tmp/mc cp /tmp/logo.png myminio/public-assets/logo.png
+        /tmp/mc cp /tmp/abstract.png myminio/premium-assets/abstract.png
+        /tmp/mc cp /tmp/logo.png myminio/premium-assets/logo.png
 
         echo 'MinIO setup complete!'
         /tmp/mc ls myminio/public-assets/
