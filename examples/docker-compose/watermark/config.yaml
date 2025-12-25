@@ -24,6 +24,10 @@ buckets:
       secret_key: "${AWS_SECRET_KEY}"
     auth:
       enabled: false
+    image_optimization:
+      enabled: true
+      max_width: 4096
+      max_height: 4096
 
   # Premium images - requires auth, no watermark
   - name: "premium"
@@ -36,6 +40,10 @@ buckets:
       secret_key: "${AWS_SECRET_KEY}"
     auth:
       enabled: true
+    image_optimization:
+      enabled: true
+      max_width: 4096
+      max_height: 4096
 
   # Preview images - watermarked for non-subscribers
   - name: "previews"
@@ -48,6 +56,10 @@ buckets:
       secret_key: "${AWS_SECRET_KEY}"
     auth:
       enabled: false
+    image_optimization:
+      enabled: true
+      max_width: 4096
+      max_height: 4096
     watermark:
       enabled: true
       cache_ttl_seconds: 3600
@@ -103,6 +115,10 @@ buckets:
       secret_key: "${AWS_SECRET_KEY}"
     auth:
       enabled: true
+    image_optimization:
+      enabled: true
+      max_width: 4096
+      max_height: 4096
     watermark:
       enabled: true
       rules:
