@@ -58,44 +58,44 @@ buckets:
       enabled: true
       cache_ttl_seconds: 3600
       rules:
-        # Text watermark with user info
-        - pattern: "*.jpg"
+        # Text watermark with user info (** matches any path)
+        - pattern: "**/*.jpg"
           watermarks:
             - type: text
               text: "PREVIEW - {{date}}"
-              font_size: 32
+              font_size: 48
               color: "#FF0000"
-              opacity: 0.4
+              opacity: 0.7
               position: bottom-right
               margin: 20
             - type: text
               text: "yatagarasu.example.com"
-              font_size: 18
+              font_size: 36
               color: "#FFFFFF"
-              opacity: 0.3
+              opacity: 0.5
               position: bottom-left
               margin: 15
 
         # Tiled watermark for PNG files
-        - pattern: "*.png"
+        - pattern: "**/*.png"
           watermarks:
             - type: text
               text: "SAMPLE"
-              font_size: 36
+              font_size: 48
               color: "#888888"
-              opacity: 0.15
+              opacity: 0.3
               position: tiled
               tile_spacing: 150
               rotation: -30
 
         # Diagonal band for all other images
-        - pattern: "*"
+        - pattern: "**"
           watermarks:
             - type: text
               text: "PREVIEW ONLY"
-              font_size: 24
+              font_size: 36
               color: "#FF6600"
-              opacity: 0.25
+              opacity: 0.5
               position: diagonal-band
 
   # Protected documents - watermark with user identity
