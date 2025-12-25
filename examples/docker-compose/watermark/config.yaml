@@ -10,7 +10,7 @@ jwt:
   algorithm: HS256
   secret: "${JWT_SECRET}"
   token_sources:
-    - source_type: bearer
+    - type: bearer
 
 buckets:
   # Public images - no watermark
