@@ -58,9 +58,17 @@ buckets:
       enabled: true
       cache_ttl_seconds: 3600
       rules:
-        # Text watermark with user info (** matches any path)
+        # Text + Image watermark for JPEG files
         - pattern: "**/*.jpg"
           watermarks:
+            # Logo watermark in top-left
+            - type: image
+              source: "https://raw.githubusercontent.com/julianshen/yatagarasu/master/website/assets/images/logo.png"
+              width: 80
+              opacity: 0.7
+              position: top-left
+              margin: 15
+            # Text watermark in bottom-right
             - type: text
               text: "PREVIEW - {{date}}"
               font_size: 48
