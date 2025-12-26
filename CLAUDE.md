@@ -16,6 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## PROJECT OVERVIEW
 
 Yatagarasu is a high-performance S3 proxy that provides:
+
 - **Multi-bucket routing** with isolated credentials
 - **Flexible JWT authentication** (optional per-bucket)
 - **Zero-copy streaming** for large files (constant memory usage)
@@ -24,6 +25,7 @@ Yatagarasu is a high-performance S3 proxy that provides:
 - **Hot reload** configuration without downtime
 
 ### Quick Architecture
+
 ```
 Client → Pingora HTTP Server → Router → JWT Auth (optional)
   → Cache Check → S3 Client (SigV4) → S3 Backend → Stream Response
@@ -36,6 +38,7 @@ Client → Pingora HTTP Server → Router → JWT Auth (optional)
 ## DEVELOPMENT COMMANDS
 
 ### Build & Test
+
 ```bash
 # Build the project
 cargo build
@@ -63,12 +66,13 @@ cargo test --lib && cargo test --test integration_*
 ```
 
 ### Code Quality
+
 ```bash
 # Lint (must pass before commit)
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Format code (must pass before commit)
-cargo fmt
+cargo fmt --all
 
 # Check formatting without applying
 cargo fmt --check
@@ -78,6 +82,7 @@ cargo tarpaulin --out Html --output-dir coverage
 ```
 
 ### Integration Testing with MinIO
+
 ```bash
 # Start MinIO (S3-compatible storage for testing)
 docker run -d -p 9000:9000 -p 9001:9001 \
@@ -97,6 +102,7 @@ docker stop minio && docker rm minio
 ```
 
 ### Running the Proxy
+
 ```bash
 # Run with config file
 cargo run -- --config config.yaml
@@ -119,6 +125,7 @@ curl http://localhost:8080/health
 ## CODE ARCHITECTURE
 
 ### Module Structure
+
 ```
 src/
 ├── main.rs           # Application entry point, server setup
@@ -141,27 +148,32 @@ src/
 ### Key Design Principles
 
 **1. Per-Bucket Credential Isolation**
+
 - Each bucket config gets its own S3 client
 - No shared credentials = no risk of using wrong bucket credentials
 - Security through isolation
 
 **2. Zero-Copy Streaming for Large Files**
+
 - Files >10MB stream directly through proxy (no buffering to disk)
 - Constant ~64KB memory per connection regardless of file size
 - Enables serving GB+ files to thousands of concurrent clients
 
 **3. Smart Caching for Small Files**
+
 - Files <10MB cached in memory (configurable)
 - Async cache writes don't block client response
 - Cache hits served in <10ms
 
 **4. Range Requests Always Streamed**
+
 - HTTP Range requests bypass cache entirely
 - Always fetch from S3 on-demand
 - Useful for video seeking, parallel downloads
 - Memory: constant ~64KB per range request
 
 **5. Optional Per-Bucket Authentication**
+
 - JWT validation only (no token issuance)
 - Multiple token sources: Authorization header, query param, custom header
 - Custom claims verification with operators (equals, contains, in, gt, lt)
@@ -172,7 +184,9 @@ src/
 ## TDD WORKFLOW WITH PLAN.MD
 
 ### The "Go" Command
+
 When you see "go" from the user:
+
 1. Read `plan.md` to find the next unmarked test `[ ]`
 2. Implement the test (Red phase - watch it fail)
 3. Write minimum code to pass (Green phase)
@@ -182,12 +196,14 @@ When you see "go" from the user:
 7. Wait for next "go"
 
 ### Test Execution Strategy
+
 - **Red Phase**: Write failing test first
 - **Green Phase**: Minimum code to pass
 - **Refactor Phase**: Improve structure while tests stay green
 - **Commit**: Mark test complete, commit with prefix
 
 ### Example Test Progression (from plan.md)
+
 ```
 Phase 1: Foundation
 [ ] Test: Cargo project compiles without errors
@@ -239,7 +255,9 @@ Phase 4: JWT Authentication
 Separate all changes into two distinct types:
 
 ### 1. STRUCTURAL CHANGES
+
 Rearranging code without changing behavior:
+
 - Renaming variables, methods, or classes for clarity
 - Extracting methods or functions
 - Moving code to more appropriate locations
@@ -247,13 +265,16 @@ Rearranging code without changing behavior:
 - Reformatting code
 
 ### 2. BEHAVIORAL CHANGES
+
 Adding or modifying actual functionality:
+
 - Implementing new features
 - Fixing bugs that change program behavior
 - Modifying algorithms or logic
 - Adding new dependencies that change behavior
 
 ### Critical Rules:
+
 - **Never mix structural and behavioral changes in the same commit**
 - **Always make structural changes first** when both are needed
 - Validate structural changes do not alter behavior by running tests before and after
@@ -264,13 +285,15 @@ Adding or modifying actual functionality:
 ## COMMIT DISCIPLINE
 
 Only commit when:
+
 1. **ALL tests are passing** - No exceptions
-2. **ALL compiler/linter warnings have been resolved** - Zero warnings policy (`cargo clippy -- -D warnings`)
+2. **ALL compiler/linter warnings have been resolved** - Zero warnings policy (`cargo clippy --all-targets --all-features -- -D warnings`)
 3. **Code is properly formatted** - Run `cargo fmt` before commit
 4. **The change represents a single logical unit of work** - One concept per commit
 5. **Commit messages clearly state** whether the commit contains structural or behavioral changes
 
 ### Commit Message Format:
+
 ```
 [STRUCTURAL] Extract validation logic into separate method
 [BEHAVIORAL] Add support for JSON input format
@@ -293,6 +316,7 @@ Use small, frequent commits rather than large, infrequent ones. Each commit shou
 - **Document why, not what** - The code shows what; comments explain why
 
 ### Rust-Specific Quality Standards
+
 - Use `Result<T, E>` for error handling (no panics in production code)
 - Prefer `&str` over `String` for function parameters when ownership not needed
 - Use `impl Trait` or generics to avoid dynamic dispatch when possible
@@ -326,6 +350,7 @@ Use small, frequent commits rather than large, infrequent ones. Each commit shou
 When approaching a new feature:
 
 1. **Red Phase**: Write a simple failing test for a small part of the feature
+
    ```rust
    #[test]
    fn test_extracts_bearer_token_from_header() {
@@ -336,6 +361,7 @@ When approaching a new feature:
    ```
 
 2. **Green Phase**: Implement the bare minimum to make it pass
+
    ```rust
    fn extract_token(headers: &Headers, source: &TokenSource) -> Option<String> {
        match source {
@@ -349,6 +375,7 @@ When approaching a new feature:
    ```
 
 3. **Run Tests**: Confirm all tests pass (Green state)
+
    ```bash
    $ cargo test
    running 1 test
@@ -356,10 +383,12 @@ When approaching a new feature:
    ```
 
 4. **Refactor Phase** (Tidy First): Make any necessary structural changes
+
    - Run tests after each structural change
    - Ensure tests remain green throughout
 
 5. **Commit Structural Changes**: Separately from behavioral changes
+
    ```bash
    git commit -m "[STRUCTURAL] Extract token extraction to separate module"
    ```
@@ -367,6 +396,7 @@ When approaching a new feature:
 6. **Continue**: Add another test for the next small increment of functionality
 
 7. **Commit Behavioral Changes**: When feature increment is complete
+
    ```bash
    git commit -m "[BEHAVIORAL] Add Bearer token extraction from Authorization header"
    ```
@@ -378,6 +408,7 @@ When approaching a new feature:
 ## TESTING STRATEGY
 
 ### Test Pyramid
+
 ```
      /\
     /  \     E2E Tests (5%) - Full proxy with MinIO
@@ -390,23 +421,27 @@ When approaching a new feature:
 ### Test Levels
 
 **Unit Tests** (>90% coverage target)
+
 - Individual functions and methods
 - Fast execution (<1s total)
 - No external dependencies (mock S3, JWT)
 - Test behavior, not implementation
 
 **Integration Tests** (all critical paths)
+
 - Component interactions (router + auth + s3)
 - May use test doubles or in-memory services
 - Moderate execution time (<10s total)
 
 **End-to-End Tests** (main workflows)
+
 - Full stack with real MinIO instance
 - Slow but comprehensive
 - Mark with `#[ignore]` for normal test runs
 - Run before releases
 
 ### Test File Organization
+
 ```
 tests/
 ├── unit/              # Fast unit tests
@@ -433,6 +468,7 @@ tests/
 Always write one test at a time, make it run, then improve structure. Always run all tests (except explicitly marked long-running tests) after each change.
 
 **The rhythm is:**
+
 1. Add a test (Red)
 2. Make it pass (Green)
 3. Clean up (Refactor)
@@ -448,12 +484,13 @@ This rhythm should become automatic, a comfortable cycle that produces clean, we
 ```bash
 # All must succeed:
 cargo test              # ✅ All tests passing
-cargo clippy -- -D warnings  # ✅ No warnings
+cargo clippy --all-targets --all-features -- -D warnings  # ✅ No warnings
 cargo fmt --check       # ✅ Code formatted
 # Coverage >90% (check with cargo tarpaulin)
 ```
 
 **Never commit when:**
+
 - Any test is failing
 - Clippy shows any warnings
 - Code is not formatted
@@ -464,12 +501,14 @@ cargo fmt --check       # ✅ Code formatted
 ## COMMON PATTERNS IN THIS CODEBASE
 
 ### Configuration with Environment Variable Substitution
+
 ```rust
 // In config module: Replace ${VAR_NAME} with env var value
 let value = config_value.replace("${AWS_KEY}", &env::var("AWS_KEY")?);
 ```
 
 ### Per-Bucket S3 Client Creation
+
 ```rust
 // Each bucket gets isolated S3 client
 for bucket_config in config.buckets {
@@ -479,6 +518,7 @@ for bucket_config in config.buckets {
 ```
 
 ### Streaming S3 Response
+
 ```rust
 // Stream chunks without buffering full file
 while let Some(chunk) = s3_stream.next().await {
@@ -491,6 +531,7 @@ while let Some(chunk) = s3_stream.next().await {
 ```
 
 ### JWT Token Source Priority
+
 ```rust
 // Try each configured source in order
 for source in &config.jwt.token_sources {
@@ -516,15 +557,15 @@ for source in &config.jwt.token_sources {
 
 ## PERFORMANCE TARGETS
 
-| Metric | Target | How to Verify |
-|--------|--------|---------------|
-| JWT validation | <1ms | `cargo bench jwt_validation` |
-| Path routing | <10μs | `cargo bench routing` |
-| S3 signature gen | <100μs | `cargo bench s3_signature` |
-| Cache hit response | <10ms P95 | Integration test with timing |
-| S3 streaming TTFB | <500ms P95 | E2E test with MinIO |
-| Throughput | >10,000 req/s | Load test with `wrk` or `hey` |
-| Memory per connection | ~64KB | Monitor during stress test |
+| Metric                | Target        | How to Verify                 |
+| --------------------- | ------------- | ----------------------------- |
+| JWT validation        | <1ms          | `cargo bench jwt_validation`  |
+| Path routing          | <10μs         | `cargo bench routing`         |
+| S3 signature gen      | <100μs        | `cargo bench s3_signature`    |
+| Cache hit response    | <10ms P95     | Integration test with timing  |
+| S3 streaming TTFB     | <500ms P95    | E2E test with MinIO           |
+| Throughput            | >10,000 req/s | Load test with `wrk` or `hey` |
+| Memory per connection | ~64KB         | Monitor during stress test    |
 
 ---
 
