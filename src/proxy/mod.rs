@@ -3792,7 +3792,13 @@ impl ProxyHttp for YatagarasuProxy {
             // Broadcast chunk if we have body data
             if let Some(ref chunk) = body {
                 if let Some(leader) = ctx.streaming_leader() {
-                    let _ = leader.send_chunk(chunk.clone());
+                    if let Err(e) = leader.send_chunk(chunk.clone()) {
+                        tracing::warn!(
+                            request_id = %ctx.request_id(),
+                            error = ?e,
+                            "Failed to broadcast chunk to streaming followers"
+                        );
+                    }
                 }
             }
 
