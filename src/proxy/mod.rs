@@ -2992,12 +2992,12 @@ impl ProxyHttp for YatagarasuProxy {
             // Clone bucket name to avoid borrow conflict with ctx.set_streaming_leader()
             if let Some(bucket_config) = ctx.bucket_config() {
                 let bucket_name = bucket_config.name.clone();
-                let object_key = ctx.path().trim_start_matches('/').to_string();
+                let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
                 let cache_key = CacheKey {
                     bucket: bucket_name.clone(),
                     object_key,
                     etag: None,
-                    variant: None,
+                    variant: ctx.image_params().map(|p| p.to_cache_key()),
                 };
 
                 match coalescer.acquire(&cache_key) {
