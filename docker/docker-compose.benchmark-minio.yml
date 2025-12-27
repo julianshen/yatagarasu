@@ -1,0 +1,125 @@
+# Docker Compose for MinIO Backend Benchmarking
+# Usage:
+#   docker-compose -f docker/docker-compose.benchmark-minio.yml up -d
+#   ./scripts/run-backend-benchmark.sh minio
+#   docker-compose -f docker/docker-compose.benchmark-minio.yml down -v
+
+version: '3.8'
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: benchmark-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-benchmark-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - benchmark-net
+    # Allocate resources for fair comparison
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # MinIO setup - creates buckets and test files of various sizes
+  minio-setup:
+    image: minio/mc:latest
+    container_name: benchmark-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo '=== Configuring MinIO for Benchmark ===';
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+
+      echo 'Creating benchmark bucket...';
+      mc mb --ignore-existing myminio/benchmark;
+      mc anonymous set public myminio/benchmark;
+
+      echo 'Creating test files...';
+      echo 'Creating 10KB file...';
+      dd if=/dev/urandom of=/tmp/test-10kb.bin bs=10K count=1 2>/dev/null;
+
+      echo 'Creating 1MB file...';
+      dd if=/dev/urandom of=/tmp/test-1mb.bin bs=1M count=1 2>/dev/null;
+
+      echo 'Creating 10MB file...';
+      dd if=/dev/urandom of=/tmp/test-10mb.bin bs=1M count=10 2>/dev/null;
+
+      echo 'Creating 100MB file...';
+      dd if=/dev/urandom of=/tmp/test-100mb.bin bs=10M count=10 2>/dev/null;
+
+      echo 'Creating 1GB file (this takes a while)...';
+      dd if=/dev/urandom of=/tmp/test-1gb.bin bs=100M count=10 2>/dev/null;
+
+      echo 'Uploading files to MinIO...';
+      mc cp /tmp/test-10kb.bin myminio/benchmark/test-10kb.bin;
+      mc cp /tmp/test-1mb.bin myminio/benchmark/test-1mb.bin;
+      mc cp /tmp/test-10mb.bin myminio/benchmark/test-10mb.bin;
+      mc cp /tmp/test-100mb.bin myminio/benchmark/test-100mb.bin;
+      mc cp /tmp/test-1gb.bin myminio/benchmark/test-1gb.bin;
+
+      echo 'Verifying uploads...';
+      mc ls myminio/benchmark/;
+
+      echo '';
+      echo '=== MinIO Setup Complete ===';
+      echo 'Files available at http://localhost:9000/benchmark/';
+      "
+    networks:
+      - benchmark-net
+
+  # Yatagarasu proxy configured for MinIO backend
+  yatagarasu:
+    image: yatagarasu:benchmark
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: benchmark-proxy-minio
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      AWS_ACCESS_KEY_BENCHMARK: minioadmin
+      AWS_SECRET_KEY_BENCHMARK: minioadmin
+      RUST_LOG: warn
+    volumes:
+      - ../config/benchmark/config.benchmark-minio.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+networks:
+  benchmark-net:
+    driver: bridge
+
+volumes:
+  minio-benchmark-data:
+    driver: local

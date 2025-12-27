@@ -1,0 +1,134 @@
+# Docker Compose for RustFS Backend Benchmarking
+# Usage:
+#   docker-compose -f docker/docker-compose.benchmark-rustfs.yml up -d
+#   ./scripts/run-backend-benchmark.sh rustfs
+#   docker-compose -f docker/docker-compose.benchmark-rustfs.yml down -v
+#
+# Note: RustFS is ~2.3x faster than MinIO for small objects (4KB)
+#       See: https://github.com/rustfs/rustfs
+
+version: '3.8'
+
+services:
+  # RustFS S3-compatible storage
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: benchmark-rustfs
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      # RustFS uses different env var names than MinIO
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+    volumes:
+      - rustfs-benchmark-data:/data
+      - rustfs-benchmark-logs:/logs
+    # RustFS uses TCP check since it doesn't have MinIO's health endpoint
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/ -o /dev/null || exit 0"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - benchmark-net
+    # Allocate resources for fair comparison
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # RustFS setup - creates buckets and test files of various sizes
+  # Uses mc (MinIO client) which is S3-compatible
+  rustfs-setup:
+    image: minio/mc:latest
+    container_name: benchmark-rustfs-setup
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo '=== Configuring RustFS for Benchmark ===';
+      mc alias set myrustfs http://rustfs:9000 rustfsadmin rustfsadmin;
+
+      echo 'Creating benchmark bucket...';
+      mc mb --ignore-existing myrustfs/benchmark;
+      mc anonymous set public myrustfs/benchmark;
+
+      echo 'Creating test files...';
+      echo 'Creating 10KB file...';
+      dd if=/dev/urandom of=/tmp/test-10kb.bin bs=10K count=1 2>/dev/null;
+
+      echo 'Creating 1MB file...';
+      dd if=/dev/urandom of=/tmp/test-1mb.bin bs=1M count=1 2>/dev/null;
+
+      echo 'Creating 10MB file...';
+      dd if=/dev/urandom of=/tmp/test-10mb.bin bs=1M count=10 2>/dev/null;
+
+      echo 'Creating 100MB file...';
+      dd if=/dev/urandom of=/tmp/test-100mb.bin bs=10M count=10 2>/dev/null;
+
+      echo 'Creating 1GB file (this takes a while)...';
+      dd if=/dev/urandom of=/tmp/test-1gb.bin bs=100M count=10 2>/dev/null;
+
+      echo 'Uploading files to RustFS...';
+      mc cp /tmp/test-10kb.bin myrustfs/benchmark/test-10kb.bin;
+      mc cp /tmp/test-1mb.bin myrustfs/benchmark/test-1mb.bin;
+      mc cp /tmp/test-10mb.bin myrustfs/benchmark/test-10mb.bin;
+      mc cp /tmp/test-100mb.bin myrustfs/benchmark/test-100mb.bin;
+      mc cp /tmp/test-1gb.bin myrustfs/benchmark/test-1gb.bin;
+
+      echo 'Verifying uploads...';
+      mc ls myrustfs/benchmark/;
+
+      echo '';
+      echo '=== RustFS Setup Complete ===';
+      echo 'Files available at http://localhost:9000/benchmark/';
+      "
+    networks:
+      - benchmark-net
+
+  # Yatagarasu proxy configured for RustFS backend
+  yatagarasu:
+    image: yatagarasu:benchmark
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: benchmark-proxy-rustfs
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      AWS_ACCESS_KEY_BENCHMARK: rustfsadmin
+      AWS_SECRET_KEY_BENCHMARK: rustfsadmin
+      RUST_LOG: warn
+    volumes:
+      - ../config/benchmark/config.benchmark-rustfs.yaml:/etc/yatagarasu/config.yaml:ro
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+networks:
+  benchmark-net:
+    driver: bridge
+
+volumes:
+  rustfs-benchmark-data:
+    driver: local
+  rustfs-benchmark-logs:
+    driver: local

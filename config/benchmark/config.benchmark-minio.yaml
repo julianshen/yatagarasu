@@ -1,0 +1,30 @@
+# Yatagarasu configuration for MinIO benchmark
+# Caching disabled to measure pure backend throughput
+
+server:
+  address: "0.0.0.0"
+  port: 8080
+
+buckets:
+  - name: "benchmark"
+    path_prefix: "/benchmark"
+    s3:
+      bucket: "benchmark"
+      region: "us-east-1"
+      endpoint: "http://minio:9000"
+      access_key: "${AWS_ACCESS_KEY_BENCHMARK}"
+      secret_key: "${AWS_SECRET_KEY_BENCHMARK}"
+    auth:
+      enabled: false
+
+# Cache disabled for pure backend comparison
+cache:
+  layers: []
+
+logging:
+  level: "warn"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090

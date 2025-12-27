@@ -1,0 +1,5 @@
+# Ignore large k6 JSON output files (they contain raw data points)
+*.json
+
+# Keep the summary
+!.gitignore
