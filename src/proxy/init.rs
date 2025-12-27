@@ -23,7 +23,7 @@ use crate::metrics::Metrics;
 use crate::opa::{OpaCache, OpaClient, OpaClientConfig, SharedOpaClient};
 use crate::openfga::OpenFgaClient;
 use crate::rate_limit::RateLimitManager;
-use crate::request_coalescing::RequestCoalescer;
+use crate::request_coalescing::Coalescer;
 use crate::resources::ResourceMonitor;
 use crate::retry::RetryPolicy;
 use crate::router::Router;
@@ -40,7 +40,7 @@ pub(super) struct ProxyComponents {
     pub metrics: Arc<Metrics>,
     pub resource_monitor: Arc<ResourceMonitor>,
     pub request_semaphore: Arc<Semaphore>,
-    pub request_coalescer: RequestCoalescer,
+    pub coalescer: Option<Coalescer>,
     pub circuit_breakers: HashMap<String, Arc<CircuitBreaker>>,
     pub rate_limit_manager: Option<Arc<RateLimitManager>>,
     pub retry_policies: HashMap<String, RetryPolicy>,
@@ -140,13 +140,16 @@ pub(super) fn initialize_from_config(config: Config) -> ProxyComponents {
         cache.clone().map(|c| c as Arc<dyn Cache>),
     ));
 
+    // Initialize coalescer based on config strategy (Phase 38/40)
+    let coalescer = initialize_coalescer(&config);
+
     ProxyComponents {
         config,
         router,
         metrics,
         resource_monitor,
         request_semaphore,
-        request_coalescer: RequestCoalescer::new(),
+        coalescer,
         circuit_breakers,
         rate_limit_manager,
         retry_policies,
@@ -243,6 +246,29 @@ fn initialize_replica_sets(config: &Config) -> HashMap<String, crate::replica_se
         }
     }
     replica_sets
+}
+
+/// Initialize coalescer based on configuration.
+///
+/// Returns `None` if coalescing is disabled, otherwise creates the appropriate
+/// coalescer based on the configured strategy (WaitForComplete or Streaming).
+fn initialize_coalescer(config: &Config) -> Option<Coalescer> {
+    let coalescing_config = &config.server.coalescing;
+
+    if !coalescing_config.enabled {
+        tracing::info!("Request coalescing is disabled");
+        return None;
+    }
+
+    let strategy = coalescing_config.strategy;
+    let coalescer = Coalescer::new(strategy);
+
+    tracing::info!(
+        strategy = ?strategy,
+        "Request coalescing initialized"
+    );
+
+    Some(coalescer)
 }
 
 /// Initialize OPA clients and shared cache.

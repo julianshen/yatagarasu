@@ -332,6 +332,38 @@ This plan implements four main areas:
 
 ---
 
+## Phase 8: Request Coalescing
+
+### 8.1 Coalescing Configuration
+- [x] Test: Config supports server.coalescing section
+- [x] Test: Coalescing strategy configurable (wait_for_complete vs streaming)
+- [x] Test: Coalescer initializes correct strategy from config
+
+### 8.2 Streaming Coalescer Core
+- [x] Test: StreamingCoalescer::new creates broadcast channel
+- [x] Test: acquire() returns Leader or Follower slot
+- [x] Test: StreamLeader removes stream key on Drop
+- [x] Test: StreamLeader can broadcast headers
+- [x] Test: StreamLeader can broadcast body chunks
+- [x] Test: StreamLeader can broadcast completion
+- [x] Test: StreamLeader can broadcast errors
+
+### 8.3 Proxy Integration
+- [x] Test: RequestContext holds streaming_leader handle
+- [x] Test: RequestContext manual Clone handles RAII correctly
+- [x] Test: request_filter acquires slot on cache miss
+- [x] Test: Follower hijacks response in request_filter
+- [x] Test: upstream_response_filter broadcasts headers from Leader
+- [x] Test: response_body_filter broadcasts chunks from Leader
+- [x] Test: response_body_filter broadcasts finish on stream end
+
+### 8.4 Error Handling
+- [x] Test: Follower handles RecvError::Lagged with 503 Retry-After
+- [x] Test: Follower handles RecvError::Closed with 502 Bad Gateway
+- [x] Test: Leader handles broadcast failures gracefully
+
+---
+
 ## Directory Structure (Final)
 
 ```
@@ -405,6 +437,7 @@ yatagarasu/
 5. **Phase 5** (K8s Examples) - Usage examples
 6. **Phase 6** (Documentation) - Comprehensive docs
 7. **Phase 7** (Integration) - End-to-end validation
+8. **Phase 8** (Request Coalescing) - Core proxy feature
 
 ---
 
@@ -455,13 +488,14 @@ yatagarasu/
 | Phase 5: K8s Examples | 15 tests | Low |
 | Phase 6: Documentation | 35 tests | Medium |
 | Phase 7: Integration | 12 tests | Medium |
-| **Total** | **187 tests** | |
+| Phase 8: Request Coalescing | 17 tests | High |
+| **Total** | **204 tests** | |
 
 ---
 
 ## Success Criteria
 
-- [ ] All 187 tests passing
+- [ ] All 204 tests passing
 - [ ] `helm lint` passes
 - [ ] `kustomize build` succeeds for all overlays
 - [ ] All Docker Compose examples start successfully

@@ -15,6 +15,7 @@ fn test_can_create_empty_config_struct() {
             max_concurrent_requests: 1000,
             rate_limit: None,
             security_limits: SecurityLimitsConfig::default(),
+            coalescing: CoalescingConfig::default(),
         },
         buckets: vec![],
         jwt: None,

@@ -95,6 +95,9 @@ pub struct ServerConfig {
     pub rate_limit: Option<RateLimitConfigYaml>,
     #[serde(default)]
     pub security_limits: SecurityLimitsConfig,
+    /// Request coalescing configuration (default: enabled with wait_for_complete strategy)
+    #[serde(default)]
+    pub coalescing: super::coalescing::CoalescingConfig,
 }
 
 #[cfg(test)]

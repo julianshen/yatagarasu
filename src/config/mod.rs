@@ -27,6 +27,7 @@ pub mod audit;
 pub mod authorization;
 pub mod bucket;
 pub mod circuit_breaker;
+pub mod coalescing;
 pub mod jwt;
 pub mod rate_limit;
 pub mod retry;
@@ -40,6 +41,7 @@ pub use audit::{
 pub use authorization::AuthorizationConfig;
 pub use bucket::{AuthConfig, BucketConfig, IpFilterConfig, S3Config, S3Replica};
 pub use circuit_breaker::CircuitBreakerConfigYaml;
+pub use coalescing::{CoalescingConfig, CoalescingStrategy};
 pub use jwt::{ClaimRule, JwtConfig, JwtKey, TokenSource};
 pub use rate_limit::{
     BucketRateLimitConfigYaml, GlobalRateLimitConfigYaml, PerIpRateLimitConfigYaml,

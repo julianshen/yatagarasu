@@ -1,4 +1,4 @@
-// Request Coalescing Module - Phase 38
+// Request Coalescing Module - Phase 38 & 40
 //
 // Deduplicates concurrent S3 requests for the same object.
 // When multiple clients request the same S3 object simultaneously:
@@ -6,12 +6,21 @@
 // - Subsequent requests (followers): Wait for leader to complete, then read from cache
 // - All requests: Receive the same response (true deduplication)
 //
+// Strategies:
+// - WaitForComplete (Phase 38): Followers wait for full download completion
+// - Streaming: Followers receive bytes in real-time as leader downloads
+//
 // Expected benefit: 20-30% throughput improvement under high concurrency
+
+pub mod stream;
 
 use crate::cache::CacheKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::watch;
+
+// Re-export streaming types
+pub use stream::{StreamLeader, StreamMessage, StreamingCoalescer, StreamingSlot};
 
 /// Request coalescing manager
 /// Tracks in-flight S3 requests and deduplicates concurrent requests for the same object
@@ -161,6 +170,48 @@ impl Drop for LeaderGuard {
         tokio::spawn(async move {
             coalescer.remove_in_flight(&key).await;
         });
+    }
+}
+
+// ============================================================================
+// Unified Coalescer - Polymorphic wrapper for both strategies
+// ============================================================================
+
+use crate::config::CoalescingStrategy;
+
+/// Unified coalescer that supports both wait-for-complete and streaming strategies.
+/// Use `Coalescer::new()` to create based on configuration.
+#[derive(Debug, Clone)]
+pub enum Coalescer {
+    /// Followers wait for leader to fully complete (Phase 38)
+    WaitForComplete(RequestCoalescer),
+    /// Followers receive bytes in real-time
+    Streaming(StreamingCoalescer),
+}
+
+impl Coalescer {
+    /// Create a coalescer based on the configured strategy
+    pub fn new(strategy: CoalescingStrategy) -> Self {
+        match strategy {
+            CoalescingStrategy::WaitForComplete => {
+                Coalescer::WaitForComplete(RequestCoalescer::new())
+            }
+            CoalescingStrategy::Streaming => Coalescer::Streaming(StreamingCoalescer::new()),
+        }
+    }
+
+    /// Get current number of in-flight requests/streams
+    pub async fn in_flight_count(&self) -> usize {
+        match self {
+            Coalescer::WaitForComplete(c) => c.in_flight_count().await,
+            Coalescer::Streaming(c) => c.in_flight_count(),
+        }
+    }
+}
+
+impl Default for Coalescer {
+    fn default() -> Self {
+        Coalescer::WaitForComplete(RequestCoalescer::new())
     }
 }
 
