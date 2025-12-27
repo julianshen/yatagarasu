@@ -17,6 +17,7 @@ use pingora_http::ResponseHeader;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
+use tracing::{error, warn};
 
 use crate::cache::CacheKey;
 
@@ -49,7 +50,10 @@ impl StreamingCoalescer {
     pub fn acquire(&self, key: &CacheKey) -> StreamingSlot {
         let key_str = Self::cache_key_to_string(key);
 
-        let mut streams = self.streams.lock().unwrap();
+        let mut streams = self.streams.lock().unwrap_or_else(|e| {
+            warn!("Streams mutex poisoned during acquire, recovering: {}", e);
+            e.into_inner()
+        });
 
         // Check if there's already an in-flight stream
         if let Some(sender) = streams.get(&key_str) {
@@ -71,7 +75,16 @@ impl StreamingCoalescer {
 
     /// Get current number of in-flight streams
     pub fn in_flight_count(&self) -> usize {
-        self.streams.lock().unwrap().len()
+        self.streams
+            .lock()
+            .unwrap_or_else(|e| {
+                warn!(
+                    "Streams mutex poisoned during in_flight_count, recovering: {}",
+                    e
+                );
+                e.into_inner()
+            })
+            .len()
     }
 
     /// Convert a CacheKey to a string for use as a map key
@@ -176,8 +189,19 @@ impl StreamLeader {
 impl Drop for StreamLeader {
     fn drop(&mut self) {
         // Clean up the stream from the map
-        if let Ok(mut streams) = self.streams.lock() {
-            streams.remove(&self.key);
+        match self.streams.lock() {
+            Ok(mut streams) => {
+                streams.remove(&self.key);
+            }
+            Err(e) => {
+                error!(
+                    "Streams mutex poisoned during StreamLeader drop for key {}: {}",
+                    self.key, e
+                );
+                // Even if poisoned, we should try to recover and remove the key to prevent leaks
+                let mut streams = e.into_inner();
+                streams.remove(&self.key);
+            }
         }
     }
 }
@@ -259,10 +283,10 @@ mod tests {
 
         // Follower receives them in order
         let msg1 = follower.recv().await.unwrap();
-        assert!(matches!(msg1, StreamMessage::Chunk(b) if b == Bytes::from("chunk1")));
+        assert!(matches!(msg1, StreamMessage::Chunk(b) if b == "chunk1"));
 
         let msg2 = follower.recv().await.unwrap();
-        assert!(matches!(msg2, StreamMessage::Chunk(b) if b == Bytes::from("chunk2")));
+        assert!(matches!(msg2, StreamMessage::Chunk(b) if b == "chunk2"));
 
         let msg3 = follower.recv().await.unwrap();
         assert!(matches!(msg3, StreamMessage::Done));
@@ -371,5 +395,31 @@ mod tests {
         // Follower receives error
         let msg = follower.recv().await.unwrap();
         assert!(matches!(msg, StreamMessage::Error(e) if e == "S3 connection failed"));
+    }
+
+    #[test]
+    fn test_poisoned_mutex_recovery() {
+        let coalescer = StreamingCoalescer::new();
+        let key = test_cache_key("poisoned.txt");
+
+        // Force poison the mutex
+        let streams = Arc::clone(&coalescer.streams);
+        let _ = std::thread::spawn(move || {
+            let _lock = streams.lock().unwrap();
+            panic!("Force poison");
+        })
+        .join();
+
+        // Mutex should be poisoned now.
+        // acquire should recover and not panic.
+        let slot = coalescer.acquire(&key);
+        assert!(slot.is_leader());
+
+        // in_flight_count should also recover
+        assert_eq!(coalescer.in_flight_count(), 1);
+
+        // Cleanup should also work even if poisoned (though it's already "recovered" by acquire)
+        drop(slot);
+        assert_eq!(coalescer.in_flight_count(), 0);
     }
 }
