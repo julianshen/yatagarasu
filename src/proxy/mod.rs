@@ -2662,22 +2662,29 @@ impl ProxyHttp for YatagarasuProxy {
             let is_get_or_head = ctx.method() == "GET" || ctx.method() == "HEAD";
             let is_head_request = ctx.method() == "HEAD";
             if is_get_or_head {
-                // Cache Bypass Logic: Range requests always bypass cache
+                // Cache/Coalescing Bypass Logic: Range requests bypass both cache and coalescing
                 // Range requests are for partial content (video seeking, parallel downloads)
-                // and we don't cache partial responses
+                // and we don't cache partial responses. Additionally, different byte ranges
+                // represent fundamentally different data requests that should not be coalesced.
+                // Example: Client A (bytes 0-1023) vs Client B (bytes 1024-2047)
                 let is_range_request =
                     ctx.headers().contains_key("range") || ctx.headers().contains_key("Range");
+
+                // Check if we should bypass coalescing (Phase 38: Request Coalescing)
+                // Range requests always bypass coalescing to avoid returning wrong byte ranges
+                let should_bypass_coalescing = RequestCoalescer::should_bypass(is_range_request);
 
                 if is_range_request {
                     tracing::debug!(
                         request_id = %ctx.request_id(),
-                        "Range request detected - bypassing cache"
+                        bypass_coalescing = %should_bypass_coalescing,
+                        "Range request detected - bypassing cache and coalescing"
                     );
                     if self.audit_writer.is_some() {
                         ctx.audit()
                             .set_cache_status(crate::audit::CacheStatus::Bypass);
                     }
-                    // Skip cache lookup - fall through to Ok(false) at the end
+                    // Skip cache lookup and coalescing - fall through to Ok(false) at the end
                 } else {
                     let bucket_config = ctx.bucket_config().cloned().ok_or_else(|| {
                         pingora_core::Error::explain(
@@ -2858,6 +2865,10 @@ impl ProxyHttp for YatagarasuProxy {
                                     .set_cache_status(crate::audit::CacheStatus::Miss);
                             }
                             // Cache miss - continue to upstream
+                            // Phase 38: Request coalescing would be applied here for non-Range requests
+                            // The should_bypass_coalescing flag (computed above) determines if coalescing
+                            // should be skipped. Range requests always bypass coalescing because
+                            // different byte ranges represent different data.
                             tracing::debug!(
                                 request_id = %ctx.request_id(),
                                 bucket = %bucket_config.name,

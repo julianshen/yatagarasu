@@ -7,6 +7,12 @@
 // - All requests: Receive the same response (true deduplication)
 //
 // Expected benefit: 20-30% throughput improvement under high concurrency
+//
+// IMPORTANT: Range requests (partial content) bypass coalescing entirely.
+// Different byte ranges represent fundamentally different data requests:
+// - Client A requests bytes 0-1023
+// - Client B requests bytes 1024-2047
+// These should NOT be coalesced as they need different data from S3.
 
 use crate::cache::CacheKey;
 use std::collections::HashMap;
@@ -28,6 +34,21 @@ impl RequestCoalescer {
         Self {
             in_flight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Check if a request should bypass coalescing.
+    ///
+    /// Returns `true` for Range requests (partial content), which should never
+    /// be coalesced because different byte ranges represent different data:
+    /// - Client A: bytes 0-1023
+    /// - Client B: bytes 1024-2047
+    ///
+    /// These need separate S3 requests with their respective Range headers.
+    ///
+    /// # Arguments
+    /// * `has_range_header` - Whether the request contains a Range header
+    pub fn should_bypass(has_range_header: bool) -> bool {
+        has_range_header
     }
 
     /// Acquire a coalescing slot for a request
@@ -351,6 +372,24 @@ mod tests {
         assert!(
             slot2.is_leader(),
             "New request should be leader after cleanup"
+        );
+    }
+
+    #[test]
+    fn test_should_bypass_returns_true_for_range_requests() {
+        // Range requests should bypass coalescing
+        assert!(
+            RequestCoalescer::should_bypass(true),
+            "Range requests should bypass coalescing"
+        );
+    }
+
+    #[test]
+    fn test_should_bypass_returns_false_for_normal_requests() {
+        // Normal requests should NOT bypass coalescing
+        assert!(
+            !RequestCoalescer::should_bypass(false),
+            "Normal requests should not bypass coalescing"
         );
     }
 }
