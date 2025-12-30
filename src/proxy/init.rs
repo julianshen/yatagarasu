@@ -123,8 +123,11 @@ pub(super) fn initialize_from_config(config: Config) -> ProxyComponents {
 
     let security_limits = config.server.security_limits.to_security_limits();
 
-    // TODO Phase 30: Initialize cache from config if enabled
-    let cache = None; // Temporarily None until cache initialization is implemented
+    // Cache is initialized to None here and then populated asynchronously
+    // via YatagarasuProxy::init_cache() which is called from main.rs
+    // This two-phase initialization is required because TieredCache::from_config()
+    // is async (connects to Redis, validates disk paths, etc.)
+    let cache = None;
 
     // Phase 32: Initialize OPA clients and cache for buckets with authorization config
     let (opa_clients, opa_cache) = initialize_opa_clients(&config);
@@ -291,14 +294,24 @@ fn initialize_opa_clients(
                         cache_ttl_seconds: auth_config.opa_cache_ttl_seconds,
                     };
                     max_cache_ttl = max_cache_ttl.max(client_config.cache_ttl_seconds);
-                    let client = Arc::new(OpaClient::new(client_config));
-                    opa_clients.insert(bucket.name.clone(), client);
-                    tracing::info!(
-                        bucket = %bucket.name,
-                        opa_url = %opa_url,
-                        policy_path = %policy_path,
-                        "OPA authorization enabled for bucket"
-                    );
+                    match OpaClient::new(client_config) {
+                        Ok(client) => {
+                            opa_clients.insert(bucket.name.clone(), Arc::new(client));
+                            tracing::info!(
+                                bucket = %bucket.name,
+                                opa_url = %opa_url,
+                                policy_path = %policy_path,
+                                "OPA authorization enabled for bucket"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                bucket = %bucket.name,
+                                error = %e,
+                                "Failed to create OPA client for bucket, skipping OPA authorization"
+                            );
+                        }
+                    }
                 }
             }
         }

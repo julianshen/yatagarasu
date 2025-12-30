@@ -134,7 +134,12 @@ pub struct ImageFetcher {
 
 impl ImageFetcher {
     /// Create a new image fetcher with the given configuration.
-    pub fn new(config: ImageFetcherConfig) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns `WatermarkError::ConfigError` if the HTTP client cannot be created
+    /// (e.g., TLS configuration issues, system resource exhaustion).
+    pub fn new(config: ImageFetcherConfig) -> Result<Self, WatermarkError> {
         let cache = Cache::builder()
             .max_capacity(config.max_cache_entries)
             .time_to_live(config.cache_ttl)
@@ -143,9 +148,11 @@ impl ImageFetcher {
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| {
+                WatermarkError::ConfigError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
-        Self { cache, http_client }
+        Ok(Self { cache, http_client })
     }
 
     /// Fetch an image from the given source.
@@ -482,7 +489,7 @@ mod tests {
             max_cache_entries: 50,
             cache_ttl: Duration::from_secs(1800),
         };
-        let fetcher = ImageFetcher::new(config);
+        let fetcher = ImageFetcher::new(config).expect("should create fetcher");
         assert_eq!(fetcher.cache_size(), 0);
     }
 
@@ -491,7 +498,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_clear() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
 
         // Cache should start empty
         assert_eq!(fetcher.cache_size(), 0);
@@ -503,7 +511,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_cached_returns_false_for_uncached() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
 
         assert!(!fetcher.is_cached("s3://bucket/logo.png").await);
         assert!(!fetcher.is_cached("https://example.com/logo.png").await);
@@ -511,7 +520,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_requires_s3_client_for_s3_source() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
 
         // Trying to fetch S3 source without client should error
         let result = fetcher.fetch("s3://bucket/logo.png", None).await;

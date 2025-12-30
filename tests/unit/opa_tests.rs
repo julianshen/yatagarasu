@@ -18,7 +18,7 @@ fn test_can_create_opa_client_struct() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     // Verify client is created successfully
     assert!(client.config().url == "http://localhost:8181");
@@ -36,7 +36,7 @@ fn test_opa_client_contains_config() {
         cache_ttl_seconds: 120,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
     let retrieved_config = client.config();
 
     assert_eq!(retrieved_config.url, "http://opa.example.com:8181");
@@ -60,7 +60,7 @@ fn test_opa_client_is_send_sync() {
         timeout_ms: 5000,
         cache_ttl_seconds: 60,
     };
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
     let _arc_client = std::sync::Arc::new(client);
 }
 
@@ -432,7 +432,7 @@ fn test_opa_client_builds_correct_endpoint_url() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
     let endpoint = client.policy_endpoint();
 
     // Should be: {base_url}/v1/data/{policy_path}
@@ -451,7 +451,7 @@ fn test_opa_client_builds_endpoint_with_nested_policy_path() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
     let endpoint = client.policy_endpoint();
 
     assert_eq!(

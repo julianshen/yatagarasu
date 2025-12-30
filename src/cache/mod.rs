@@ -72,6 +72,9 @@ pub mod warming;
 // sendfile support for zero-copy file serving (v1.4)
 pub mod sendfile;
 
+// Cache-Control header parsing for RFC 7234 compliance (Phase 36)
+pub mod control;
+
 // Re-export configuration types
 pub use config::{
     BucketCacheOverride, CacheConfig, DiskCacheConfig, MemoryCacheConfig, RedisCacheConfig,
@@ -94,6 +97,9 @@ pub use traits::Cache;
 
 // Re-export implementations
 pub use memory::{MemoryCache, NullCache};
+
+// Re-export Cache-Control types
+pub use control::CacheControl;
 
 // ============================================================
 // Cache Factory Function

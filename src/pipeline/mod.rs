@@ -32,6 +32,8 @@ pub struct RequestContext {
     response_etag: Option<String>,
     /// Last-Modified from S3 response headers (for If-Modified-Since support)
     response_last_modified: Option<String>,
+    /// Cache-Control header from S3 response (for RFC 7234 compliance)
+    response_cache_control: Option<String>,
     /// Whether to cache this response (based on size, range requests, etc.)
     should_cache_response: bool,
     /// Total response size accumulated so far
@@ -70,6 +72,7 @@ impl RequestContext {
             response_content_type: None,
             response_etag: None,
             response_last_modified: None,
+            response_cache_control: None,
             should_cache_response: false,
             total_response_size: 0,
             retry_attempt: 0,
@@ -100,6 +103,7 @@ impl RequestContext {
             response_content_type: None,
             response_etag: None,
             response_last_modified: None,
+            response_cache_control: None,
             should_cache_response: false,
             total_response_size: 0,
             retry_attempt: 0,
@@ -134,6 +138,7 @@ impl RequestContext {
             response_content_type: None,
             response_etag: None,
             response_last_modified: None,
+            response_cache_control: None,
             should_cache_response: false,
             total_response_size: 0,
             retry_attempt: 0,
@@ -285,6 +290,16 @@ impl RequestContext {
         self.response_last_modified.as_deref()
     }
 
+    /// Set response Cache-Control from upstream headers (for RFC 7234 compliance)
+    pub fn set_response_cache_control(&mut self, cache_control: String) {
+        self.response_cache_control = Some(cache_control);
+    }
+
+    /// Get response Cache-Control header value
+    pub fn response_cache_control(&self) -> Option<&str> {
+        self.response_cache_control.as_deref()
+    }
+
     /// Check if this response should be cached
     pub fn should_cache_response(&self) -> bool {
         self.should_cache_response
@@ -365,6 +380,7 @@ impl Clone for RequestContext {
             response_content_type: self.response_content_type.clone(),
             response_etag: self.response_etag.clone(),
             response_last_modified: self.response_last_modified.clone(),
+            response_cache_control: self.response_cache_control.clone(),
             should_cache_response: self.should_cache_response,
             total_response_size: self.total_response_size,
             retry_attempt: self.retry_attempt,
