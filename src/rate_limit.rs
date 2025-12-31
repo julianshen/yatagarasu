@@ -44,6 +44,11 @@ use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+/// Maximum number of per-IP rate limiters to track before cleanup
+const DEFAULT_MAX_IP_LIMITERS: usize = 100_000;
+/// Maximum number of per-user rate limiters to track before cleanup
+const DEFAULT_MAX_USER_LIMITERS: usize = 50_000;
+
 /// Rate limiter manager handling global, per-bucket, per-IP, and per-user limits
 pub struct RateLimitManager {
     /// Global rate limiter (all requests)
@@ -82,6 +87,10 @@ pub struct RateLimitManager {
     per_ip_rps: Option<NonZeroU32>,
     /// Per-user rate limit config (requests per second)
     per_user_rps: Option<NonZeroU32>,
+    /// Maximum number of tracked IPs before cleanup
+    max_ip_limiters: usize,
+    /// Maximum number of tracked users before cleanup
+    max_user_limiters: usize,
 }
 
 impl RateLimitManager {
@@ -119,6 +128,8 @@ impl RateLimitManager {
             users: Arc::new(RwLock::new(HashMap::new())),
             per_ip_rps,
             per_user_rps,
+            max_ip_limiters: DEFAULT_MAX_IP_LIMITERS,
+            max_user_limiters: DEFAULT_MAX_USER_LIMITERS,
         }
     }
 
@@ -160,6 +171,9 @@ impl RateLimitManager {
     /// Check if a request should be allowed for a specific IP address
     ///
     /// Returns true if allowed, false if rate limit exceeded
+    ///
+    /// If the number of tracked IPs exceeds `max_ip_limiters`, older entries
+    /// are cleared to prevent unbounded memory growth under DDoS attacks.
     pub fn check_ip(&self, ip: IpAddr) -> bool {
         if self.per_ip_rps.is_none() {
             return true; // No per-IP limit configured
@@ -175,6 +189,17 @@ impl RateLimitManager {
 
         // Slow path: create limiter for new IP
         let mut limiters = self.ips.write();
+
+        // Enforce max limiter count to prevent memory exhaustion
+        if limiters.len() >= self.max_ip_limiters {
+            tracing::warn!(
+                ip_count = limiters.len(),
+                max_ips = self.max_ip_limiters,
+                "Per-IP rate limiter count exceeded max, clearing all to prevent memory exhaustion"
+            );
+            limiters.clear();
+        }
+
         let limiter = limiters.entry(ip).or_insert_with(|| {
             let rps = self.per_ip_rps.unwrap(); // Safe: checked above
             Arc::new(RateLimiter::direct(Quota::per_second(rps)))
@@ -185,6 +210,9 @@ impl RateLimitManager {
     /// Check if a request should be allowed for a specific user (from JWT claims)
     ///
     /// Returns true if allowed, false if rate limit exceeded
+    ///
+    /// If the number of tracked users exceeds `max_user_limiters`, older entries
+    /// are cleared to prevent unbounded memory growth.
     pub fn check_user(&self, user_id: &str) -> bool {
         if self.per_user_rps.is_none() {
             return true; // No per-user limit configured
@@ -200,6 +228,17 @@ impl RateLimitManager {
 
         // Slow path: create limiter for new user
         let mut limiters = self.users.write();
+
+        // Enforce max limiter count to prevent memory exhaustion
+        if limiters.len() >= self.max_user_limiters {
+            tracing::warn!(
+                user_count = limiters.len(),
+                max_users = self.max_user_limiters,
+                "Per-user rate limiter count exceeded max, clearing all to prevent memory exhaustion"
+            );
+            limiters.clear();
+        }
+
         let limiter = limiters.entry(user_id.to_string()).or_insert_with(|| {
             let rps = self.per_user_rps.unwrap(); // Safe: checked above
             Arc::new(RateLimiter::direct(Quota::per_second(rps)))

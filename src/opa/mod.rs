@@ -34,6 +34,8 @@ pub enum OpaError {
     },
     /// OPA response could not be parsed
     InvalidResponse(String),
+    /// Failed to create HTTP client
+    HttpClientCreation(String),
 }
 
 impl fmt::Display for OpaError {
@@ -57,6 +59,9 @@ impl fmt::Display for OpaError {
             }
             OpaError::InvalidResponse(msg) => {
                 write!(f, "Invalid OPA response: {}", msg)
+            }
+            OpaError::HttpClientCreation(msg) => {
+                write!(f, "Failed to create HTTP client for OPA: {}", msg)
             }
         }
     }
@@ -197,16 +202,21 @@ impl OpaClient {
     /// Create a new OPA client with the given configuration
     ///
     /// Configures the HTTP client with the specified timeout.
-    pub fn new(config: OpaClientConfig) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns `OpaError::HttpClientCreation` if the HTTP client cannot be created
+    /// (e.g., TLS configuration issues, system resource exhaustion).
+    pub fn new(config: OpaClientConfig) -> Result<Self, OpaError> {
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.timeout_ms))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| OpaError::HttpClientCreation(e.to_string()))?;
 
-        Self {
+        Ok(Self {
             config,
             http_client,
-        }
+        })
     }
 
     /// Get the client configuration

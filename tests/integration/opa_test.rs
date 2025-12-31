@@ -132,7 +132,7 @@ async fn test_opa_evaluation_allow_admin() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     // Admin should be allowed
     let input = OpaInput::new(
@@ -170,7 +170,7 @@ async fn test_opa_evaluation_deny_non_admin() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     // Non-admin without matching bucket should be denied
     let input = OpaInput::new(
@@ -204,7 +204,7 @@ async fn test_opa_evaluation_allow_matching_bucket() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     // User with allowed_bucket claim matching bucket should be allowed
     let input = OpaInput::new(
@@ -241,7 +241,7 @@ async fn test_opa_evaluation_allow_public_path() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     // Public paths should be allowed for anyone
     let input = OpaInput::new(
@@ -297,7 +297,7 @@ async fn test_opa_cache_hit_returns_same_result() {
         timeout_ms: 5000,
         cache_ttl_seconds: 60,
     };
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
     let result = client.evaluate(&input).await.unwrap();
 
     // Store result in cache
@@ -362,7 +362,7 @@ async fn test_opa_timeout_returns_error() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     let input = OpaInput::new(
         json!({"sub": "user1"}),
@@ -387,7 +387,7 @@ async fn test_opa_connection_error_to_invalid_host() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     let input = OpaInput::new(
         json!({"sub": "user1"}),
@@ -469,7 +469,7 @@ async fn test_opa_evaluation_latency() {
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     let input = OpaInput::new(
         json!({"sub": "admin-user", "roles": ["admin"]}),
@@ -555,7 +555,7 @@ async fn test_opa_throughput() {
         cache_ttl_seconds: 0, // Disable cache for this test
     };
 
-    let client = std::sync::Arc::new(OpaClient::new(config));
+    let client = std::sync::Arc::new(OpaClient::new(config).expect("should create client"));
 
     let start = std::time::Instant::now();
     let count = 50; // Reduced count for containerized tests
@@ -629,7 +629,7 @@ default allow = false
         cache_ttl_seconds: 60,
     };
 
-    let client = OpaClient::new(config);
+    let client = OpaClient::new(config).expect("should create client");
 
     let input = OpaInput::new(
         json!({"sub": "admin", "roles": ["admin"]}),

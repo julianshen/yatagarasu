@@ -126,7 +126,12 @@ impl YatagarasuProxy {
             openfga_clients: Arc::new(components.openfga_clients),
             audit_writer: components.audit_writer,
             prewarm_manager: components.prewarm_manager,
-            watermark_image_fetcher: Arc::new(ImageFetcher::new(ImageFetcherConfig::default())),
+            watermark_image_fetcher: Arc::new(
+                ImageFetcher::new(ImageFetcherConfig::default()).expect(
+                    "Failed to create HTTP client for watermark image fetcher. \
+                             This typically indicates a system-level TLS or resource issue.",
+                ),
+            ),
         }
     }
 
@@ -3447,6 +3452,17 @@ impl ProxyHttp for YatagarasuProxy {
                 }
             }
 
+            // Capture Cache-Control header for RFC 7234 compliance
+            if let Some(cache_control) = upstream_response
+                .headers
+                .get("cache-control")
+                .or_else(|| upstream_response.headers.get("Cache-Control"))
+            {
+                if let Ok(cc_str) = cache_control.to_str() {
+                    ctx.set_response_cache_control(cc_str.to_string());
+                }
+            }
+
             // check if cache is enabled to enable buffering for cache population
             if self.cache.is_some() {
                 ctx.enable_response_buffering();
@@ -3557,39 +3573,66 @@ impl ProxyHttp for YatagarasuProxy {
                         if let (Some(bucket_config), Some(cache)) =
                             (ctx.bucket_config(), &self.cache)
                         {
-                            use crate::cache::{CacheEntry, CacheKey};
+                            use crate::cache::{CacheControl, CacheEntry, CacheKey};
 
-                            let router = self.router.load_full();
-                            let object_key = router.extract_s3_key(ctx.path()).unwrap_or_default();
-                            let cache_key = CacheKey {
-                                bucket: bucket_config.name.clone(),
-                                object_key: object_key.to_string(),
-                                etag: None,
-                                variant: None, // Original always has None
-                            };
+                            // Parse Cache-Control header to determine if response should be cached
+                            let cache_control = ctx
+                                .response_cache_control()
+                                .map(CacheControl::parse)
+                                .unwrap_or_default();
 
-                            let cache_entry = CacheEntry::new(
-                                bytes::Bytes::from(cache_data),
-                                ctx.response_content_type()
-                                    .unwrap_or("application/octet-stream")
-                                    .to_string(),
-                                ctx.response_etag().unwrap_or("").to_string(),
-                                ctx.response_last_modified().map(|s| s.to_string()),
-                                Some(std::time::Duration::from_secs(3600)), // 1 hour TTL
-                            );
+                            // RFC 7234 compliance: Skip caching for non-cacheable responses
+                            if !cache_control.should_store() {
+                                tracing::debug!(
+                                    request_id = %ctx.request_id(),
+                                    cache_control = ?ctx.response_cache_control(),
+                                    "Skipping cache due to Cache-Control directives"
+                                );
+                            } else {
+                                let router = self.router.load_full();
+                                let object_key =
+                                    router.extract_s3_key(ctx.path()).unwrap_or_default();
+                                let cache_key = CacheKey {
+                                    bucket: bucket_config.name.clone(),
+                                    object_key: object_key.to_string(),
+                                    etag: None,
+                                    variant: None, // Original always has None
+                                };
 
-                            let cache_clone = Arc::clone(cache);
-                            let request_id = ctx.request_id().to_string();
+                                // Use TTL from Cache-Control header or default to 1 hour
+                                let default_ttl = std::time::Duration::from_secs(3600);
+                                let ttl = cache_control.effective_ttl(default_ttl);
 
-                            tokio::spawn(async move {
-                                if let Err(e) = cache_clone.set(cache_key, cache_entry).await {
-                                    tracing::warn!(
-                                        request_id = %request_id,
-                                        error = %e,
-                                        "Failed to populate cache from S3 response"
-                                    );
-                                }
-                            });
+                                let cache_entry = CacheEntry::new(
+                                    bytes::Bytes::from(cache_data),
+                                    ctx.response_content_type()
+                                        .unwrap_or("application/octet-stream")
+                                        .to_string(),
+                                    ctx.response_etag().unwrap_or("").to_string(),
+                                    ctx.response_last_modified().map(|s| s.to_string()),
+                                    Some(ttl),
+                                );
+
+                                let cache_clone = Arc::clone(cache);
+                                let request_id = ctx.request_id().to_string();
+                                let ttl_secs = ttl.as_secs();
+
+                                tokio::spawn(async move {
+                                    if let Err(e) = cache_clone.set(cache_key, cache_entry).await {
+                                        tracing::warn!(
+                                            request_id = %request_id,
+                                            error = %e,
+                                            "Failed to populate cache from S3 response"
+                                        );
+                                    } else {
+                                        tracing::debug!(
+                                            request_id = %request_id,
+                                            ttl_seconds = ttl_secs,
+                                            "Cached response with TTL from Cache-Control"
+                                        );
+                                    }
+                                });
+                            }
                         }
                     }
 
@@ -3726,39 +3769,59 @@ impl ProxyHttp for YatagarasuProxy {
                                         optimized_data
                                     };
 
-                                    // Store optimized version in cache (if cache enabled)
+                                    // Store optimized version in cache (if cache enabled and cacheable)
                                     if self.cache.is_some() {
                                         if let (Some(bucket_config), Some(cache)) =
                                             (ctx.bucket_config(), &self.cache)
                                         {
-                                            use crate::cache::{CacheEntry, CacheKey};
-                                            let router = self.router.load_full();
-                                            let object_key = router
-                                                .extract_s3_key(ctx.path())
-                                                .unwrap_or_default();
-                                            let variant = params.to_cache_key();
-
-                                            let cache_key = CacheKey {
-                                                bucket: bucket_config.name.clone(),
-                                                object_key: object_key.to_string(),
-                                                etag: None,
-                                                variant: Some(variant),
+                                            use crate::cache::{
+                                                CacheControl, CacheEntry, CacheKey,
                                             };
 
-                                            let cache_entry = CacheEntry::new(
-                                                bytes::Bytes::from(optimized_data.clone()),
-                                                content_type.clone(),
-                                                // We don't have a real ETag for optimized image, usage empty or derived?
-                                                // Using empty for now as it differs from original
-                                                "".to_string(),
-                                                ctx.response_last_modified().map(|s| s.to_string()),
-                                                Some(std::time::Duration::from_secs(3600)),
-                                            );
+                                            // Parse Cache-Control header
+                                            let cache_control = ctx
+                                                .response_cache_control()
+                                                .map(CacheControl::parse)
+                                                .unwrap_or_default();
 
-                                            let cache_clone = Arc::clone(cache);
-                                            tokio::spawn(async move {
-                                                cache_clone.set(cache_key, cache_entry).await.ok();
-                                            });
+                                            // RFC 7234: Skip caching for non-cacheable responses
+                                            if cache_control.should_store() {
+                                                let router = self.router.load_full();
+                                                let object_key = router
+                                                    .extract_s3_key(ctx.path())
+                                                    .unwrap_or_default();
+                                                let variant = params.to_cache_key();
+
+                                                let cache_key = CacheKey {
+                                                    bucket: bucket_config.name.clone(),
+                                                    object_key: object_key.to_string(),
+                                                    etag: None,
+                                                    variant: Some(variant),
+                                                };
+
+                                                // Use TTL from Cache-Control or default
+                                                let default_ttl =
+                                                    std::time::Duration::from_secs(3600);
+                                                let ttl = cache_control.effective_ttl(default_ttl);
+
+                                                let cache_entry = CacheEntry::new(
+                                                    bytes::Bytes::from(optimized_data.clone()),
+                                                    content_type.clone(),
+                                                    // We don't have a real ETag for optimized image
+                                                    "".to_string(),
+                                                    ctx.response_last_modified()
+                                                        .map(|s| s.to_string()),
+                                                    Some(ttl),
+                                                );
+
+                                                let cache_clone = Arc::clone(cache);
+                                                tokio::spawn(async move {
+                                                    cache_clone
+                                                        .set(cache_key, cache_entry)
+                                                        .await
+                                                        .ok();
+                                                });
+                                            }
                                         }
                                     }
 

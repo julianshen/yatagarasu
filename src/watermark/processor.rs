@@ -558,7 +558,8 @@ mod tests {
     // Test: Processor creation
     #[test]
     fn test_processor_creation() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
         let _processor = WatermarkProcessor::new(fetcher);
     }
 
@@ -668,7 +669,8 @@ mod tests {
     // Integration test: Apply text watermark
     #[tokio::test]
     async fn test_apply_no_watermark_when_disabled() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
         let processor = WatermarkProcessor::new(fetcher);
 
         let img = DynamicImage::new_rgba8(100, 100);
@@ -689,7 +691,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_no_watermark_when_no_matching_rule() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
         let processor = WatermarkProcessor::new(fetcher);
 
         let img = DynamicImage::new_rgba8(100, 100);
@@ -709,7 +712,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_text_watermark() {
-        let fetcher = ImageFetcher::new(ImageFetcherConfig::default());
+        let fetcher =
+            ImageFetcher::new(ImageFetcherConfig::default()).expect("should create fetcher");
         let processor = WatermarkProcessor::new(fetcher);
 
         let img = DynamicImage::new_rgba8(200, 200);

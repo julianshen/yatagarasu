@@ -1,7 +1,7 @@
 # Yatagarasu Implementation Plan
 
-**Last Updated**: 2025-11-29
-**Current Status**: v1.0.0 Released ✅, v1.1.0 Development In Progress (Phases 33-35 Complete)
+**Last Updated**: 2025-12-31
+**Current Status**: v1.0.0 Released ✅, v1.1.0 Development In Progress (Phases 33-35 Complete), v1.6.0 Planned (Phase 36)
 
 ---
 
@@ -15,6 +15,11 @@
 - ✅ Phase 35: Advanced Security - IP filtering, per-user rate limiting (COMPLETE)
 - ⏳ Caching layer (in progress)
 - ⏳ RS256/ES256 JWT algorithms (pending)
+
+**v1.6.0 Planned (Phase 36):**
+- ⏳ Critical bug fixes (cache init, OPA panic, watermark panic)
+- ⏳ High priority fixes (disk cache clear, rate limiter memory)
+- ⏳ RFC 7234 Cache-Control header compliance
 
 **What's Complete (v1.0.0 + v1.1.0 Progress)**:
 - ✅ Phases 1-5: Library layer (config, router, auth, S3) - 171 library tests passing
@@ -145,6 +150,13 @@ This plan is organized around working server capabilities, not just passing test
 **Status**: 🚧 IN PROGRESS - Phases 33-35 complete (audit, tracing, security), caching remaining
 
 **Target**: Milestone 8 = v1.1.0 release (Q1 2026)
+
+### 📋 Milestone 9: Bug Fixes & Cache-Control Compliance (v1.6.0) - PLANNED
+**Deliverable**: Critical bug fixes, RFC 7234 Cache-Control compliance
+**Verification**: No panics in production code, Cache-Control headers honored, proper TTL handling
+**Status**: 📋 PLANNED - Phase 36 defined (37 tests)
+
+**Target**: Milestone 9 = v1.6.0 release
 
 ---
 
@@ -2605,6 +2617,324 @@ curl -X DELETE http://localhost:8080/public/file.txt
 
 # Should succeed (admin endpoint exception)
 curl -X POST http://localhost:8080/admin/reload -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Phase 36: Critical Bug Fixes & Cache-Control Compliance (v1.6.0)
+
+**Target Version**: v1.6.0
+**Priority**: CRITICAL
+**Estimated Effort**: 3-5 days
+**Last Updated**: 2025-12-31
+
+### Overview
+
+This phase addresses critical production bugs and implements RFC 7234 Cache-Control header compliance. All issues were identified during a comprehensive codebase analysis.
+
+---
+
+### A. Critical Bug Fixes (Priority: IMMEDIATE)
+
+#### A.1. Cache Layer Initialization
+**Location**: `src/proxy/init.rs:126-127`
+**Issue**: Cache configuration exists but initialization is skipped - cache always None
+**Impact**: Performance degradation, increased S3 costs, all cache config ignored
+
+**Tests** (3 tests):
+- [ ] Test: Cache is initialized when cache config is provided
+- [ ] Test: Cache is None when cache config is absent
+- [ ] Test: Proxy uses initialized cache for GET requests
+
+**Implementation Notes**:
+```rust
+// Current (broken):
+let cache = None; // Temporarily None until cache initialization is implemented
+
+// Fix: Wire up CacheConfig to actual cache initialization
+let cache = match &config.cache {
+    Some(cache_config) => Some(build_cache_layer(cache_config).await?),
+    None => None,
+};
+```
+
+---
+
+#### A.2. OPA Client Panic Fix
+**Location**: `src/opa/mod.rs:204`
+**Issue**: `.expect()` causes panic if HTTP client creation fails
+**Impact**: Production crash on TLS/network misconfiguration
+
+**Tests** (2 tests):
+- [ ] Test: OPA client creation returns error instead of panic on failure
+- [ ] Test: OPA client handles TLS configuration errors gracefully
+
+**Implementation Notes**:
+```rust
+// Current (panic):
+.expect("Failed to create HTTP client");
+
+// Fix: Propagate error
+.map_err(|e| OpaError::HttpClientCreation(e.to_string()))?
+```
+
+---
+
+#### A.3. Watermark Image Fetcher Panic Fix
+**Location**: `src/watermark/image_fetcher.rs:146`
+**Issue**: `.expect()` causes panic if HTTP client creation fails
+**Impact**: Production crash during watermark fetching
+
+**Tests** (2 tests):
+- [ ] Test: Image fetcher returns error instead of panic on HTTP client failure
+- [ ] Test: Watermark processing handles fetch errors gracefully
+
+**Implementation Notes**:
+```rust
+// Current (panic):
+.expect("Failed to create HTTP client");
+
+// Fix: Return WatermarkError
+.map_err(|e| WatermarkError::HttpClientCreation(e.to_string()))?
+```
+
+---
+
+### B. High Priority Bug Fixes (Priority: SHORT-TERM)
+
+#### B.1. Disk Cache Clear Incomplete
+**Location**: `src/cache/disk/disk_cache.rs:224`
+**Issue**: Clear operation doesn't delete files from disk, leaving orphaned data
+**Impact**: Disk space leak, potential stale data
+
+**Tests** (3 tests):
+- [ ] Test: Disk cache clear() removes all cached files from disk
+- [ ] Test: Disk cache clear() removes index entries
+- [ ] Test: Disk cache directory is empty after clear()
+
+**Implementation Notes**:
+```rust
+// Current:
+// TODO: Optionally delete all files from disk
+
+// Fix: Add file deletion
+async fn clear(&self) -> CacheResult<()> {
+    // Clear in-memory index
+    self.index.write().await.clear();
+
+    // Delete all files in cache directory
+    let mut entries = tokio::fs::read_dir(&self.base_path).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        tokio::fs::remove_file(entry.path()).await?;
+    }
+    Ok(())
+}
+```
+
+---
+
+#### B.2. Rate Limiter Unbounded Memory
+**Location**: `src/rate_limit.rs:178`
+**Issue**: Per-IP rate limiters stored indefinitely without TTL cleanup
+**Impact**: Memory exhaustion under DDoS or high unique IP volume
+
+**Tests** (3 tests):
+- [ ] Test: Idle rate limiters are cleaned up after TTL expires
+- [ ] Test: Active rate limiters are not cleaned up
+- [ ] Test: Memory usage stays bounded under high unique IP load
+
+**Implementation Notes**:
+```rust
+// Fix: Add background cleanup task with TTL-based eviction
+struct RateLimiterEntry {
+    limiter: RateLimiter,
+    last_access: Instant,
+}
+
+// Cleanup task removes entries not accessed within TTL (e.g., 5 minutes)
+async fn cleanup_idle_limiters(&self) {
+    let ttl = Duration::from_secs(300);
+    let mut limiters = self.per_ip_limiters.write().await;
+    limiters.retain(|_, entry| entry.last_access.elapsed() < ttl);
+}
+```
+
+---
+
+### C. Cache-Control Header Compliance (RFC 7234)
+
+**Objective**: Parse Cache-Control headers from S3 responses and honor caching directives
+
+#### C.1. Cache-Control Header Parsing
+**Location**: New module `src/cache/control.rs`
+
+**Tests** (5 tests):
+- [ ] Test: Parses max-age directive from Cache-Control header
+- [ ] Test: Parses no-cache directive
+- [ ] Test: Parses no-store directive
+- [ ] Test: Parses private directive
+- [ ] Test: Parses must-revalidate directive
+- [ ] Test: Handles multiple directives in single header
+- [ ] Test: Handles missing Cache-Control header (use default TTL)
+
+**Implementation Notes**:
+```rust
+pub struct CacheControl {
+    pub max_age: Option<Duration>,
+    pub no_cache: bool,
+    pub no_store: bool,
+    pub private: bool,
+    pub must_revalidate: bool,
+    pub s_maxage: Option<Duration>,  // Shared cache specific
+}
+
+impl CacheControl {
+    pub fn parse(header_value: &str) -> Self {
+        // Parse comma-separated directives
+        // Handle: max-age=3600, no-cache, no-store, private, must-revalidate, s-maxage=7200
+    }
+
+    pub fn is_cacheable_by_shared_cache(&self) -> bool {
+        !self.no_store && !self.private && !self.no_cache
+    }
+
+    pub fn effective_ttl(&self, default: Duration) -> Duration {
+        self.s_maxage.or(self.max_age).unwrap_or(default)
+    }
+}
+```
+
+---
+
+#### C.2. Skip Caching for Non-Cacheable Responses
+**Location**: `src/proxy/mod.rs` (around line 3571)
+
+**Tests** (5 tests):
+- [ ] Test: Response with no-store is not cached
+- [ ] Test: Response with no-cache is not cached (served but not stored)
+- [ ] Test: Response with private is not cached by shared proxy
+- [ ] Test: Response with max-age=0 is not cached
+- [ ] Test: Response without Cache-Control uses default TTL
+
+**Implementation Notes**:
+```rust
+// Before creating cache entry:
+let cache_control = CacheControl::parse(
+    ctx.response_header("cache-control").unwrap_or("")
+);
+
+// Skip caching if directives indicate non-cacheable
+if !cache_control.is_cacheable_by_shared_cache() {
+    tracing::debug!(
+        cache_control = ?ctx.response_header("cache-control"),
+        "Skipping cache due to Cache-Control directives"
+    );
+    return Ok(()); // Don't cache
+}
+```
+
+---
+
+#### C.3. Honor max-age for TTL
+**Location**: `src/proxy/mod.rs:3578`
+
+**Tests** (4 tests):
+- [ ] Test: Cache entry TTL respects max-age when present
+- [ ] Test: Cache entry TTL respects s-maxage over max-age for shared cache
+- [ ] Test: Cache entry uses config default TTL when no max-age present
+- [ ] Test: Cache entry expires correctly based on max-age
+
+**Implementation Notes**:
+```rust
+// Current (hardcoded):
+Some(std::time::Duration::from_secs(3600)), // 1 hour TTL
+
+// Fix: Use parsed Cache-Control
+let ttl = cache_control.effective_ttl(self.config.cache_default_ttl);
+
+let cache_entry = CacheEntry::new(
+    bytes::Bytes::from(cache_data),
+    content_type,
+    etag,
+    last_modified,
+    Some(ttl),  // Dynamic TTL from Cache-Control
+);
+```
+
+---
+
+#### C.4. Must-Revalidate Support
+**Location**: `src/cache/mod.rs` (cache serving logic)
+
+**Tests** (3 tests):
+- [ ] Test: Stale entry with must-revalidate triggers revalidation
+- [ ] Test: Stale entry without must-revalidate may be served stale
+- [ ] Test: Revalidation uses If-None-Match with stored ETag
+
+**Implementation Notes**:
+```rust
+// When serving from cache:
+if cache_entry.is_stale() {
+    if cache_entry.must_revalidate {
+        // Must revalidate with origin
+        return self.revalidate_with_origin(ctx, &cache_entry).await;
+    } else {
+        // Can serve stale (stale-while-revalidate optional)
+        return Ok(cache_entry.data.clone());
+    }
+}
+```
+
+---
+
+### D. Integration Tests
+
+**Tests** (5 tests):
+- [ ] Test: End-to-end caching with max-age=60 expires correctly
+- [ ] Test: End-to-end no-store response bypasses cache
+- [ ] Test: End-to-end private response not cached
+- [ ] Test: Cache hit rate metrics are accurate
+- [ ] Test: Multiple requests to same object use cached response
+
+---
+
+### Summary
+
+| Section | Tests | Priority | Status |
+|---------|-------|----------|--------|
+| A.1 Cache Init | 3 | CRITICAL | [ ] |
+| A.2 OPA Panic | 2 | CRITICAL | [ ] |
+| A.3 Watermark Panic | 2 | CRITICAL | [ ] |
+| B.1 Disk Cache Clear | 3 | HIGH | [ ] |
+| B.2 Rate Limiter Memory | 3 | HIGH | [ ] |
+| C.1 CC Parsing | 7 | MEDIUM | [ ] |
+| C.2 Skip Non-Cacheable | 5 | MEDIUM | [ ] |
+| C.3 Honor max-age | 4 | MEDIUM | [ ] |
+| C.4 Must-Revalidate | 3 | MEDIUM | [ ] |
+| D. Integration | 5 | MEDIUM | [ ] |
+
+**Total Tests**: 37 tests
+**Estimated Effort**: 3-5 days
+**Dependencies**: None
+
+---
+
+### Verification
+
+```bash
+# Run all Phase 36 tests
+cargo test phase_36
+
+# Verify no panics in production code
+cargo clippy -- -D clippy::expect_used -D clippy::unwrap_used
+
+# Test cache behavior manually
+curl -v http://localhost:8080/public/test.txt
+# Check response headers for Cache-Control handling
+
+# Load test rate limiter memory
+hey -n 100000 -c 1000 http://localhost:8080/public/test.txt
+# Monitor memory usage during test
 ```
 
 ---

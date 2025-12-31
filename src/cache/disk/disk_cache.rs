@@ -221,8 +221,23 @@ impl Cache for DiskCache {
         // Reset eviction counter
         self.eviction_count.store(0, Ordering::SeqCst);
 
-        // TODO: Optionally delete all files from disk (left for later optimization)
-        // For now, orphaned files will be cleaned up during next validate_and_repair()
+        // Delete all files from cache directory
+        // This prevents orphaned files from persisting on disk
+        if let Ok(mut entries) = tokio::fs::read_dir(&self.cache_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                // Only delete regular files (not directories)
+                if path.is_file() {
+                    if let Err(e) = tokio::fs::remove_file(&path).await {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "Failed to delete cache file during clear"
+                        );
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
