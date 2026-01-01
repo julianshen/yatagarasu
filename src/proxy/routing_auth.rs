@@ -216,8 +216,13 @@ pub fn build_opa_input(
     client_ip: Option<String>,
 ) -> OpaInput {
     let jwt_claims = claims
-        .map(|c| serde_json::to_value(c).unwrap_or_default())
-        .unwrap_or(serde_json::json!({}));
+        .map(|c| {
+            serde_json::to_value(c).unwrap_or_else(|e| {
+                tracing::warn!("Failed to serialize JWT claims for OPA input: {}", e);
+                serde_json::json!({})
+            })
+        })
+        .unwrap_or_else(|| serde_json::json!({}));
 
     OpaInput::new(
         jwt_claims,
@@ -321,8 +326,13 @@ pub async fn authorize_with_openfga(
 
     // Extract user ID from claims
     let jwt_claims = claims
-        .map(|c| serde_json::to_value(c).unwrap_or_default())
-        .unwrap_or(serde_json::json!({}));
+        .map(|c| {
+            serde_json::to_value(c).unwrap_or_else(|e| {
+                tracing::warn!("Failed to serialize JWT claims for OpenFGA authorization: {}", e);
+                serde_json::json!({})
+            })
+        })
+        .unwrap_or_else(|| serde_json::json!({}));
 
     let user_claim = bucket_config
         .authorization
