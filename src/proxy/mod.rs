@@ -11,6 +11,7 @@
 mod helpers;
 mod init;
 mod security;
+mod special_endpoints;
 
 use async_trait::async_trait;
 use pingora_core::upstreams::peer::HttpPeer;
@@ -873,162 +874,62 @@ impl ProxyHttp for YatagarasuProxy {
 
         // Special handling for /health endpoint (bypass auth, return health status)
         if path == "/health" {
-            let uptime_seconds = self.start_time.elapsed().as_secs();
-            let version = env!("CARGO_PKG_VERSION");
+            let response = special_endpoints::handle_health(self.start_time);
 
-            let health_response = serde_json::json!({
-                "status": "healthy",
-                "uptime_seconds": uptime_seconds,
-                "version": version
-            })
-            .to_string();
-
-            let mut header = ResponseHeader::build(200, None)?;
-            header.insert_header("Content-Type", "application/json")?;
-            header.insert_header("Content-Length", health_response.len().to_string())?;
+            let mut header = ResponseHeader::build(response.status, None)?;
+            header.insert_header("Content-Type", response.content_type)?;
+            header.insert_header("Content-Length", response.body.len().to_string())?;
 
             session
                 .write_response_header(Box::new(header), false)
                 .await?;
             session
-                .write_response_body(Some(health_response.into()), true)
+                .write_response_body(Some(response.body.into()), true)
                 .await?;
 
-            // Record metrics for /health endpoint itself
-            self.metrics.increment_status_count(200);
-
-            return Ok(true); // Short-circuit (response already sent)
+            self.metrics.increment_status_count(response.status);
+            return Ok(true);
         }
 
-        // Special handling for /ready endpoint (bypass auth, check S3 backend health with per-replica details)
+        // Special handling for /ready endpoint (bypass auth, check S3 backend health)
         if path == "/ready" {
-            // Check health of all S3 backends with per-replica granularity (Phase 23)
-            let mut backends_health = serde_json::Map::new();
-            let mut all_healthy = true;
+            let response =
+                special_endpoints::handle_ready(&config.buckets, &self.replica_sets, &self.metrics);
 
-            for bucket_config in &config.buckets {
-                // Get the ReplicaSet for this bucket
-                if let Some(replica_set) = self.replica_sets.get(&bucket_config.name) {
-                    // Check health of each replica via circuit breaker state
-                    let mut replicas_health = serde_json::Map::new();
-                    let mut bucket_has_healthy_replica = false;
-
-                    for replica in &replica_set.replicas {
-                        // Check circuit breaker state to determine health
-                        let is_healthy = replica.circuit_breaker.state()
-                            == crate::circuit_breaker::CircuitState::Closed;
-
-                        if is_healthy {
-                            bucket_has_healthy_replica = true;
-                        }
-
-                        replicas_health.insert(
-                            replica.name.clone(),
-                            serde_json::Value::String(if is_healthy {
-                                "healthy".to_string()
-                            } else {
-                                "unhealthy".to_string()
-                            }),
-                        );
-                    }
-
-                    // Determine overall bucket status
-                    let bucket_status = if bucket_has_healthy_replica {
-                        if replicas_health.values().all(|v| v == "healthy") {
-                            "ready"
-                        } else {
-                            "degraded" // Some replicas unhealthy but at least one healthy
-                        }
-                    } else {
-                        all_healthy = false;
-                        "unavailable" // All replicas unhealthy
-                    };
-
-                    // Record backend health in metrics (for Prometheus export)
-                    self.metrics
-                        .set_backend_health(&bucket_config.name, bucket_has_healthy_replica);
-
-                    // Build bucket health object with status and per-replica details
-                    let mut bucket_health = serde_json::Map::new();
-                    bucket_health.insert(
-                        "status".to_string(),
-                        serde_json::Value::String(bucket_status.to_string()),
-                    );
-                    bucket_health.insert(
-                        "replicas".to_string(),
-                        serde_json::Value::Object(replicas_health),
-                    );
-
-                    backends_health.insert(
-                        bucket_config.name.clone(),
-                        serde_json::Value::Object(bucket_health),
-                    );
-                } else {
-                    // Fallback: No ReplicaSet found (shouldn't happen with proper config)
-                    tracing::warn!(
-                        bucket = %bucket_config.name,
-                        "No ReplicaSet found for bucket, reporting as unavailable"
-                    );
-                    all_healthy = false;
-
-                    let mut bucket_health = serde_json::Map::new();
-                    bucket_health.insert(
-                        "status".to_string(),
-                        serde_json::Value::String("unavailable".to_string()),
-                    );
-                    backends_health.insert(
-                        bucket_config.name.clone(),
-                        serde_json::Value::Object(bucket_health),
-                    );
-                }
-            }
-
-            let status_code: u16 = if all_healthy { 200 } else { 503 };
-            let ready_response = serde_json::json!({
-                "status": if all_healthy { "ready" } else { "unavailable" },
-                "backends": backends_health
-            })
-            .to_string();
-
-            let mut header = ResponseHeader::build(status_code, None)?;
-            header.insert_header("Content-Type", "application/json")?;
-            header.insert_header("Content-Length", ready_response.len().to_string())?;
+            let mut header = ResponseHeader::build(response.status, None)?;
+            header.insert_header("Content-Type", response.content_type)?;
+            header.insert_header("Content-Length", response.body.len().to_string())?;
 
             session
                 .write_response_header(Box::new(header), false)
                 .await?;
             session
-                .write_response_body(Some(ready_response.into()), true)
+                .write_response_body(Some(response.body.into()), true)
                 .await?;
 
-            // Record metrics for /ready endpoint itself
-            self.metrics.increment_status_count(status_code);
-
-            return Ok(true); // Short-circuit (response already sent)
+            self.metrics.increment_status_count(response.status);
+            return Ok(true);
         }
 
         // Special handling for /metrics endpoint (bypass auth, return Prometheus metrics)
         if path == "/metrics" {
-            let mut metrics_output = self.metrics.export_prometheus();
+            let circuit_breaker_metrics = self.export_circuit_breaker_metrics();
+            let response =
+                special_endpoints::handle_metrics(&self.metrics, circuit_breaker_metrics);
 
-            // Append circuit breaker metrics for each bucket
-            metrics_output.push_str(&self.export_circuit_breaker_metrics());
-
-            let mut header = ResponseHeader::build(200, None)?;
-            header.insert_header("Content-Type", "text/plain; version=0.0.4")?;
-            header.insert_header("Content-Length", metrics_output.len().to_string())?;
+            let mut header = ResponseHeader::build(response.status, None)?;
+            header.insert_header("Content-Type", response.content_type)?;
+            header.insert_header("Content-Length", response.body.len().to_string())?;
 
             session
                 .write_response_header(Box::new(header), false)
                 .await?;
             session
-                .write_response_body(Some(metrics_output.into()), true)
+                .write_response_body(Some(response.body.into()), true)
                 .await?;
 
-            // Record metrics for /metrics endpoint itself
-            self.metrics.increment_status_count(200);
-
-            return Ok(true); // Short-circuit (response already sent)
+            self.metrics.increment_status_count(response.status);
+            return Ok(true);
         }
 
         // Admin API Router (Phase 1)
