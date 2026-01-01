@@ -2939,6 +2939,706 @@ hey -n 100000 -c 1000 http://localhost:8080/public/test.txt
 
 ---
 
+## Phase 37: Proxy Module Refactoring (v1.7.0)
+
+**Target Version**: v1.7.0
+**Priority**: HIGH (Technical Debt)
+**Type**: STRUCTURAL (No Behavioral Changes)
+**Last Updated**: 2025-12-31
+
+### Overview
+
+The `src/proxy/mod.rs` file has grown to **4,184 lines** with a monolithic `request_filter()` method spanning **2,450 lines**. This phase splits it into focused, maintainable modules following the Single Responsibility Principle.
+
+**Current State**:
+- `proxy/mod.rs`: 4,184 lines
+- `proxy/init.rs`: 441 lines
+- `proxy/helpers.rs`: 183 lines
+- Main struct `YatagarasuProxy`: 97 fields
+- Monolithic `request_filter()`: 2,450 lines mixing 10+ concerns
+
+**Target State**:
+- `proxy/mod.rs`: ~300 lines (struct definition, trait routing)
+- 9 focused sub-modules with clear responsibilities
+- Each module: 100-550 lines
+- Clear dependency graph between modules
+
+---
+
+### Architecture: Target Module Structure
+
+```
+src/proxy/
+├── mod.rs                    # Core struct, trait dispatch (~300 lines)
+├── init.rs                   # Initialization (existing, 441 lines)
+├── helpers.rs                # Utilities (existing, 183 lines)
+├── request_filter.rs         # Request pre-processing (~400 lines)
+├── security.rs               # Security validations (~300 lines)
+├── special_endpoints.rs      # /health, /metrics, /admin/* (~800 lines)
+├── routing_auth.rs           # Routing & authorization (~350 lines)
+├── cache_handler.rs          # Cache hit/miss handling (~200 lines)
+├── upstream.rs               # S3 request preparation (~200 lines)
+├── response_handler.rs       # Response processing (~400 lines)
+├── error_handler.rs          # Error & retry logic (~150 lines)
+└── logging.rs                # Metrics & audit logging (~200 lines)
+```
+
+---
+
+### Guiding Principles
+
+1. **Pure Structural Changes**: No behavioral modifications - tests must pass unchanged
+2. **Incremental Extraction**: One module at a time, commit after each
+3. **Backward Compatibility**: Re-exports from `mod.rs` maintain public API
+4. **Test Stability**: All 1,313+ tests pass after each extraction
+5. **Commit Discipline**: Each commit tagged `[STRUCTURAL]`
+6. **No Feature Mixing**: Don't fix bugs or add features during refactor
+
+---
+
+### Phase 37.1: Preparation & Security Module
+
+**Objective**: Extract security validations into dedicated module
+
+#### Tests (Structural Verification)
+
+- [x] Test: Security module exists at `src/proxy/security.rs`
+- [x] Test: `check_uri_length()` function is accessible from security module
+- [x] Test: `check_header_size()` function is accessible from security module
+- [x] Test: `check_body_size()` function is accessible from security module
+- [x] Test: `check_path_traversal()` function is accessible from security module
+- [x] Test: `check_sql_injection()` function is accessible from security module
+- [x] Test: `validate_request_security()` combined function works correctly
+- [x] Test: All existing security-related tests still pass
+- [x] Test: `mod.rs` includes security module declaration
+
+#### Implementation Notes
+
+**Extract from `request_filter()` lines 690-972:**
+```rust
+// src/proxy/security.rs
+
+use pingora_http::RequestHeader;
+use crate::config::SecurityLimits;
+
+/// HTTP method validation result
+pub enum MethodValidation {
+    Allowed,
+    MethodNotAllowed { method: String },
+}
+
+/// Validate HTTP method (GET, HEAD, OPTIONS only)
+pub fn validate_http_method(method: &str) -> MethodValidation { ... }
+
+/// Validate URI length against configured limits
+pub fn validate_uri_length(uri: &str, limits: &SecurityLimits) -> Result<(), SecurityError> { ... }
+
+/// Validate request headers (size, count)
+pub fn validate_headers(headers: &RequestHeader, limits: &SecurityLimits) -> Result<(), SecurityError> { ... }
+
+/// Detect path traversal attacks (../, encoded variants)
+pub fn detect_path_traversal(raw_uri: &str) -> Result<(), SecurityError> { ... }
+
+/// Basic SQL injection pattern detection
+pub fn detect_sql_injection(path: &str, query: &str) -> Result<(), SecurityError> { ... }
+
+/// Combined security validation
+pub fn validate_request_security(
+    method: &str,
+    uri: &str,
+    headers: &RequestHeader,
+    limits: &SecurityLimits,
+) -> Result<(), SecurityError> { ... }
+```
+
+**Update `mod.rs`**:
+```rust
+mod security;
+pub use security::*; // Re-export for backward compatibility
+```
+
+---
+
+### Phase 37.2: Special Endpoints Module
+
+**Objective**: Extract built-in endpoint handlers (/health, /metrics, /admin/*)
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Special endpoints module exists at `src/proxy/special_endpoints.rs`
+- [ ] Test: `handle_health_endpoint()` is accessible
+- [ ] Test: `handle_ready_endpoint()` is accessible
+- [ ] Test: `handle_metrics_endpoint()` is accessible
+- [ ] Test: `handle_admin_reload()` is accessible
+- [ ] Test: `handle_cache_purge()` is accessible
+- [ ] Test: `handle_cache_stats()` is accessible
+- [ ] Test: `handle_cache_info()` is accessible
+- [ ] Test: All existing endpoint tests still pass
+- [ ] Test: Health endpoint returns 200 with correct JSON structure
+- [ ] Test: Metrics endpoint returns Prometheus format
+
+#### Implementation Notes
+
+**Extract from `request_filter()` lines 1,019-2,360:**
+```rust
+// src/proxy/special_endpoints.rs
+
+use pingora_http::{RequestHeader, ResponseHeader};
+use crate::metrics::Metrics;
+use crate::cache::TieredCache;
+
+/// Endpoint handler result
+pub enum EndpointResult {
+    Handled(Box<ResponseHeader>),
+    NotSpecialEndpoint,
+}
+
+/// Route to special endpoint handler if path matches
+pub fn handle_special_endpoint(
+    path: &str,
+    method: &str,
+    metrics: &Metrics,
+    cache: Option<&TieredCache>,
+    config: &Config,
+) -> EndpointResult { ... }
+
+// Individual handlers
+pub fn handle_health_endpoint() -> ResponseHeader { ... }
+pub fn handle_ready_endpoint(replicas: &ReplicaSets) -> ResponseHeader { ... }
+pub fn handle_metrics_endpoint(metrics: &Metrics) -> ResponseHeader { ... }
+pub fn handle_admin_reload(config_path: &Path) -> ResponseHeader { ... }
+pub fn handle_cache_purge(cache: &TieredCache, bucket: Option<&str>, key: Option<&str>) -> ResponseHeader { ... }
+pub fn handle_cache_stats(cache: &TieredCache) -> ResponseHeader { ... }
+pub fn handle_cache_info(cache: &TieredCache, key: &str) -> ResponseHeader { ... }
+```
+
+---
+
+### Phase 37.3: Routing & Authorization Module
+
+**Objective**: Extract bucket routing and auth pipeline
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Routing auth module exists at `src/proxy/routing_auth.rs`
+- [ ] Test: `route_to_bucket()` is accessible
+- [ ] Test: `check_rate_limits()` is accessible
+- [ ] Test: `check_circuit_breaker()` is accessible
+- [ ] Test: `authenticate_jwt()` is accessible
+- [ ] Test: `authorize_with_opa()` is accessible
+- [ ] Test: `authorize_with_openfga()` is accessible
+- [ ] Test: All existing auth tests still pass
+- [ ] Test: JWT validation behavior unchanged
+- [ ] Test: OPA authorization behavior unchanged
+
+#### Implementation Notes
+
+**Extract from `request_filter()` lines 2,362-2,698:**
+```rust
+// src/proxy/routing_auth.rs
+
+use crate::router::Router;
+use crate::auth::Claims;
+use crate::opa::OpaClient;
+use crate::rate_limit::RateLimitManager;
+
+/// Authorization result
+pub enum AuthResult {
+    Allowed { claims: Option<Claims> },
+    Denied { status: u16, message: String },
+    RateLimited,
+    CircuitOpen,
+}
+
+/// Route request to bucket configuration
+pub fn route_to_bucket<'a>(
+    router: &'a Router,
+    path: &str,
+) -> Option<&'a BucketConfig> { ... }
+
+/// Check rate limits for request
+pub fn check_rate_limits(
+    manager: &RateLimitManager,
+    bucket: &str,
+    client_ip: IpAddr,
+    user_id: Option<&str>,
+) -> Result<(), RateLimitError> { ... }
+
+/// Check circuit breaker state
+pub fn check_circuit_breaker(
+    breakers: &HashMap<String, CircuitBreaker>,
+    bucket: &str,
+) -> Result<(), CircuitBreakerError> { ... }
+
+/// Authenticate with JWT
+pub async fn authenticate_jwt(
+    bucket_config: &BucketConfig,
+    headers: &HashMap<String, String>,
+) -> Result<Option<Claims>, AuthError> { ... }
+
+/// Authorize with OPA
+pub async fn authorize_with_opa(
+    client: &OpaClient,
+    cache: &OpaCache,
+    input: &OpaInput,
+) -> Result<bool, OpaError> { ... }
+
+/// Authorize with OpenFGA
+pub async fn authorize_with_openfga(
+    client: &OpenFgaClient,
+    request: &FgaRequest,
+) -> Result<bool, OpenFgaError> { ... }
+```
+
+---
+
+### Phase 37.4: Cache Handler Module
+
+**Objective**: Extract cache lookup and streaming coalescing
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Cache handler module exists at `src/proxy/cache_handler.rs`
+- [ ] Test: `check_cache_hit()` is accessible
+- [ ] Test: `serve_from_cache()` is accessible
+- [ ] Test: `handle_conditional_request()` is accessible
+- [ ] Test: `join_streaming_coalescer()` is accessible
+- [ ] Test: All existing cache tests still pass
+- [ ] Test: Cache hit returns X-Cache: HIT header
+- [ ] Test: Conditional 304 response works correctly
+
+#### Implementation Notes
+
+**Extract from `request_filter()` lines 2,700-2,852:**
+```rust
+// src/proxy/cache_handler.rs
+
+use crate::cache::{TieredCache, CacheKey, CacheEntry};
+use crate::request_coalescing::Coalescer;
+
+/// Cache lookup result
+pub enum CacheLookup {
+    Hit { entry: CacheEntry },
+    ConditionalNotModified,
+    Miss,
+    CoalescerFollower { receiver: StreamReceiver },
+}
+
+/// Check if request can be served from cache
+pub async fn check_cache_hit(
+    cache: &TieredCache,
+    key: &CacheKey,
+    if_none_match: Option<&str>,
+    if_modified_since: Option<&str>,
+) -> CacheLookup { ... }
+
+/// Build response from cache entry
+pub fn serve_from_cache(
+    entry: &CacheEntry,
+    request_id: &str,
+) -> (ResponseHeader, Bytes) { ... }
+
+/// Handle conditional request (If-None-Match, If-Modified-Since)
+pub fn handle_conditional_request(
+    entry: &CacheEntry,
+    if_none_match: Option<&str>,
+    if_modified_since: Option<&str>,
+) -> Option<ResponseHeader> { ... }
+
+/// Join streaming coalescer as follower
+pub async fn join_streaming_coalescer(
+    coalescer: &Coalescer,
+    key: &str,
+) -> Option<StreamReceiver> { ... }
+```
+
+---
+
+### Phase 37.5: Upstream Request Module
+
+**Objective**: Extract S3 request preparation and signing
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Upstream module exists at `src/proxy/upstream.rs`
+- [ ] Test: `prepare_s3_request()` is accessible
+- [ ] Test: `sign_request()` is accessible
+- [ ] Test: `select_replica()` is accessible
+- [ ] Test: All existing S3 signing tests still pass
+- [ ] Test: AWS SigV4 signatures are valid
+- [ ] Test: Replica selection with failover works
+
+#### Implementation Notes
+
+**Extract from `upstream_request_filter()` lines 3,035-3,214:**
+```rust
+// src/proxy/upstream.rs
+
+use crate::s3::{S3Client, S3Request, SignedHeaders};
+use crate::router::Router;
+
+/// Prepare S3 request with signed headers
+pub fn prepare_s3_request(
+    router: &Router,
+    path: &str,
+    method: &str,
+    bucket_config: &BucketConfig,
+    replica_name: Option<&str>,
+) -> Result<S3Request, S3Error> { ... }
+
+/// Sign request with AWS SigV4
+pub fn sign_request(
+    request: &S3Request,
+    credentials: &S3Credentials,
+    region: &str,
+) -> SignedHeaders { ... }
+
+/// Select healthy replica from replica set
+pub fn select_replica(
+    replica_set: &ReplicaSet,
+    circuit_breakers: &HashMap<String, CircuitBreaker>,
+) -> Option<&ReplicaConfig> { ... }
+
+/// Build upstream peer from bucket configuration
+pub fn build_upstream_peer(
+    bucket_config: &BucketConfig,
+    replica: Option<&ReplicaConfig>,
+) -> HttpPeer { ... }
+```
+
+---
+
+### Phase 37.6: Response Handler Module
+
+**Objective**: Extract response processing, caching, and optimization
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Response handler module exists at `src/proxy/response_handler.rs`
+- [ ] Test: `capture_response_headers()` is accessible
+- [ ] Test: `buffer_response_chunk()` is accessible
+- [ ] Test: `finalize_response()` is accessible
+- [ ] Test: `populate_cache()` is accessible
+- [ ] Test: `apply_image_optimization()` is accessible
+- [ ] Test: `apply_watermark()` is accessible
+- [ ] Test: All existing response processing tests pass
+- [ ] Test: Cache population respects Cache-Control headers
+- [ ] Test: Image optimization produces valid output
+
+#### Implementation Notes
+
+**Extract from lines 3,369-3,893:**
+```rust
+// src/proxy/response_handler.rs
+
+use crate::cache::{TieredCache, CacheEntry, CacheControl};
+use crate::image_optimizer::ImageParams;
+use crate::watermark::WatermarkProcessor;
+
+/// Capture response headers for caching
+pub fn capture_response_headers(
+    headers: &ResponseHeader,
+) -> CapturedHeaders { ... }
+
+/// Buffer response chunk, check size limits
+pub fn buffer_response_chunk(
+    buffer: &mut Vec<u8>,
+    chunk: &[u8],
+    max_size: usize,
+) -> BufferResult { ... }
+
+/// Finalize buffered response (cache, optimize, watermark)
+pub async fn finalize_response(
+    buffer: Vec<u8>,
+    captured_headers: &CapturedHeaders,
+    cache: Option<&TieredCache>,
+    image_params: Option<&ImageParams>,
+    watermark_processor: Option<&WatermarkProcessor>,
+    cache_key: &CacheKey,
+) -> FinalizedResponse { ... }
+
+/// Populate cache with response data
+pub async fn populate_cache(
+    cache: &TieredCache,
+    key: CacheKey,
+    data: Bytes,
+    headers: &CapturedHeaders,
+) -> Result<(), CacheError> { ... }
+
+/// Apply image optimization
+pub fn apply_image_optimization(
+    data: &[u8],
+    params: &ImageParams,
+) -> Result<Vec<u8>, ImageError> { ... }
+
+/// Apply watermark to image
+pub async fn apply_watermark(
+    image: DynamicImage,
+    processor: &WatermarkProcessor,
+    context: &WatermarkContext,
+) -> Result<DynamicImage, WatermarkError> { ... }
+```
+
+---
+
+### Phase 37.7: Error Handler Module
+
+**Objective**: Extract error handling and retry logic
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Error handler module exists at `src/proxy/error_handler.rs`
+- [ ] Test: `handle_connection_failure()` is accessible
+- [ ] Test: `handle_proxy_error()` is accessible
+- [ ] Test: `should_retry()` is accessible
+- [ ] Test: `record_error_metrics()` is accessible
+- [ ] Test: All existing error handling tests pass
+- [ ] Test: Retry logic respects configured policies
+- [ ] Test: Circuit breaker is updated on errors
+
+#### Implementation Notes
+
+**Extract from lines 3,896-4,043:**
+```rust
+// src/proxy/error_handler.rs
+
+use crate::retry::RetryPolicy;
+use crate::circuit_breaker::CircuitBreaker;
+
+/// Error handling result
+pub enum ErrorAction {
+    Retry { attempt: u32 },
+    Fail { status: u16, message: String },
+}
+
+/// Handle connection failure
+pub fn handle_connection_failure(
+    error: &Box<Error>,
+    retry_policy: Option<&RetryPolicy>,
+    attempt: u32,
+    ctx: &mut RequestContext,
+) -> ErrorAction { ... }
+
+/// Handle error during proxying
+pub fn handle_proxy_error(
+    error: &Box<Error>,
+    retry_policy: Option<&RetryPolicy>,
+    attempt: u32,
+    buffer_complete: bool,
+    ctx: &mut RequestContext,
+) -> ErrorAction { ... }
+
+/// Determine if request should be retried
+pub fn should_retry(
+    policy: &RetryPolicy,
+    attempt: u32,
+    error: &Error,
+) -> bool { ... }
+
+/// Record error in metrics
+pub fn record_error_metrics(
+    metrics: &Metrics,
+    bucket: &str,
+    error_type: &str,
+) { ... }
+```
+
+---
+
+### Phase 37.8: Logging Module
+
+**Objective**: Extract metrics recording and audit logging
+
+#### Tests (Structural Verification)
+
+- [ ] Test: Logging module exists at `src/proxy/logging.rs`
+- [ ] Test: `record_request_completion()` is accessible
+- [ ] Test: `update_circuit_breaker()` is accessible
+- [ ] Test: `extract_s3_error()` is accessible
+- [ ] Test: `finalize_audit_log()` is accessible
+- [ ] Test: All existing logging tests pass
+- [ ] Test: Metrics are recorded correctly
+- [ ] Test: Audit log contains required fields
+
+#### Implementation Notes
+
+**Extract from lines 3,217-3,368:**
+```rust
+// src/proxy/logging.rs
+
+use crate::metrics::Metrics;
+use crate::audit::AuditWriter;
+use crate::circuit_breaker::CircuitBreaker;
+
+/// Record request completion metrics
+pub fn record_request_completion(
+    metrics: &Metrics,
+    bucket: &str,
+    status: u16,
+    duration: Duration,
+    method: &str,
+    bytes_sent: u64,
+) { ... }
+
+/// Update circuit breaker state based on response
+pub fn update_circuit_breaker(
+    breaker: &CircuitBreaker,
+    success: bool,
+) { ... }
+
+/// Extract S3 error information from response
+pub fn extract_s3_error(
+    headers: &ResponseHeader,
+    body: Option<&[u8]>,
+) -> Option<S3ErrorInfo> { ... }
+
+/// Finalize audit log entry
+pub async fn finalize_audit_log(
+    writer: &AuditWriter,
+    ctx: &RequestContext,
+    status: u16,
+    bytes_sent: u64,
+) { ... }
+
+/// Log replica failover information
+pub fn log_replica_info(
+    bucket: &str,
+    replica: &str,
+    status: &str,
+) { ... }
+```
+
+---
+
+### Phase 37.9: Request Filter Simplification
+
+**Objective**: Simplify `request_filter()` to orchestration-only logic
+
+#### Tests (Structural Verification)
+
+- [ ] Test: `request_filter()` is under 200 lines
+- [ ] Test: `request_filter()` only orchestrates sub-module calls
+- [ ] Test: All existing integration tests pass
+- [ ] Test: Request flow unchanged (security → routing → auth → cache → upstream)
+- [ ] Test: All error responses unchanged
+
+#### Implementation Notes
+
+**Simplified `request_filter()`:**
+```rust
+async fn request_filter(
+    &self,
+    session: &mut Session,
+    ctx: &mut Self::CTX,
+) -> Result<bool> {
+    // 1. Security validations
+    if let Err(e) = security::validate_request_security(...) {
+        return self.send_error_response(session, e).await;
+    }
+
+    // 2. Special endpoints
+    if let EndpointResult::Handled(resp) = special_endpoints::handle_special_endpoint(...) {
+        return self.send_response(session, resp).await;
+    }
+
+    // 3. Route to bucket
+    let bucket_config = match routing_auth::route_to_bucket(...) {
+        Some(config) => config,
+        None => return self.send_404(session).await,
+    };
+
+    // 4. Rate limiting & circuit breaker
+    routing_auth::check_rate_limits(...)?;
+    routing_auth::check_circuit_breaker(...)?;
+
+    // 5. Authentication & authorization
+    let claims = routing_auth::authenticate_jwt(...).await?;
+    routing_auth::authorize_with_opa(...).await?;
+    routing_auth::authorize_with_openfga(...).await?;
+
+    // 6. Cache hit check
+    match cache_handler::check_cache_hit(...).await {
+        CacheLookup::Hit { entry } => {
+            return self.serve_cached_response(session, entry).await;
+        }
+        CacheLookup::ConditionalNotModified => {
+            return self.send_304(session).await;
+        }
+        CacheLookup::CoalescerFollower { receiver } => {
+            return self.handle_streaming_follower(session, receiver).await;
+        }
+        CacheLookup::Miss => {}
+    }
+
+    // 7. Continue to upstream
+    Ok(false)
+}
+```
+
+---
+
+### Phase 37.10: Final Cleanup & Documentation
+
+**Objective**: Final integration, documentation, and verification
+
+#### Tests (Structural Verification)
+
+- [ ] Test: All 1,313+ tests pass
+- [ ] Test: No clippy warnings
+- [ ] Test: Code formatted with rustfmt
+- [ ] Test: `proxy/mod.rs` is under 400 lines
+- [ ] Test: Each sub-module has doc comments
+- [ ] Test: Module dependency graph is acyclic
+- [ ] Test: Public API unchanged (re-exports work)
+- [ ] Test: Benchmark performance unchanged (±5%)
+
+#### Documentation Updates
+
+- [ ] Update `CLAUDE.md` with new module structure
+- [ ] Add module-level doc comments to each new file
+- [ ] Update architecture diagram in `docs/`
+
+---
+
+### Summary
+
+| Phase | Module | Lines | Status |
+|-------|--------|-------|--------|
+| 37.1 | security.rs | ~300 | [ ] |
+| 37.2 | special_endpoints.rs | ~800 | [ ] |
+| 37.3 | routing_auth.rs | ~350 | [ ] |
+| 37.4 | cache_handler.rs | ~200 | [ ] |
+| 37.5 | upstream.rs | ~200 | [ ] |
+| 37.6 | response_handler.rs | ~400 | [ ] |
+| 37.7 | error_handler.rs | ~150 | [ ] |
+| 37.8 | logging.rs | ~200 | [ ] |
+| 37.9 | mod.rs simplification | ~300 | [ ] |
+| 37.10 | Final cleanup | - | [ ] |
+
+**Total Tests**: 58 structural verification tests
+**Estimated Effort**: 3-5 days
+**Risk Level**: Low (pure structural, no behavioral changes)
+
+---
+
+### Verification Commands
+
+```bash
+# After each phase, run:
+cargo test --lib                    # All unit tests pass
+cargo test --test '*'               # All integration tests pass
+cargo clippy -- -D warnings         # No warnings
+cargo fmt --check                   # Properly formatted
+
+# Performance verification (Phase 37.10):
+cargo bench                         # Performance within ±5%
+
+# Line count verification:
+wc -l src/proxy/*.rs               # Check module sizes
+```
+
+---
+
 ## Notes and Decisions
 
 ### Design Decisions
