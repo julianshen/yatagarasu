@@ -88,6 +88,10 @@ pub struct ProxyErrorContext {
 
 /// Check if a retry should be attempted based on policy and current state.
 ///
+/// This function uses 1-indexed attempts consistently:
+/// - attempt=1 is the first attempt
+/// - attempt=max_attempts is the last allowed attempt (no more retries)
+///
 /// # Arguments
 ///
 /// * `retry_policy` - Optional retry policy for the bucket.
@@ -97,6 +101,13 @@ pub struct ProxyErrorContext {
 /// # Returns
 ///
 /// A `RetryEligibility` indicating whether retry is allowed.
+///
+/// # Note
+///
+/// This uses `RetryPolicy::is_retriable_status()` which only considers
+/// 500/502/503/504 as retriable. The broader `RETRIABLE_STATUS_CODES`
+/// constant in this module (which also includes 408/429) is provided
+/// for classification purposes but not used for policy-based retry decisions.
 pub fn check_retry_eligibility(
     retry_policy: Option<&RetryPolicy>,
     current_attempt: u32,
@@ -108,22 +119,23 @@ pub fn check_retry_eligibility(
         };
     };
 
-    if !policy.should_retry(current_attempt, status_code) {
-        // Check if it's due to attempts exhausted or non-retriable status
-        if current_attempt >= policy.max_attempts {
-            return RetryEligibility::NotEligible {
-                reason: FailReason::AttemptsExhausted {
-                    attempts: current_attempt,
-                    max_attempts: policy.max_attempts,
-                },
-            };
-        } else {
-            return RetryEligibility::NotEligible {
-                reason: FailReason::NotRetriableStatus {
-                    status: status_code,
-                },
-            };
-        }
+    // Check attempts first (1-indexed: attempt >= max_attempts means exhausted)
+    if current_attempt >= policy.max_attempts {
+        return RetryEligibility::NotEligible {
+            reason: FailReason::AttemptsExhausted {
+                attempts: current_attempt,
+                max_attempts: policy.max_attempts,
+            },
+        };
+    }
+
+    // Check if status code is retriable according to policy
+    if !policy.is_retriable_status(status_code) {
+        return RetryEligibility::NotEligible {
+            reason: FailReason::NotRetriableStatus {
+                status: status_code,
+            },
+        };
     }
 
     RetryEligibility::Eligible { current_attempt }
@@ -280,9 +292,18 @@ pub fn classify_status(status_code: u16) -> ErrorClassification {
 // Backoff Calculation
 // ============================================================================
 
+/// Maximum exponent for backoff calculation to prevent overflow.
+/// With this cap, the maximum multiplier is 2^10 = 1024.
+const MAX_BACKOFF_EXPONENT: u32 = 10;
+
 /// Calculate backoff delay for a retry attempt.
 ///
-/// Uses exponential backoff with jitter.
+/// Uses exponential backoff: `initial_backoff_ms * 2^(attempt-1)`.
+/// The result is capped at `max_backoff_ms`.
+///
+/// Note: This is a deterministic calculation without jitter.
+/// For production use with multiple clients, consider adding
+/// jitter on top of this base delay to prevent thundering herd.
 ///
 /// # Arguments
 ///
@@ -295,7 +316,9 @@ pub fn classify_status(status_code: u16) -> ErrorClassification {
 /// Backoff delay in milliseconds.
 pub fn calculate_backoff(attempt: u32, initial_backoff_ms: u64, max_backoff_ms: u64) -> u64 {
     // Exponential backoff: initial * 2^(attempt-1)
-    let base_delay = initial_backoff_ms.saturating_mul(1u64 << attempt.saturating_sub(1).min(10));
+    // Cap exponent to prevent overflow
+    let exponent = attempt.saturating_sub(1).min(MAX_BACKOFF_EXPONENT);
+    let base_delay = initial_backoff_ms.saturating_mul(1u64 << exponent);
 
     // Cap at max backoff
     base_delay.min(max_backoff_ms)
