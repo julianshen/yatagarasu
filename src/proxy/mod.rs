@@ -16,6 +16,8 @@ mod init;
 mod routing_auth;
 mod security;
 mod special_endpoints;
+#[allow(dead_code)] // Phase 37.5: Extracted module, integration pending
+mod upstream;
 
 use async_trait::async_trait;
 use pingora_core::upstreams::peer::HttpPeer;
