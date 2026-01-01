@@ -64,13 +64,15 @@ impl S3Credentials {
     pub fn host_for_signing(&self) -> String {
         if let Some(ref custom_endpoint) = self.endpoint {
             // For custom endpoints (MinIO), use hostname WITHOUT port
-            custom_endpoint
+            // Filter out empty strings to handle malformed URLs like "http://:9000"
+            let host = custom_endpoint
                 .trim_start_matches("http://")
                 .trim_start_matches("https://")
                 .split(':')
                 .next()
-                .unwrap_or("localhost")
-                .to_string()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("localhost");
+            host.to_string()
         } else {
             // For AWS S3, use standard format
             format!("{}.s3.{}.amazonaws.com", self.bucket, self.region)
@@ -283,6 +285,10 @@ pub fn sign_s3_request(s3_request: &S3Request, credentials: &S3Credentials) -> S
     };
 
     // Build URI path
+    // TODO: Review during integration - S3Request signs with path-style URI (/{bucket}/{key})
+    // but for AWS virtual-hosted style, the actual request URI should be /{key}.
+    // The existing S3 module uses path-style signing which works with MinIO and
+    // AWS S3 path-style endpoints. Verify this works correctly in production.
     let uri = credentials.uri_path(&s3_request.key);
 
     SignedRequest { headers, host, uri }
@@ -310,13 +316,24 @@ pub fn parse_endpoint(endpoint: Option<&str>, bucket: &str, region: &str) -> (St
             .trim_start_matches("https://");
         let use_tls = custom_endpoint.starts_with("https://");
 
-        let (host, port) = if let Some((h, p)) = endpoint_str.split_once(':') {
+        // Extract just the host:port part (strip any path after the first /)
+        let host_port_part = endpoint_str.split('/').next().unwrap_or(endpoint_str);
+
+        let (host, port) = if let Some((h, p)) = host_port_part.split_once(':') {
+            // Handle empty host (e.g., "http://:9000")
+            let host = if h.is_empty() { "localhost" } else { h };
             (
-                h.to_string(),
+                host.to_string(),
                 p.parse().unwrap_or(if use_tls { 443 } else { 80 }),
             )
         } else {
-            (endpoint_str.to_string(), if use_tls { 443 } else { 80 })
+            // Handle empty host (e.g., "http://")
+            let host = if host_port_part.is_empty() {
+                "localhost"
+            } else {
+                host_port_part
+            };
+            (host.to_string(), if use_tls { 443 } else { 80 })
         };
 
         (host, port, use_tls)
@@ -579,5 +596,82 @@ mod tests {
 
         assert_eq!(creds.bucket, "test-bucket");
         assert_eq!(creds.access_key, "test-access-key");
+    }
+
+    // ========== Edge case tests for malformed endpoints ==========
+
+    #[test]
+    fn test_host_for_signing_empty_host_defaults_to_localhost() {
+        // Malformed URL like "http://:9000" should default to "localhost"
+        let creds = S3Credentials {
+            bucket: "test".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "key".to_string(),
+            secret_key: "secret".to_string(),
+            endpoint: Some("http://:9000".to_string()),
+            timeout: 30,
+        };
+
+        assert_eq!(creds.host_for_signing(), "localhost");
+    }
+
+    #[test]
+    fn test_host_for_signing_empty_endpoint_defaults_to_localhost() {
+        // Completely empty endpoint after scheme should default to "localhost"
+        let creds = S3Credentials {
+            bucket: "test".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "key".to_string(),
+            secret_key: "secret".to_string(),
+            endpoint: Some("http://".to_string()),
+            timeout: 30,
+        };
+
+        assert_eq!(creds.host_for_signing(), "localhost");
+    }
+
+    #[test]
+    fn test_parse_endpoint_with_trailing_slash() {
+        // Endpoints with trailing slash should parse correctly
+        let (host, port, tls) =
+            parse_endpoint(Some("http://localhost:9000/"), "bucket", "us-east-1");
+
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 9000);
+        assert!(!tls);
+    }
+
+    #[test]
+    fn test_parse_endpoint_with_path() {
+        // Endpoints with path should ignore the path and use host:port only
+        let (host, port, tls) = parse_endpoint(
+            Some("http://minio.local:9000/some/path"),
+            "bucket",
+            "us-east-1",
+        );
+
+        assert_eq!(host, "minio.local");
+        assert_eq!(port, 9000);
+        assert!(!tls);
+    }
+
+    #[test]
+    fn test_parse_endpoint_empty_host_defaults_to_localhost() {
+        // Malformed URL with empty host should default to localhost
+        let (host, port, tls) = parse_endpoint(Some("http://:9000"), "bucket", "us-east-1");
+
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 9000);
+        assert!(!tls);
+    }
+
+    #[test]
+    fn test_parse_endpoint_completely_empty() {
+        // Completely empty endpoint (just scheme) should default to localhost
+        let (host, port, tls) = parse_endpoint(Some("http://"), "bucket", "us-east-1");
+
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 80);
+        assert!(!tls);
     }
 }
