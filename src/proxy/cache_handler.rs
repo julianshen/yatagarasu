@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 use crate::cache::tiered::TieredCache;
 use crate::cache::traits::Cache;
 use crate::cache::{CacheEntry, CacheKey};
-use crate::request_coalescing::{Coalescer, StreamMessage, StreamingSlot};
+use crate::request_coalescing::{Coalescer, StreamLeader, StreamMessage, StreamingSlot};
 
 // ============================================================================
 // Result Types
@@ -86,8 +86,12 @@ pub struct CacheHitResponse {
 /// Result of coalescer acquisition.
 #[derive(Debug)]
 pub enum CoalescerAcquisition {
-    /// Became the leader - proceed to S3.
-    Leader,
+    /// Became the leader - proceed to S3 and broadcast to followers.
+    /// The StreamLeader handle must be kept alive to broadcast data.
+    Leader {
+        /// The leader handle for broadcasting data to followers.
+        leader: StreamLeader,
+    },
     /// Became a follower - stream from leader.
     Follower {
         /// Receiver for streaming data from leader.
@@ -280,7 +284,7 @@ pub fn join_streaming_coalescer(
     };
 
     match streaming_coalescer.acquire(cache_key) {
-        StreamingSlot::Leader(_leader) => CoalescerAcquisition::Leader,
+        StreamingSlot::Leader(leader) => CoalescerAcquisition::Leader { leader },
         StreamingSlot::Follower(receiver) => CoalescerAcquisition::Follower { receiver },
     }
 }
