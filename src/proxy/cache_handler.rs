@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 use crate::cache::tiered::TieredCache;
 use crate::cache::traits::Cache;
 use crate::cache::{CacheEntry, CacheKey};
-use crate::request_coalescing::{Coalescer, StreamingSlot, StreamMessage};
+use crate::request_coalescing::{Coalescer, StreamMessage, StreamingSlot};
 
 // ============================================================================
 // Result Types
@@ -129,16 +129,19 @@ pub async fn check_cache_hit(
         Ok(Some(entry)) => {
             // Check conditional request headers
             match handle_conditional_request(&entry, if_none_match, if_modified_since) {
-                ConditionalResult::NotModifiedByEtag { etag } => CacheLookup::ConditionalNotModified {
-                    etag: Some(etag),
-                    last_modified: None,
-                },
-                ConditionalResult::NotModifiedByDate { last_modified, etag } => {
+                ConditionalResult::NotModifiedByEtag { etag } => {
                     CacheLookup::ConditionalNotModified {
-                        etag,
-                        last_modified: Some(last_modified),
+                        etag: Some(etag),
+                        last_modified: None,
                     }
                 }
+                ConditionalResult::NotModifiedByDate {
+                    last_modified,
+                    etag,
+                } => CacheLookup::ConditionalNotModified {
+                    etag,
+                    last_modified: Some(last_modified),
+                },
                 ConditionalResult::Modified => CacheLookup::Hit { entry },
             }
         }
@@ -162,9 +165,9 @@ pub async fn check_cache_hit(
 ///
 /// # Returns
 ///
-/// * `ConditionalResult::EtagMatch` - ETag matches, return 304.
-/// * `ConditionalResult::LastModifiedMatch` - Last-Modified matches, return 304.
-/// * `ConditionalResult::NoMatch` - No match, serve full response.
+/// * `ConditionalResult::NotModifiedByEtag` - ETag matches, return 304.
+/// * `ConditionalResult::NotModifiedByDate` - Last-Modified matches, return 304.
+/// * `ConditionalResult::Modified` - No match, serve full response.
 pub fn handle_conditional_request(
     entry: &CacheEntry,
     if_none_match: Option<&str>,
@@ -391,7 +394,10 @@ mod tests {
             handle_conditional_request(&entry, None, Some("Wed, 21 Oct 2015 07:28:00 GMT"));
 
         match result {
-            ConditionalResult::NotModifiedByDate { last_modified, etag } => {
+            ConditionalResult::NotModifiedByDate {
+                last_modified,
+                etag,
+            } => {
                 assert_eq!(last_modified, "Wed, 21 Oct 2015 07:28:00 GMT");
                 assert_eq!(etag, Some("abc123".to_string()));
             }
@@ -473,10 +479,7 @@ mod tests {
         let (etag, modified) = extract_conditional_headers(&headers);
 
         assert_eq!(etag, Some("abc123".to_string()));
-        assert_eq!(
-            modified,
-            Some("Wed, 21 Oct 2015 07:28:00 GMT".to_string())
-        );
+        assert_eq!(modified, Some("Wed, 21 Oct 2015 07:28:00 GMT".to_string()));
     }
 
     #[test]
@@ -491,10 +494,7 @@ mod tests {
         let (etag, modified) = extract_conditional_headers(&headers);
 
         assert_eq!(etag, Some("abc123".to_string()));
-        assert_eq!(
-            modified,
-            Some("Wed, 21 Oct 2015 07:28:00 GMT".to_string())
-        );
+        assert_eq!(modified, Some("Wed, 21 Oct 2015 07:28:00 GMT".to_string()));
     }
 
     #[test]
