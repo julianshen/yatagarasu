@@ -3203,14 +3203,14 @@ pub async fn authorize_with_openfga(
 
 #### Tests (Structural Verification)
 
-- [ ] Test: Cache handler module exists at `src/proxy/cache_handler.rs`
-- [ ] Test: `check_cache_hit()` is accessible
-- [ ] Test: `serve_from_cache()` is accessible
-- [ ] Test: `handle_conditional_request()` is accessible
-- [ ] Test: `join_streaming_coalescer()` is accessible
-- [ ] Test: All existing cache tests still pass
-- [ ] Test: Cache hit returns X-Cache: HIT header
-- [ ] Test: Conditional 304 response works correctly
+- [x] Test: Cache handler module exists at `src/proxy/cache_handler.rs`
+- [x] Test: `check_cache_hit()` is accessible
+- [x] Test: `serve_from_cache()` is accessible
+- [x] Test: `handle_conditional_request()` is accessible
+- [x] Test: `join_streaming_coalescer()` is accessible
+- [x] Test: All existing cache tests still pass (1355 tests pass)
+- [x] Test: Cache hit returns X-Cache: HIT header (via CacheHitResponse struct)
+- [x] Test: Conditional 304 response works correctly (NotModifiedByEtag/NotModifiedByDate)
 
 #### Implementation Notes
 
