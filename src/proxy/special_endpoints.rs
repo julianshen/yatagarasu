@@ -104,7 +104,10 @@ pub fn handle_ready(
 
             // Determine overall bucket status
             let bucket_status = if bucket_has_healthy_replica {
-                if replicas_health.values().all(|v| v == "healthy") {
+                if replicas_health
+                    .values()
+                    .all(|v| v.as_str() == Some("healthy"))
+                {
                     "ready"
                 } else {
                     "degraded" // Some replicas unhealthy but at least one healthy
@@ -175,6 +178,69 @@ pub fn handle_metrics(metrics: &Metrics, circuit_breaker_metrics: String) -> End
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::circuit_breaker::CircuitBreakerConfig;
+    use crate::config::S3Config;
+    use crate::replica_set::ReplicaEntry;
+    use crate::s3::S3Client;
+
+    /// Helper to create a minimal S3Config for testing
+    fn test_s3_config() -> S3Config {
+        S3Config {
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: "test-key".to_string(),
+            secret_key: "test-secret".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Helper to create a minimal BucketConfig for testing
+    fn test_bucket_config(name: &str) -> BucketConfig {
+        BucketConfig {
+            name: name.to_string(),
+            path_prefix: format!("/{}", name),
+            s3: test_s3_config(),
+            auth: None,
+            cache: None,
+            authorization: None,
+            ip_filter: Default::default(),
+            watermark: None,
+        }
+    }
+
+    /// Helper to create a ReplicaEntry with healthy (closed) circuit breaker
+    fn healthy_replica(name: &str) -> ReplicaEntry {
+        ReplicaEntry {
+            name: name.to_string(),
+            priority: 1,
+            client: S3Client {
+                config: test_s3_config(),
+            },
+            circuit_breaker: crate::circuit_breaker::CircuitBreaker::new(
+                CircuitBreakerConfig::default(),
+            ),
+        }
+    }
+
+    /// Helper to create a ReplicaEntry with unhealthy (open) circuit breaker
+    fn unhealthy_replica(name: &str) -> ReplicaEntry {
+        let cb_config = CircuitBreakerConfig {
+            failure_threshold: 1, // Open after 1 failure
+            ..Default::default()
+        };
+        let cb = crate::circuit_breaker::CircuitBreaker::new(cb_config);
+        // Record a failure to open the circuit
+        cb.record_failure();
+
+        ReplicaEntry {
+            name: name.to_string(),
+            priority: 1,
+            client: S3Client {
+                config: test_s3_config(),
+            },
+            circuit_breaker: cb,
+        }
+    }
 
     #[test]
     fn test_endpoint_response_json() {
@@ -225,5 +291,170 @@ mod tests {
         let _ = EndpointResponse::json(200, String::new());
         let _ = handle_health as fn(Instant) -> EndpointResponse;
         let _ = handle_metrics as fn(&Metrics, String) -> EndpointResponse;
+    }
+
+    // ========== handle_ready tests ==========
+
+    #[test]
+    fn test_handle_ready_all_replicas_healthy() {
+        // Setup: One bucket with two healthy replicas
+        let buckets = vec![test_bucket_config("products")];
+        let mut replica_sets = HashMap::new();
+        replica_sets.insert(
+            "products".to_string(),
+            ReplicaSet {
+                replicas: vec![healthy_replica("primary"), healthy_replica("secondary")],
+            },
+        );
+        let metrics = Metrics::new();
+
+        // Execute
+        let response = handle_ready(&buckets, &replica_sets, &metrics);
+
+        // Verify
+        assert_eq!(response.status, 200);
+        assert_eq!(response.content_type, "application/json");
+
+        let parsed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(parsed["status"], "ready");
+        assert_eq!(parsed["backends"]["products"]["status"], "ready");
+        assert_eq!(
+            parsed["backends"]["products"]["replicas"]["primary"],
+            "healthy"
+        );
+        assert_eq!(
+            parsed["backends"]["products"]["replicas"]["secondary"],
+            "healthy"
+        );
+    }
+
+    #[test]
+    fn test_handle_ready_some_replicas_unhealthy_returns_degraded() {
+        // Setup: One bucket with one healthy and one unhealthy replica
+        let buckets = vec![test_bucket_config("products")];
+        let mut replica_sets = HashMap::new();
+        replica_sets.insert(
+            "products".to_string(),
+            ReplicaSet {
+                replicas: vec![healthy_replica("primary"), unhealthy_replica("secondary")],
+            },
+        );
+        let metrics = Metrics::new();
+
+        // Execute
+        let response = handle_ready(&buckets, &replica_sets, &metrics);
+
+        // Verify: Status 200 but bucket is "degraded"
+        assert_eq!(response.status, 200);
+
+        let parsed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(parsed["status"], "ready"); // Overall still ready (at least one healthy)
+        assert_eq!(parsed["backends"]["products"]["status"], "degraded");
+        assert_eq!(
+            parsed["backends"]["products"]["replicas"]["primary"],
+            "healthy"
+        );
+        assert_eq!(
+            parsed["backends"]["products"]["replicas"]["secondary"],
+            "unhealthy"
+        );
+    }
+
+    #[test]
+    fn test_handle_ready_all_replicas_unhealthy_returns_unavailable() {
+        // Setup: One bucket with all unhealthy replicas
+        let buckets = vec![test_bucket_config("products")];
+        let mut replica_sets = HashMap::new();
+        replica_sets.insert(
+            "products".to_string(),
+            ReplicaSet {
+                replicas: vec![unhealthy_replica("primary"), unhealthy_replica("secondary")],
+            },
+        );
+        let metrics = Metrics::new();
+
+        // Execute
+        let response = handle_ready(&buckets, &replica_sets, &metrics);
+
+        // Verify: Status 503 and bucket is "unavailable"
+        assert_eq!(response.status, 503);
+
+        let parsed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(parsed["status"], "unavailable");
+        assert_eq!(parsed["backends"]["products"]["status"], "unavailable");
+        assert_eq!(
+            parsed["backends"]["products"]["replicas"]["primary"],
+            "unhealthy"
+        );
+        assert_eq!(
+            parsed["backends"]["products"]["replicas"]["secondary"],
+            "unhealthy"
+        );
+    }
+
+    #[test]
+    fn test_handle_ready_no_replica_set_returns_unavailable() {
+        // Setup: Bucket exists in config but no ReplicaSet found
+        let buckets = vec![test_bucket_config("products")];
+        let replica_sets = HashMap::new(); // Empty - no replica sets
+        let metrics = Metrics::new();
+
+        // Execute
+        let response = handle_ready(&buckets, &replica_sets, &metrics);
+
+        // Verify: Status 503 and bucket is "unavailable"
+        assert_eq!(response.status, 503);
+
+        let parsed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(parsed["status"], "unavailable");
+        assert_eq!(parsed["backends"]["products"]["status"], "unavailable");
+    }
+
+    #[test]
+    fn test_handle_ready_multiple_buckets_mixed_health() {
+        // Setup: Two buckets - one healthy, one with all unhealthy replicas
+        let buckets = vec![test_bucket_config("products"), test_bucket_config("images")];
+        let mut replica_sets = HashMap::new();
+        replica_sets.insert(
+            "products".to_string(),
+            ReplicaSet {
+                replicas: vec![healthy_replica("primary")],
+            },
+        );
+        replica_sets.insert(
+            "images".to_string(),
+            ReplicaSet {
+                replicas: vec![unhealthy_replica("primary")],
+            },
+        );
+        let metrics = Metrics::new();
+
+        // Execute
+        let response = handle_ready(&buckets, &replica_sets, &metrics);
+
+        // Verify: Status 503 because one bucket is unavailable
+        assert_eq!(response.status, 503);
+
+        let parsed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(parsed["status"], "unavailable");
+        assert_eq!(parsed["backends"]["products"]["status"], "ready");
+        assert_eq!(parsed["backends"]["images"]["status"], "unavailable");
+    }
+
+    #[test]
+    fn test_handle_ready_empty_buckets_returns_ready() {
+        // Setup: No buckets configured
+        let buckets: Vec<BucketConfig> = vec![];
+        let replica_sets = HashMap::new();
+        let metrics = Metrics::new();
+
+        // Execute
+        let response = handle_ready(&buckets, &replica_sets, &metrics);
+
+        // Verify: Status 200, all_healthy is true when there's nothing to check
+        assert_eq!(response.status, 200);
+
+        let parsed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(parsed["status"], "ready");
     }
 }
