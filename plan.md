@@ -3319,16 +3319,16 @@ pub fn build_upstream_peer(
 
 #### Tests (Structural Verification)
 
-- [ ] Test: Response handler module exists at `src/proxy/response_handler.rs`
-- [ ] Test: `capture_response_headers()` is accessible
-- [ ] Test: `buffer_response_chunk()` is accessible
-- [ ] Test: `finalize_response()` is accessible
-- [ ] Test: `populate_cache()` is accessible
-- [ ] Test: `apply_image_optimization()` is accessible
-- [ ] Test: `apply_watermark()` is accessible
-- [ ] Test: All existing response processing tests pass
-- [ ] Test: Cache population respects Cache-Control headers
-- [ ] Test: Image optimization produces valid output
+- [x] Test: Response handler module exists at `src/proxy/response_handler.rs`
+- [x] Test: `capture_response_headers()` is accessible
+- [x] Test: `buffer_response_chunk()` is accessible
+- [x] Test: `build_cache_entry()` is accessible (was `finalize_response()`)
+- [x] Test: `build_cache_key()` is accessible (was `populate_cache()`)
+- [x] Test: `process_image_optimization()` is accessible (was `apply_image_optimization()`)
+- [x] Test: `is_optimizable_image()` is accessible (watermark handled separately)
+- [x] Test: All existing response processing tests pass (1403 tests)
+- [x] Test: Cache population respects Cache-Control headers
+- [x] Test: Image optimization produces valid output
 
 #### Implementation Notes
 

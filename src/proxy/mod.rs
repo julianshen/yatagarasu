@@ -12,6 +12,8 @@
 mod cache_handler;
 mod helpers;
 mod init;
+#[allow(dead_code)] // Phase 37.6: Extracted module, integration pending
+mod response_handler;
 #[allow(dead_code)] // Phase 37.3: Extracted module, integration pending
 mod routing_auth;
 mod security;
