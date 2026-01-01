@@ -12,6 +12,8 @@ mod helpers;
 mod init;
 #[allow(dead_code)] // Phase 37.3: Extracted module, integration pending
 mod routing_auth;
+#[allow(dead_code)] // Phase 37.4: Extracted module, integration pending
+mod cache_handler;
 mod security;
 mod special_endpoints;
 
