@@ -3265,13 +3265,13 @@ pub async fn join_streaming_coalescer(
 
 #### Tests (Structural Verification)
 
-- [ ] Test: Upstream module exists at `src/proxy/upstream.rs`
-- [ ] Test: `prepare_s3_request()` is accessible
-- [ ] Test: `sign_request()` is accessible
-- [ ] Test: `select_replica()` is accessible
-- [ ] Test: All existing S3 signing tests still pass
-- [ ] Test: AWS SigV4 signatures are valid
-- [ ] Test: Replica selection with failover works
+- [x] Test: Upstream module exists at `src/proxy/upstream.rs`
+- [x] Test: `prepare_s3_request()` is accessible (as `build_s3_request()`)
+- [x] Test: `sign_request()` is accessible (as `sign_s3_request()`)
+- [x] Test: `select_replica()` is accessible
+- [x] Test: All existing S3 signing tests still pass
+- [x] Test: AWS SigV4 signatures are valid
+- [x] Test: Replica selection with failover works
 
 #### Implementation Notes
 
