@@ -328,7 +328,10 @@ pub async fn authorize_with_openfga(
     let jwt_claims = claims
         .map(|c| {
             serde_json::to_value(c).unwrap_or_else(|e| {
-                tracing::warn!("Failed to serialize JWT claims for OpenFGA authorization: {}", e);
+                tracing::warn!(
+                    "Failed to serialize JWT claims for OpenFGA authorization: {}",
+                    e
+                );
                 serde_json::json!({})
             })
         })
