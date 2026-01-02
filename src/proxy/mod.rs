@@ -273,6 +273,12 @@ impl YatagarasuProxy {
             tracing::info!("No cache configuration found");
         }
 
+        // Start rate limiter cleanup task now that we have a Tokio runtime (Phase 36)
+        // This prevents unbounded memory growth from per-IP/per-user tracking
+        if let Some(ref rate_limit_manager) = self.rate_limit_manager {
+            rate_limit_manager.start_cleanup_task(None); // Uses default interval (60s)
+        }
+
         self
     }
 

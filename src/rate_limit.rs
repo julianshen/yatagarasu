@@ -43,11 +43,23 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
 
 /// Maximum number of per-IP rate limiters to track before cleanup
 const DEFAULT_MAX_IP_LIMITERS: usize = 100_000;
 /// Maximum number of per-user rate limiters to track before cleanup
 const DEFAULT_MAX_USER_LIMITERS: usize = 50_000;
+/// Default TTL for idle rate limiters (5 minutes)
+const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(5 * 60);
+/// Default cleanup interval (1 minute)
+const DEFAULT_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+
+/// A rate limiter entry with last access tracking for TTL-based eviction
+struct TrackedLimiter {
+    limiter: Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock>>,
+    last_accessed: Instant,
+}
 
 /// Rate limiter manager handling global, per-bucket, per-IP, and per-user limits
 pub struct RateLimitManager {
@@ -63,26 +75,10 @@ pub struct RateLimitManager {
             >,
         >,
     >,
-    /// Per-IP rate limiters (keyed by IP address)
-    #[allow(clippy::type_complexity)]
-    ips: Arc<
-        RwLock<
-            HashMap<
-                IpAddr,
-                Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock>>,
-            >,
-        >,
-    >,
-    /// Per-user rate limiters (keyed by user ID from JWT)
-    #[allow(clippy::type_complexity)]
-    users: Arc<
-        RwLock<
-            HashMap<
-                String,
-                Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock>>,
-            >,
-        >,
-    >,
+    /// Per-IP rate limiters with access tracking (keyed by IP address)
+    ips: Arc<RwLock<HashMap<IpAddr, TrackedLimiter>>>,
+    /// Per-user rate limiters with access tracking (keyed by user ID from JWT)
+    users: Arc<RwLock<HashMap<String, TrackedLimiter>>>,
     /// Per-IP rate limit config (requests per second)
     per_ip_rps: Option<NonZeroU32>,
     /// Per-user rate limit config (requests per second)
@@ -91,6 +87,10 @@ pub struct RateLimitManager {
     max_ip_limiters: usize,
     /// Maximum number of tracked users before cleanup
     max_user_limiters: usize,
+    /// TTL for idle rate limiters before eviction
+    idle_ttl: Duration,
+    /// Cleanup task shutdown sender (Some when task is running)
+    cleanup_shutdown: Arc<RwLock<Option<oneshot::Sender<()>>>>,
 }
 
 impl RateLimitManager {
@@ -130,6 +130,146 @@ impl RateLimitManager {
             per_user_rps,
             max_ip_limiters: DEFAULT_MAX_IP_LIMITERS,
             max_user_limiters: DEFAULT_MAX_USER_LIMITERS,
+            idle_ttl: DEFAULT_IDLE_TTL,
+            cleanup_shutdown: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Start the background cleanup task that evicts idle rate limiters
+    ///
+    /// This task runs periodically (default: every 60 seconds) and removes
+    /// rate limiter entries that haven't been accessed within the TTL period.
+    ///
+    /// # Arguments
+    /// * `interval` - How often to run cleanup (default: 60 seconds)
+    ///
+    /// Call this once after creating the manager if you want automatic cleanup.
+    /// The task will be automatically stopped when the manager is dropped.
+    /// Calling this multiple times is safe - subsequent calls are ignored if
+    /// a cleanup task is already running.
+    pub fn start_cleanup_task(&self, interval: Option<Duration>) {
+        let interval = interval.unwrap_or(DEFAULT_CLEANUP_INTERVAL);
+        let ips = Arc::clone(&self.ips);
+        let users = Arc::clone(&self.users);
+        let idle_ttl = self.idle_ttl;
+        let max_ip_limiters = self.max_ip_limiters;
+        let max_user_limiters = self.max_user_limiters;
+
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+
+        // Atomically check and store shutdown sender to prevent duplicate tasks (TOCTOU safe)
+        {
+            let mut guard = self.cleanup_shutdown.write();
+            if guard.is_some() {
+                tracing::debug!(
+                    "Rate limiter cleanup task already running, skipping duplicate start"
+                );
+                return;
+            }
+            *guard = Some(shutdown_tx);
+        }
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        let now = Instant::now();
+
+                        // Cleanup stale IPs (two-phase: collect expired keys with read lock, then remove with write lock)
+                        // This minimizes write lock hold time to reduce latency spikes
+                        {
+                            // Phase 1: Collect expired keys with read lock
+                            let expired_ips: Vec<IpAddr> = {
+                                let ips_guard = ips.read();
+                                ips_guard
+                                    .iter()
+                                    .filter(|(_, entry)| now.duration_since(entry.last_accessed) >= idle_ttl)
+                                    .map(|(ip, _)| *ip)
+                                    .collect()
+                            };
+
+                            // Phase 2: Remove expired keys with write lock (much faster)
+                            if !expired_ips.is_empty() {
+                                let mut ips_guard = ips.write();
+                                for ip in &expired_ips {
+                                    ips_guard.remove(ip);
+                                }
+                                tracing::debug!(
+                                    evicted_ips = expired_ips.len(),
+                                    remaining_ips = ips_guard.len(),
+                                    "Evicted idle IP rate limiters"
+                                );
+
+                                // Emergency cleanup if still over max
+                                if ips_guard.len() > max_ip_limiters {
+                                    tracing::warn!(
+                                        ip_count = ips_guard.len(),
+                                        max_ips = max_ip_limiters,
+                                        "IP rate limiters exceed max after TTL cleanup, clearing all"
+                                    );
+                                    ips_guard.clear();
+                                }
+                            }
+                        }
+
+                        // Cleanup stale users (two-phase approach)
+                        {
+                            // Phase 1: Collect expired keys with read lock
+                            let expired_users: Vec<String> = {
+                                let users_guard = users.read();
+                                users_guard
+                                    .iter()
+                                    .filter(|(_, entry)| now.duration_since(entry.last_accessed) >= idle_ttl)
+                                    .map(|(user, _)| user.clone())
+                                    .collect()
+                            };
+
+                            // Phase 2: Remove expired keys with write lock
+                            if !expired_users.is_empty() {
+                                let mut users_guard = users.write();
+                                for user in &expired_users {
+                                    users_guard.remove(user);
+                                }
+                                tracing::debug!(
+                                    evicted_users = expired_users.len(),
+                                    remaining_users = users_guard.len(),
+                                    "Evicted idle user rate limiters"
+                                );
+
+                                // Emergency cleanup if still over max
+                                if users_guard.len() > max_user_limiters {
+                                    tracing::warn!(
+                                        user_count = users_guard.len(),
+                                        max_users = max_user_limiters,
+                                        "User rate limiters exceed max after TTL cleanup, clearing all"
+                                    );
+                                    users_guard.clear();
+                                }
+                            }
+                        }
+                    }
+                    _ = &mut shutdown_rx => {
+                        tracing::debug!("Rate limiter cleanup task shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        tracing::info!(
+            interval_secs = interval.as_secs(),
+            idle_ttl_secs = idle_ttl.as_secs(),
+            "Started rate limiter cleanup task"
+        );
+    }
+
+    /// Stop the background cleanup task
+    pub fn stop_cleanup_task(&self) {
+        if let Some(shutdown_tx) = self.cleanup_shutdown.write().take() {
+            let _ = shutdown_tx.send(());
         }
     }
 
@@ -174,20 +314,14 @@ impl RateLimitManager {
     ///
     /// If the number of tracked IPs exceeds `max_ip_limiters`, older entries
     /// are cleared to prevent unbounded memory growth under DDoS attacks.
+    ///
+    /// Each access updates the `last_accessed` timestamp to prevent TTL-based
+    /// eviction of active limiters.
     pub fn check_ip(&self, ip: IpAddr) -> bool {
         if self.per_ip_rps.is_none() {
             return true; // No per-IP limit configured
         }
 
-        // Fast path: check if limiter exists
-        {
-            let limiters = self.ips.read();
-            if let Some(limiter) = limiters.get(&ip) {
-                return limiter.check().is_ok();
-            }
-        }
-
-        // Slow path: create limiter for new IP
         let mut limiters = self.ips.write();
 
         // Enforce max limiter count to prevent memory exhaustion
@@ -200,11 +334,17 @@ impl RateLimitManager {
             limiters.clear();
         }
 
-        let limiter = limiters.entry(ip).or_insert_with(|| {
+        let entry = limiters.entry(ip).or_insert_with(|| {
             let rps = self.per_ip_rps.unwrap(); // Safe: checked above
-            Arc::new(RateLimiter::direct(Quota::per_second(rps)))
+            TrackedLimiter {
+                limiter: Arc::new(RateLimiter::direct(Quota::per_second(rps))),
+                last_accessed: Instant::now(),
+            }
         });
-        limiter.check().is_ok()
+
+        // Update last accessed time to prevent TTL eviction
+        entry.last_accessed = Instant::now();
+        entry.limiter.check().is_ok()
     }
 
     /// Check if a request should be allowed for a specific user (from JWT claims)
@@ -213,20 +353,14 @@ impl RateLimitManager {
     ///
     /// If the number of tracked users exceeds `max_user_limiters`, older entries
     /// are cleared to prevent unbounded memory growth.
+    ///
+    /// Each access updates the `last_accessed` timestamp to prevent TTL-based
+    /// eviction of active limiters.
     pub fn check_user(&self, user_id: &str) -> bool {
         if self.per_user_rps.is_none() {
             return true; // No per-user limit configured
         }
 
-        // Fast path: check if limiter exists
-        {
-            let limiters = self.users.read();
-            if let Some(limiter) = limiters.get(user_id) {
-                return limiter.check().is_ok();
-            }
-        }
-
-        // Slow path: create limiter for new user
         let mut limiters = self.users.write();
 
         // Enforce max limiter count to prevent memory exhaustion
@@ -239,11 +373,17 @@ impl RateLimitManager {
             limiters.clear();
         }
 
-        let limiter = limiters.entry(user_id.to_string()).or_insert_with(|| {
+        let entry = limiters.entry(user_id.to_string()).or_insert_with(|| {
             let rps = self.per_user_rps.unwrap(); // Safe: checked above
-            Arc::new(RateLimiter::direct(Quota::per_second(rps)))
+            TrackedLimiter {
+                limiter: Arc::new(RateLimiter::direct(Quota::per_second(rps))),
+                last_accessed: Instant::now(),
+            }
         });
-        limiter.check().is_ok()
+
+        // Update last accessed time to prevent TTL eviction
+        entry.last_accessed = Instant::now();
+        entry.limiter.check().is_ok()
     }
 
     /// Check all rate limits for a request
@@ -313,38 +453,63 @@ impl RateLimitManager {
         self.users.read().len()
     }
 
-    /// Clean up IP limiters that haven't been used recently
+    /// Clean up IP limiters that haven't been used within the TTL period
     /// (prevents unbounded memory growth for per-IP tracking)
     ///
-    /// This should be called periodically (e.g., every 5 minutes)
-    pub fn cleanup_stale_ips(&self, max_ips: usize) {
+    /// # Arguments
+    /// * `ttl` - Time-to-live for idle entries. Entries not accessed within this
+    ///   duration will be evicted.
+    ///
+    /// Returns the number of entries evicted.
+    pub fn cleanup_stale_ips(&self, ttl: Duration) -> usize {
         let mut ips = self.ips.write();
-        if ips.len() > max_ips {
-            // Simple strategy: clear all if too many
-            // In production, could use LRU or timestamp-based eviction
+        let before_count = ips.len();
+        let now = Instant::now();
+
+        ips.retain(|_, entry| now.duration_since(entry.last_accessed) < ttl);
+
+        let evicted = before_count - ips.len();
+        if evicted > 0 {
             tracing::info!(
-                ip_count = ips.len(),
-                max_ips = max_ips,
-                "Cleaning up per-IP rate limiters"
+                evicted_ips = evicted,
+                remaining_ips = ips.len(),
+                ttl_secs = ttl.as_secs(),
+                "Cleaned up stale per-IP rate limiters"
             );
-            ips.clear();
         }
+        evicted
     }
 
-    /// Clean up user limiters that haven't been used recently
+    /// Clean up user limiters that haven't been used within the TTL period
     /// (prevents unbounded memory growth for per-user tracking)
     ///
-    /// This should be called periodically (e.g., every 5 minutes)
-    pub fn cleanup_stale_users(&self, max_users: usize) {
+    /// # Arguments
+    /// * `ttl` - Time-to-live for idle entries. Entries not accessed within this
+    ///   duration will be evicted.
+    ///
+    /// Returns the number of entries evicted.
+    pub fn cleanup_stale_users(&self, ttl: Duration) -> usize {
         let mut users = self.users.write();
-        if users.len() > max_users {
+        let before_count = users.len();
+        let now = Instant::now();
+
+        users.retain(|_, entry| now.duration_since(entry.last_accessed) < ttl);
+
+        let evicted = before_count - users.len();
+        if evicted > 0 {
             tracing::info!(
-                user_count = users.len(),
-                max_users = max_users,
-                "Cleaning up per-user rate limiters"
+                evicted_users = evicted,
+                remaining_users = users.len(),
+                ttl_secs = ttl.as_secs(),
+                "Cleaned up stale per-user rate limiters"
             );
-            users.clear();
         }
+        evicted
+    }
+
+    /// Get the configured idle TTL for rate limiters
+    pub fn idle_ttl(&self) -> Duration {
+        self.idle_ttl
     }
 }
 
@@ -536,9 +701,33 @@ mod tests {
 
         assert_eq!(manager.tracked_ip_count(), 100);
 
-        // Cleanup with max 50 should clear all
-        manager.cleanup_stale_ips(50);
+        // Cleanup with very short TTL should evict all (they were just created)
+        // Wait a tiny bit so entries are "old"
+        thread::sleep(Duration::from_millis(10));
+        let evicted = manager.cleanup_stale_ips(Duration::from_millis(5));
+        assert_eq!(evicted, 100);
         assert_eq!(manager.tracked_ip_count(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_preserves_active_ips() {
+        let manager = RateLimitManager::new(None, Some(10));
+
+        // Add 2 IPs
+        let ip1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let ip2 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        manager.check_ip(ip1);
+        manager.check_ip(ip2);
+        assert_eq!(manager.tracked_ip_count(), 2);
+
+        // Wait and then access only ip1
+        thread::sleep(Duration::from_millis(20));
+        manager.check_ip(ip1); // This updates last_accessed for ip1
+
+        // Cleanup with 15ms TTL should evict ip2 (not accessed) but keep ip1
+        let evicted = manager.cleanup_stale_ips(Duration::from_millis(15));
+        assert_eq!(evicted, 1);
+        assert_eq!(manager.tracked_ip_count(), 1);
     }
 
     #[test]
@@ -650,9 +839,30 @@ mod tests {
         }
         assert_eq!(manager.tracked_user_count(), 100);
 
-        // Cleanup with max 50 should clear all
-        manager.cleanup_stale_users(50);
+        // Cleanup with very short TTL should evict all
+        thread::sleep(Duration::from_millis(10));
+        let evicted = manager.cleanup_stale_users(Duration::from_millis(5));
+        assert_eq!(evicted, 100);
         assert_eq!(manager.tracked_user_count(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_preserves_active_users() {
+        let manager = RateLimitManager::with_user_limit(None, None, Some(10));
+
+        // Add 2 users
+        manager.check_user("alice");
+        manager.check_user("bob");
+        assert_eq!(manager.tracked_user_count(), 2);
+
+        // Wait and then access only alice
+        thread::sleep(Duration::from_millis(20));
+        manager.check_user("alice"); // This updates last_accessed for alice
+
+        // Cleanup with 15ms TTL should evict bob (not accessed) but keep alice
+        let evicted = manager.cleanup_stale_users(Duration::from_millis(15));
+        assert_eq!(evicted, 1);
+        assert_eq!(manager.tracked_user_count(), 1);
     }
 
     #[test]

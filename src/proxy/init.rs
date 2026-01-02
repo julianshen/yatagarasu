@@ -203,6 +203,10 @@ fn initialize_rate_limit_manager(config: &Config) -> Option<Arc<RateLimitManager
         }
     }
 
+    // NOTE: The cleanup task is NOT started here because this function runs
+    // before the Tokio runtime is initialized. The cleanup task is started
+    // in YatagarasuProxy::init_cache() which runs inside a Tokio runtime.
+
     Some(Arc::new(manager))
 }
 
