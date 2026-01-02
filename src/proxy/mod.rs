@@ -10,6 +10,8 @@
 
 #[allow(dead_code)] // Phase 37.4: Extracted module, integration pending
 mod cache_handler;
+#[allow(dead_code)] // Phase 37.7: Extracted module, integration pending
+mod error_handler;
 mod helpers;
 mod init;
 #[allow(dead_code)] // Phase 37.6: Extracted module, integration pending
