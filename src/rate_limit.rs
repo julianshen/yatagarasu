@@ -148,12 +148,6 @@ impl RateLimitManager {
     /// Calling this multiple times is safe - subsequent calls are ignored if
     /// a cleanup task is already running.
     pub fn start_cleanup_task(&self, interval: Option<Duration>) {
-        // Guard against starting duplicate cleanup tasks
-        if self.cleanup_shutdown.read().is_some() {
-            tracing::debug!("Rate limiter cleanup task already running, skipping duplicate start");
-            return;
-        }
-
         let interval = interval.unwrap_or(DEFAULT_CLEANUP_INTERVAL);
         let ips = Arc::clone(&self.ips);
         let users = Arc::clone(&self.users);
@@ -163,8 +157,17 @@ impl RateLimitManager {
 
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
-        // Store shutdown sender so we can stop the task later
-        *self.cleanup_shutdown.write() = Some(shutdown_tx);
+        // Atomically check and store shutdown sender to prevent duplicate tasks (TOCTOU safe)
+        {
+            let mut guard = self.cleanup_shutdown.write();
+            if guard.is_some() {
+                tracing::debug!(
+                    "Rate limiter cleanup task already running, skipping duplicate start"
+                );
+                return;
+            }
+            *guard = Some(shutdown_tx);
+        }
 
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
@@ -175,57 +178,76 @@ impl RateLimitManager {
                     _ = ticker.tick() => {
                         let now = Instant::now();
 
-                        // Cleanup stale IPs
+                        // Cleanup stale IPs (two-phase: collect expired keys with read lock, then remove with write lock)
+                        // This minimizes write lock hold time to reduce latency spikes
                         {
-                            let mut ips_guard = ips.write();
-                            let before_count = ips_guard.len();
-                            ips_guard.retain(|_, entry| {
-                                now.duration_since(entry.last_accessed) < idle_ttl
-                            });
-                            let evicted = before_count - ips_guard.len();
-                            if evicted > 0 {
+                            // Phase 1: Collect expired keys with read lock
+                            let expired_ips: Vec<IpAddr> = {
+                                let ips_guard = ips.read();
+                                ips_guard
+                                    .iter()
+                                    .filter(|(_, entry)| now.duration_since(entry.last_accessed) >= idle_ttl)
+                                    .map(|(ip, _)| *ip)
+                                    .collect()
+                            };
+
+                            // Phase 2: Remove expired keys with write lock (much faster)
+                            if !expired_ips.is_empty() {
+                                let mut ips_guard = ips.write();
+                                for ip in &expired_ips {
+                                    ips_guard.remove(ip);
+                                }
                                 tracing::debug!(
-                                    evicted_ips = evicted,
+                                    evicted_ips = expired_ips.len(),
                                     remaining_ips = ips_guard.len(),
                                     "Evicted idle IP rate limiters"
                                 );
-                            }
 
-                            // Emergency cleanup if still over max
-                            if ips_guard.len() > max_ip_limiters {
-                                tracing::warn!(
-                                    ip_count = ips_guard.len(),
-                                    max_ips = max_ip_limiters,
-                                    "IP rate limiters exceed max after TTL cleanup, clearing all"
-                                );
-                                ips_guard.clear();
+                                // Emergency cleanup if still over max
+                                if ips_guard.len() > max_ip_limiters {
+                                    tracing::warn!(
+                                        ip_count = ips_guard.len(),
+                                        max_ips = max_ip_limiters,
+                                        "IP rate limiters exceed max after TTL cleanup, clearing all"
+                                    );
+                                    ips_guard.clear();
+                                }
                             }
                         }
 
-                        // Cleanup stale users
+                        // Cleanup stale users (two-phase approach)
                         {
-                            let mut users_guard = users.write();
-                            let before_count = users_guard.len();
-                            users_guard.retain(|_, entry| {
-                                now.duration_since(entry.last_accessed) < idle_ttl
-                            });
-                            let evicted = before_count - users_guard.len();
-                            if evicted > 0 {
+                            // Phase 1: Collect expired keys with read lock
+                            let expired_users: Vec<String> = {
+                                let users_guard = users.read();
+                                users_guard
+                                    .iter()
+                                    .filter(|(_, entry)| now.duration_since(entry.last_accessed) >= idle_ttl)
+                                    .map(|(user, _)| user.clone())
+                                    .collect()
+                            };
+
+                            // Phase 2: Remove expired keys with write lock
+                            if !expired_users.is_empty() {
+                                let mut users_guard = users.write();
+                                for user in &expired_users {
+                                    users_guard.remove(user);
+                                }
                                 tracing::debug!(
-                                    evicted_users = evicted,
+                                    evicted_users = expired_users.len(),
                                     remaining_users = users_guard.len(),
                                     "Evicted idle user rate limiters"
                                 );
-                            }
 
-                            // Emergency cleanup if still over max
-                            if users_guard.len() > max_user_limiters {
-                                tracing::warn!(
-                                    user_count = users_guard.len(),
-                                    max_users = max_user_limiters,
-                                    "User rate limiters exceed max after TTL cleanup, clearing all"
-                                );
-                                users_guard.clear();
+                                // Emergency cleanup if still over max
+                                if users_guard.len() > max_user_limiters {
+                                    tracing::warn!(
+                                        user_count = users_guard.len(),
+                                        max_users = max_user_limiters,
+                                        "User rate limiters exceed max after TTL cleanup, clearing all"
+                                    );
+                                    users_guard.clear();
+                                }
                             }
                         }
                     }
