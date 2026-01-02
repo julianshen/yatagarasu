@@ -203,9 +203,9 @@ fn initialize_rate_limit_manager(config: &Config) -> Option<Arc<RateLimitManager
         }
     }
 
-    // Start background cleanup task to evict idle rate limiters (Phase 36)
-    // This prevents unbounded memory growth from per-IP/per-user tracking
-    manager.start_cleanup_task(None); // Uses default interval (60s)
+    // NOTE: The cleanup task is NOT started here because this function runs
+    // before the Tokio runtime is initialized. The cleanup task is started
+    // in YatagarasuProxy::init_cache() which runs inside a Tokio runtime.
 
     Some(Arc::new(manager))
 }
