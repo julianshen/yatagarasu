@@ -31,25 +31,26 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{Rgba, RgbaImage};
 use std::sync::OnceLock;
 
-/// Default embedded font (DejaVu Sans Mono - subset for common characters).
-/// Using a monospace font for predictable width calculations.
-/// This is a minimal embedded font for basic text rendering.
-static DEFAULT_FONT: OnceLock<FontRef<'static>> = OnceLock::new();
+/// Cached result of loading the default font.
+/// Stores the Result to avoid panicking on font load failure.
+static DEFAULT_FONT: OnceLock<Result<FontRef<'static>, String>> = OnceLock::new();
 
 /// Embedded font data (Liberation Mono - OFL licensed, commonly available).
 /// For production, this could be replaced with a configurable font path.
 const EMBEDDED_FONT_DATA: &[u8] = include_bytes!("fonts/DejaVuSansMono.ttf");
 
 /// Get the default font, initializing it lazily.
+///
+/// Returns an error instead of panicking if the embedded font data is corrupted.
 fn get_default_font() -> Result<&'static FontRef<'static>, WatermarkError> {
-    DEFAULT_FONT.get_or_init(|| {
+    let result = DEFAULT_FONT.get_or_init(|| {
         FontRef::try_from_slice(EMBEDDED_FONT_DATA)
-            .expect("Failed to load embedded font - this is a bug")
+            .map_err(|e| format!("Failed to load embedded font: {e}"))
     });
 
-    DEFAULT_FONT
-        .get()
-        .ok_or_else(|| WatermarkError::RenderError("Failed to initialize font".to_string()))
+    result
+        .as_ref()
+        .map_err(|e| WatermarkError::RenderError(e.clone()))
 }
 
 /// Parsed RGBA color from hex string.

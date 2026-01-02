@@ -36,8 +36,17 @@ use std::sync::OnceLock;
 static TEMPLATE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// Gets the compiled template pattern regex.
+///
+/// # Safety
+/// The regex pattern `r"\{\{([^}]+)\}\}"` is a compile-time constant that is
+/// guaranteed to be valid. The `.expect()` can never panic in practice.
+/// This is verified by the `test_template_regex_is_valid` test.
 fn get_template_pattern() -> &'static Regex {
-    TEMPLATE_PATTERN.get_or_init(|| Regex::new(r"\{\{([^}]+)\}\}").expect("Invalid template regex"))
+    TEMPLATE_PATTERN.get_or_init(|| {
+        // SAFETY: This is a compile-time constant regex pattern.
+        // If this panics, it's a developer error that should fail at test time.
+        Regex::new(r"\{\{([^}]+)\}\}").expect("Invalid template regex - this is a compile-time bug")
+    })
 }
 
 /// Context containing all available values for template substitution.
@@ -213,6 +222,18 @@ pub fn template_hash(template: &str, context: &TemplateContext) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Verify that the template regex pattern is valid.
+    /// This test ensures the `.expect()` in `get_template_pattern()` will never panic.
+    #[test]
+    fn test_template_regex_is_valid() {
+        // This test verifies the compile-time constant regex pattern is valid.
+        // If this test passes, the .expect() in get_template_pattern() is safe.
+        let pattern = get_template_pattern();
+        assert!(pattern.is_match("{{variable}}"));
+        assert!(pattern.is_match("{{jwt.sub}}"));
+        assert!(!pattern.is_match("plain text"));
+    }
 
     // Test: resolve_template replaces {{ip}}
     #[test]
