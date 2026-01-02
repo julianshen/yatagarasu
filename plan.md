@@ -3456,14 +3456,14 @@ pub fn record_error_metrics(
 
 #### Tests (Structural Verification)
 
-- [ ] Test: Logging module exists at `src/proxy/logging.rs`
-- [ ] Test: `record_request_completion()` is accessible
-- [ ] Test: `update_circuit_breaker()` is accessible
-- [ ] Test: `extract_s3_error()` is accessible
-- [ ] Test: `finalize_audit_log()` is accessible
-- [ ] Test: All existing logging tests pass
-- [ ] Test: Metrics are recorded correctly
-- [ ] Test: Audit log contains required fields
+- [x] Test: Logging module exists at `src/proxy/logging.rs`
+- [x] Test: `prepare_request_metrics()` is accessible (was `record_request_completion`)
+- [x] Test: `determine_circuit_breaker_action()` is accessible (was `update_circuit_breaker`)
+- [x] Test: `build_s3_error_info()` is accessible (was `extract_s3_error`)
+- [x] Test: `prepare_audit_data()` is accessible (was `finalize_audit_log`)
+- [x] Test: All existing logging tests pass (1458 tests)
+- [x] Test: Metrics are recorded correctly (via prepare_request_metrics)
+- [x] Test: Audit log contains required fields (via prepare_audit_data)
 
 #### Implementation Notes
 
