@@ -188,9 +188,9 @@ pub fn prepare_request_metrics(
 ///
 /// The appropriate `CircuitBreakerAction`.
 pub fn determine_circuit_breaker_action(status_code: u16) -> CircuitBreakerAction {
-    if (200..300).contains(&status_code) {
+    if is_circuit_breaker_success(status_code) {
         CircuitBreakerAction::RecordSuccess
-    } else if status_code >= 500 {
+    } else if is_circuit_breaker_failure(status_code) {
         CircuitBreakerAction::RecordFailure
     } else {
         CircuitBreakerAction::NoAction
@@ -364,12 +364,10 @@ pub enum RequestLogLevel {
 ///
 /// Appropriate `RequestLogLevel`.
 pub fn determine_log_level(status_code: u16) -> RequestLogLevel {
-    if status_code >= 500 {
-        RequestLogLevel::Error
-    } else if status_code >= 400 {
-        RequestLogLevel::Warn
-    } else {
-        RequestLogLevel::Info
+    match status_code {
+        500.. => RequestLogLevel::Error,
+        400..=499 => RequestLogLevel::Warn,
+        _ => RequestLogLevel::Info,
     }
 }
 
@@ -450,6 +448,59 @@ mod tests {
         let duration = Duration::ZERO;
         let ms = duration_to_ms(duration);
         assert_eq!(ms, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_duration_ms_current_time() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // Test with current time, should be close to 0
+        let duration = calculate_duration_ms(now_s);
+        assert!(
+            (0.0..100.0).contains(&duration),
+            "Duration should be small for current time, got {}",
+            duration
+        );
+    }
+
+    #[test]
+    fn test_calculate_duration_ms_past_time() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // Test with a time 1 second in the past
+        let start_timestamp = now_s - 1.0;
+        let duration = calculate_duration_ms(start_timestamp);
+        // Should be around 1000ms. Allow for some variance.
+        assert!(
+            (duration - 1000.0).abs() < 100.0,
+            "Duration for 1s ago should be ~1000ms, got {}",
+            duration
+        );
+    }
+
+    #[test]
+    fn test_calculate_duration_ms_future_time() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now_s = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // Test with a time in the future, should be 0
+        let future_timestamp = now_s + 10.0;
+        let duration = calculate_duration_ms(future_timestamp);
+        assert_eq!(duration, 0.0, "Duration for future timestamp should be 0");
     }
 
     // -- Circuit breaker action tests --
