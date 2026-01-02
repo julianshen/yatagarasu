@@ -145,7 +145,15 @@ impl RateLimitManager {
     ///
     /// Call this once after creating the manager if you want automatic cleanup.
     /// The task will be automatically stopped when the manager is dropped.
+    /// Calling this multiple times is safe - subsequent calls are ignored if
+    /// a cleanup task is already running.
     pub fn start_cleanup_task(&self, interval: Option<Duration>) {
+        // Guard against starting duplicate cleanup tasks
+        if self.cleanup_shutdown.read().is_some() {
+            tracing::debug!("Rate limiter cleanup task already running, skipping duplicate start");
+            return;
+        }
+
         let interval = interval.unwrap_or(DEFAULT_CLEANUP_INTERVAL);
         let ips = Arc::clone(&self.ips);
         let users = Arc::clone(&self.users);
