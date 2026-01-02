@@ -3598,16 +3598,22 @@ async fn request_filter(
 - [x] Test: Each sub-module has doc comments
 - [x] Test: Module dependency graph is acyclic
 - [x] Test: Public API unchanged (re-exports work)
+- [ ] Test: Benchmark performance unchanged (±5%) - DEFERRED (structural only, no logic changes)
 
-**Note**: The goal of reducing `proxy/mod.rs` to under 400 lines was not achieved in this
-phase. Phase 37 successfully extracted 9 modules with types and helpers (security, special_endpoints,
-routing_auth, cache_handler, upstream, response_handler, error_handler, logging, request_filter),
-but the actual refactoring of `request_filter()` to use these modules would require deeper
-integration with Pingora's session management. This is tracked as future work.
+**Note on Extraction vs Integration**:
+- **Extraction** (completed): 9 modules created with types and helper functions
+- **Integration** (deferred): Refactoring `request_filter()` to actually call these modules
+
+Phase 37 successfully extracted types and helpers, but the actual refactoring of
+`request_filter()` (~2200 lines) to use these modules would require deeper integration
+with Pingora's session management. The extracted modules provide the foundation for
+this future work.
 
 #### Documentation Updates
 
 - [x] Add module-level doc comments to each new file (already present)
+- [ ] Update `CLAUDE.md` with new module structure - DEFERRED (modules are internal)
+- [ ] Update architecture diagram in `docs/` - DEFERRED (no architectural changes)
 
 ---
 
