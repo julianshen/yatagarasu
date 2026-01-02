@@ -6,19 +6,22 @@
 //!
 //! # Design
 //!
-//! The request filter follows a staged pipeline:
+//! The request filter follows a 10-stage pipeline:
 //! 1. Resource checks (concurrency, load)
 //! 2. Security validation
 //! 3. Special endpoint handling
 //! 4. Routing to bucket
-//! 5. Rate limiting & circuit breaker
-//! 6. Authentication & authorization
-//! 7. Cache lookup
-//! 8. Upstream forwarding
+//! 5. Rate limiting
+//! 6. Circuit breaker
+//! 7. Authentication
+//! 8. Authorization
+//! 9. Cache lookup
+//! 10. Upstream forwarding
 //!
 //! Each stage can either continue to the next stage or short-circuit
 //! with a response (success or error).
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 // ============================================================================
@@ -51,20 +54,24 @@ pub enum RequestStage {
 }
 
 impl RequestStage {
+    /// All stages in pipeline order. Used for stage sequencing.
+    const STAGES: &'static [Self] = &[
+        Self::ResourceCheck,
+        Self::SecurityValidation,
+        Self::SpecialEndpoint,
+        Self::Routing,
+        Self::RateLimiting,
+        Self::CircuitBreaker,
+        Self::Authentication,
+        Self::Authorization,
+        Self::CacheLookup,
+        Self::UpstreamForward,
+    ];
+
     /// Get the next stage in the pipeline.
     pub fn next(&self) -> Option<RequestStage> {
-        match self {
-            RequestStage::ResourceCheck => Some(RequestStage::SecurityValidation),
-            RequestStage::SecurityValidation => Some(RequestStage::SpecialEndpoint),
-            RequestStage::SpecialEndpoint => Some(RequestStage::Routing),
-            RequestStage::Routing => Some(RequestStage::RateLimiting),
-            RequestStage::RateLimiting => Some(RequestStage::CircuitBreaker),
-            RequestStage::CircuitBreaker => Some(RequestStage::Authentication),
-            RequestStage::Authentication => Some(RequestStage::Authorization),
-            RequestStage::Authorization => Some(RequestStage::CacheLookup),
-            RequestStage::CacheLookup => Some(RequestStage::UpstreamForward),
-            RequestStage::UpstreamForward => None,
-        }
+        let current_pos = Self::STAGES.iter().position(|&s| s == *self)?;
+        Self::STAGES.get(current_pos + 1).copied()
     }
 
     /// Get stage name for logging/metrics.
@@ -102,8 +109,8 @@ pub enum StageOutcome {
     Error {
         /// HTTP status code for the error.
         status_code: u16,
-        /// Error message.
-        message: String,
+        /// Error message. Uses Cow to avoid allocation for static strings.
+        message: Cow<'static, str>,
     },
 }
 
@@ -118,8 +125,8 @@ impl StageOutcome {
         StageOutcome::Handled { status_code }
     }
 
-    /// Create an error outcome.
-    pub fn error(status_code: u16, message: impl Into<String>) -> Self {
+    /// Create an error outcome with a static message (no allocation).
+    pub fn error(status_code: u16, message: impl Into<Cow<'static, str>>) -> Self {
         StageOutcome::Error {
             status_code,
             message: message.into(),
@@ -354,8 +361,8 @@ pub enum AuthenticationResult {
     NotRequired,
     /// Authentication failed.
     Failed {
-        /// Error message.
-        reason: String,
+        /// Error message. Uses Cow to avoid allocation for static strings.
+        reason: Cow<'static, str>,
     },
 }
 
@@ -371,7 +378,7 @@ impl AuthenticationResult {
     }
 
     /// Create a failed result.
-    pub fn failed(reason: impl Into<String>) -> Self {
+    pub fn failed(reason: impl Into<Cow<'static, str>>) -> Self {
         AuthenticationResult::Failed {
             reason: reason.into(),
         }
@@ -404,8 +411,8 @@ pub enum AuthorizationResult {
     Allowed,
     /// Access denied.
     Denied {
-        /// Reason for denial.
-        reason: String,
+        /// Reason for denial. Uses Cow to avoid allocation for static strings.
+        reason: Cow<'static, str>,
     },
     /// Authorization not configured.
     NotConfigured,
@@ -418,7 +425,7 @@ impl AuthorizationResult {
     }
 
     /// Create a denied result.
-    pub fn denied(reason: impl Into<String>) -> Self {
+    pub fn denied(reason: impl Into<Cow<'static, str>>) -> Self {
         AuthorizationResult::Denied {
             reason: reason.into(),
         }
@@ -510,11 +517,17 @@ impl RequestFilterOutcome {
 // ============================================================================
 
 /// Check if a path is a special endpoint.
+///
+/// Special endpoints include:
+/// - `/health`, `/healthz`, `/ready` - Health checks
+/// - `/metrics` - Prometheus metrics
+/// - `/admin/reload` - Configuration hot reload
+/// - `/admin/cache/purge` - Cache purge (global and bucket-level)
 pub fn is_special_endpoint(path: &str) -> bool {
     matches!(
         path,
-        "/health" | "/healthz" | "/ready" | "/metrics" | "/__reload" | "/__purge"
-    )
+        "/health" | "/healthz" | "/ready" | "/metrics" | "/admin/reload"
+    ) || path.starts_with("/admin/cache/purge")
 }
 
 /// Determine the special endpoint type from path.
@@ -522,15 +535,18 @@ pub fn classify_special_endpoint(path: &str) -> SpecialEndpointResult {
     match path {
         "/health" | "/healthz" | "/ready" => SpecialEndpointResult::HealthCheck,
         "/metrics" => SpecialEndpointResult::Metrics,
-        "/__purge" => SpecialEndpointResult::CachePurge,
-        "/__reload" => SpecialEndpointResult::ConfigReload,
+        "/admin/reload" => SpecialEndpointResult::ConfigReload,
+        _ if path.starts_with("/admin/cache/purge") => SpecialEndpointResult::CachePurge,
         _ => SpecialEndpointResult::NotSpecial,
     }
 }
 
-/// Check if HTTP method is safe (GET/HEAD).
+/// Check if HTTP method is safe (GET/HEAD/OPTIONS).
+/// These methods should not modify server state.
 pub fn is_safe_method(method: &str) -> bool {
-    matches!(method.to_uppercase().as_str(), "GET" | "HEAD" | "OPTIONS")
+    method.eq_ignore_ascii_case("GET")
+        || method.eq_ignore_ascii_case("HEAD")
+        || method.eq_ignore_ascii_case("OPTIONS")
 }
 
 /// Check if request requires authentication based on bucket config.
@@ -790,34 +806,64 @@ mod tests {
 
     #[test]
     fn test_is_special_endpoint() {
+        // Health endpoints
         assert!(is_special_endpoint("/health"));
         assert!(is_special_endpoint("/healthz"));
         assert!(is_special_endpoint("/ready"));
+        // Metrics endpoint
         assert!(is_special_endpoint("/metrics"));
-        assert!(is_special_endpoint("/__reload"));
-        assert!(is_special_endpoint("/__purge"));
+        // Admin endpoints
+        assert!(is_special_endpoint("/admin/reload"));
+        assert!(is_special_endpoint("/admin/cache/purge"));
+        assert!(is_special_endpoint("/admin/cache/purge/bucket"));
+        assert!(is_special_endpoint(
+            "/admin/cache/purge/bucket/path/to/file"
+        ));
+        // Non-special endpoints
         assert!(!is_special_endpoint("/bucket/file.jpg"));
         assert!(!is_special_endpoint("/api/v1/data"));
+        assert!(!is_special_endpoint("/admin/other"));
     }
 
     #[test]
     fn test_classify_special_endpoint() {
+        // Health checks
         assert_eq!(
             classify_special_endpoint("/health"),
             SpecialEndpointResult::HealthCheck
         );
         assert_eq!(
+            classify_special_endpoint("/healthz"),
+            SpecialEndpointResult::HealthCheck
+        );
+        assert_eq!(
+            classify_special_endpoint("/ready"),
+            SpecialEndpointResult::HealthCheck
+        );
+        // Metrics
+        assert_eq!(
             classify_special_endpoint("/metrics"),
             SpecialEndpointResult::Metrics
         );
+        // Cache purge (global and bucket-level)
         assert_eq!(
-            classify_special_endpoint("/__purge"),
+            classify_special_endpoint("/admin/cache/purge"),
             SpecialEndpointResult::CachePurge
         );
         assert_eq!(
-            classify_special_endpoint("/__reload"),
+            classify_special_endpoint("/admin/cache/purge/bucket"),
+            SpecialEndpointResult::CachePurge
+        );
+        assert_eq!(
+            classify_special_endpoint("/admin/cache/purge/bucket/path/to/file"),
+            SpecialEndpointResult::CachePurge
+        );
+        // Config reload
+        assert_eq!(
+            classify_special_endpoint("/admin/reload"),
             SpecialEndpointResult::ConfigReload
         );
+        // Non-special
         assert_eq!(
             classify_special_endpoint("/other"),
             SpecialEndpointResult::NotSpecial
